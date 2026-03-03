@@ -25,6 +25,8 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 360
     continue-on-error: true
+    outputs:
+      build_ok: ${{ steps.build.outcome == 'success' }}
 
     steps:
       - name: Checkout
@@ -37,21 +39,17 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build (Windows Release)
+        id: build
         shell: cmd
         run: |
           @echo on
           git config --global core.longpaths true
-          set VS_DEV_CMD=
-          for %%V in (Enterprise Professional Community BuildTools) do (
-            if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\%%V\Common7\Tools\VsDevCmd.bat" set VS_DEV_CMD=%ProgramFiles(x86)%\Microsoft Visual Studio\2022\%%V\Common7\Tools\VsDevCmd.bat
-          )
-          if "%VS_DEV_CMD%"=="" (
-            echo VsDevCmd.bat not found
-            exit /b 1
-          )
-          call "%VS_DEV_CMD%" -arch=x64
-          if errorlevel 1 exit /b 1
 
           Telegram\build\prepare\win.bat
           if errorlevel 1 exit /b 1
@@ -64,7 +62,7 @@ jobs:
           if errorlevel 1 exit /b 1
 
       - name: Upload Windows artifact
-        if: ${{ success() }}
+        if: ${{ steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: telegram-windows-release
@@ -75,7 +73,7 @@ jobs:
     name: Ubuntu .deb (fallback)
     runs-on: ubuntu-22.04
     needs: windows
-    if: ${{ always() && needs.windows.result != 'success' }}
+    if: ${{ always() && needs.windows.outputs.build_ok != 'true' }}
     timeout-minutes: 360
 
     steps:
