@@ -61,26 +61,49 @@ jobs:
           cmake --build ..\out --config Release --target Telegram
           if errorlevel 1 exit /b 1
 
-      - name: Verify built EXE exists
+      - name: Locate built EXE
         if: ${{ steps.build.outcome == 'success' }}
+        id: locate_exe
         shell: pwsh
         run: |
-          $matches = Get-ChildItem -Path "out" -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -ieq "Telegram.exe" }
+          $roots = @(
+            "$PWD/out",
+            "$PWD/Telegram/out",
+            "$PWD/out/Release",
+            "$PWD/out/Debug"
+          ) | Where-Object { Test-Path $_ }
+
+          $matches = @()
+          foreach ($root in $roots) {
+            $matches += Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -ieq "Telegram.exe" -or $_.Name -ieq "Telegram" }
+          }
+          $matches = $matches | Sort-Object LastWriteTime -Descending -Unique
+
           if (-not $matches -or $matches.Count -eq 0) {
-            Write-Error "Telegram.exe was not found under ./out"
+            Write-Host "Searched roots:"
+            $roots | ForEach-Object { Write-Host " - $_" }
+            Write-Host "Top executables for debugging:"
+            if (Test-Path "$PWD/out") {
+              Get-ChildItem -Path "$PWD/out" -Recurse -File -Include *.exe -ErrorAction SilentlyContinue |
+                Select-Object -First 40 FullName
+            }
+            Write-Error "Telegram binary was not found in known output paths."
             exit 1
           }
-          Write-Host "Found Telegram.exe at:"
-          $matches | ForEach-Object { Write-Host $_.FullName }
+
+          $picked = $matches | Select-Object -First 1
+          New-Item -ItemType Directory -Path "$PWD/dist" -Force | Out-Null
+          Copy-Item -LiteralPath $picked.FullName -Destination "$PWD/dist/Telegram.exe" -Force
+          Write-Host "Picked binary: $($picked.FullName)"
 
       - name: Upload Windows artifact
-        if: ${{ steps.build.outcome == 'success' }}
+        if: ${{ steps.locate_exe.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: telegram-windows-release
           path: |
-            out/**/Telegram.exe
+            dist/Telegram.exe
           if-no-files-found: error
 
   linux_deb:
