@@ -49,10 +49,27 @@ jobs:
         shell: cmd
         run: |
           @echo on
-          git config --global core.longpaths true
+          setlocal EnableExtensions EnableDelayedExpansion
 
-          Telegram\build\prepare\win.bat
-          if errorlevel 1 exit /b 1
+          git config --global core.longpaths true
+          git config --global http.version HTTP/1.1
+          git config --global http.postBuffer 524288000
+
+          set "PREPARE_MAX_TRIES=3"
+          set "PREPARE_TRY=1"
+          :prepare_retry
+          echo [prepare] attempt !PREPARE_TRY! of !PREPARE_MAX_TRIES!
+          call Telegram\build\prepare\win.bat
+          if not errorlevel 1 goto prepare_ok
+          if !PREPARE_TRY! GEQ !PREPARE_MAX_TRIES! (
+            echo [prepare] failed after !PREPARE_TRY! attempts
+            exit /b 1
+          )
+          echo [prepare] failed, retry in 20s (transient network/proxy errors are common)
+          timeout /t 20 /nobreak >nul
+          set /a PREPARE_TRY+=1
+          goto prepare_retry
+          :prepare_ok
 
           cd Telegram
           configure.bat x64 -D TDESKTOP_API_TEST=ON
