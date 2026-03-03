@@ -1,0 +1,151 @@
+name: Build Telegram Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-desktop.yml'
+      - 'Telegram/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'lib/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows (preferred)
+    runs-on: windows-2022
+    timeout-minutes: 360
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build (Windows Release)
+        shell: cmd
+        run: |
+          @echo on
+          git config --global core.longpaths true
+          set VS_DEV_CMD=
+          for %%V in (Enterprise Professional Community BuildTools) do (
+            if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\%%V\Common7\Tools\VsDevCmd.bat" set VS_DEV_CMD=%ProgramFiles(x86)%\Microsoft Visual Studio\2022\%%V\Common7\Tools\VsDevCmd.bat
+          )
+          if "%VS_DEV_CMD%"=="" (
+            echo VsDevCmd.bat not found
+            exit /b 1
+          )
+          call "%VS_DEV_CMD%" -arch=x64
+          if errorlevel 1 exit /b 1
+
+          Telegram\build\prepare\win.bat
+          if errorlevel 1 exit /b 1
+
+          cd Telegram
+          configure.bat x64 -D TDESKTOP_API_TEST=ON
+          if errorlevel 1 exit /b 1
+
+          cmake --build ..\out --config Release --target Telegram
+          if errorlevel 1 exit /b 1
+
+      - name: Upload Windows artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-windows-release
+          path: |
+            out/Release/Telegram.exe
+
+  linux_deb:
+    name: Ubuntu .deb (fallback)
+    runs-on: ubuntu-22.04
+    needs: windows
+    if: ${{ always() && needs.windows.result != 'success' }}
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install poetry
+
+      - name: Build docker image for Linux toolchain
+        env:
+          JOBS: '2'
+          DEBUG: ''
+          LTO: ''
+        run: |
+          ./Telegram/build/prepare/linux.sh
+
+      - name: Build Telegram (Release)
+        run: |
+          docker run --rm \
+            -u "$(id -u)" \
+            -v "$PWD:/usr/src/tdesktop" \
+            tdesktop:centos_env \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -D TDESKTOP_API_TEST=ON
+
+      - name: Build .deb package
+        run: |
+          set -euo pipefail
+          version="0.0.${GITHUB_RUN_NUMBER}"
+          pkgroot="$PWD/package-root"
+          appdir="$pkgroot/opt/tgd"
+          desktopdir="$pkgroot/usr/share/applications"
+          icondir="$pkgroot/usr/share/icons/hicolor/256x256/apps"
+
+          mkdir -p "$pkgroot/DEBIAN" "$appdir" "$desktopdir" "$icondir"
+
+          install -m 0755 out/Release/Telegram "$appdir/telegram-desktop"
+          install -m 0644 lib/xdg/org.telegram.desktop.desktop "$desktopdir/org.telegram.desktop.desktop"
+          install -m 0644 Telegram/Resources/art/icon256.png "$icondir/telegram-desktop.png"
+
+          sed -i 's#^Exec=.*#Exec=/opt/tgd/telegram-desktop -- %u#' "$desktopdir/org.telegram.desktop.desktop"
+          sed -i 's#^Icon=.*#Icon=telegram-desktop#' "$desktopdir/org.telegram.desktop.desktop"
+
+          cat > "$pkgroot/DEBIAN/control" <<EOF
+          Package: tgd
+          Version: ${version}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: tgd build bot <noreply@example.com>
+          Depends: libc6 (>= 2.31), libstdc++6
+          Description: Telegram Desktop build of tgd with plugin system
+          EOF
+
+          dpkg-deb --build "$pkgroot" "tgd_${version}_amd64.deb"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-linux-deb
+          path: |
+            out/Release/Telegram
+            tgd_*.deb

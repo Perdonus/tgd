@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonObject>
 
 #include <algorithm>
+#include <exception>
 
 namespace Plugins {
 namespace {
@@ -46,10 +47,35 @@ QString NormalizeCommand(QString command) {
 	return TrimmedCommand(std::move(command)).toLower();
 }
 
+bool IsValidCommandKey(const QString &key) {
+	if (key.isEmpty()) {
+		return false;
+	}
+	for (const auto ch : key) {
+		if (ch.isSpace() || ch == '/' || ch == '\\' || ch == '@') {
+			return false;
+		}
+	}
+	return true;
+}
+
 QString PluginBaseName(const QString &path) {
 	const auto info = QFileInfo(path);
 	const auto base = info.completeBaseName();
 	return base.isEmpty() ? info.fileName() : base;
+}
+
+QString CurrentExceptionText() {
+	try {
+		throw;
+	} catch (const std::exception &e) {
+		const auto message = QString::fromUtf8(e.what()).trimmed();
+		return message.isEmpty()
+			? u"std::exception"_q
+			: message;
+	} catch (...) {
+		return u"Unknown exception."_q;
+	}
 }
 
 } // namespace
@@ -147,24 +173,36 @@ bool Manager::triggerAction(ActionId id) {
 	if (it == end(_actions)) {
 		return false;
 	}
-	if (it->handlerWithContext) {
-		auto context = ActionContext();
-		context.window = activeWindow();
-		if (!context.window) {
-			context.window = Core::App().activePrimaryWindow();
+	try {
+		if (it->handlerWithContext) {
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = it->pluginId;
+			auto context = ActionContext();
+			context.window = activeWindow();
+			if (!context.window) {
+				context.window = Core::App().activePrimaryWindow();
+			}
+			if (context.window) {
+				context.session = context.window->maybeSession();
+			}
+			if (!context.session) {
+				context.session = activeSession();
+			}
+			it->handlerWithContext(context);
+			_registeringPluginId = previousPluginId;
+			return true;
 		}
-		if (context.window) {
-			context.session = context.window->maybeSession();
+		if (it->handler) {
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = it->pluginId;
+			it->handler();
+			_registeringPluginId = previousPluginId;
+			return true;
 		}
-		if (!context.session) {
-			context.session = activeSession();
-		}
-		it->handlerWithContext(context);
-		return true;
-	}
-	if (it->handler) {
-		it->handler();
-		return true;
+	} catch (...) {
+		_registeringPluginId.clear();
+		disablePlugin(it->pluginId, u"Action failed: "_q + CurrentExceptionText());
+		showToast(u"Plugin action failed and was disabled."_q);
 	}
 	return false;
 }
@@ -181,11 +219,21 @@ bool Manager::openPanel(PanelId id) {
 		showToast(u"No active window to show panel."_q);
 		return false;
 	}
-	if (it->handler) {
-		it->handler(window);
-		return true;
+	if (!it->handler) {
+		return false;
 	}
-	return false;
+	try {
+		const auto previousPluginId = _registeringPluginId;
+		_registeringPluginId = it->pluginId;
+		it->handler(window);
+		_registeringPluginId = previousPluginId;
+		return true;
+	} catch (...) {
+		_registeringPluginId.clear();
+		disablePlugin(it->pluginId, u"Panel failed: "_q + CurrentExceptionText());
+		showToast(u"Plugin panel failed and was disabled."_q);
+		return false;
+	}
 }
 
 bool Manager::setEnabled(const QString &pluginId, bool enabled) {
@@ -209,20 +257,20 @@ CommandResult Manager::interceptOutgoingText(
 		const Api::SendOptions &options) {
 	auto result = CommandResult();
 	if (!_outgoingInterceptors.empty()) {
-		auto ordered = std::vector<const OutgoingInterceptorEntry*>();
+		auto ordered = std::vector<OutgoingInterceptorEntry>();
 		ordered.reserve(_outgoingInterceptors.size());
 		for (auto it = _outgoingInterceptors.cbegin();
 			it != end(_outgoingInterceptors);
 			++it) {
-			ordered.push_back(&it.value());
+			ordered.push_back(it.value());
 		}
 		std::sort(ordered.begin(), ordered.end(), [](
-				const OutgoingInterceptorEntry *a,
-				const OutgoingInterceptorEntry *b) {
-			if (a->priority != b->priority) {
-				return a->priority < b->priority;
+				const OutgoingInterceptorEntry &a,
+				const OutgoingInterceptorEntry &b) {
+			if (a.priority != b.priority) {
+				return a.priority < b.priority;
 			}
-			return a->id < b->id;
+			return a.id < b.id;
 		});
 		const auto context = OutgoingTextContext{
 			.session = session,
@@ -230,13 +278,24 @@ CommandResult Manager::interceptOutgoingText(
 			.text = text.text,
 			.options = &options,
 		};
-		for (const auto entry : ordered) {
-			if (!entry || !entry->handler) {
+		for (const auto &entry : ordered) {
+			if (!entry.handler) {
 				continue;
 			}
-			const auto handled = entry->handler(context);
-			if (handled.action != CommandResult::Action::Continue) {
-				return handled;
+			try {
+				const auto previousPluginId = _registeringPluginId;
+				_registeringPluginId = entry.pluginId;
+				const auto handled = entry.handler(context);
+				_registeringPluginId = previousPluginId;
+				if (handled.action != CommandResult::Action::Continue) {
+					return handled;
+				}
+			} catch (...) {
+				_registeringPluginId.clear();
+				disablePlugin(
+					entry.pluginId,
+					u"Outgoing interceptor failed: "_q + CurrentExceptionText());
+				showToast(u"Plugin interceptor failed and was disabled."_q);
 			}
 		}
 	}
@@ -256,7 +315,7 @@ CommandResult Manager::interceptOutgoingText(
 		return result;
 	}
 	const auto key = commandKey(token);
-	if (key.isEmpty()) {
+	if (key.isEmpty() || !IsValidCommandKey(key)) {
 		return result;
 	}
 	const auto idIt = _commandIdByName.find(key);
@@ -278,15 +337,45 @@ CommandResult Manager::interceptOutgoingText(
 		.options = &options,
 	};
 	if (entryIt->handler) {
-		return entryIt->handler(context);
+		try {
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = entryIt->pluginId;
+			const auto handled = entryIt->handler(context);
+			_registeringPluginId = previousPluginId;
+			return handled;
+		} catch (...) {
+			_registeringPluginId.clear();
+			disablePlugin(
+				entryIt->pluginId,
+				u"Command handler failed: "_q + CurrentExceptionText());
+			showToast(u"Plugin command failed and was disabled."_q);
+			return {
+				.action = CommandResult::Action::Cancel,
+			};
+		}
 	}
 	return result;
 }
 
 void Manager::notifyWindowCreated(Window::Controller *window) {
-	for (const auto &handler : _windowHandlers) {
-		if (handler) {
-			handler(window);
+	const auto handlers = _windowHandlers;
+	for (const auto &entry : handlers) {
+		if (!entry.handler) {
+			continue;
+		}
+		try {
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = entry.pluginId;
+			entry.handler(window);
+			_registeringPluginId = previousPluginId;
+		} catch (...) {
+			_registeringPluginId.clear();
+			if (!entry.pluginId.isEmpty()) {
+				disablePlugin(
+					entry.pluginId,
+					u"Window callback failed: "_q + CurrentExceptionText());
+			}
+			showToast(u"Plugin window callback failed."_q);
 		}
 	}
 }
@@ -303,8 +392,11 @@ CommandId Manager::registerCommand(
 		const QString &pluginId,
 	CommandDescriptor descriptor,
 	CommandHandler handler) {
+	if (!hasPlugin(pluginId) || !handler) {
+		return 0;
+	}
 	const auto key = commandKey(descriptor.command);
-	if (key.isEmpty() || key.contains('@') || _commandIdByName.contains(key)) {
+	if (!IsValidCommandKey(key) || _commandIdByName.contains(key)) {
 		return 0;
 	}
 	descriptor.command = '/' + key;
@@ -349,7 +441,7 @@ ActionId Manager::registerAction(
 		const QString &title,
 		const QString &description,
 		ActionHandler handler) {
-	if (title.trimmed().isEmpty()) {
+	if (!hasPlugin(pluginId) || !handler || title.trimmed().isEmpty()) {
 		return 0;
 	}
 	const auto id = _nextActionId++;
@@ -391,7 +483,7 @@ ActionId Manager::registerActionWithContext(
 		const QString &title,
 		const QString &description,
 		ActionWithContextHandler handler) {
-	if (title.trimmed().isEmpty()) {
+	if (!hasPlugin(pluginId) || !handler || title.trimmed().isEmpty()) {
 		return 0;
 	}
 	const auto id = _nextActionId++;
@@ -414,7 +506,7 @@ OutgoingInterceptorId Manager::registerOutgoingTextInterceptor(
 		const QString &pluginId,
 		OutgoingTextHandler handler,
 		int priority) {
-	if (!handler) {
+	if (!hasPlugin(pluginId) || !handler) {
 		return 0;
 	}
 	const auto id = _nextOutgoingInterceptorId++;
@@ -454,7 +546,7 @@ MessageObserverId Manager::registerMessageObserver(
 		const QString &pluginId,
 		MessageObserverOptions options,
 		MessageEventHandler handler) {
-	if (!handler) {
+	if (!hasPlugin(pluginId) || !handler) {
 		return 0;
 	}
 	const auto id = _nextMessageObserverId++;
@@ -496,7 +588,7 @@ PanelId Manager::registerPanel(
 		const QString &pluginId,
 		PanelDescriptor descriptor,
 		PanelHandler handler) {
-	if (descriptor.title.trimmed().isEmpty()) {
+	if (!hasPlugin(pluginId) || !handler || descriptor.title.trimmed().isEmpty()) {
 		return 0;
 	}
 	const auto id = _nextPanelId++;
@@ -557,7 +649,10 @@ void Manager::forEachWindow(
 void Manager::onWindowCreated(
 		std::function<void(Window::Controller*)> handler) {
 	if (handler) {
-		_windowHandlers.push_back(std::move(handler));
+		_windowHandlers.push_back({
+			.pluginId = _registeringPluginId,
+			.handler = std::move(handler),
+		});
 	}
 }
 
@@ -601,7 +696,10 @@ void Manager::forEachSession(
 void Manager::onSessionActivated(
 		std::function<void(Main::Session*)> handler) {
 	if (handler) {
-		_sessionHandlers.push_back(std::move(handler));
+		_sessionHandlers.push_back({
+			.pluginId = _registeringPluginId,
+			.handler = std::move(handler),
+		});
 	}
 }
 
@@ -725,7 +823,19 @@ void Manager::loadPlugin(const QString &path) {
 	_pluginIndexById.insert(_plugins.back().state.info.id, index);
 
 	if (_plugins.back().state.enabled) {
-		_plugins.back().instance->onLoad();
+		_registeringPluginId = _plugins.back().state.info.id;
+		try {
+			_plugins.back().instance->onLoad();
+		} catch (...) {
+			const auto pluginId = _plugins.back().state.info.id;
+			_registeringPluginId.clear();
+			disablePlugin(
+				pluginId,
+				u"onLoad failed: "_q + CurrentExceptionText());
+			showToast(u"Plugin failed to load and was disabled."_q);
+			return;
+		}
+		_registeringPluginId.clear();
 	} else {
 		_plugins.back().instance.reset();
 		_plugins.back().library.reset();
@@ -735,7 +845,13 @@ void Manager::loadPlugin(const QString &path) {
 void Manager::unloadAll() {
 	for (auto &plugin : _plugins) {
 		if (plugin.state.loaded && plugin.instance) {
-			plugin.instance->onUnload();
+			_registeringPluginId = plugin.state.info.id;
+			try {
+				plugin.instance->onUnload();
+			} catch (...) {
+				plugin.state.error = u"onUnload failed: "_q + CurrentExceptionText();
+			}
+			_registeringPluginId.clear();
 		}
 	}
 	_commands.clear();
@@ -834,8 +950,72 @@ void Manager::unregisterPluginMessageObservers(const QString &pluginId) {
 	}
 }
 
+void Manager::unregisterPluginWindowHandlers(const QString &pluginId) {
+	_windowHandlers.erase(
+		std::remove_if(
+			_windowHandlers.begin(),
+			_windowHandlers.end(),
+			[&](const WindowHandlerEntry &entry) {
+				return entry.pluginId == pluginId;
+			}),
+		_windowHandlers.end());
+}
+
+void Manager::unregisterPluginSessionHandlers(const QString &pluginId) {
+	_sessionHandlers.erase(
+		std::remove_if(
+			_sessionHandlers.begin(),
+			_sessionHandlers.end(),
+			[&](const SessionHandlerEntry &entry) {
+				return entry.pluginId == pluginId;
+			}),
+		_sessionHandlers.end());
+}
+
 QString Manager::commandKey(const QString &command) const {
 	return NormalizeCommand(command);
+}
+
+bool Manager::hasPlugin(const QString &pluginId) const {
+	if (pluginId.trimmed().isEmpty()) {
+		return false;
+	}
+	return _pluginIndexById.contains(pluginId);
+}
+
+void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
+	auto *record = findRecord(pluginId);
+	if (!record) {
+		return;
+	}
+	record->state.enabled = false;
+	record->state.loaded = false;
+	if (!reason.trimmed().isEmpty()) {
+		record->state.error = reason.trimmed();
+	}
+	unregisterPluginCommands(pluginId);
+	unregisterPluginActions(pluginId);
+	unregisterPluginPanels(pluginId);
+	unregisterPluginOutgoingInterceptors(pluginId);
+	unregisterPluginMessageObservers(pluginId);
+	unregisterPluginWindowHandlers(pluginId);
+	unregisterPluginSessionHandlers(pluginId);
+	if (record->instance) {
+		_registeringPluginId = pluginId;
+		try {
+			record->instance->onUnload();
+		} catch (...) {
+			// Keep the original failure reason.
+		}
+		_registeringPluginId.clear();
+		record->instance.reset();
+	}
+	if (record->library) {
+		record->library->unload();
+		record->library.reset();
+	}
+	_disabled.insert(pluginId);
+	saveConfig();
 }
 
 void Manager::updateMessageObserverSubscriptions() {
@@ -843,6 +1023,16 @@ void Manager::updateMessageObserverSubscriptions() {
 	if (!_activeSession || _messageObservers.isEmpty()) {
 		return;
 	}
+	const auto observerSnapshot = [=] {
+		auto result = std::vector<MessageObserverEntry>();
+		result.reserve(_messageObservers.size());
+		for (auto it = _messageObservers.cbegin();
+			it != end(_messageObservers);
+			++it) {
+			result.push_back(it.value());
+		}
+		return result;
+	};
 	auto wantsNew = false;
 	auto wantsEdited = false;
 	auto wantsDeleted = false;
@@ -867,14 +1057,13 @@ void Manager::updateMessageObserverSubscriptions() {
 				.item = update.item.get(),
 				.event = MessageEvent::New,
 			};
-			for (auto it = _messageObservers.cbegin();
-				it != end(_messageObservers);
-				++it) {
+			const auto snapshot = observerSnapshot();
+			for (const auto &entry : snapshot) {
 				dispatchMessageEvent(
 					_activeSession,
 					context,
-					it.value().options,
-					it.value());
+					entry.options,
+					entry);
 			}
 		}, _messageObserverLifetime);
 	}
@@ -888,14 +1077,13 @@ void Manager::updateMessageObserverSubscriptions() {
 				.item = update.item.get(),
 				.event = MessageEvent::Edited,
 			};
-			for (auto it = _messageObservers.cbegin();
-				it != end(_messageObservers);
-				++it) {
+			const auto snapshot = observerSnapshot();
+			for (const auto &entry : snapshot) {
 				dispatchMessageEvent(
 					_activeSession,
 					context,
-					it.value().options,
-					it.value());
+					entry.options,
+					entry);
 			}
 		}, _messageObserverLifetime);
 	}
@@ -909,14 +1097,13 @@ void Manager::updateMessageObserverSubscriptions() {
 				.item = update.item.get(),
 				.event = MessageEvent::Deleted,
 			};
-			for (auto it = _messageObservers.cbegin();
-				it != end(_messageObservers);
-				++it) {
+			const auto snapshot = observerSnapshot();
+			for (const auto &entry : snapshot) {
 				dispatchMessageEvent(
 					_activeSession,
 					context,
-					it.value().options,
-					it.value());
+					entry.options,
+					entry);
 			}
 		}, _messageObserverLifetime);
 	}
@@ -924,9 +1111,24 @@ void Manager::updateMessageObserverSubscriptions() {
 
 void Manager::handleActiveSessionChanged(Main::Session *session) {
 	_activeSession = session;
-	for (const auto &handler : _sessionHandlers) {
-		if (handler) {
-			handler(session);
+	const auto handlers = _sessionHandlers;
+	for (const auto &entry : handlers) {
+		if (!entry.handler) {
+			continue;
+		}
+		try {
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = entry.pluginId;
+			entry.handler(session);
+			_registeringPluginId = previousPluginId;
+		} catch (...) {
+			_registeringPluginId.clear();
+			if (!entry.pluginId.isEmpty()) {
+				disablePlugin(
+					entry.pluginId,
+					u"Session callback failed: "_q + CurrentExceptionText());
+			}
+			showToast(u"Plugin session callback failed."_q);
 		}
 	}
 	updateMessageObserverSubscriptions();
@@ -970,7 +1172,18 @@ void Manager::dispatchMessageEvent(
 	}
 	auto callContext = context;
 	callContext.session = session;
-	entry.handler(callContext);
+	try {
+		const auto previousPluginId = _registeringPluginId;
+		_registeringPluginId = entry.pluginId;
+		entry.handler(callContext);
+		_registeringPluginId = previousPluginId;
+	} catch (...) {
+		_registeringPluginId.clear();
+		disablePlugin(
+			entry.pluginId,
+			u"Message observer failed: "_q + CurrentExceptionText());
+		showToast(u"Plugin observer failed and was disabled."_q);
+	}
 }
 
 } // namespace Plugins

@@ -134,12 +134,20 @@ public:
 	void onSessionActivated(
 		std::function<void(Main::Session*)> handler) override;
 
-private:
-	struct CommandEntry {
-		CommandId id = 0;
-		QString pluginId;
-		CommandDescriptor descriptor;
-		CommandHandler handler;
+	private:
+		struct WindowHandlerEntry {
+			QString pluginId;
+			std::function<void(Window::Controller*)> handler;
+		};
+		struct SessionHandlerEntry {
+			QString pluginId;
+			std::function<void(Main::Session*)> handler;
+		};
+		struct CommandEntry {
+			CommandId id = 0;
+			QString pluginId;
+			CommandDescriptor descriptor;
+			CommandHandler handler;
 	};
 	struct ActionEntry {
 		ActionId id = 0;
@@ -186,16 +194,20 @@ private:
 	PluginRecord *findRecord(const QString &pluginId);
 	const PluginRecord *findRecord(const QString &pluginId) const;
 	void unregisterPluginCommands(const QString &pluginId);
-	void unregisterPluginActions(const QString &pluginId);
-	void unregisterPluginPanels(const QString &pluginId);
-	void unregisterPluginOutgoingInterceptors(const QString &pluginId);
-	void unregisterPluginMessageObservers(const QString &pluginId);
-	QString commandKey(const QString &command) const;
-	void updateMessageObserverSubscriptions();
-	void handleActiveSessionChanged(Main::Session *session);
-	void dispatchMessageEvent(
-		Main::Session *session,
-		const MessageEventContext &context,
+		void unregisterPluginActions(const QString &pluginId);
+		void unregisterPluginPanels(const QString &pluginId);
+		void unregisterPluginOutgoingInterceptors(const QString &pluginId);
+		void unregisterPluginMessageObservers(const QString &pluginId);
+		void unregisterPluginWindowHandlers(const QString &pluginId);
+		void unregisterPluginSessionHandlers(const QString &pluginId);
+		QString commandKey(const QString &command) const;
+		bool hasPlugin(const QString &pluginId) const;
+		void disablePlugin(const QString &pluginId, const QString &reason);
+		void updateMessageObserverSubscriptions();
+		void handleActiveSessionChanged(Main::Session *session);
+		void dispatchMessageEvent(
+			Main::Session *session,
+			const MessageEventContext &context,
 		const MessageObserverOptions &options,
 		const MessageObserverEntry &entry);
 
@@ -229,11 +241,12 @@ private:
 	QHash<QString, QVector<MessageObserverId>> _messageObserversByPlugin;
 	MessageObserverId _nextMessageObserverId = 1;
 
-	std::vector<std::function<void(Window::Controller*)>> _windowHandlers;
-	std::vector<std::function<void(Main::Session*)>> _sessionHandlers;
-	rpl::lifetime _sessionLifetime;
-	rpl::lifetime _messageObserverLifetime;
-	Main::Session *_activeSession = nullptr;
-};
+		std::vector<WindowHandlerEntry> _windowHandlers;
+		std::vector<SessionHandlerEntry> _sessionHandlers;
+		QString _registeringPluginId;
+		rpl::lifetime _sessionLifetime;
+		rpl::lifetime _messageObserverLifetime;
+		Main::Session *_activeSession = nullptr;
+	};
 
 } // namespace Plugins
