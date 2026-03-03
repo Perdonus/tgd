@@ -70,7 +70,11 @@ jobs:
             "$PWD/out",
             "$PWD/Telegram/out",
             "$PWD/out/Release",
-            "$PWD/out/Debug"
+            "$PWD/out/Debug",
+            "$PWD/../out",
+            "$PWD/../../out",
+            "$PWD/../tgd/out",
+            "$PWD/../../tgd/out"
           ) | Where-Object { Test-Path $_ }
 
           $matches = @()
