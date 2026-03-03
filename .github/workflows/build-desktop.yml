@@ -61,13 +61,27 @@ jobs:
           cmake --build ..\out --config Release --target Telegram
           if errorlevel 1 exit /b 1
 
+      - name: Verify built EXE exists
+        if: ${{ steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $matches = Get-ChildItem -Path "out" -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ieq "Telegram.exe" }
+          if (-not $matches -or $matches.Count -eq 0) {
+            Write-Error "Telegram.exe was not found under ./out"
+            exit 1
+          }
+          Write-Host "Found Telegram.exe at:"
+          $matches | ForEach-Object { Write-Host $_.FullName }
+
       - name: Upload Windows artifact
         if: ${{ steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: telegram-windows-release
           path: |
-            out/Release/Telegram.exe
+            out/**/Telegram.exe
+          if-no-files-found: error
 
   linux_deb:
     name: Ubuntu .deb (fallback)
