@@ -1,0 +1,35 @@
+name: Quick Plugin Checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Telegram/SourceFiles/plugins/**"
+      - "Telegram/SourceFiles/settings/settings_plugins.cpp"
+      - "tools/plugin_sanity_check.py"
+      - ".github/workflows/quick-plugin-checks.yml"
+  pull_request:
+    paths:
+      - "Telegram/SourceFiles/plugins/**"
+      - "Telegram/SourceFiles/settings/settings_plugins.cpp"
+      - "tools/plugin_sanity_check.py"
+      - ".github/workflows/quick-plugin-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  plugin_sanity:
+    name: Plugin Sanity (no build)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run plugin sanity checks
+        run: |
+          python3 tools/plugin_sanity_check.py
