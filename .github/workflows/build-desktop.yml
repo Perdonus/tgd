@@ -120,21 +120,29 @@ jobs:
           cd /d "%GITHUB_WORKSPACE%\\Telegram"
 
           set "CFG_OK="
+          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
+          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
+          set "CFG_LOG_1=%CI_LOGS_DIR%\\configure-attempt1.log"
+          set "CFG_LOG_2=%CI_LOGS_DIR%\\configure-attempt2.log"
+          set "CFG_LOG_3=%CI_LOGS_DIR%\\configure-attempt3.log"
 
           where python
           python --version
 
-          call configure.bat x64 -D TDESKTOP_API_TEST=ON && set "CFG_OK=1"
+          call configure.bat x64 -D TDESKTOP_API_TEST=ON > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
           if not defined CFG_OK (
             echo [configure] primary flags failed, retrying: configure.bat x64
-            call configure.bat x64 && set "CFG_OK=1"
+            powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_1%' -Tail 80"
+            call configure.bat x64 > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
           )
           if not defined CFG_OK (
             echo [configure] x64 configure failed, retrying: configure.bat
-            call configure.bat && set "CFG_OK=1"
+            powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_2%' -Tail 80"
+            call configure.bat > "%CFG_LOG_3%" 2>&1 && set "CFG_OK=1"
           )
           if not defined CFG_OK (
             echo [configure] all configure attempts failed
+            powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_3%' -Tail 30) -join ' | '; Write-Output ('::error title=Configure failed::' + $tail)"
             if exist "%GITHUB_WORKSPACE%\\cmake" (
               echo [configure] cmake helpers files:
               dir /b "%GITHUB_WORKSPACE%\\cmake"
@@ -161,6 +169,15 @@ jobs:
           cmake --build ..\out --config Release
           if errorlevel 1 exit /b 1
           :build_ok
+
+      - name: Upload diagnostics logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ci-logs
+          path: |
+            ci-logs/*.log
+          if-no-files-found: ignore
 
       - name: Locate built EXE
         if: ${{ steps.build_target.outcome == 'success' }}
