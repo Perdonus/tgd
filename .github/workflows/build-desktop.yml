@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 360
     continue-on-error: true
     outputs:
-      build_ok: ${{ steps.build.outcome == 'success' }}
+      build_ok: ${{ steps.locate_exe.outcome == 'success' }}
 
     steps:
       - name: Checkout
@@ -44,12 +44,13 @@ jobs:
         with:
           arch: x64
 
-      - name: Build (Windows Release)
-        id: build
+      - name: Prepare dependencies (Windows)
+        id: prepare
         shell: cmd
         run: |
           @echo on
           setlocal EnableExtensions EnableDelayedExpansion
+          cd /d "%GITHUB_WORKSPACE%"
 
           git config --global core.longpaths true
           git config --global http.version HTTP/1.1
@@ -71,6 +72,14 @@ jobs:
           goto prepare_retry
           :prepare_ok
 
+      - name: Ensure cmake submodule
+        id: ensure_cmake
+        shell: cmd
+        run: |
+          @echo on
+          setlocal EnableExtensions EnableDelayedExpansion
+          cd /d "%GITHUB_WORKSPACE%"
+
           set "CMAKE_SUBMODULE_MAX_TRIES=3"
           set "CMAKE_SUBMODULE_TRY=1"
           :cmake_submodule_retry
@@ -88,15 +97,30 @@ jobs:
           goto cmake_submodule_retry
           :cmake_submodule_ok
 
-          cd Telegram
+      - name: Configure (Windows Release)
+        id: configure
+        shell: cmd
+        run: |
+          @echo on
+          setlocal EnableExtensions EnableDelayedExpansion
+          cd /d "%GITHUB_WORKSPACE%\\Telegram"
+
           configure.bat x64 -D TDESKTOP_API_TEST=ON
           if errorlevel 1 exit /b 1
+
+      - name: Build Telegram target (Release)
+        id: build_target
+        shell: cmd
+        run: |
+          @echo on
+          setlocal EnableExtensions EnableDelayedExpansion
+          cd /d "%GITHUB_WORKSPACE%\\Telegram"
 
           cmake --build ..\out --config Release --target Telegram
           if errorlevel 1 exit /b 1
 
       - name: Locate built EXE
-        if: ${{ steps.build.outcome == 'success' }}
+        if: ${{ steps.build_target.outcome == 'success' }}
         id: locate_exe
         shell: pwsh
         run: |
