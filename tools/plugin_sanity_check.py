@@ -4,6 +4,7 @@ Fast non-build sanity checks for plugin runtime invariants.
 
 These checks are intentionally simple and text-based, so they can run in
 seconds in CI without compiling Telegram Desktop.
+They are used by the "Quick Plugin Checks" GitHub Actions workflow.
 """
 
 from __future__ import annotations
