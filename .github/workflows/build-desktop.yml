@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -172,7 +172,7 @@ jobs:
     name: Ubuntu .deb (fallback)
     runs-on: ubuntu-22.04
     needs: windows
-    if: ${{ always() && needs.windows.outputs.build_ok != 'true' }}
+    if: ${{ false }}
     timeout-minutes: 360
 
     steps:
