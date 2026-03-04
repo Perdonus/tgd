@@ -116,6 +116,8 @@ jobs:
           set /a CMAKE_SUBMODULE_TRY+=1
           goto cmake_submodule_retry
           :cmake_submodule_ok
+          echo [cmake-submodule] ready: cmake\run_cmake.py
+          exit /b 0
 
       - name: Configure (Windows Release)
         id: configure
