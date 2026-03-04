@@ -83,33 +83,25 @@ jobs:
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%"
 
-          set "CMAKE_HELPERS_COMMIT="
-          for /f "tokens=3" %%i in ('git ls-tree HEAD cmake') do set "CMAKE_HELPERS_COMMIT=%%i"
-          if not defined CMAKE_HELPERS_COMMIT (
-            echo [cmake-submodule] failed to resolve cmake_helpers commit from git tree
-            exit /b 1
-          )
-
           set "CMAKE_SUBMODULE_MAX_TRIES=3"
           set "CMAKE_SUBMODULE_TRY=1"
           :cmake_submodule_retry
           if exist cmake\run_cmake.py goto cmake_submodule_ok
           echo [cmake-submodule] attempt !CMAKE_SUBMODULE_TRY! of !CMAKE_SUBMODULE_MAX_TRIES!
           git submodule sync --recursive
-          git submodule update --init --recursive --depth 1 cmake
+          git submodule update --init --recursive cmake
           if exist cmake\run_cmake.py goto cmake_submodule_ok
 
           echo [cmake-submodule] submodule update did not produce run_cmake.py, trying direct clone fallback
           if exist cmake rmdir /Q /S cmake
-          git clone https://github.com/desktop-app/cmake_helpers.git cmake
-          if not errorlevel 1 (
-            pushd cmake
-            git checkout !CMAKE_HELPERS_COMMIT!
-            popd
-          )
+          git clone --depth 1 https://github.com/desktop-app/cmake_helpers.git cmake
           if exist cmake\run_cmake.py goto cmake_submodule_ok
           if !CMAKE_SUBMODULE_TRY! GEQ !CMAKE_SUBMODULE_MAX_TRIES! (
             echo [cmake-submodule] cmake\\run_cmake.py is still missing
+            if exist cmake (
+              echo [cmake-submodule] cmake directory snapshot:
+              dir /b cmake
+            )
             exit /b 1
           )
           timeout /t 10 /nobreak >nul
