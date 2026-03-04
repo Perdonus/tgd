@@ -71,6 +71,23 @@ jobs:
           goto prepare_retry
           :prepare_ok
 
+          set "CMAKE_SUBMODULE_MAX_TRIES=3"
+          set "CMAKE_SUBMODULE_TRY=1"
+          :cmake_submodule_retry
+          if exist cmake\run_cmake.py goto cmake_submodule_ok
+          echo [cmake-submodule] attempt !CMAKE_SUBMODULE_TRY! of !CMAKE_SUBMODULE_MAX_TRIES!
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth 1 cmake
+          if exist cmake\run_cmake.py goto cmake_submodule_ok
+          if !CMAKE_SUBMODULE_TRY! GEQ !CMAKE_SUBMODULE_MAX_TRIES! (
+            echo [cmake-submodule] cmake\\run_cmake.py is still missing
+            exit /b 1
+          )
+          timeout /t 10 /nobreak >nul
+          set /a CMAKE_SUBMODULE_TRY+=1
+          goto cmake_submodule_retry
+          :cmake_submodule_ok
+
           cd Telegram
           configure.bat x64 -D TDESKTOP_API_TEST=ON
           if errorlevel 1 exit /b 1
