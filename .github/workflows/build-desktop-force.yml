@@ -110,41 +110,34 @@ jobs:
         id: ensure_sources
         shell: pwsh
         run: |
-          $repos = @(
-            @{ Path = "Telegram/lib_crl"; Url = "https://github.com/desktop-app/lib_crl.git" },
-            @{ Path = "Telegram/lib_rpl"; Url = "https://github.com/desktop-app/lib_rpl.git" },
-            @{ Path = "Telegram/lib_base"; Url = "https://github.com/desktop-app/lib_base.git" },
-            @{ Path = "Telegram/codegen"; Url = "https://github.com/desktop-app/codegen.git" },
-            @{ Path = "Telegram/lib_ui"; Url = "https://github.com/desktop-app/lib_ui.git" },
-            @{ Path = "Telegram/lib_lottie"; Url = "https://github.com/desktop-app/lib_lottie.git" },
-            @{ Path = "Telegram/lib_tl"; Url = "https://github.com/desktop-app/lib_tl.git" },
-            @{ Path = "Telegram/lib_spellcheck"; Url = "https://github.com/desktop-app/lib_spellcheck.git" },
-            @{ Path = "Telegram/lib_storage"; Url = "https://github.com/desktop-app/lib_storage.git" },
-            @{ Path = "Telegram/lib_qr"; Url = "https://github.com/desktop-app/lib_qr.git" },
-            @{ Path = "Telegram/lib_webrtc"; Url = "https://github.com/desktop-app/lib_webrtc.git" },
-            @{ Path = "Telegram/lib_webview"; Url = "https://github.com/desktop-app/lib_webview.git" },
-            @{ Path = "Telegram/ThirdParty/GSL"; Url = "https://github.com/Microsoft/GSL.git" },
-            @{ Path = "Telegram/ThirdParty/xxHash"; Url = "https://github.com/Cyan4973/xxHash.git" },
-            @{ Path = "Telegram/ThirdParty/rlottie"; Url = "https://github.com/desktop-app/rlottie.git" },
-            @{ Path = "Telegram/ThirdParty/lz4"; Url = "https://github.com/lz4/lz4.git" },
-            @{ Path = "Telegram/ThirdParty/expected"; Url = "https://github.com/TartanLlama/expected" },
-            @{ Path = "Telegram/ThirdParty/QR"; Url = "https://github.com/nayuki/QR-Code-generator" },
-            @{ Path = "Telegram/ThirdParty/hunspell"; Url = "https://github.com/hunspell/hunspell" },
-            @{ Path = "Telegram/ThirdParty/range-v3"; Url = "https://github.com/ericniebler/range-v3.git" },
-            @{ Path = "Telegram/ThirdParty/tgcalls"; Url = "https://github.com/TelegramMessenger/tgcalls.git" },
-            @{ Path = "Telegram/ThirdParty/kcoreaddons"; Url = "https://github.com/KDE/kcoreaddons.git" },
-            @{ Path = "Telegram/ThirdParty/kimageformats"; Url = "https://github.com/KDE/kimageformats.git" },
-            @{ Path = "Telegram/ThirdParty/cld3"; Url = "https://github.com/google/cld3.git" },
-            @{ Path = "Telegram/ThirdParty/libprisma"; Url = "https://github.com/desktop-app/libprisma.git" },
-            @{ Path = "Telegram/ThirdParty/dispatch"; Url = "https://github.com/apple/swift-corelibs-libdispatch" },
-            @{ Path = "Telegram/ThirdParty/fcitx5-qt"; Url = "https://github.com/fcitx/fcitx5-qt.git" },
-            @{ Path = "Telegram/ThirdParty/nimf"; Url = "https://github.com/hamonikr/nimf.git" },
-            @{ Path = "Telegram/ThirdParty/hime"; Url = "https://github.com/hime-ime/hime.git" },
-            @{ Path = "Telegram/ThirdParty/xdg-desktop-portal"; Url = "https://github.com/flatpak/xdg-desktop-portal.git" }
-          )
+          $moduleLines = @(git config -f .gitmodules --get-regexp "^submodule\..*\.path$")
+          if (-not $moduleLines -or $moduleLines.Count -eq 0) {
+            throw "[sources] no entries found in .gitmodules"
+          }
 
-          foreach ($repo in $repos) {
-            $target = Join-Path $env:GITHUB_WORKSPACE $repo.Path
+          foreach ($line in $moduleLines) {
+            $parts = $line -split '\s+', 2
+            if ($parts.Count -lt 2) {
+              continue
+            }
+
+            $pathKey = $parts[0]
+            $modulePath = $parts[1].Trim()
+            if ([string]::IsNullOrWhiteSpace($modulePath)) {
+              continue
+            }
+            if ($modulePath -eq "cmake") {
+              Write-Host "[sources] skip submodule handled separately: $modulePath"
+              continue
+            }
+
+            $modulePrefix = $pathKey.Substring(0, $pathKey.Length - 5)
+            $moduleUrl = (git config -f .gitmodules --get "$modulePrefix.url").Trim()
+            if ([string]::IsNullOrWhiteSpace($moduleUrl)) {
+              throw "[sources] url missing for $modulePath"
+            }
+
+            $target = Join-Path $env:GITHUB_WORKSPACE $modulePath
             $needsClone = $true
             if (Test-Path -LiteralPath $target) {
               $entries = @(Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue)
@@ -153,16 +146,16 @@ jobs:
               }
             }
             if (-not $needsClone) {
-              Write-Host "[sources] ok: $($repo.Path)"
+              Write-Host "[sources] ok: $modulePath"
               continue
             }
             if (Test-Path -LiteralPath $target) {
               Remove-Item -LiteralPath $target -Recurse -Force
             }
-            Write-Host "[sources] clone: $($repo.Path)"
-            git clone --depth 1 $repo.Url $target
+            Write-Host "[sources] clone: $modulePath"
+            git clone --depth 1 --filter=blob:none $moduleUrl $target
             if ($LASTEXITCODE -ne 0) {
-              throw "[sources] failed to clone $($repo.Url) -> $($repo.Path)"
+              throw "[sources] failed to clone $moduleUrl -> $modulePath"
             }
           }
 
