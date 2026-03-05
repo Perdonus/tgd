@@ -1,4 +1,5 @@
 name: Build Telegram Desktop
+# CI touch: rerun Windows pipeline after canceled run.
 
 on:
   workflow_dispatch:
