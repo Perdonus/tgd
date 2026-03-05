@@ -136,7 +136,16 @@ jobs:
             @{ Path = "Telegram/ThirdParty/QR"; Url = "https://github.com/nayuki/QR-Code-generator" },
             @{ Path = "Telegram/ThirdParty/hunspell"; Url = "https://github.com/hunspell/hunspell" },
             @{ Path = "Telegram/ThirdParty/range-v3"; Url = "https://github.com/ericniebler/range-v3.git" },
-            @{ Path = "Telegram/ThirdParty/tgcalls"; Url = "https://github.com/TelegramMessenger/tgcalls.git" }
+            @{ Path = "Telegram/ThirdParty/tgcalls"; Url = "https://github.com/TelegramMessenger/tgcalls.git" },
+            @{ Path = "Telegram/ThirdParty/kcoreaddons"; Url = "https://github.com/KDE/kcoreaddons.git" },
+            @{ Path = "Telegram/ThirdParty/kimageformats"; Url = "https://github.com/KDE/kimageformats.git" },
+            @{ Path = "Telegram/ThirdParty/cld3"; Url = "https://github.com/google/cld3.git" },
+            @{ Path = "Telegram/ThirdParty/libprisma"; Url = "https://github.com/desktop-app/libprisma.git" },
+            @{ Path = "Telegram/ThirdParty/dispatch"; Url = "https://github.com/apple/swift-corelibs-libdispatch" },
+            @{ Path = "Telegram/ThirdParty/fcitx5-qt"; Url = "https://github.com/fcitx/fcitx5-qt.git" },
+            @{ Path = "Telegram/ThirdParty/nimf"; Url = "https://github.com/hamonikr/nimf.git" },
+            @{ Path = "Telegram/ThirdParty/hime"; Url = "https://github.com/hime-ime/hime.git" },
+            @{ Path = "Telegram/ThirdParty/xdg-desktop-portal"; Url = "https://github.com/flatpak/xdg-desktop-portal.git" }
           )
 
           foreach ($repo in $repos) {
@@ -175,6 +184,8 @@ jobs:
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
           set "CFG_LOG_1=%CI_LOGS_DIR%\\configure-attempt1.log"
           set "CFG_LOG_2=%CI_LOGS_DIR%\\configure-attempt2.log"
+          set "API_ID=17349"
+          set "API_HASH=344583e45741c457fe1862106095a5eb"
 
           where python
           python --version
@@ -182,12 +193,12 @@ jobs:
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
 
-          call configure.bat x64 force -D TDESKTOP_API_TEST=ON > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
+          call configure.bat x64 force -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
           if not defined CFG_OK (
             echo [configure] primary x64 flags failed, retrying: configure.bat x64 force
             powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_1%' -Tail 80"
             powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_1%' -Tail 20) -join ' | '; Write-Output ('::warning title=Configure attempt1 failed::' + $tail)"
-            call configure.bat x64 force > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
+            call configure.bat x64 force -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
           )
           if not defined CFG_OK (
             echo [configure] all x64 configure attempts failed
