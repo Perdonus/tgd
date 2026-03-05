@@ -111,6 +111,57 @@ jobs:
           echo [cmake-submodule] ready: cmake\run_cmake.py
           exit /b 0
 
+      - name: Ensure required source mirrors
+        id: ensure_sources
+        shell: pwsh
+        run: |
+          $repos = @(
+            @{ Path = "Telegram/lib_crl"; Url = "https://github.com/desktop-app/lib_crl.git" },
+            @{ Path = "Telegram/lib_rpl"; Url = "https://github.com/desktop-app/lib_rpl.git" },
+            @{ Path = "Telegram/lib_base"; Url = "https://github.com/desktop-app/lib_base.git" },
+            @{ Path = "Telegram/codegen"; Url = "https://github.com/desktop-app/codegen.git" },
+            @{ Path = "Telegram/lib_ui"; Url = "https://github.com/desktop-app/lib_ui.git" },
+            @{ Path = "Telegram/lib_lottie"; Url = "https://github.com/desktop-app/lib_lottie.git" },
+            @{ Path = "Telegram/lib_tl"; Url = "https://github.com/desktop-app/lib_tl.git" },
+            @{ Path = "Telegram/lib_spellcheck"; Url = "https://github.com/desktop-app/lib_spellcheck.git" },
+            @{ Path = "Telegram/lib_storage"; Url = "https://github.com/desktop-app/lib_storage.git" },
+            @{ Path = "Telegram/lib_qr"; Url = "https://github.com/desktop-app/lib_qr.git" },
+            @{ Path = "Telegram/lib_webrtc"; Url = "https://github.com/desktop-app/lib_webrtc.git" },
+            @{ Path = "Telegram/lib_webview"; Url = "https://github.com/desktop-app/lib_webview.git" },
+            @{ Path = "Telegram/ThirdParty/GSL"; Url = "https://github.com/Microsoft/GSL.git" },
+            @{ Path = "Telegram/ThirdParty/xxHash"; Url = "https://github.com/Cyan4973/xxHash.git" },
+            @{ Path = "Telegram/ThirdParty/rlottie"; Url = "https://github.com/desktop-app/rlottie.git" },
+            @{ Path = "Telegram/ThirdParty/lz4"; Url = "https://github.com/lz4/lz4.git" },
+            @{ Path = "Telegram/ThirdParty/expected"; Url = "https://github.com/TartanLlama/expected" },
+            @{ Path = "Telegram/ThirdParty/QR"; Url = "https://github.com/nayuki/QR-Code-generator" },
+            @{ Path = "Telegram/ThirdParty/hunspell"; Url = "https://github.com/hunspell/hunspell" },
+            @{ Path = "Telegram/ThirdParty/range-v3"; Url = "https://github.com/ericniebler/range-v3.git" },
+            @{ Path = "Telegram/ThirdParty/tgcalls"; Url = "https://github.com/TelegramMessenger/tgcalls.git" }
+          )
+
+          foreach ($repo in $repos) {
+            $target = Join-Path $env:GITHUB_WORKSPACE $repo.Path
+            $needsClone = $true
+            if (Test-Path -LiteralPath $target) {
+              $entries = @(Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue)
+              if ($entries.Count -gt 0) {
+                $needsClone = $false
+              }
+            }
+            if (-not $needsClone) {
+              Write-Host "[sources] ok: $($repo.Path)"
+              continue
+            }
+            if (Test-Path -LiteralPath $target) {
+              Remove-Item -LiteralPath $target -Recurse -Force
+            }
+            Write-Host "[sources] clone: $($repo.Path)"
+            git clone --depth 1 $repo.Url $target
+            if ($LASTEXITCODE -ne 0) {
+              throw "[sources] failed to clone $($repo.Url) -> $($repo.Path)"
+            }
+          }
+
       - name: Configure (Windows Release)
         id: configure
         shell: cmd
