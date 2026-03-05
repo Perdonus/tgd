@@ -30,3 +30,4 @@ Build (Linux)
 Notes
 - The entry symbol is `TgdPluginEntry`.
 - The plugin API lives in `Telegram/SourceFiles/plugins/plugins_api.h`.
+- CI touch: keep this file unchanged functionally.
