@@ -25,7 +25,6 @@ jobs:
     name: Windows (preferred)
     runs-on: windows-2022
     timeout-minutes: 360
-    continue-on-error: true
     outputs:
       build_ok: ${{ steps.locate_exe.outcome == 'success' }}
 
@@ -275,12 +274,24 @@ jobs:
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%\\Telegram"
 
-          cmake --build ..\out --config Release --target Telegram
+          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
+          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
+          set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-target.log"
+          set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-release.log"
+
+          cmake --build ..\out --config Release --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok
           echo [build] target Telegram failed, retrying default Release build
-          cmake --build ..\out --config Release
-          if errorlevel 1 exit /b 1
+          powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 120"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Target build failed::' + $tail)"
+          cmake --build ..\out --config Release > "%BUILD_LOG_RELEASE%" 2>&1
+          if not errorlevel 1 goto build_ok
+          echo [build] default Release build failed
+          powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 120"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::error title=Release build failed::' + $tail)"
+          exit /b 1
           :build_ok
+          exit /b 0
 
       - name: Upload diagnostics logs
         if: ${{ always() }}
