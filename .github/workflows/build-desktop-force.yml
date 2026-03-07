@@ -226,57 +226,145 @@ jobs:
         id: normalize_paths
         shell: pwsh
         run: |
-          $workspace = $env:GITHUB_WORKSPACE
-          $parent = (Resolve-Path (Join-Path $workspace "..")).Path
+          $ErrorActionPreference = "Stop"
+
+          function Get-ExistingItem([string] $Path) {
+            if ([string]::IsNullOrWhiteSpace($Path)) {
+              return $null
+            }
+            return Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+          }
+
+          function Resolve-ExistingPath([string[]] $Candidates) {
+            foreach ($candidate in $Candidates) {
+              $item = Get-ExistingItem $candidate
+              if ($null -ne $item) {
+                return $item.FullName
+              }
+            }
+            return $null
+          }
+
+          function Ensure-Directory([string] $Path) {
+            if ([string]::IsNullOrWhiteSpace($Path)) {
+              return
+            }
+            if ($null -eq (Get-ExistingItem $Path)) {
+              New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            }
+          }
+
+          function Ensure-DirAlias([string] $Path, [string] $Target) {
+            if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Target)) {
+              return
+            }
+            $targetItem = Get-ExistingItem $Target
+            if ($null -eq $targetItem) {
+              throw "[paths] alias target missing: $Target"
+            }
+            $existing = Get-ExistingItem $Path
+            if ($null -ne $existing) {
+              Write-Host "[paths] present: $Path"
+              return
+            }
+            $parentDir = Split-Path -Parent $Path
+            if (-not [string]::IsNullOrWhiteSpace($parentDir)) {
+              Ensure-Directory $parentDir
+            }
+            New-Item -ItemType Junction -Path $Path -Target $targetItem.FullName | Out-Null
+            Write-Host "[paths] linked $Path -> $($targetItem.FullName)"
+          }
+
+          function Find-QtDir([string[]] $Roots, [string] $Name) {
+            $uniqueRoots = @($Roots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+            foreach ($root in $uniqueRoots) {
+              $direct = Resolve-ExistingPath @((Join-Path $root $Name))
+              if ($direct) {
+                return $direct
+              }
+            }
+            foreach ($root in $uniqueRoots) {
+              $rootItem = Get-ExistingItem $root
+              if ($null -eq $rootItem) {
+                continue
+              }
+              $found = Get-ChildItem -LiteralPath $rootItem.FullName -Directory -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -eq $Name } |
+                Select-Object -First 1
+              if ($found) {
+                return $found.FullName
+              }
+            }
+            return $null
+          }
+
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path
+          $parent = (Resolve-Path -LiteralPath (Join-Path $workspace "..")).Path
           $libsRoot = Join-Path $parent "Libraries"
           $libsWin64 = Join-Path $libsRoot "win64"
           $workspaceLibs = Join-Path $workspace "Libraries"
+          $workspaceWin64 = Join-Path $workspaceLibs "win64"
 
-          if (-not (Test-Path -LiteralPath $libsRoot)) {
-            throw "[paths] Libraries root not found: $libsRoot"
+          $rootCandidates = @($libsRoot, $workspaceLibs)
+          foreach ($base in @($parent, $workspace)) {
+            if ($null -ne (Get-ExistingItem $base)) {
+              $rootCandidates += @(Get-ChildItem -LiteralPath $base -Directory -Filter Libraries -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName)
+            }
+          }
+          $actualRoot = Resolve-ExistingPath $rootCandidates
+
+          if (-not $actualRoot) {
+            Write-Host "[paths] parent snapshot:"
+            Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue | Select-Object -First 60 FullName
+            Write-Host "[paths] workspace snapshot:"
+            Get-ChildItem -LiteralPath $workspace -Force -ErrorAction SilentlyContinue | Select-Object -First 60 FullName
+            throw "[paths] Libraries root not found near $workspace"
           }
 
-          if (-not (Test-Path -LiteralPath $workspaceLibs)) {
-            New-Item -ItemType Junction -Path $workspaceLibs -Target $libsRoot | Out-Null
-            Write-Host "[paths] linked $workspaceLibs -> $libsRoot"
+          Ensure-DirAlias $libsRoot $actualRoot
+          $actualRoot = Resolve-ExistingPath @($libsRoot, $workspaceLibs, $actualRoot)
+          Ensure-DirAlias $workspaceLibs $actualRoot
+
+          $qtVersions = @("Qt-5.15.18", "Qt-6.10.1")
+          $actualWin64 = Resolve-ExistingPath @($libsWin64, $workspaceWin64, (Join-Path $actualRoot "win64"))
+          if (-not $actualWin64) {
+            foreach ($qtName in $qtVersions) {
+              $qtHit = Find-QtDir @($actualRoot, $workspaceLibs, $libsRoot) $qtName
+              if ($qtHit) {
+                $actualWin64 = Split-Path -Parent $qtHit
+                break
+              }
+            }
           }
 
-          $qtCandidates = @(
-            @{ Ver = "5.15.18"; A = (Join-Path $libsWin64 "Qt-5.15.18"); B = (Join-Path $libsRoot "Qt-5.15.18") },
-            @{ Ver = "6.10.1"; A = (Join-Path $libsWin64 "Qt-6.10.1"); B = (Join-Path $libsRoot "Qt-6.10.1") }
-          )
+          if ($actualWin64) {
+            Ensure-DirAlias $libsWin64 $actualWin64
+            Ensure-DirAlias $workspaceWin64 $libsWin64
+          }
 
           $foundQt = $false
-          foreach ($q in $qtCandidates) {
-            $a = $q.A
-            $b = $q.B
-            $aExists = Test-Path -LiteralPath $a
-            $bExists = Test-Path -LiteralPath $b
-
-            if ($aExists -and -not $bExists) {
-              New-Item -ItemType Junction -Path $b -Target $a | Out-Null
-              Write-Host "[paths] linked $b -> $a"
-              $bExists = $true
-            } elseif ($bExists -and -not $aExists) {
-              New-Item -ItemType Junction -Path $a -Target $b | Out-Null
-              Write-Host "[paths] linked $a -> $b"
-              $aExists = $true
+          foreach ($qtName in $qtVersions) {
+            $qtPath = Find-QtDir @($libsWin64, $libsRoot, $workspaceWin64, $workspaceLibs, $actualWin64, $actualRoot) $qtName
+            if (-not $qtPath) {
+              continue
             }
-
-            if ($aExists -or $bExists) {
-              Write-Host "[paths] Qt candidate present: $($q.Ver)"
-              $foundQt = $true
-            }
+            $foundQt = $true
+            Ensure-DirAlias (Join-Path $libsWin64 $qtName) $qtPath
+            Ensure-DirAlias (Join-Path $libsRoot $qtName) (Join-Path $libsWin64 $qtName)
+            Ensure-DirAlias (Join-Path $workspaceWin64 $qtName) (Join-Path $libsWin64 $qtName)
+            Ensure-DirAlias (Join-Path $workspaceLibs $qtName) (Join-Path $libsRoot $qtName)
+            Write-Host "[paths] Qt candidate present: $qtName at $qtPath"
           }
 
           if (-not $foundQt) {
             Write-Host "[paths] Libraries root snapshot:"
-            Get-ChildItem -LiteralPath $libsRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 60 Name
-            if (Test-Path -LiteralPath $libsWin64) {
+            Get-ChildItem -LiteralPath $libsRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 60 FullName
+            if ($null -ne (Get-ExistingItem $libsWin64)) {
               Write-Host "[paths] Libraries/win64 snapshot:"
-              Get-ChildItem -LiteralPath $libsWin64 -Force -ErrorAction SilentlyContinue | Select-Object -First 80 Name
+              Get-ChildItem -LiteralPath $libsWin64 -Force -ErrorAction SilentlyContinue | Select-Object -First 80 FullName
             }
-            throw "[paths] Qt directories were not found under $libsRoot or $libsWin64"
+            throw "[paths] Qt directories were not found after normalization"
           }
 
       - name: Configure (Windows Release)
