@@ -122,7 +122,8 @@ jobs:
             throw "[sources] no entries found in .gitmodules"
           }
 
-          # Pinned gitlink SHAs from telegramdesktop/tdesktop dev tree.
+          # Pin external ThirdParty mirrors to upstream gitlinks.
+          # Keep desktop-app repos on HEAD because this fork expects newer APIs there.
           $moduleShas = @{
             "Telegram/ThirdParty/GSL" = "87f9d768866548b5b86e72be66c60c5abd4d9b37"
             "Telegram/ThirdParty/QR" = "720f62bddb7226106071d4728c292cb1df519ceb"
@@ -142,18 +143,6 @@ jobs:
             "Telegram/ThirdParty/tgcalls" = "24694f64b03e301ec2c90792566046e61a2c4967"
             "Telegram/ThirdParty/xdg-desktop-portal" = "11c8a96b147aeae70e3f770313f93b367d53fedd"
             "Telegram/ThirdParty/xxHash" = "bbb27a5efb85b92a0486cf361a8635715a53f6ba"
-            "Telegram/codegen" = "0d0d71af1058f0c4e9d9c9971f5c66331e6055af"
-            "Telegram/lib_base" = "eb8564e08735533b996780946fd819f24c333ac5"
-            "Telegram/lib_crl" = "c1d6b0273653095b10b4d0f4f7c30b614b690fd5"
-            "Telegram/lib_lottie" = "4fc3ac0ea52f271cc9b108481f83d56fd76ab0ed"
-            "Telegram/lib_qr" = "6fdf60461444ba150e13ac36009c0ffce72c4c83"
-            "Telegram/lib_rpl" = "9a3ce435f4054e6cbd45e1c6e3e27cfff515c829"
-            "Telegram/lib_spellcheck" = "81297706b32a6ec829a7dff5461ff458f82fb602"
-            "Telegram/lib_storage" = "ccdc72548a5065b5991b4e06e610d76bc4f6023e"
-            "Telegram/lib_tl" = "783052514ea6bd9ed0b7ddb4e5adb8c0077e5b9a"
-            "Telegram/lib_ui" = "114fd95c7511f6de1091b21bb23e51b8ecdc50ab"
-            "Telegram/lib_webrtc" = "792c7a5b4846c489753deb5b87f67b3d11b399cf"
-            "Telegram/lib_webview" = "55af106a525cfe9e1001ab36cbe09bf487fa2545"
           }
 
           foreach ($line in $moduleLines) {
