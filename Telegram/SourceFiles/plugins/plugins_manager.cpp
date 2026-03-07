@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
+#include "main/main_session.h"
 #include "settings.h"
 #include "window/window_controller.h"
 #include "ui/text/text_entity.h"
@@ -891,9 +892,9 @@ void Manager::unloadAll() {
 	_pluginIndexById.clear();
 }
 
-PluginRecord *Manager::findRecord(const QString &pluginId) {
+Manager::PluginRecord *Manager::findRecord(const QString &pluginId) {
 	const auto it = _pluginIndexById.find(pluginId);
-	if (it == end(_pluginIndexById)) {
+	if (it == _pluginIndexById.end()) {
 		return nullptr;
 	}
 	const auto index = it.value();
@@ -903,9 +904,10 @@ PluginRecord *Manager::findRecord(const QString &pluginId) {
 	return &_plugins[index];
 }
 
-const PluginRecord *Manager::findRecord(const QString &pluginId) const {
+const Manager::PluginRecord *Manager::findRecord(
+		const QString &pluginId) const {
 	const auto it = _pluginIndexById.find(pluginId);
-	if (it == end(_pluginIndexById)) {
+	if (it == _pluginIndexById.end()) {
 		return nullptr;
 	}
 	const auto index = it.value();
@@ -1027,7 +1029,7 @@ void Manager::updateMessageObserverSubscriptions() {
 		auto result = std::vector<MessageObserverEntry>();
 		result.reserve(_messageObservers.size());
 		for (auto it = _messageObservers.cbegin();
-			it != end(_messageObservers);
+			it != _messageObservers.cend();
 			++it) {
 			result.push_back(it.value());
 		}
@@ -1037,7 +1039,7 @@ void Manager::updateMessageObserverSubscriptions() {
 	auto wantsEdited = false;
 	auto wantsDeleted = false;
 	for (auto it = _messageObservers.cbegin();
-		it != end(_messageObservers);
+		it != _messageObservers.cend();
 		++it) {
 		const auto &options = it.value().options;
 		wantsNew |= options.newMessages;
