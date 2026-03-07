@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: false
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows:
@@ -63,7 +63,7 @@ jobs:
           set "PREPARE_TRY=1"
           :prepare_retry
           echo [prepare] attempt !PREPARE_TRY! of !PREPARE_MAX_TRIES!
-          powershell -NoProfile -Command "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/s','/c','call Telegram\\build\\prepare\\win.bat' -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru -NoNewWindow; if (-not $p.WaitForExit(7800 * 1000)) { Write-Host '[prepare] timed out after 7800s'; try { $p.Kill($true) } catch {}; exit 124 }; exit $p.ExitCode"
+          powershell -NoProfile -Command "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/s','/c','call Telegram\\build\\prepare\\win.bat' -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru -NoNewWindow; if (-not $p.WaitForExit(5400 * 1000)) { Write-Host '[prepare] timed out after 5400s'; try { $p.Kill($true) } catch {}; exit 124 }; exit $p.ExitCode"
           if not errorlevel 1 goto prepare_ok
           if !PREPARE_TRY! GEQ !PREPARE_MAX_TRIES! (
             echo [prepare] failed after !PREPARE_TRY! attempts
