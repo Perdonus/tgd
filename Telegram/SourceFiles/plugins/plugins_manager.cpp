@@ -724,7 +724,7 @@ void Manager::loadConfig() {
 
 void Manager::saveConfig() const {
 	QDir().mkpath(QFileInfo(_configPath).absolutePath());
-	auto list = QStringList(begin(_disabled), end(_disabled));
+	auto list = _disabled.values();
 	list.sort(Qt::CaseInsensitive);
 	auto array = QJsonArray();
 	for (const auto &id : list) {
