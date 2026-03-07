@@ -119,12 +119,12 @@ std::vector<CommandDescriptor> Manager::commandsFor(
 		const QString &pluginId) const {
 	auto result = std::vector<CommandDescriptor>();
 	const auto it = _commandsByPlugin.find(pluginId);
-	if (it == end(_commandsByPlugin)) {
+	if (it == _commandsByPlugin.end()) {
 		return result;
 	}
 	for (const auto id : it.value()) {
 		const auto entry = _commands.find(id);
-		if (entry != end(_commands)) {
+		if (entry != _commands.end()) {
 			result.push_back(entry->descriptor);
 		}
 	}
@@ -134,12 +134,12 @@ std::vector<CommandDescriptor> Manager::commandsFor(
 std::vector<ActionState> Manager::actionsFor(const QString &pluginId) const {
 	auto result = std::vector<ActionState>();
 	const auto it = _actionsByPlugin.find(pluginId);
-	if (it == end(_actionsByPlugin)) {
+	if (it == _actionsByPlugin.end()) {
 		return result;
 	}
 	for (const auto id : it.value()) {
 		const auto entry = _actions.find(id);
-		if (entry != end(_actions)) {
+		if (entry != _actions.end()) {
 			result.push_back({
 				.id = entry->id,
 				.title = entry->title,
@@ -153,12 +153,12 @@ std::vector<ActionState> Manager::actionsFor(const QString &pluginId) const {
 std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
 	auto result = std::vector<PanelState>();
 	const auto it = _panelsByPlugin.find(pluginId);
-	if (it == end(_panelsByPlugin)) {
+	if (it == _panelsByPlugin.end()) {
 		return result;
 	}
 	for (const auto id : it.value()) {
 		const auto entry = _panels.find(id);
-		if (entry != end(_panels)) {
+		if (entry != _panels.end()) {
 			result.push_back({
 				.id = entry->id,
 				.title = entry->descriptor.title,
@@ -171,7 +171,7 @@ std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
 
 bool Manager::triggerAction(ActionId id) {
 	const auto it = _actions.find(id);
-	if (it == end(_actions)) {
+	if (it == _actions.end()) {
 		return false;
 	}
 	try {
@@ -210,7 +210,7 @@ bool Manager::triggerAction(ActionId id) {
 
 bool Manager::openPanel(PanelId id) {
 	const auto it = _panels.find(id);
-	if (it == end(_panels)) {
+	if (it == _panels.end()) {
 		return false;
 	}
 	const auto window = activeWindow()
@@ -261,7 +261,7 @@ CommandResult Manager::interceptOutgoingText(
 		auto ordered = std::vector<OutgoingInterceptorEntry>();
 		ordered.reserve(_outgoingInterceptors.size());
 		for (auto it = _outgoingInterceptors.cbegin();
-			it != end(_outgoingInterceptors);
+			it != _outgoingInterceptors.cend();
 			++it) {
 			ordered.push_back(it.value());
 		}
@@ -320,11 +320,11 @@ CommandResult Manager::interceptOutgoingText(
 		return result;
 	}
 	const auto idIt = _commandIdByName.find(key);
-	if (idIt == end(_commandIdByName)) {
+	if (idIt == _commandIdByName.end()) {
 		return result;
 	}
 	const auto entryIt = _commands.find(idIt.value());
-	if (entryIt == end(_commands)) {
+	if (entryIt == _commands.end()) {
 		return result;
 	}
 	const auto args = full.mid(end).trimmed();
@@ -418,7 +418,7 @@ CommandId Manager::registerCommand(
 
 void Manager::unregisterCommand(CommandId id) {
 	const auto it = _commands.find(id);
-	if (it == end(_commands)) {
+	if (it == _commands.end()) {
 		return;
 	}
 	const auto key = commandKey(it->descriptor.command);
@@ -426,7 +426,7 @@ void Manager::unregisterCommand(CommandId id) {
 	const auto pluginId = it->pluginId;
 	_commands.remove(id);
 	const auto listIt = _commandsByPlugin.find(pluginId);
-	if (listIt != end(_commandsByPlugin)) {
+	if (listIt != _commandsByPlugin.end()) {
 		listIt->removeAll(id);
 		if (listIt->isEmpty()) {
 			_commandsByPlugin.erase(listIt);
@@ -462,13 +462,13 @@ ActionId Manager::registerAction(
 
 void Manager::unregisterAction(ActionId id) {
 	const auto it = _actions.find(id);
-	if (it == end(_actions)) {
+	if (it == _actions.end()) {
 		return;
 	}
 	const auto pluginId = it->pluginId;
 	_actions.remove(id);
 	const auto listIt = _actionsByPlugin.find(pluginId);
-	if (listIt != end(_actionsByPlugin)) {
+	if (listIt != _actionsByPlugin.end()) {
 		listIt->removeAll(id);
 		if (listIt->isEmpty()) {
 			_actionsByPlugin.erase(listIt);
@@ -526,13 +526,13 @@ OutgoingInterceptorId Manager::registerOutgoingTextInterceptor(
 
 void Manager::unregisterOutgoingTextInterceptor(OutgoingInterceptorId id) {
 	const auto it = _outgoingInterceptors.find(id);
-	if (it == end(_outgoingInterceptors)) {
+	if (it == _outgoingInterceptors.end()) {
 		return;
 	}
 	const auto pluginId = it->pluginId;
 	_outgoingInterceptors.remove(id);
 	const auto listIt = _outgoingInterceptorsByPlugin.find(pluginId);
-	if (listIt != end(_outgoingInterceptorsByPlugin)) {
+	if (listIt != _outgoingInterceptorsByPlugin.end()) {
 		listIt->removeAll(id);
 		if (listIt->isEmpty()) {
 			_outgoingInterceptorsByPlugin.erase(listIt);
@@ -567,13 +567,13 @@ MessageObserverId Manager::registerMessageObserver(
 
 void Manager::unregisterMessageObserver(MessageObserverId id) {
 	const auto it = _messageObservers.find(id);
-	if (it == end(_messageObservers)) {
+	if (it == _messageObservers.end()) {
 		return;
 	}
 	const auto pluginId = it->pluginId;
 	_messageObservers.remove(id);
 	const auto listIt = _messageObserversByPlugin.find(pluginId);
-	if (listIt != end(_messageObserversByPlugin)) {
+	if (listIt != _messageObserversByPlugin.end()) {
 		listIt->removeAll(id);
 		if (listIt->isEmpty()) {
 			_messageObserversByPlugin.erase(listIt);
@@ -608,13 +608,13 @@ PanelId Manager::registerPanel(
 
 void Manager::unregisterPanel(PanelId id) {
 	const auto it = _panels.find(id);
-	if (it == end(_panels)) {
+	if (it == _panels.end()) {
 		return;
 	}
 	const auto pluginId = it->pluginId;
 	_panels.remove(id);
 	const auto listIt = _panelsByPlugin.find(pluginId);
-	if (listIt != end(_panelsByPlugin)) {
+	if (listIt != _panelsByPlugin.end()) {
 		listIt->removeAll(id);
 		if (listIt->isEmpty()) {
 			_panelsByPlugin.erase(listIt);
