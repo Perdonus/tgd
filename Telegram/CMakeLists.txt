@@ -2033,6 +2033,7 @@ function(add_tg_plugin_example target_name output_name source_file)
     init_non_host_target(${target_name})
     set_target_properties(${target_name} PROPERTIES
         AUTOMOC OFF
+        EXCLUDE_FROM_ALL ON
         OUTPUT_NAME ${output_name}
         PREFIX ""
         SUFFIX ".tgd"

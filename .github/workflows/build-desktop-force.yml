@@ -451,6 +451,7 @@ jobs:
       - name: Build example plugins
         if: ${{ steps.build_target.outcome == 'success' }}
         id: build_plugins
+        continue-on-error: true
         shell: cmd
         run: |
           @echo on
@@ -509,7 +510,7 @@ jobs:
           if-no-files-found: error
 
       - name: Locate built EXE
-        if: ${{ steps.build_target.outcome == 'success' }}
+        if: ${{ always() && steps.build_target.outcome == 'success' }}
         id: locate_exe
         shell: pwsh
         run: |
@@ -549,7 +550,7 @@ jobs:
           Write-Host "Picked binary: $($picked.FullName)"
 
       - name: Upload Windows artifact
-        if: ${{ steps.locate_exe.outcome == 'success' }}
+        if: ${{ always() && steps.locate_exe.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: telegram-windows-release
