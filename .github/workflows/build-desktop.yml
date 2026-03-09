@@ -454,6 +454,66 @@ jobs:
             ci-logs/*.log
           if-no-files-found: ignore
 
+      - name: Build example plugins
+        if: ${{ steps.build_target.outcome == 'success' }}
+        id: build_plugins
+        shell: cmd
+        run: |
+          @echo on
+          setlocal EnableExtensions EnableDelayedExpansion
+          cd /d "%GITHUB_WORKSPACE%\\Telegram"
+
+          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
+          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
+          set "PLUGIN_BUILD_LOG=%CI_LOGS_DIR%\\build-plugins.log"
+
+          cmake --build ..\out --config Release --target tgd_example_plugins > "%PLUGIN_BUILD_LOG%" 2>&1
+          if not errorlevel 1 exit /b 0
+
+          echo [plugins] example plugin build failed
+          powershell -NoProfile -Command "Get-Content -Path '%PLUGIN_BUILD_LOG%' -Tail 120"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%PLUGIN_BUILD_LOG%' -Tail 40) -join ' | '; Write-Output ('::error title=Plugin example build failed::' + $tail)"
+          exit /b 1
+
+      - name: Collect example plugins
+        if: ${{ steps.build_plugins.outcome == 'success' }}
+        id: collect_plugins
+        shell: pwsh
+        run: |
+          $roots = @(
+            "$PWD/out/plugin_examples",
+            "$PWD/Telegram/out/plugin_examples",
+            "$PWD/out/Release/plugin_examples",
+            "$PWD/Telegram/out/Release/plugin_examples"
+          ) | Where-Object { Test-Path $_ }
+
+          $matches = @()
+          foreach ($root in $roots) {
+            $matches += Get-ChildItem -Path $root -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue
+          }
+          $matches = $matches | Sort-Object FullName -Unique
+
+          if (-not $matches -or $matches.Count -eq 0) {
+            Write-Host "Searched plugin roots:"
+            $roots | ForEach-Object { Write-Host " - $_" }
+            Write-Error "Built example plugins were not found."
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Path "$PWD/dist/plugins" -Force | Out-Null
+          foreach ($match in $matches) {
+            Copy-Item -LiteralPath $match.FullName -Destination (Join-Path "$PWD/dist/plugins" $match.Name) -Force
+          }
+
+      - name: Upload example plugins artifact
+        if: ${{ steps.collect_plugins.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-plugin-examples-windows
+          path: |
+            dist/plugins/*.tgd
+          if-no-files-found: error
+
       - name: Locate built EXE
         if: ${{ steps.build_target.outcome == 'success' }}
         id: locate_exe

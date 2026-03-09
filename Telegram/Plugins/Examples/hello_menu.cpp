@@ -6,6 +6,15 @@ Registers a menu action that shows a toast.
 
 #include <QtCore/QString>
 
+TGD_PLUGIN_PREVIEW(
+	"example.hello_menu",
+	"Example Hello Menu",
+	"1.0",
+	"Example",
+	"Adds a menu action that shows a toast.",
+	"",
+	"")
+
 class HelloMenuPlugin final : public Plugins::Plugin {
 public:
 	explicit HelloMenuPlugin(Plugins::Host *host) : _host(host) {
@@ -49,7 +58,7 @@ private:
 };
 
 TGD_PLUGIN_ENTRY {
-	if (apiVersion < Plugins::kApiVersion) {
+	if (apiVersion != Plugins::kApiVersion) {
 		return nullptr;
 	}
 	return new HelloMenuPlugin(host);

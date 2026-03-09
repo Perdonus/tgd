@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtCore/QString>
+#include <QtCore/QtGlobal>
 
 #include <cstdint>
 #include <functional>
@@ -30,6 +31,70 @@ class HistoryItem;
 namespace Plugins {
 
 constexpr int kApiVersion = 2;
+constexpr int kBinaryInfoVersion = 1;
+constexpr int kPreviewInfoVersion = 1;
+
+#if defined(_MSC_VER)
+inline constexpr auto kCompilerId = "msvc";
+inline constexpr auto kCompilerVersion = _MSC_VER;
+#elif defined(__clang__)
+inline constexpr auto kCompilerId = "clang";
+inline constexpr auto kCompilerVersion = (__clang_major__ * 100) + __clang_minor__;
+#elif defined(__GNUC__)
+inline constexpr auto kCompilerId = "gcc";
+inline constexpr auto kCompilerVersion = (__GNUC__ * 100) + __GNUC_MINOR__;
+#else
+inline constexpr auto kCompilerId = "unknown";
+inline constexpr auto kCompilerVersion = 0;
+#endif
+
+#if defined(_WIN32)
+inline constexpr auto kPlatformId = "windows";
+#elif defined(__APPLE__)
+inline constexpr auto kPlatformId = "macos";
+#elif defined(__linux__)
+inline constexpr auto kPlatformId = "linux";
+#else
+inline constexpr auto kPlatformId = "unknown";
+#endif
+
+struct BinaryInfo {
+	int structVersion = kBinaryInfoVersion;
+	int apiVersion = kApiVersion;
+	int pointerSize = int(sizeof(void*));
+	int qtMajor = QT_VERSION_MAJOR;
+	int qtMinor = QT_VERSION_MINOR;
+	int compilerVersion = kCompilerVersion;
+	const char *compiler = kCompilerId;
+	const char *platform = kPlatformId;
+};
+
+constexpr BinaryInfo MakeBinaryInfo() {
+	auto result = BinaryInfo();
+	result.structVersion = kBinaryInfoVersion;
+	result.apiVersion = kApiVersion;
+	result.pointerSize = int(sizeof(void*));
+	result.qtMajor = QT_VERSION_MAJOR;
+	result.qtMinor = QT_VERSION_MINOR;
+	result.compilerVersion = kCompilerVersion;
+	result.compiler = kCompilerId;
+	result.platform = kPlatformId;
+	return result;
+}
+
+inline constexpr auto kBinaryInfo = MakeBinaryInfo();
+
+struct PreviewInfo {
+	int structVersion = kPreviewInfoVersion;
+	int apiVersion = kApiVersion;
+	const char *id = nullptr;
+	const char *name = nullptr;
+	const char *version = nullptr;
+	const char *author = nullptr;
+	const char *description = nullptr;
+	const char *website = nullptr;
+	const char *icon = nullptr;
+};
 
 struct PluginInfo {
 	QString id;
@@ -192,6 +257,8 @@ public:
 };
 
 using EntryFn = Plugin* (*)(Host *host, int apiVersion);
+using BinaryInfoFn = const BinaryInfo* (*)();
+using PreviewInfoFn = const PreviewInfo* (*)();
 
 } // namespace Plugins
 
@@ -204,6 +271,27 @@ using EntryFn = Plugin* (*)(Host *host, int apiVersion);
 #endif
 
 #define TGD_PLUGIN_ENTRY \
+	extern "C" TGD_PLUGIN_EXPORT const Plugins::BinaryInfo *TgdPluginBinaryInfo() { \
+		return &Plugins::kBinaryInfo; \
+	} \
 	extern "C" TGD_PLUGIN_EXPORT Plugins::Plugin *TgdPluginEntry( \
 		Plugins::Host *host, \
 		int apiVersion)
+
+#define TGD_PLUGIN_PREVIEW(ID, NAME, VERSION, AUTHOR, DESCRIPTION, WEBSITE, ICON) \
+	namespace { \
+	inline constexpr Plugins::PreviewInfo kTgdPluginPreviewInfo = { \
+		Plugins::kPreviewInfoVersion, \
+		Plugins::kApiVersion, \
+		ID, \
+		NAME, \
+		VERSION, \
+		AUTHOR, \
+		DESCRIPTION, \
+		WEBSITE, \
+		ICON, \
+	}; \
+	} \
+	extern "C" TGD_PLUGIN_EXPORT const Plugins::PreviewInfo *TgdPluginPreviewInfo() { \
+		return &kTgdPluginPreviewInfo; \
+	}

@@ -6,6 +6,15 @@ Registers /shrug and replaces the message with a fixed text.
 
 #include <QtCore/QString>
 
+TGD_PLUGIN_PREVIEW(
+	"example.shrug",
+	"Example Shrug",
+	"1.0",
+	"Example",
+	"Replaces /shrug with [shrug].",
+	"",
+	"")
+
 class ShrugPlugin final : public Plugins::Plugin {
 public:
 	explicit ShrugPlugin(Plugins::Host *host) : _host(host) {
@@ -50,7 +59,7 @@ private:
 };
 
 TGD_PLUGIN_ENTRY {
-	if (apiVersion < Plugins::kApiVersion) {
+	if (apiVersion != Plugins::kApiVersion) {
 		return nullptr;
 	}
 	return new ShrugPlugin(host);

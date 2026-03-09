@@ -2025,6 +2025,39 @@ endif()
 
 set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
 
+set(tg_plugin_examples_output ${CMAKE_BINARY_DIR}/plugin_examples)
+set(tg_plugin_example_targets)
+
+function(add_tg_plugin_example target_name output_name source_file)
+    add_library(${target_name} MODULE ${source_file})
+    init_non_host_target(${target_name})
+    set_target_properties(${target_name} PROPERTIES
+        AUTOMOC OFF
+        OUTPUT_NAME ${output_name}
+        PREFIX ""
+        SUFFIX ".tgd"
+        LIBRARY_OUTPUT_DIRECTORY ${tg_plugin_examples_output}
+        RUNTIME_OUTPUT_DIRECTORY ${tg_plugin_examples_output}
+    )
+    target_include_directories(${target_name} PRIVATE ${src_loc})
+    target_link_libraries(${target_name}
+    PRIVATE
+        desktop-app::external_qt
+        desktop-app::lib_base
+        desktop-app::lib_crl
+        desktop-app::lib_ui
+    )
+    list(APPEND tg_plugin_example_targets ${target_name})
+    set(tg_plugin_example_targets "${tg_plugin_example_targets}" PARENT_SCOPE)
+endfunction()
+
+add_tg_plugin_example(TgPluginExampleCommandShrug command_shrug Plugins/Examples/command_shrug.cpp)
+add_tg_plugin_example(TgPluginExampleHelloMenu hello_menu Plugins/Examples/hello_menu.cpp)
+add_tg_plugin_example(TgPluginExampleMessageObserver message_observer Plugins/Examples/message_observer.cpp)
+add_tg_plugin_example(TgPluginExamplePanelDemo panel_demo Plugins/Examples/panel_demo.cpp)
+add_tg_plugin_example(TgPluginExampleTransparentTelegram transparent_telegram Plugins/Examples/transparent_telegram.cpp)
+add_custom_target(tgd_example_plugins DEPENDS ${tg_plugin_example_targets})
+
 if (MSVC)
     target_link_libraries(Telegram
     PRIVATE

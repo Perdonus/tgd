@@ -10,6 +10,15 @@ Registers a panel entry that opens a simple dialog.
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
 
+TGD_PLUGIN_PREVIEW(
+	"example.panel_demo",
+	"Example Panel",
+	"1.0",
+	"Example",
+	"Opens a demo UI panel.",
+	"",
+	"")
+
 class PanelDemoPlugin final : public Plugins::Plugin {
 public:
 	explicit PanelDemoPlugin(Plugins::Host *host) : _host(host) {
@@ -68,7 +77,7 @@ private:
 };
 
 TGD_PLUGIN_ENTRY {
-	if (apiVersion < Plugins::kApiVersion) {
+	if (apiVersion != Plugins::kApiVersion) {
 		return nullptr;
 	}
 	return new PanelDemoPlugin(host);

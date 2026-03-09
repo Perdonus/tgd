@@ -53,6 +53,19 @@ struct PanelState {
 	QString description;
 };
 
+struct PackagePreviewState {
+	PluginInfo info;
+	QString sourcePath;
+	QString icon;
+	QString error;
+	QString installedVersion;
+	QString installedPath;
+	bool compatible = false;
+	bool previewAvailable = false;
+	bool installed = false;
+	bool update = false;
+};
+
 class Manager final : public QObject, public Host {
 public:
 	explicit Manager(QObject *parent = nullptr);
@@ -62,6 +75,11 @@ public:
 	void reload();
 
 	std::vector<PluginState> plugins() const;
+	bool safeModeEnabled() const;
+	bool setSafeModeEnabled(bool enabled);
+	PackagePreviewState inspectPackage(const QString &path) const;
+	bool installPackage(const QString &sourcePath, QString *error = nullptr);
+
 	std::vector<CommandDescriptor> commandsFor(
 		const QString &pluginId) const;
 	std::vector<ActionState> actionsFor(
@@ -188,6 +206,8 @@ public:
 
 	void loadConfig();
 	void saveConfig() const;
+	void appendLogLine(const QString &line) const;
+	void logLoadFailure(const QString &path, const QString &reason) const;
 	void scanPlugins();
 	void loadPlugin(const QString &path);
 	void unloadAll();
@@ -213,6 +233,8 @@ public:
 
 	QString _pluginsPath;
 	QString _configPath;
+	QString _logPath;
+	QString _safeModePath;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;

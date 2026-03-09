@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "plugins/plugins_manager.h"
 
 #include "core/application.h"
+#include "core/launcher.h"
 #include "data/data_changes.h"
 #include "history/history_item.h"
 #include "main/main_account.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLibrary>
@@ -34,7 +36,12 @@ namespace {
 
 constexpr auto kPluginsFolder = "tdata/plugins";
 constexpr auto kConfigFile = "tdata/plugins.json";
+constexpr auto kLogFile = "tdata/plugins.log";
+constexpr auto kSafeModeFile = "tdata/plugins.safe-mode";
+constexpr auto kBinaryInfoName = "TgdPluginBinaryInfo";
+constexpr auto kPreviewInfoName = "TgdPluginPreviewInfo";
 constexpr auto kEntryName = "TgdPluginEntry";
+constexpr auto kNoPluginsArgument = "-noplugins";
 
 QString TrimmedCommand(QString command) {
 	command = command.trimmed();
@@ -66,6 +73,77 @@ QString PluginBaseName(const QString &path) {
 	return base.isEmpty() ? info.fileName() : base;
 }
 
+QString PreviewText(const char *value) {
+	return value
+		? QString::fromUtf8(value).trimmed()
+		: QString();
+}
+
+PluginInfo PluginInfoFromPreview(const Plugins::PreviewInfo &preview) {
+	return {
+		.id = PreviewText(preview.id),
+		.name = PreviewText(preview.name),
+		.version = PreviewText(preview.version),
+		.author = PreviewText(preview.author),
+		.description = PreviewText(preview.description),
+		.website = PreviewText(preview.website),
+	};
+}
+
+void MergePluginInfo(PluginInfo &target, const PluginInfo &preview) {
+	if (!preview.id.isEmpty()) {
+		target.id = preview.id;
+	}
+	if (!preview.name.isEmpty()) {
+		target.name = preview.name;
+	}
+	if (!preview.version.isEmpty()) {
+		target.version = preview.version;
+	}
+	if (!preview.author.isEmpty()) {
+		target.author = preview.author;
+	}
+	if (!preview.description.isEmpty()) {
+		target.description = preview.description;
+	}
+	if (!preview.website.isEmpty()) {
+		target.website = preview.website;
+	}
+}
+
+QString PreviewIconFromInfo(const Plugins::PreviewInfo &preview) {
+	return PreviewText(preview.icon);
+}
+
+QString SanitizedPluginFileStem(QString value) {
+	value = value.trimmed();
+	for (auto &ch : value) {
+		if (ch.isLetterOrNumber() || ch == '.' || ch == '_' || ch == '-') {
+			continue;
+		}
+		ch = '-';
+	}
+	while (value.contains(u"--"_q)) {
+		value.replace(u"--"_q, u"-"_q);
+	}
+	value = value.trimmed();
+	value.remove(QChar('/'));
+	value.remove(QChar('\\'));
+	value.remove(QChar(':'));
+	value.remove(QChar('*'));
+	value.remove(QChar('?'));
+	value.remove(QChar('"'));
+	value.remove(QChar('<'));
+	value.remove(QChar('>'));
+	value.remove(QChar('|'));
+	return value.isEmpty() ? u"plugin"_q : value;
+}
+
+bool CommandLineSafeModeRequested() {
+	const auto &arguments = Core::Launcher::Instance().arguments();
+	return arguments.contains(QString::fromLatin1(kNoPluginsArgument));
+}
+
 QString CurrentExceptionText() {
 	try {
 		throw;
@@ -77,6 +155,46 @@ QString CurrentExceptionText() {
 	} catch (...) {
 		return u"Unknown exception."_q;
 	}
+}
+
+QString DescribeBinaryInfoMismatch(const Plugins::BinaryInfo &info) {
+	const auto pluginCompiler = QString::fromLatin1(info.compiler ? info.compiler : "unknown");
+	const auto hostCompiler = QString::fromLatin1(Plugins::kCompilerId);
+	const auto pluginPlatform = QString::fromLatin1(info.platform ? info.platform : "unknown");
+	const auto hostPlatform = QString::fromLatin1(Plugins::kPlatformId);
+
+	if (info.structVersion != Plugins::kBinaryInfoVersion) {
+		return u"Incompatible plugin metadata version."_q;
+	}
+	if (info.apiVersion != Plugins::kApiVersion) {
+		return u"Incompatible plugin API version."_q;
+	}
+	if (info.pointerSize != int(sizeof(void*))) {
+		return u"Incompatible plugin architecture."_q;
+	}
+	if (pluginPlatform != hostPlatform) {
+		return u"Incompatible plugin platform."_q;
+	}
+	if (pluginCompiler != hostCompiler
+		|| info.compilerVersion != Plugins::kCompilerVersion) {
+		return u"Incompatible plugin compiler ABI."_q;
+	}
+	if (info.qtMajor != QT_VERSION_MAJOR || info.qtMinor != QT_VERSION_MINOR) {
+		return u"Incompatible Qt major/minor version."_q;
+	}
+	return QString();
+}
+
+QString DescribeBinaryInfo(const Plugins::BinaryInfo &info) {
+	return QString::fromLatin1(
+		"api=%1 ptr=%2 qt=%3.%4 compiler=%5/%6 platform=%7")
+		.arg(info.apiVersion)
+		.arg(info.pointerSize)
+		.arg(info.qtMajor)
+		.arg(info.qtMinor)
+		.arg(QString::fromLatin1(info.compiler ? info.compiler : "unknown"))
+		.arg(info.compilerVersion)
+		.arg(QString::fromLatin1(info.platform ? info.platform : "unknown"));
 }
 
 } // namespace
@@ -91,8 +209,14 @@ Manager::~Manager() {
 void Manager::start() {
 	_pluginsPath = cWorkingDir() + QString::fromLatin1(kPluginsFolder);
 	_configPath = cWorkingDir() + QString::fromLatin1(kConfigFile);
+	_logPath = cWorkingDir() + QString::fromLatin1(kLogFile);
+	_safeModePath = cWorkingDir() + QString::fromLatin1(kSafeModeFile);
 	loadConfig();
-	scanPlugins();
+	if (safeModeEnabled()) {
+		appendLogLine(u"[safe-mode] Plugins skipped at startup."_q);
+	} else {
+		scanPlugins();
+	}
 	_sessionLifetime.destroy();
 	Core::App().domain().activeSessionValue(
 	) | rpl::on_next([=](Main::Session *session) {
@@ -103,6 +227,10 @@ void Manager::start() {
 void Manager::reload() {
 	unloadAll();
 	loadConfig();
+	if (safeModeEnabled()) {
+		appendLogLine(u"[safe-mode] Plugins skipped on reload."_q);
+		return;
+	}
 	scanPlugins();
 }
 
@@ -113,6 +241,190 @@ std::vector<PluginState> Manager::plugins() const {
 		result.push_back(plugin.state);
 	}
 	return result;
+}
+
+bool Manager::safeModeEnabled() const {
+	if (CommandLineSafeModeRequested()) {
+		return true;
+	}
+	return !_safeModePath.isEmpty() && QFileInfo::exists(_safeModePath);
+}
+
+bool Manager::setSafeModeEnabled(bool enabled) {
+	if (_safeModePath.isEmpty()) {
+		return false;
+	}
+	QDir().mkpath(QFileInfo(_safeModePath).absolutePath());
+	if (enabled) {
+		QFile file(_safeModePath);
+		if (!file.exists()) {
+			if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+				return false;
+			}
+			file.close();
+		}
+	} else if (QFileInfo::exists(_safeModePath) && !QFile::remove(_safeModePath)) {
+		return false;
+	}
+	reload();
+	return true;
+}
+
+PackagePreviewState Manager::inspectPackage(const QString &path) const {
+	auto result = PackagePreviewState();
+	result.sourcePath = path;
+	result.info.id = PluginBaseName(path);
+	result.info.name = result.info.id;
+
+	auto library = QLibrary(path);
+	if (!library.load()) {
+		result.error = library.errorString();
+		return result;
+	}
+
+	const auto binaryInfo = reinterpret_cast<BinaryInfoFn>(
+		library.resolve(kBinaryInfoName));
+	if (!binaryInfo) {
+		result.error = u"Missing TgdPluginBinaryInfo export."_q;
+		library.unload();
+		return result;
+	}
+	const auto binary = binaryInfo();
+	if (!binary) {
+		result.error = u"Plugin binary metadata is null."_q;
+		library.unload();
+		return result;
+	}
+	const auto previewInfo = reinterpret_cast<PreviewInfoFn>(
+		library.resolve(kPreviewInfoName));
+	if (previewInfo) {
+		if (const auto preview = previewInfo();
+			preview
+			&& preview->structVersion == kPreviewInfoVersion
+			&& preview->apiVersion == kApiVersion) {
+			result.previewAvailable = true;
+			MergePluginInfo(result.info, PluginInfoFromPreview(*preview));
+			result.icon = PreviewIconFromInfo(*preview);
+		}
+	}
+
+	if (const auto mismatch = DescribeBinaryInfoMismatch(*binary);
+		!mismatch.isEmpty()) {
+		result.error = mismatch;
+		library.unload();
+		return result;
+	}
+	result.compatible = true;
+
+	if (result.info.id.isEmpty()) {
+		result.info.id = PluginBaseName(path);
+	}
+	if (result.info.name.isEmpty()) {
+		result.info.name = result.info.id;
+	}
+	if (!result.info.id.isEmpty()) {
+		if (const auto installed = findRecord(result.info.id)) {
+			result.installed = true;
+			result.update = true;
+			result.installedVersion = installed->state.info.version;
+			result.installedPath = installed->state.path;
+		}
+	}
+
+	library.unload();
+	return result;
+}
+
+bool Manager::installPackage(const QString &sourcePath, QString *error) {
+	const auto preview = inspectPackage(sourcePath);
+	if (!preview.compatible) {
+		if (error) {
+			*error = preview.error.isEmpty()
+				? u"Plugin package is incompatible."_q
+				: preview.error;
+		}
+		return false;
+	}
+
+	QDir().mkpath(_pluginsPath);
+	const auto sourceInfo = QFileInfo(sourcePath);
+	const auto fileStem = !preview.info.id.isEmpty()
+		? SanitizedPluginFileStem(preview.info.id)
+		: SanitizedPluginFileStem(sourceInfo.completeBaseName());
+	const auto targetPath = QDir(_pluginsPath).absoluteFilePath(
+		fileStem + u".tgd"_q);
+	const auto tempPath = targetPath + u".tmp"_q;
+	const auto rescanNow = [this] {
+		if (safeModeEnabled()) {
+			appendLogLine(u"[safe-mode] Plugins skipped after install attempt."_q);
+		} else {
+			scanPlugins();
+		}
+	};
+
+	unloadAll();
+	loadConfig();
+
+	QFile::remove(tempPath);
+
+	if (sourceInfo.absoluteFilePath() != targetPath) {
+		if (!QFile::copy(sourcePath, tempPath)) {
+			rescanNow();
+			if (error) {
+				*error = u"Could not copy the plugin package into tdata/plugins."_q;
+			}
+			return false;
+		}
+		if (!preview.installedPath.isEmpty()
+			&& preview.installedPath != targetPath
+			&& QFileInfo::exists(preview.installedPath)
+			&& !QFile::remove(preview.installedPath)) {
+			QFile::remove(tempPath);
+			rescanNow();
+			if (error) {
+				*error = u"Could not replace the previous plugin file."_q;
+			}
+			return false;
+		}
+		if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
+			QFile::remove(tempPath);
+			rescanNow();
+			if (error) {
+				*error = u"Could not overwrite the target plugin file."_q;
+			}
+			return false;
+		}
+		if (!QFile::rename(tempPath, targetPath)) {
+			QFile::remove(tempPath);
+			rescanNow();
+			if (error) {
+				*error = u"Could not finalize the installed plugin file."_q;
+			}
+			return false;
+		}
+	}
+
+	if (safeModeEnabled()) {
+		appendLogLine(
+			u"[install] "_q
+			+ QFileInfo(targetPath).fileName()
+			+ u" copied while plugin safe mode is enabled."_q);
+	} else {
+		scanPlugins();
+		if (!preview.info.id.isEmpty()) {
+			if (const auto record = findRecord(preview.info.id);
+				record && !record->state.error.trimmed().isEmpty()) {
+				if (error) {
+					*error = record->state.error.trimmed();
+				}
+				return false;
+			}
+		}
+	}
+	if (error) {
+		error->clear();
+	}
+	return true;
 }
 
 std::vector<CommandDescriptor> Manager::commandsFor(
@@ -740,6 +1052,29 @@ void Manager::saveConfig() const {
 	}
 }
 
+void Manager::appendLogLine(const QString &line) const {
+	if (_logPath.isEmpty()) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(_logPath).absolutePath());
+	QFile file(_logPath);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+		return;
+	}
+	const auto stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+	file.write((stamp + u" "_q + line.trimmed() + u"\n"_q).toUtf8());
+}
+
+void Manager::logLoadFailure(const QString &path, const QString &reason) const {
+	appendLogLine(
+		u"[load-failed] "_q
+		+ QFileInfo(path).fileName()
+		+ u" ("_q
+		+ path
+		+ u"): "_q
+		+ reason);
+}
+
 void Manager::scanPlugins() {
 	QDir().mkpath(_pluginsPath);
 	auto dir = QDir(_pluginsPath);
@@ -757,21 +1092,59 @@ void Manager::loadPlugin(const QString &path) {
 	record.state.path = path;
 	record.state.enabled = false;
 	record.state.loaded = false;
+	record.state.info.id = PluginBaseName(path);
+	record.state.info.name = record.state.info.id;
 
 	auto library = std::make_unique<QLibrary>(path);
 	if (!library->load()) {
 		record.state.error = library->errorString();
-		record.state.info.id = PluginBaseName(path);
-		record.state.info.name = record.state.info.id;
+		logLoadFailure(path, record.state.error);
 		_plugins.push_back(std::move(record));
 		return;
 	}
+	const auto previewInfo = reinterpret_cast<PreviewInfoFn>(
+		library->resolve(kPreviewInfoName));
+	if (previewInfo) {
+		if (const auto preview = previewInfo();
+			preview
+			&& preview->structVersion == kPreviewInfoVersion
+			&& preview->apiVersion == kApiVersion) {
+			MergePluginInfo(record.state.info, PluginInfoFromPreview(*preview));
+			if (record.state.info.name.isEmpty()) {
+				record.state.info.name = record.state.info.id;
+			}
+		}
+	}
 	const auto entry = reinterpret_cast<EntryFn>(
 		library->resolve(kEntryName));
+	const auto binaryInfo = reinterpret_cast<BinaryInfoFn>(
+		library->resolve(kBinaryInfoName));
+	if (!binaryInfo) {
+		record.state.error = u"Missing TgdPluginBinaryInfo export."_q;
+		logLoadFailure(path, record.state.error);
+		library->unload();
+		_plugins.push_back(std::move(record));
+		return;
+	}
+	const auto info = binaryInfo();
+	if (!info) {
+		record.state.error = u"Plugin binary metadata is null."_q;
+		logLoadFailure(path, record.state.error);
+		library->unload();
+		_plugins.push_back(std::move(record));
+		return;
+	}
+	if (const auto mismatch = DescribeBinaryInfoMismatch(*info);
+		!mismatch.isEmpty()) {
+		record.state.error = mismatch;
+		logLoadFailure(path, mismatch + u" ["_q + DescribeBinaryInfo(*info) + u"]"_q);
+		library->unload();
+		_plugins.push_back(std::move(record));
+		return;
+	}
 	if (!entry) {
 		record.state.error = u"Missing TgdPluginEntry export."_q;
-		record.state.info.id = PluginBaseName(path);
-		record.state.info.name = record.state.info.id;
+		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
 		return;
@@ -780,8 +1153,7 @@ void Manager::loadPlugin(const QString &path) {
 	auto instance = std::unique_ptr<Plugin>(entry(this, kApiVersion));
 	if (!instance) {
 		record.state.error = u"Plugin entry returned null."_q;
-		record.state.info.id = PluginBaseName(path);
-		record.state.info.name = record.state.info.id;
+		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
 		return;
@@ -802,6 +1174,7 @@ void Manager::loadPlugin(const QString &path) {
 	record.state.enabled = !_disabled.contains(record.state.info.id);
 
 	if (!record.state.error.isEmpty()) {
+		logLoadFailure(path, record.state.error);
 		record.state.enabled = false;
 		instance.reset();
 		library->unload();
@@ -990,6 +1363,12 @@ void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
 	if (!record) {
 		return;
 	}
+	appendLogLine(
+		u"[disabled] "_q
+		+ pluginId
+		+ (reason.trimmed().isEmpty()
+			? QString()
+			: (u": "_q + reason.trimmed())));
 	record->state.enabled = false;
 	record->state.loaded = false;
 	if (!reason.trimmed().isEmpty()) {

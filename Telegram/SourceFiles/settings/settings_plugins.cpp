@@ -85,23 +85,31 @@ QString PluginDocsText() {
 		"File format and location\n"
 		"- Extension: .tgd (shared library, renamed).\n"
 		"- Folder: <working dir>/tdata/plugins\n"
-		"- Config: <working dir>/tdata/plugins.json (disabled list)\n\n"
+		"- Config: <working dir>/tdata/plugins.json (disabled list)\n"
+		"- Safe mode flag: <working dir>/tdata/plugins.safe-mode\n"
+		"- Log: <working dir>/tdata/plugins.log (load/runtime failures)\n\n"
 		"API header (v2)\n"
 		"- Telegram/SourceFiles/plugins/plugins_api.h\n"
-		"- Main entry symbol: TgdPluginEntry\n\n"
+		"- Main entry symbol: TgdPluginEntry\n"
+		"- Metadata symbol: TgdPluginBinaryInfo\n\n"
+		"Preview metadata (optional, recommended)\n"
+		"- Static symbol: TgdPluginPreviewInfo\n"
+		"- Used by in-chat install/update dialogs before the plugin loads.\n"
+		"- Supports name, version, author, description, website and icon.\n"
+		"- Icon format: StickerPackShortName/index\n\n"
 		"Plugin lifecycle\n"
 		"- The loader resolves TgdPluginEntry and constructs your plugin.\n"
-		"- Entry receives apiVersion; accept versions >= required.\n"
+		"- Entry receives apiVersion; require an exact match.\n"
 		"- info() is called to read metadata (id, name, version).\n"
 		"- Keep constructors and info() side-effect free.\n"
-			"- onLoad() is called when enabled; register commands/actions here.\n"
-			"- onUnload() is called on reload or disable; cleanup here.\n\n"
-			"Runtime safety\n"
-			"- Exceptions escaping plugin callbacks disable that plugin\n"
-			"  automatically and save this state to config.\n"
-			"- Keep callbacks non-blocking; heavy work should run in worker\n"
-			"  threads or separate processes (IPC).\n\n"
-			"Commands\n"
+		"- onLoad() is called when enabled; register commands/actions here.\n"
+		"- onUnload() is called on reload or disable; cleanup here.\n\n"
+		"Runtime safety\n"
+		"- Exceptions escaping plugin callbacks disable that plugin\n"
+		"  automatically and save this state to config.\n"
+		"- Keep callbacks non-blocking; heavy work should run in worker\n"
+		"  threads or separate processes (IPC).\n\n"
+		"Commands\n"
 		"- Register with Host::registerCommand.\n"
 		"- Format: /command [args] at the start of the message.\n"
 		"- Commands that contain '@' are ignored to avoid bot conflicts.\n"
@@ -140,8 +148,9 @@ QString PluginDocsText() {
 		"- Plugins are written in C++ (same language as Telegram Desktop).\n"
 		"- Use QtCore (QString, QLibrary) and the C++ standard library.\n"
 		"- For UI, also link QtWidgets.\n"
-		"- Link against the same Qt version used by the app.\n"
-		"- Build with the same compiler/ABI as Telegram Desktop.\n\n"
+		"- Link against the same Qt major/minor version used by the app.\n"
+		"- Build with the same compiler/ABI as Telegram Desktop.\n"
+		"- Platform, architecture and plugin API version must match exactly.\n\n"
 		"Other runtimes\n"
 		"- DEX/Java plugins are not supported on desktop.\n"
 		"- If you need another language, embed a runtime inside a C++ plugin\n"
@@ -153,7 +162,9 @@ QString PluginDocsText() {
 		"- mv my_plugin.so my_plugin.tgd\n\n"
 		"Security\n"
 		"- Plugins run as native code inside the app process.\n"
-		"- Only load plugins you trust.\n"_q;
+		"- Only load plugins you trust.\n"
+		"- Safe mode disables plugin loading completely.\n"
+		"- You can also launch Telegram with -noplugins.\n"_q;
 }
 
 } // namespace
@@ -194,6 +205,24 @@ void Plugins::setupContent() {
 		File::ShowInFolder(Core::App().plugins().pluginsPath());
 	});
 
+	const auto safeMode = _content->add(object_ptr<Ui::SettingsButton>(
+		_content,
+		rpl::single(u"Plugin Safe Mode"_q),
+		st::settingsButtonNoIcon
+	))->toggleOn(rpl::single(Core::App().plugins().safeModeEnabled()));
+	safeMode->toggledChanges(
+	) | rpl::on_next([=](bool value) {
+		if (!Core::App().plugins().setSafeModeEnabled(value)) {
+			_controller->window().showToast(u"Could not change safe mode."_q);
+		}
+		rebuildList();
+	}, safeMode->lifetime());
+	Ui::AddDividerText(
+		_content,
+		rpl::single(
+			u"When enabled, Telegram skips all plugin loading. "
+			u"Useful for recovery after a broken plugin."_q));
+
 	const auto reload = AddButtonWithIcon(
 		_content,
 		rpl::single(u"Reload Plugins"_q),
@@ -216,9 +245,16 @@ void Plugins::rebuildList() {
 
 	const auto plugins = Core::App().plugins().plugins();
 	if (plugins.empty()) {
-		Ui::AddDividerText(
-			_list,
-			rpl::single(u"No plugins found in tdata/plugins."_q));
+		if (Core::App().plugins().safeModeEnabled()) {
+			Ui::AddDividerText(
+				_list,
+				rpl::single(
+					u"Plugin safe mode is enabled. No plugins were loaded."_q));
+		} else {
+			Ui::AddDividerText(
+				_list,
+				rpl::single(u"No plugins found in tdata/plugins."_q));
+		}
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
 		return;

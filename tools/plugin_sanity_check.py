@@ -25,6 +25,7 @@ EXPECTED_EXAMPLES = {
     "hello_menu.cpp",
     "message_observer.cpp",
     "panel_demo.cpp",
+    "transparent_telegram.cpp",
 }
 
 
@@ -84,9 +85,15 @@ def check_examples(host_methods: set[str], errors: list[str]) -> None:
             errors,
         )
         require(
-            r"apiVersion\s*<\s*Plugins::kApiVersion",
+            r"TGD_PLUGIN_PREVIEW\s*\(",
             text,
-            f"{path.name}: has apiVersion compatibility check",
+            f"{path.name}: defines TGD_PLUGIN_PREVIEW",
+            errors,
+        )
+        require(
+            r"apiVersion\s*!=\s*Plugins::kApiVersion",
+            text,
+            f"{path.name}: has exact apiVersion compatibility check",
             errors,
         )
 
@@ -113,6 +120,24 @@ def main() -> int:
         "positive kApiVersion constant",
         errors,
     )
+    require(
+        r"constexpr int kBinaryInfoVersion = [1-9]\d*;",
+        api,
+        "positive kBinaryInfoVersion constant",
+        errors,
+    )
+    require(
+        r"TgdPluginBinaryInfo",
+        api,
+        "plugins_api.h exports TgdPluginBinaryInfo",
+        errors,
+    )
+    require(
+        r"TgdPluginPreviewInfo",
+        api,
+        "plugins_api.h exports TgdPluginPreviewInfo",
+        errors,
+    )
 
     host_methods = extract_host_method_names(api)
     if not host_methods:
@@ -125,6 +150,18 @@ def main() -> int:
         r"void Manager::disablePlugin\([^)]*\)\s*\{[\s\S]*saveConfig\(\);",
         cpp,
         "disablePlugin() persists config",
+        errors,
+    )
+    require(
+        r"library->resolve\(kBinaryInfoName\)",
+        cpp,
+        "loader resolves TgdPluginBinaryInfo",
+        errors,
+    )
+    require(
+        r"DescribeBinaryInfoMismatch",
+        cpp,
+        "loader validates plugin binary metadata",
         errors,
     )
 

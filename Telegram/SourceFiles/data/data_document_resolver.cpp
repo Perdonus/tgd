@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/options.h"
 #include "base/platform/base_platform_info.h"
+#include "api/api_common.h"
+#include "apiwrap.h"
 #include "boxes/abstract_box.h" // Ui::show().
 #include "chat_helpers/ttl_media_layer_widget.h"
 #include "core/application.h"
@@ -18,21 +20,33 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/media/history_view_gif.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_text_entity.h"
+#include "main/main_session.h"
 #include "media/player/media_player_instance.h"
 #include "platform/platform_file_utilities.h"
+#include "plugins/plugins_manager.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/chat_theme.h"
+#include "ui/painter.h"
+#include "ui/rp_widget.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_layers.h"
+#include "styles/style_settings.h"
 
 #include <QtCore/QBuffer>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMimeType>
 #include <QtCore/QMimeDatabase>
 
@@ -45,6 +59,323 @@ base::options::toggle OptionExternalVideoPlayer({
 	.description = "Use system video player instead of the internal one. "
 		"This disabes video playback in messages.",
 });
+
+constexpr auto kPluginPackageExtension = ".tgd";
+constexpr auto kPluginIncomingFolder = "tdata/plugins/.incoming";
+constexpr auto kPluginIconSize = 72;
+constexpr auto kPluginIconRowHeight = 88;
+
+struct PluginIconSpec {
+	QString packShortName;
+	int stickerIndex = -1;
+
+	[[nodiscard]] bool valid() const {
+		return !packShortName.isEmpty() && stickerIndex >= 0;
+	}
+};
+
+PluginIconSpec ParsePluginIconSpec(QString value) {
+	value = value.trimmed();
+	const auto slash = value.indexOf('/');
+	if (slash <= 0 || slash + 1 >= value.size()) {
+		return {};
+	}
+	auto result = PluginIconSpec();
+	result.packShortName = value.mid(0, slash).trimmed();
+	result.stickerIndex = value.mid(slash + 1).trimmed().toInt();
+	if (!result.valid()) {
+		return {};
+	}
+	return result;
+}
+
+QString PluginPackageDisplayName(not_null<DocumentData*> document) {
+	const auto filename = document->filename().trimmed();
+	if (!filename.isEmpty()) {
+		return filename;
+	}
+	const auto filepath = document->filepath(true);
+	if (!filepath.isEmpty()) {
+		return QFileInfo(filepath).fileName();
+	}
+	return QString::number(document->id) + QString::fromLatin1(kPluginPackageExtension);
+}
+
+bool IsPluginPackage(not_null<DocumentData*> document) {
+	return PluginPackageDisplayName(document).endsWith(
+		QString::fromLatin1(kPluginPackageExtension),
+		Qt::CaseInsensitive);
+}
+
+QString PluginIncomingPath(not_null<DocumentData*> document) {
+	auto filename = QFileInfo(PluginPackageDisplayName(document)).fileName();
+	if (!filename.endsWith(QString::fromLatin1(kPluginPackageExtension), Qt::CaseInsensitive)) {
+		filename += QString::fromLatin1(kPluginPackageExtension);
+	}
+	const auto dir = QDir(cWorkingDir() + QString::fromLatin1(kPluginIncomingFolder));
+	QDir().mkpath(dir.path());
+	return dir.filePath(QString::number(document->id) + u"-"_q + filename);
+}
+
+QString LocalPluginPackagePath(not_null<DocumentData*> document) {
+	const auto filepath = document->filepath(true);
+	if (!filepath.isEmpty() && QFileInfo::exists(filepath)) {
+		return filepath;
+	}
+	const auto media = document->createMediaView();
+	const auto bytes = media->bytes();
+	if (bytes.isEmpty()) {
+		return QString();
+	}
+	const auto path = PluginIncomingPath(document);
+	auto file = QFile(path);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		return QString();
+	}
+	if (file.write(bytes) != bytes.size()) {
+		file.close();
+		QFile::remove(path);
+		return QString();
+	}
+	file.close();
+	return path;
+}
+
+TextWithEntities PluginVersionText(const Plugins::PackagePreviewState &preview) {
+	auto result = TextWithEntities();
+	result.append(u"Version: "_q);
+	const auto oldVersion = preview.installedVersion.trimmed();
+	const auto newVersion = preview.info.version.trimmed();
+	if (preview.update && !oldVersion.isEmpty()) {
+		result.append(tr::strikeout(oldVersion));
+		if (!newVersion.isEmpty()) {
+			result.append(u"  "_q);
+		}
+	}
+	result.append(newVersion.isEmpty() ? u"unknown"_q : newVersion);
+	return result;
+}
+
+QString PluginPackageButtonText(const Plugins::PackagePreviewState &preview) {
+	return preview.update ? u"Update"_q : u"Install"_q;
+}
+
+QString PluginPackageStatusText(const Plugins::PackagePreviewState &preview) {
+	if (!preview.error.isEmpty()) {
+		return u"Status: "_q + preview.error;
+	}
+	if (Core::App().plugins().safeModeEnabled()) {
+		return u"Status: Plugin safe mode is enabled. "
+			u"Telegram will copy the package, but it will not load "
+			u"any plugins until safe mode is turned off."_q;
+	}
+	if (!preview.previewAvailable) {
+		return u"Status: No static preview metadata. "
+			u"You can still install it if you trust the source."_q;
+	}
+	return preview.update
+		? u"Status: This package will replace the installed plugin."_q
+		: u"Status: Ready to install."_q;
+}
+
+class PluginPackageIcon final : public Ui::RpWidget {
+public:
+	PluginPackageIcon(
+		QWidget *parent,
+		not_null<Main::Session*> session,
+		QString title,
+		QString iconSpec)
+	: Ui::RpWidget(parent)
+	, _session(session)
+	, _title(std::move(title))
+	, _iconSpec(ParsePluginIconSpec(std::move(iconSpec))) {
+		setMinimumHeight(kPluginIconRowHeight);
+		setMaximumHeight(kPluginIconRowHeight);
+
+		paintRequest(
+		) | rpl::on_next([=] {
+			auto p = QPainter(this);
+			const auto image = currentImage();
+			const auto target = QRect(
+				(width() - kPluginIconSize) / 2,
+				(height() - kPluginIconSize) / 2,
+				kPluginIconSize,
+				kPluginIconSize);
+			p.setRenderHint(QPainter::Antialiasing);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(0, 0, 0, 22));
+			p.drawRoundedRect(target, 18, 18);
+			if (image) {
+				const auto pixmap = image->pix(kPluginIconSize, kPluginIconSize);
+				p.drawPixmap(target.topLeft(), pixmap);
+				return;
+			}
+			auto font = this->font();
+			font.setPointSize(font.pointSize() + 8);
+			font.setBold(true);
+			p.setFont(font);
+			p.setPen(palette().color(QPalette::WindowText));
+			const auto letter = !_title.trimmed().isEmpty()
+				? _title.trimmed().left(1).toUpper()
+				: u"P"_q;
+			p.drawText(target, Qt::AlignCenter, letter);
+		}, lifetime());
+
+		_session->downloaderTaskFinished(
+		) | rpl::on_next([=] {
+			update();
+		}, lifetime());
+
+		requestIcon();
+	}
+
+	~PluginPackageIcon() override {
+		if (_requestId) {
+			const auto requestId = _requestId;
+			_requestId = 0;
+			_session->api().request(requestId).cancel();
+		}
+	}
+
+private:
+	void requestIcon() {
+		if (!_iconSpec.valid()) {
+			return;
+		}
+		_requestId = _session->api().request(MTPmessages_GetStickerSet(
+			Data::InputStickerSet(StickerSetIdentifier{
+				.shortName = _iconSpec.packShortName,
+			}),
+			MTP_int(0)
+		)).done(crl::guard(this, [=](const MTPmessages_StickerSet &result) {
+			_requestId = 0;
+			result.match([&](const MTPDmessages_stickerSet &data) {
+				if (const auto set = _session->data().stickers().feedSetFull(data)) {
+					if (_iconSpec.stickerIndex >= 0
+						&& _iconSpec.stickerIndex < set->stickers.size()) {
+						_sticker = set->stickers[_iconSpec.stickerIndex];
+						_stickerMedia = _sticker->createMediaView();
+						_stickerMedia->thumbnailWanted(_sticker->stickerSetOrigin());
+					}
+					if (set->hasThumbnail()) {
+						_thumbnailView = set->createThumbnailView();
+						set->loadThumbnail();
+					}
+				}
+				update();
+			}, [&](const MTPDmessages_stickerSetNotModified &) {
+				update();
+			});
+		})).fail(crl::guard(this, [=] {
+			_requestId = 0;
+			update();
+		})).send();
+	}
+
+	Image *currentImage() const {
+		if (_stickerMedia) {
+			if (const auto image = _stickerMedia->thumbnail()) {
+				return image;
+			}
+		}
+		return _thumbnailView ? _thumbnailView->image() : nullptr;
+	}
+
+	const not_null<Main::Session*> _session;
+	QString _title;
+	PluginIconSpec _iconSpec;
+	mtpRequestId _requestId = 0;
+	DocumentData *_sticker = nullptr;
+	std::shared_ptr<Data::DocumentMedia> _stickerMedia;
+	std::shared_ptr<Data::StickersSetThumbnailView> _thumbnailView;
+};
+
+void ShowPluginPackageBox(
+		not_null<Window::SessionController*> controller,
+		const Plugins::PackagePreviewState &preview) {
+	const auto title = !preview.info.name.trimmed().isEmpty()
+		? preview.info.name.trimmed()
+		: (!preview.info.id.trimmed().isEmpty()
+			? preview.info.id.trimmed()
+			: QFileInfo(preview.sourcePath).fileName());
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(preview.update ? u"Update Plugin"_q : u"Install Plugin"_q);
+
+		box->addRow(object_ptr<PluginPackageIcon>(
+			box,
+			&controller->session(),
+			title,
+			preview.icon));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(title),
+			st::sessionBigName),
+			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
+			style::al_top);
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(PluginVersionText(preview)),
+			st::sessionDateLabel),
+			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
+			style::al_top);
+		if (!preview.info.author.trimmed().isEmpty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(u"Author: "_q + preview.info.author.trimmed()),
+				st::defaultFlatLabel),
+				style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
+				style::al_top);
+		}
+		if (!preview.info.description.trimmed().isEmpty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(preview.info.description.trimmed()),
+				st::boxLabel),
+				style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
+				style::al_top);
+		}
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(PluginPackageStatusText(preview)),
+			st::boxLabel),
+			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
+			style::al_top);
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(
+				u"Plugins run as native code inside Telegram. "
+				u"Install only if you trust this file."_q),
+			st::boxLabel),
+			style::margins(
+				st::boxPadding.left(),
+				st::boxPadding.bottom() / 2,
+				st::boxPadding.right(),
+				0),
+			style::al_top);
+
+		if (preview.compatible) {
+			box->addButton(PluginPackageButtonText(preview), [=] {
+				auto error = QString();
+				if (!Core::App().plugins().installPackage(preview.sourcePath, &error)) {
+					controller->window().showToast(
+						error.isEmpty()
+							? u"Could not install the plugin."_q
+							: error);
+					return;
+				}
+				controller->window().showToast(
+					preview.update
+						? u"Plugin updated."_q
+						: u"Plugin installed."_q);
+				box->closeBox();
+			});
+		}
+		box->addButton(u"Close"_q, [=] {
+			box->closeBox();
+		});
+	}));
+}
 
 void ConfirmDontWarnBox(
 		not_null<Ui::GenericBox*> box,
@@ -258,6 +589,45 @@ void ResolveDocument(
 			showDocument();
 		}
 	} else {
+		if (IsPluginPackage(document)) {
+			if (!controller) {
+				return;
+			}
+			const auto localPath = LocalPluginPackagePath(document);
+			if (!localPath.isEmpty()) {
+				ShowPluginPackageBox(
+					controller,
+					Core::App().plugins().inspectPackage(localPath));
+				return;
+			}
+			const auto tempPath = PluginIncomingPath(document);
+			if (!(document->loading()
+				&& document->loadingFilePath() == tempPath)) {
+				document->save(
+					item ? item->fullId() : Data::FileOrigin(),
+					tempPath);
+			}
+			controller->window().showToast(
+				u"Downloading plugin package..."_q);
+			const auto wait = std::make_shared<rpl::lifetime>();
+			document->session().downloaderTaskFinished(
+			) | rpl::on_next([=] {
+				if (document->loading()) {
+					return;
+				}
+				wait->destroy();
+				const auto readyPath = LocalPluginPackagePath(document);
+				if (readyPath.isEmpty()) {
+					controller->window().showToast(
+						u"Could not prepare the plugin package."_q);
+					return;
+				}
+				ShowPluginPackageBox(
+					controller,
+					Core::App().plugins().inspectPackage(readyPath));
+			}, *wait);
+			return;
+		}
 		document->saveFromDataSilent();
 		if (!openImageInApp()) {
 			if (!document->filepath(true).isEmpty()) {

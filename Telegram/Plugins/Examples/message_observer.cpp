@@ -4,6 +4,15 @@ Shows a toast when a new incoming message arrives.
 */
 #include "plugins/plugins_api.h"
 
+TGD_PLUGIN_PREVIEW(
+	"example.message_observer",
+	"Example Message Observer",
+	"1.0",
+	"Example",
+	"Toasts on new incoming messages.",
+	"",
+	"")
+
 class MessageObserverPlugin final : public Plugins::Plugin {
 public:
 	explicit MessageObserverPlugin(Plugins::Host *host) : _host(host) {
@@ -47,7 +56,7 @@ private:
 };
 
 TGD_PLUGIN_ENTRY {
-	if (apiVersion < Plugins::kApiVersion) {
+	if (apiVersion != Plugins::kApiVersion) {
 		return nullptr;
 	}
 	return new MessageObserverPlugin(host);

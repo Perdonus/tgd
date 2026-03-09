@@ -7,12 +7,14 @@ on:
       - main
     paths:
       - "Telegram/SourceFiles/plugins/**"
+      - "Telegram/Plugins/Examples/**"
       - "Telegram/SourceFiles/settings/settings_plugins.cpp"
       - "tools/plugin_sanity_check.py"
       - ".github/workflows/quick-plugin-checks.yml"
   pull_request:
     paths:
       - "Telegram/SourceFiles/plugins/**"
+      - "Telegram/Plugins/Examples/**"
       - "Telegram/SourceFiles/settings/settings_plugins.cpp"
       - "tools/plugin_sanity_check.py"
       - ".github/workflows/quick-plugin-checks.yml"
