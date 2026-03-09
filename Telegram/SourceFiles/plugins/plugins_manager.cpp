@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDir>
 #include <QtCore/QDateTime>
+#include <QtCore/QByteArray>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLibrary>
@@ -113,6 +114,87 @@ void MergePluginInfo(PluginInfo &target, const PluginInfo &preview) {
 
 QString PreviewIconFromInfo(const Plugins::PreviewInfo &preview) {
 	return PreviewText(preview.icon);
+}
+
+QString ReadManifestField(const QByteArray &data, int *offset, bool *ok) {
+	if (!offset || !ok || *offset < 0 || *offset >= data.size()) {
+		if (ok) {
+			*ok = false;
+		}
+		return QString();
+	}
+	const auto end = data.indexOf('\0', *offset);
+	if (end < 0) {
+		*ok = false;
+		return QString();
+	}
+	const auto value = QString::fromUtf8(
+		data.constData() + *offset,
+		end - *offset).trimmed();
+	*offset = end + 1;
+	*ok = true;
+	return value;
+}
+
+bool ReadPreviewManifest(
+		const QString &path,
+		PluginInfo *info,
+		QString *icon) {
+	if (!info || !icon) {
+		return false;
+	}
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return false;
+	}
+	const auto data = file.readAll();
+	const auto marker = QByteArray(TGD_PLUGIN_MANIFEST_MAGIC) + '\0';
+	const auto start = data.indexOf(marker);
+	if (start < 0) {
+		return false;
+	}
+	auto offset = start + marker.size();
+	auto ok = false;
+	const auto id = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto name = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto version = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto author = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto description = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto website = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto parsedIcon = ReadManifestField(data, &offset, &ok);
+	if (!ok) {
+		return false;
+	}
+	const auto endMarker = ReadManifestField(data, &offset, &ok);
+	if (!ok || endMarker != QString::fromLatin1(TGD_PLUGIN_MANIFEST_END)) {
+		return false;
+	}
+	info->id = id;
+	info->name = name;
+	info->version = version;
+	info->author = author;
+	info->description = description;
+	info->website = website;
+	*icon = parsedIcon;
+	return true;
 }
 
 QString SanitizedPluginFileStem(QString value) {
@@ -275,44 +357,29 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 	result.sourcePath = path;
 	result.info.id = PluginBaseName(path);
 	result.info.name = result.info.id;
+	result.compatible = false;
 
-	auto library = QLibrary(path);
-	if (!library.load()) {
-		result.error = library.errorString();
+	const auto fileInfo = QFileInfo(path);
+	if (!fileInfo.exists() || !fileInfo.isFile()) {
+		result.error = u"Plugin package file was not found."_q;
 		return result;
 	}
-
-	const auto binaryInfo = reinterpret_cast<BinaryInfoFn>(
-		library.resolve(kBinaryInfoName));
-	if (!binaryInfo) {
-		result.error = u"Missing TgdPluginBinaryInfo export."_q;
-		library.unload();
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		result.error = u"Could not read the plugin package."_q;
 		return result;
 	}
-	const auto binary = binaryInfo();
-	if (!binary) {
-		result.error = u"Plugin binary metadata is null."_q;
-		library.unload();
+	if (file.size() <= 0) {
+		result.error = u"Plugin package is empty."_q;
 		return result;
 	}
-	const auto previewInfo = reinterpret_cast<PreviewInfoFn>(
-		library.resolve(kPreviewInfoName));
-	if (previewInfo) {
-		if (const auto preview = previewInfo();
-			preview
-			&& preview->structVersion == kPreviewInfoVersion
-			&& preview->apiVersion == kApiVersion) {
-			result.previewAvailable = true;
-			MergePluginInfo(result.info, PluginInfoFromPreview(*preview));
-			result.icon = PreviewIconFromInfo(*preview);
-		}
-	}
-
-	if (const auto mismatch = DescribeBinaryInfoMismatch(*binary);
-		!mismatch.isEmpty()) {
-		result.error = mismatch;
-		library.unload();
-		return result;
+	file.close();
+	auto previewInfo = PluginInfo();
+	auto previewIcon = QString();
+	if (ReadPreviewManifest(path, &previewInfo, &previewIcon)) {
+		result.previewAvailable = true;
+		MergePluginInfo(result.info, previewInfo);
+		result.icon = previewIcon;
 	}
 	result.compatible = true;
 
@@ -330,8 +397,6 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 			result.installedPath = installed->state.path;
 		}
 	}
-
-	library.unload();
 	return result;
 }
 
@@ -1150,7 +1215,16 @@ void Manager::loadPlugin(const QString &path) {
 		return;
 	}
 
-	auto instance = std::unique_ptr<Plugin>(entry(this, kApiVersion));
+	auto instance = std::unique_ptr<Plugin>();
+	try {
+		instance.reset(entry(this, kApiVersion));
+	} catch (...) {
+		record.state.error = u"Plugin entry failed: "_q + CurrentExceptionText();
+		logLoadFailure(path, record.state.error);
+		library->unload();
+		_plugins.push_back(std::move(record));
+		return;
+	}
 	if (!instance) {
 		record.state.error = u"Plugin entry returned null."_q;
 		logLoadFailure(path, record.state.error);
@@ -1159,7 +1233,16 @@ void Manager::loadPlugin(const QString &path) {
 		return;
 	}
 
-	record.state.info = instance->info();
+	try {
+		record.state.info = instance->info();
+	} catch (...) {
+		record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
+		logLoadFailure(path, record.state.error);
+		instance.reset();
+		library->unload();
+		_plugins.push_back(std::move(record));
+		return;
+	}
 	record.state.info.id = record.state.info.id.trimmed();
 	if (record.state.info.name.isEmpty()) {
 		record.state.info.name = record.state.info.id;

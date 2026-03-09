@@ -171,11 +171,13 @@ QString PluginPackageStatusText(const Plugins::PackagePreviewState &preview) {
 	}
 	if (!preview.previewAvailable) {
 		return u"Status: No static preview metadata. "
-			u"You can still install it if you trust the source."_q;
+			u"Compatibility will be checked during install."_q;
 	}
 	return preview.update
-		? u"Status: This package will replace the installed plugin."_q
-		: u"Status: Ready to install."_q;
+		? u"Status: This package will replace the installed plugin. "
+			u"Compatibility will be checked during install."_q
+		: u"Status: Ready to install. "
+			u"Compatibility will be checked during install."_q;
 }
 
 class PluginPackageIcon final : public Ui::RpWidget {
@@ -363,6 +365,10 @@ void ShowPluginPackageBox(
 							? u"Could not install the plugin."_q
 							: error);
 					return;
+				}
+				if (preview.sourcePath.startsWith(
+					cWorkingDir() + QString::fromLatin1(kPluginIncomingFolder))) {
+					QFile::remove(preview.sourcePath);
 				}
 				controller->window().showToast(
 					preview.update
@@ -593,6 +599,8 @@ void ResolveDocument(
 			if (!controller) {
 				return;
 			}
+			const auto documentId = document->id;
+			const auto session = &document->session();
 			const auto localPath = LocalPluginPackagePath(document);
 			if (!localPath.isEmpty()) {
 				ShowPluginPackageBox(
@@ -601,31 +609,38 @@ void ResolveDocument(
 				return;
 			}
 			const auto tempPath = PluginIncomingPath(document);
-			if (!(document->loading()
-				&& document->loadingFilePath() == tempPath)) {
+			const auto alreadyLoading = document->loading()
+				&& document->loadingFilePath() == tempPath;
+			if (!alreadyLoading) {
 				document->save(
 					item ? item->fullId() : Data::FileOrigin(),
 					tempPath);
+				controller->window().showToast(
+					u"Downloading plugin package..."_q);
+				const auto wait = std::make_shared<rpl::lifetime>();
+				session->downloaderTaskFinished(
+				) | rpl::on_next(crl::guard(controller, [=] {
+					const auto current = session->data().document(documentId);
+					if (current->loading() && !QFileInfo::exists(tempPath)) {
+						return;
+					}
+					wait->destroy();
+					const auto readyPath = QFileInfo::exists(tempPath)
+						? tempPath
+						: LocalPluginPackagePath(current);
+					if (readyPath.isEmpty()) {
+						controller->window().showToast(
+							u"Could not prepare the plugin package."_q);
+						return;
+					}
+					ShowPluginPackageBox(
+						controller,
+						Core::App().plugins().inspectPackage(readyPath));
+				}), *wait);
+			} else {
+				controller->window().showToast(
+					u"Plugin package is still downloading."_q);
 			}
-			controller->window().showToast(
-				u"Downloading plugin package..."_q);
-			const auto wait = std::make_shared<rpl::lifetime>();
-			document->session().downloaderTaskFinished(
-			) | rpl::on_next([=] {
-				if (document->loading()) {
-					return;
-				}
-				wait->destroy();
-				const auto readyPath = LocalPluginPackagePath(document);
-				if (readyPath.isEmpty()) {
-					controller->window().showToast(
-						u"Could not prepare the plugin package."_q);
-					return;
-				}
-				ShowPluginPackageBox(
-					controller,
-					Core::App().plugins().inspectPackage(readyPath));
-			}, *wait);
 			return;
 		}
 		document->saveFromDataSilent();

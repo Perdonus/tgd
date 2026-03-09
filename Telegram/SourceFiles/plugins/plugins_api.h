@@ -278,6 +278,9 @@ using PreviewInfoFn = const PreviewInfo* (*)();
 		Plugins::Host *host, \
 		int apiVersion)
 
+#define TGD_PLUGIN_MANIFEST_MAGIC "TGD_PLUGIN_MANIFEST_V1"
+#define TGD_PLUGIN_MANIFEST_END "TGD_PLUGIN_MANIFEST_END"
+
 #define TGD_PLUGIN_PREVIEW(ID, NAME, VERSION, AUTHOR, DESCRIPTION, WEBSITE, ICON) \
 	namespace { \
 	inline constexpr Plugins::PreviewInfo kTgdPluginPreviewInfo = { \
@@ -292,6 +295,16 @@ using PreviewInfoFn = const PreviewInfo* (*)();
 		ICON, \
 	}; \
 	} \
+	extern "C" TGD_PLUGIN_EXPORT const char TgdPluginManifest[] = \
+		TGD_PLUGIN_MANIFEST_MAGIC "\0" \
+		ID "\0" \
+		NAME "\0" \
+		VERSION "\0" \
+		AUTHOR "\0" \
+		DESCRIPTION "\0" \
+		WEBSITE "\0" \
+		ICON "\0" \
+		TGD_PLUGIN_MANIFEST_END "\0"; \
 	extern "C" TGD_PLUGIN_EXPORT const Plugins::PreviewInfo *TgdPluginPreviewInfo() { \
 		return &kTgdPluginPreviewInfo; \
 	}
