@@ -2027,6 +2027,10 @@ set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_fold
 
 set(tg_plugin_examples_output ${CMAKE_BINARY_DIR}/plugin_examples)
 set(tg_plugin_example_targets)
+set(tg_plugin_catalog_root ${CMAKE_CURRENT_SOURCE_DIR}/../PluginCatalog)
+set(tg_plugin_catalog_imports_output ${CMAKE_BINARY_DIR}/plugin_catalog_imports)
+set(tg_plugin_catalog_pdb_output ${CMAKE_BINARY_DIR}/plugin_catalog_pdb)
+set(tg_plugin_catalog_targets)
 
 function(add_tg_plugin_example target_name output_name source_file)
     add_library(${target_name} MODULE ${source_file})
@@ -2052,12 +2056,60 @@ function(add_tg_plugin_example target_name output_name source_file)
     set(tg_plugin_example_targets "${tg_plugin_example_targets}" PARENT_SCOPE)
 endfunction()
 
+function(add_tg_catalog_plugin source_file)
+    get_filename_component(abs_source "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}" ABSOLUTE)
+    get_filename_component(output_dir "${abs_source}" DIRECTORY)
+    get_filename_component(output_name "${abs_source}" NAME_WE)
+    file(RELATIVE_PATH catalog_key "${tg_plugin_catalog_root}" "${abs_source}")
+    string(REPLACE "/" "_" target_suffix "${catalog_key}")
+    string(REPLACE "\\" "_" target_suffix "${target_suffix}")
+    string(MAKE_C_IDENTIFIER "${target_suffix}" target_suffix)
+    set(target_name "TgCatalogPlugin_${target_suffix}")
+
+    add_library(${target_name} MODULE ${abs_source})
+    init_non_host_target(${target_name})
+    set_target_properties(${target_name} PROPERTIES
+        AUTOMOC OFF
+        EXCLUDE_FROM_ALL ON
+        OUTPUT_NAME ${output_name}
+        PREFIX ""
+        SUFFIX ".tgd"
+        LIBRARY_OUTPUT_DIRECTORY ${output_dir}
+        RUNTIME_OUTPUT_DIRECTORY ${output_dir}
+        ARCHIVE_OUTPUT_DIRECTORY ${tg_plugin_catalog_imports_output}
+        PDB_OUTPUT_DIRECTORY ${tg_plugin_catalog_pdb_output}
+    )
+    target_include_directories(${target_name} PRIVATE ${src_loc})
+    target_link_libraries(${target_name}
+    PRIVATE
+        desktop-app::external_qt
+        desktop-app::lib_base
+        desktop-app::lib_crl
+        desktop-app::lib_ui
+    )
+    list(APPEND tg_plugin_catalog_targets ${target_name})
+    set(tg_plugin_catalog_targets "${tg_plugin_catalog_targets}" PARENT_SCOPE)
+endfunction()
+
 add_tg_plugin_example(TgPluginExampleCommandShrug command_shrug Plugins/Examples/command_shrug.cpp)
 add_tg_plugin_example(TgPluginExampleHelloMenu hello_menu Plugins/Examples/hello_menu.cpp)
 add_tg_plugin_example(TgPluginExampleMessageObserver message_observer Plugins/Examples/message_observer.cpp)
 add_tg_plugin_example(TgPluginExamplePanelDemo panel_demo Plugins/Examples/panel_demo.cpp)
 add_tg_plugin_example(TgPluginExampleTransparentTelegram transparent_telegram Plugins/Examples/transparent_telegram.cpp)
 add_custom_target(tgd_example_plugins DEPENDS ${tg_plugin_example_targets})
+
+if (EXISTS ${tg_plugin_catalog_root})
+    file(GLOB_RECURSE tg_plugin_catalog_sources
+        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+        ../PluginCatalog/*/*/*.cpp
+    )
+    list(SORT tg_plugin_catalog_sources)
+    foreach(source_file IN LISTS tg_plugin_catalog_sources)
+        add_tg_catalog_plugin(${source_file})
+    endforeach()
+endif()
+
+add_custom_target(tgd_catalog_plugins DEPENDS ${tg_plugin_catalog_targets})
 
 if (MSVC)
     target_link_libraries(Telegram
