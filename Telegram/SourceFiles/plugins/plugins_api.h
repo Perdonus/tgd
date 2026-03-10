@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <cstdint>
 #include <functional>
 
+class QWidget;
+
 namespace Api {
 struct SendOptions;
 } // namespace Api
@@ -237,6 +239,7 @@ public:
 		std::function<void(Window::Controller*)> visitor) = 0;
 	virtual void onWindowCreated(
 		std::function<void(Window::Controller*)> handler) = 0;
+	virtual QWidget *windowWidget(Window::Controller *window) const = 0;
 
 	virtual Window::Controller *activeWindow() const = 0;
 	virtual Main::Session *activeSession() const = 0;

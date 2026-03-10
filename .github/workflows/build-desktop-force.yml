@@ -6,10 +6,9 @@ on:
   push:
     branches:
       - main
-      - Plugins
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -18,7 +17,6 @@ concurrency:
 jobs:
   windows:
     name: Windows (preferred)
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-catalog]') }}
     runs-on: windows-2022
     timeout-minutes: 360
     outputs:
@@ -415,7 +413,6 @@ jobs:
           exit /b 0
 
       - name: Build Telegram target (Release)
-        if: ${{ github.ref_name != 'Plugins' }}
         id: build_target
         shell: cmd
         run: |
@@ -452,7 +449,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Build example plugins
-        if: ${{ github.ref_name != 'Plugins' && steps.build_target.outcome == 'success' }}
+        if: ${{ steps.build_target.outcome == 'success' }}
         id: build_plugins
         continue-on-error: true
         shell: cmd
@@ -474,7 +471,7 @@ jobs:
           exit /b 1
 
       - name: Collect example plugins
-        if: ${{ github.ref_name != 'Plugins' && steps.build_plugins.outcome == 'success' }}
+        if: ${{ steps.build_plugins.outcome == 'success' }}
         id: collect_plugins
         shell: pwsh
         run: |
@@ -504,7 +501,7 @@ jobs:
           }
 
       - name: Upload example plugins artifact
-        if: ${{ github.ref_name != 'Plugins' && steps.collect_plugins.outcome == 'success' }}
+        if: ${{ steps.collect_plugins.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: telegram-plugin-examples-windows
@@ -512,70 +509,8 @@ jobs:
             dist/plugins/*.tgd
           if-no-files-found: error
 
-      - name: Build plugin catalog
-        if: ${{ github.ref_name == 'Plugins' }}
-        id: build_catalog_plugins
-        shell: cmd
-        run: |
-          @echo on
-          setlocal EnableExtensions EnableDelayedExpansion
-          cd /d "%GITHUB_WORKSPACE%\Telegram"
-
-          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\ci-logs"
-          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "PLUGIN_BUILD_LOG=%CI_LOGS_DIR%\build-plugin-catalog.log"
-
-          cmake --build ..\out --config Release --target tgd_catalog_plugins > "%PLUGIN_BUILD_LOG%" 2>&1
-          if not errorlevel 1 exit /b 0
-
-          echo [plugins] catalog plugin build failed
-          powershell -NoProfile -Command "Get-Content -Path '%PLUGIN_BUILD_LOG%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%PLUGIN_BUILD_LOG%' -Tail 40) -join ' | '; Write-Output ('::error title=Plugin catalog build failed::' + $tail)"
-          exit /b 1
-
-      - name: Collect catalog plugins
-        if: ${{ github.ref_name == 'Plugins' && steps.build_catalog_plugins.outcome == 'success' }}
-        id: collect_catalog_plugins
-        shell: pwsh
-        run: |
-          $matches = Get-ChildItem -Path "$PWD/PluginCatalog" -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Unique
-
-          if (-not $matches -or $matches.Count -eq 0) {
-            Write-Host "Searched catalog root: $PWD/PluginCatalog"
-            Write-Error "Built catalog plugins were not found."
-            exit 1
-          }
-
-          Write-Host "Collected $($matches.Count) catalog plugins."
-          "count=$($matches.Count)" >> $env:GITHUB_OUTPUT
-
-      - name: Upload plugin catalog artifact
-        if: ${{ github.ref_name == 'Plugins' && steps.collect_catalog_plugins.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: telegram-plugin-catalog-windows
-          path: |
-            PluginCatalog/**/*.tgd
-          if-no-files-found: error
-
-      - name: Commit refreshed plugin binaries
-        if: ${{ github.ref_name == 'Plugins' && steps.collect_catalog_plugins.outcome == 'success' && github.event_name == 'push' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add PluginCatalog
-          if git diff --cached --quiet; then
-            echo "No plugin catalog changes to commit."
-            exit 0
-          fi
-          git commit -m "ci: refresh plugin catalog binaries [skip plugin-catalog]"
-          git push origin HEAD:Plugins
-
       - name: Locate built EXE
-        if: ${{ github.ref_name != 'Plugins' && always() && steps.build_target.outcome == 'success' }}
+        if: ${{ always() && steps.build_target.outcome == 'success' }}
         id: locate_exe
         shell: pwsh
         run: |
@@ -615,7 +550,7 @@ jobs:
           Write-Host "Picked binary: $($picked.FullName)"
 
       - name: Upload Windows artifact
-        if: ${{ github.ref_name != 'Plugins' && always() && steps.locate_exe.outcome == 'success' }}
+        if: ${{ always() && steps.locate_exe.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: telegram-windows-release

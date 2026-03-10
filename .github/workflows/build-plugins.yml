@@ -1,0 +1,90 @@
+name: Build Plugin Catalog
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - Plugins
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-plugin-catalog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows_plugins:
+    name: Windows plugin catalog
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-catalog]') }}
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          cache: true
+          setup-python: false
+
+      - name: Configure plugin catalog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cmake -S PluginCatalog -B out/plugin-catalog -G "Visual Studio 17 2022" -A x64
+
+      - name: Build plugin catalog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cmake --build out/plugin-catalog --config Release --target plugin_catalog
+
+      - name: Collect plugin outputs
+        id: collect_plugins
+        shell: pwsh
+        run: |
+          $matches = Get-ChildItem -Path "$PWD/PluginCatalog" -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Unique
+
+          if (-not $matches -or $matches.Count -eq 0) {
+            Write-Error "Built plugin binaries were not found in PluginCatalog."
+            exit 1
+          }
+
+          Write-Host "Built $($matches.Count) plugin binaries."
+
+      - name: Upload plugin catalog artifact
+        if: ${{ steps.collect_plugins.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-plugin-catalog-windows
+          path: |
+            PluginCatalog/**/*.tgd
+          if-no-files-found: error
+
+      - name: Commit refreshed plugin binaries
+        if: ${{ steps.collect_plugins.outcome == 'success' && github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PluginCatalog
+          if git diff --cached --quiet; then
+            echo "No plugin catalog changes to commit."
+            exit 0
+          fi
+          git commit -m "ci: refresh plugin catalog binaries [skip plugin-catalog]"
+          git push origin HEAD:Plugins

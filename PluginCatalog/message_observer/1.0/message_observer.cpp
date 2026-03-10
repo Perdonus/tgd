@@ -37,7 +37,7 @@ public:
 		_observerId = _host->registerMessageObserver(
 			_info.id,
 			options,
-			[=](const Plugins::MessageEventContext &) {
+			[this](const Plugins::MessageEventContext &) {
 				_host->showToast(QStringLiteral("New message received."));
 			});
 	}
