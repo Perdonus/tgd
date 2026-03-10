@@ -46,20 +46,29 @@ function(add_catalog_plugin source_path)
     get_filename_component(abs_source "${source_path}" ABSOLUTE)
     get_filename_component(output_dir "${abs_source}" DIRECTORY)
     get_filename_component(output_name "${abs_source}" NAME_WE)
+    file(READ "${abs_source}" source_contents)
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_SOURCE_DIR}" "${abs_source}")
     string(REPLACE "/" "_" target_suffix "${rel_path}")
     string(REPLACE "\\" "_" target_suffix "${target_suffix}")
     string(MAKE_C_IDENTIFIER "${target_suffix}" target_suffix)
     set(target_name "CatalogPlugin_${target_suffix}")
+    set(needs_widgets FALSE)
+    if (source_contents MATCHES "QtWidgets/" OR source_contents MATCHES "QApplication")
+        set(needs_widgets TRUE)
+    endif()
 
     add_library(${target_name} MODULE "${abs_source}")
     target_compile_definitions(${target_name} PRIVATE QT_NO_KEYWORDS)
     target_include_directories(${target_name} PRIVATE ${TGD_INCLUDE_DIRS})
-    target_link_libraries(${target_name}
-    PRIVATE
-        Qt${QT_VERSION_MAJOR}::Core
-        Qt${QT_VERSION_MAJOR}::Widgets
-    )
+    target_link_libraries(${target_name} PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+    if (needs_widgets)
+        target_link_libraries(${target_name} PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+        if (COMMAND qt_import_plugins)
+            qt_import_plugins(${target_name} NO_DEFAULT)
+        elseif (COMMAND qt5_import_plugins)
+            qt5_import_plugins(${target_name} NO_DEFAULT)
+        endif()
+    endif()
     set_target_properties(${target_name} PROPERTIES
         OUTPUT_NAME "${output_name}"
         PREFIX ""

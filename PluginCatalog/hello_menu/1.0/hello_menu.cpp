@@ -3,7 +3,6 @@ Example plugin for Telegram Desktop.
 Registers a menu action that shows a toast.
 */
 #include "plugins/plugins_api.h"
-#include "window/window_controller.h"
 
 #include <QtCore/QString>
 
@@ -35,13 +34,8 @@ public:
 			_info.id,
 			QStringLiteral("Say Hello"),
 			QStringLiteral("Show a hello toast."),
-			[=](const Plugins::ActionContext &context) {
-				if (context.window) {
-					context.window->showToast(
-						QStringLiteral("Hello from plugin."));
-				} else {
-					_host->showToast(QStringLiteral("Hello from plugin."));
-				}
+			[=](const Plugins::ActionContext &) {
+				_host->showToast(QStringLiteral("Hello from plugin."));
 			});
 	}
 
