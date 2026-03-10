@@ -38,9 +38,13 @@ function(add_catalog_plugin source_path)
         PREFIX ""
         SUFFIX ".tgd"
         LIBRARY_OUTPUT_DIRECTORY "${output_dir}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${output_dir}"
         RUNTIME_OUTPUT_DIRECTORY "${output_dir}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${output_dir}"
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/import-libs"
+        ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/import-libs"
         PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pdb"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/pdb"
     )
     list(APPEND TGD_PLUGIN_TARGETS ${target_name})
     set(TGD_PLUGIN_TARGETS "${TGD_PLUGIN_TARGETS}" PARENT_SCOPE)

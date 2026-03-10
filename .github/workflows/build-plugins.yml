@@ -51,6 +51,24 @@ jobs:
           $ErrorActionPreference = "Stop"
           cmake --build out/plugin-catalog --config Release --target plugin_catalog
 
+      - name: Normalize plugin outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $configDirs = @('Release', 'Debug', 'RelWithDebInfo', 'MinSizeRel')
+          $matches = Get-ChildItem -Path "$PWD/PluginCatalog" -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue
+
+          foreach ($match in $matches) {
+            if ($configDirs -contains $match.Directory.Name) {
+              $destination = Join-Path $match.Directory.Parent.FullName $match.Name
+              Copy-Item -LiteralPath $match.FullName -Destination $destination -Force
+            }
+          }
+
+          Get-ChildItem -Path "$PWD/PluginCatalog" -Recurse -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $configDirs -contains $_.Name } |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+
       - name: Collect plugin outputs
         id: collect_plugins
         shell: pwsh
@@ -64,6 +82,7 @@ jobs:
           }
 
           Write-Host "Built $($matches.Count) plugin binaries."
+          $matches | ForEach-Object { Write-Host " - $($_.FullName)" }
 
       - name: Upload plugin catalog artifact
         if: ${{ steps.collect_plugins.outcome == 'success' }}
@@ -81,7 +100,9 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add PluginCatalog
+          git status --short PluginCatalog || true
+          git add -A PluginCatalog
+          git status --short PluginCatalog || true
           if git diff --cached --quiet; then
             echo "No plugin catalog changes to commit."
             exit 0
