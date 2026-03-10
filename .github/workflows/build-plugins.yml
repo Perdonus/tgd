@@ -36,6 +36,28 @@ jobs:
         with:
           arch: x64
 
+      - name: Restore plugin toolchain cache
+        id: plugin_toolchain_cache
+        uses: actions/cache/restore@v4
+        with:
+          key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugins.yml') }}
+          restore-keys: |
+            plugin-toolchain-win64-qt5-
+          path: |
+            Libraries/win64/Qt-5.15.18
+            Libraries/win64/cache_keys
+            Libraries/win64/libwebp
+            Libraries/win64/mozjpeg
+            Libraries/win64/openssl3
+            Libraries/win64/patches
+            Libraries/win64/tg_angle
+            Libraries/win64/zlib
+            ThirdParty/cache_keys
+            ThirdParty/jom
+            ThirdParty/msys64
+            ThirdParty/NuGet
+            ThirdParty/python
+
       - name: Prepare minimal plugin toolchain
         shell: cmd
         run: |
@@ -59,7 +81,7 @@ jobs:
             "$log = $env:PREPARE_LOG;" ^
             "if (Test-Path $log) { Remove-Item $log -Force }" ^
             "New-Item -ItemType File -Path $log -Force | Out-Null;" ^
-            "$cmd = 'call Telegram\\build\\prepare\\win.bat silent patches msys64 python NuGet jom zlib mozjpeg openssl3 libwebp tg_angle qt_5.15.18 >> \"' + $log + '\" 2>&1';" ^
+            "$cmd = 'call Telegram\\build\\prepare\\win.bat silent incremental patches msys64 python NuGet jom zlib mozjpeg openssl3 libwebp tg_angle qt_5.15.18 >> \"' + $log + '\" 2>&1';" ^
             "$proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/s','/c',$cmd -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru -NoNewWindow;" ^
             "$last = '';" ^
             "while (-not $proc.HasExited) {" ^
@@ -71,6 +93,26 @@ jobs:
             "}" ^
             "if (Test-Path $log) { Get-Content -Path $log -Tail 120 -ErrorAction SilentlyContinue }" ^
             "exit $proc.ExitCode"
+
+      - name: Save plugin toolchain cache
+        if: ${{ success() && steps.plugin_toolchain_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugins.yml') }}
+          path: |
+            Libraries/win64/Qt-5.15.18
+            Libraries/win64/cache_keys
+            Libraries/win64/libwebp
+            Libraries/win64/mozjpeg
+            Libraries/win64/openssl3
+            Libraries/win64/patches
+            Libraries/win64/tg_angle
+            Libraries/win64/zlib
+            ThirdParty/cache_keys
+            ThirdParty/jom
+            ThirdParty/msys64
+            ThirdParty/NuGet
+            ThirdParty/python
 
       - name: Configure plugin catalog
         shell: cmd

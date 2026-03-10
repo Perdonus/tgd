@@ -61,6 +61,7 @@ optionsList = [
     'qt6',
     'skip-release',
     'build-stackwalk',
+    'incremental',
 ]
 options = []
 runCommand = []
@@ -363,6 +364,7 @@ getch = _Getch()
 def runStages():
     onlyStages = []
     rebuildStale = False
+    respectOnlyStageCache = ('incremental' in options)
     for arg in sys.argv[1:]:
         if arg in options:
             continue
@@ -388,7 +390,7 @@ def runStages():
         print(prefix + ': ', end = '', flush=True)
         stage['key'] = computeCacheKey(stage)
         commands = removeDir(stage['name']) + '\n' + stage['commands']
-        checkResult = 'Forced' if len(onlyStages) > 0 else checkCacheKey(stage)
+        checkResult = checkCacheKey(stage) if (respectOnlyStageCache or len(onlyStages) == 0) else 'Forced'
         if checkResult == 'Good':
             print('SKIPPING')
             continue
