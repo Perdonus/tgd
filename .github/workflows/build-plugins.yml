@@ -137,7 +137,13 @@ jobs:
           @echo on
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%"
-          cmake -S PluginCatalog -B out\plugin-catalog -G "Visual Studio 17 2022" -A x64 -D CMAKE_PREFIX_PATH="${{ steps.prepare_paths.outputs.qt_root }}"
+          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\ci-logs"
+          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
+          set "CONFIGURE_LOG=%CI_LOGS_DIR%\configure-plugin-catalog.log"
+          cmake -S PluginCatalog -B out\plugin-catalog -G "Visual Studio 17 2022" -A x64 -D CMAKE_PREFIX_PATH="${{ steps.prepare_paths.outputs.qt_root }}" > "%CONFIGURE_LOG%" 2>&1
+          if not errorlevel 1 exit /b 0
+          powershell -NoProfile -Command "Get-Content -Path '%CONFIGURE_LOG%' -Tail 120"
+          exit /b 1
 
       - name: Build plugin catalog
         shell: cmd
