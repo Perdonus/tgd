@@ -14,5 +14,11 @@ Rules
 
 CI
 - The `Plugins` branch uses the `Build Plugin Catalog` workflow.
-- It configures Telegram's own CMake project and builds only the `tgd_catalog_plugins` target so the resulting `.tgd` files match the Telegram Desktop build environment.
+- It prepares only the minimal Windows stages needed for static Qt 5.15.18 and then builds `PluginCatalog/CMakeLists.txt`.
 - Successful runs upload the built `.tgd` files as artifacts and commit refreshed binaries back into the matching version folders.
+
+Local build
+- Prepare a static Qt matching Telegram Desktop on your platform.
+- Then run:
+  `cmake -S PluginCatalog -B out/plugin-catalog -D CMAKE_PREFIX_PATH=/path/to/Qt`
+  `cmake --build out/plugin-catalog --config Release --target plugin_catalog`

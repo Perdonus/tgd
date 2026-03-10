@@ -3,6 +3,7 @@ Example plugin for Telegram Desktop.
 Registers a menu action that shows a toast.
 */
 #include "plugins/plugins_api.h"
+#include "window/window_controller.h"
 
 #include <QtCore/QString>
 
