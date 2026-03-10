@@ -1034,10 +1034,6 @@ void Manager::onWindowCreated(
 	}
 }
 
-QWidget *Manager::windowWidget(Window::Controller *window) const {
-	return window ? window->widget().get() : nullptr;
-}
-
 Window::Controller *Manager::activeWindow() const {
 	if (const auto window = Core::App().activeWindow()) {
 		return window;

@@ -145,7 +145,6 @@ public:
 		std::function<void(Window::Controller*)> visitor) override;
 	void onWindowCreated(
 		std::function<void(Window::Controller*)> handler) override;
-	QWidget *windowWidget(Window::Controller *window) const override;
 	Window::Controller *activeWindow() const override;
 	Main::Session *activeSession() const override;
 	void forEachSession(

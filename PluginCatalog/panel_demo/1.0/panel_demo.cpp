@@ -3,6 +3,7 @@ Example plugin for Telegram Desktop.
 Registers a panel entry that opens a simple dialog.
 */
 #include "plugins/plugins_api.h"
+#include "window/window_controller.h"
 
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QLabel>
@@ -39,8 +40,11 @@ public:
 				QStringLiteral("Open Demo Panel"),
 				QStringLiteral("Shows a dialog created by the plugin."),
 			},
-			[this](Window::Controller *window) {
-				auto dialog = new QDialog(_host->windowWidget(window));
+			[=](Window::Controller *window) {
+				if (!window) {
+					return;
+				}
+				auto dialog = new QDialog(window->widget().get());
 				dialog->setAttribute(Qt::WA_DeleteOnClose);
 				dialog->setWindowTitle(QStringLiteral("Plugin Panel"));
 

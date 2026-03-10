@@ -13,10 +13,6 @@ Rules
 - `.tgd` files are native binaries and must be rebuilt against the exact Telegram Desktop ABI they target.
 
 CI
-- The `Plugins` branch uses the standalone `Build Plugin Catalog` workflow.
-- It configures `PluginCatalog/CMakeLists.txt` directly instead of running the full Telegram Desktop dependency bootstrap.
+- The `Plugins` branch uses the `Build Plugin Catalog` workflow.
+- It configures Telegram's own CMake project and builds only the `tgd_catalog_plugins` target so the resulting `.tgd` files match the Telegram Desktop build environment.
 - Successful runs upload the built `.tgd` files as artifacts and commit refreshed binaries back into the matching version folders.
-
-Local build
-- `cmake -S PluginCatalog -B out/plugin-catalog -D CMAKE_PREFIX_PATH=/path/to/Qt`
-- `cmake --build out/plugin-catalog --config Release --target plugin_catalog`

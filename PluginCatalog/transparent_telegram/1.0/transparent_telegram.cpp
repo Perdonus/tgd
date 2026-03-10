@@ -3,6 +3,7 @@ Example plugin for Telegram Desktop.
 Adds a panel with a slider that makes Telegram windows transparent.
 */
 #include "plugins/plugins_api.h"
+#include "window/window_controller.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
@@ -78,14 +79,14 @@ public:
 				QStringLiteral("Transparency"),
 				QStringLiteral("Adjust Telegram window opacity."),
 			},
-			[this](Window::Controller *window) {
+			[=](Window::Controller *window) {
 				openSettingsDialog(window);
 			});
 
-		_host->forEachWindow([this](Window::Controller *window) {
+		_host->forEachWindow([=](Window::Controller *window) {
 			trackRootWindow(window);
 		});
-		_host->onWindowCreated([this](Window::Controller *window) {
+		_host->onWindowCreated([=](Window::Controller *window) {
 			trackRootWindow(window);
 			applyCurrentOpacity();
 		});
@@ -121,7 +122,7 @@ protected:
 			const auto widget = qobject_cast<QWidget*>(watched);
 			if (widget && widget->isWindow()) {
 				auto safe = QPointer<QWidget>(widget);
-				QTimer::singleShot(0, this, [this, safe] {
+				QTimer::singleShot(0, this, [=] {
 					if (safe) {
 						applyOpacityToWidget(safe.data());
 					}
@@ -138,12 +139,12 @@ private:
 		if (!window) {
 			return;
 		}
-		const auto widget = _host->windowWidget(window);
+		const auto widget = window->widget().get();
 		if (!widget || _rootWindows.contains(widget)) {
 			return;
 		}
 		_rootWindows.insert(widget);
-		QObject::connect(widget, &QObject::destroyed, this, [this, widget] {
+		QObject::connect(widget, &QObject::destroyed, this, [=] {
 			_rootWindows.remove(widget);
 		});
 		applyOpacityToWidget(widget);
@@ -156,7 +157,7 @@ private:
 			return;
 		}
 
-		auto parent = window ? _host->windowWidget(window) : nullptr;
+		auto parent = window ? window->widget().get() : nullptr;
 		auto dialog = new QDialog(parent);
 		_settingsDialog = dialog;
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
@@ -205,14 +206,14 @@ private:
 			QDialogButtonBox::ResetRole);
 		layout->addWidget(buttons);
 
-		QObject::connect(slider, &QSlider::valueChanged, this, [this, value](int valueNow) {
+		QObject::connect(slider, &QSlider::valueChanged, this, [=](int valueNow) {
 			value->setText(PercentText(valueNow));
 			setOpacityPercent(valueNow, false);
 		});
-		QObject::connect(slider, &QSlider::sliderReleased, this, [this] {
+		QObject::connect(slider, &QSlider::sliderReleased, this, [=] {
 			saveConfig();
 		});
-		QObject::connect(reset, &QPushButton::clicked, this, [this, slider] {
+		QObject::connect(reset, &QPushButton::clicked, this, [=] {
 			slider->setValue(kDefaultOpacityPercent);
 			saveConfig();
 		});
@@ -221,7 +222,7 @@ private:
 			&QDialogButtonBox::rejected,
 			dialog,
 			&QDialog::reject);
-		QObject::connect(dialog, &QDialog::finished, this, [this] {
+		QObject::connect(dialog, &QDialog::finished, this, [=] {
 			saveConfig();
 			_settingsDialog = nullptr;
 		});

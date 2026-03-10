@@ -2075,9 +2075,13 @@ function(add_tg_catalog_plugin source_file)
         PREFIX ""
         SUFFIX ".tgd"
         LIBRARY_OUTPUT_DIRECTORY ${output_dir}
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${output_dir}
         RUNTIME_OUTPUT_DIRECTORY ${output_dir}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${output_dir}
         ARCHIVE_OUTPUT_DIRECTORY ${tg_plugin_catalog_imports_output}
+        ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${tg_plugin_catalog_imports_output}
         PDB_OUTPUT_DIRECTORY ${tg_plugin_catalog_pdb_output}
+        PDB_OUTPUT_DIRECTORY_RELEASE ${tg_plugin_catalog_pdb_output}
     )
     target_include_directories(${target_name} PRIVATE ${src_loc})
     target_link_libraries(${target_name}
