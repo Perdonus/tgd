@@ -302,7 +302,8 @@ void ShowPluginPackageBox(
 			: QFileInfo(preview.sourcePath).fileName());
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
-		box->setTitle(preview.update ? u"Update Plugin"_q : u"Install Plugin"_q);
+		box->setTitle(rpl::single(
+			preview.update ? u"Update Plugin"_q : u"Install Plugin"_q));
 
 		box->addRow(object_ptr<PluginPackageIcon>(
 			box,
@@ -357,10 +358,10 @@ void ShowPluginPackageBox(
 			style::al_top);
 
 		if (preview.compatible) {
-			box->addButton(PluginPackageButtonText(preview), [=] {
+			box->addButton(rpl::single(PluginPackageButtonText(preview)), [=] {
 				auto error = QString();
 				if (!Core::App().plugins().installPackage(preview.sourcePath, &error)) {
-					controller->window().showToast(
+					controller->showToast(
 						error.isEmpty()
 							? u"Could not install the plugin."_q
 							: error);
@@ -370,14 +371,14 @@ void ShowPluginPackageBox(
 					cWorkingDir() + QString::fromLatin1(kPluginIncomingFolder))) {
 					QFile::remove(preview.sourcePath);
 				}
-				controller->window().showToast(
+				controller->showToast(
 					preview.update
 						? u"Plugin updated."_q
 						: u"Plugin installed."_q);
 				box->closeBox();
 			});
 		}
-		box->addButton(u"Close"_q, [=] {
+		box->addButton(rpl::single(u"Close"_q), [=] {
 			box->closeBox();
 		});
 	}));
@@ -615,7 +616,7 @@ void ResolveDocument(
 				document->save(
 					item ? item->fullId() : Data::FileOrigin(),
 					tempPath);
-				controller->window().showToast(
+				controller->showToast(
 					u"Downloading plugin package..."_q);
 				const auto wait = std::make_shared<rpl::lifetime>();
 				session->downloaderTaskFinished(
@@ -629,7 +630,7 @@ void ResolveDocument(
 						? tempPath
 						: LocalPluginPackagePath(current);
 					if (readyPath.isEmpty()) {
-						controller->window().showToast(
+						controller->showToast(
 							u"Could not prepare the plugin package."_q);
 						return;
 					}
@@ -638,7 +639,7 @@ void ResolveDocument(
 						Core::App().plugins().inspectPackage(readyPath));
 				}), *wait);
 			} else {
-				controller->window().showToast(
+				controller->showToast(
 					u"Plugin package is still downloading."_q);
 			}
 			return;
