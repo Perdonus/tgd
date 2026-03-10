@@ -66,9 +66,13 @@ function(add_catalog_plugin source_path)
     if (needs_widgets)
         target_link_libraries(${target_name} PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
         if (COMMAND qt_import_plugins)
-            qt_import_plugins(${target_name} NO_DEFAULT)
+            qt_import_plugins(
+                ${target_name}
+                EXCLUDE_BY_TYPE platforms imageformats styles iconengines)
         elseif (COMMAND qt5_import_plugins)
-            qt5_import_plugins(${target_name} NO_DEFAULT)
+            qt5_import_plugins(
+                ${target_name}
+                EXCLUDE_BY_TYPE platforms imageformats styles iconengines)
         endif()
     endif()
     set_target_properties(${target_name} PROPERTIES
