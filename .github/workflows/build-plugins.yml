@@ -131,6 +131,31 @@ jobs:
             ${{ steps.prepare_paths.outputs.thirdparty_root }}/NuGet
             ${{ steps.prepare_paths.outputs.thirdparty_root }}/python
 
+      - name: Create Qt ANGLE link aliases
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $qtLibDir = Join-Path "${{ steps.prepare_paths.outputs.qt_root }}" "lib"
+          $angleLib = Join-Path "${{ steps.prepare_paths.outputs.win64_root }}" "tg_angle/out/Release/tg_angle.lib"
+
+          if (-not (Test-Path -LiteralPath $angleLib)) {
+            $found = Get-ChildItem -Path "${{ steps.prepare_paths.outputs.win64_root }}/tg_angle" -Recurse -File -Filter tg_angle.lib -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\Release\\' } |
+              Select-Object -First 1
+            if ($found) {
+              $angleLib = $found.FullName
+            }
+          }
+
+          if (-not (Test-Path -LiteralPath $angleLib)) {
+            throw "[angle] tg_angle.lib was not found"
+          }
+
+          New-Item -ItemType Directory -Path $qtLibDir -Force | Out-Null
+          foreach ($alias in @("libEGL.lib", "libGLESv2.lib")) {
+            Copy-Item -LiteralPath $angleLib -Destination (Join-Path $qtLibDir $alias) -Force
+          }
+
       - name: Configure plugin catalog
         shell: cmd
         run: |
