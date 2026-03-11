@@ -10,8 +10,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "plugins/plugins_api.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QDateTime>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonObject>
 #include <QtCore/QObject>
 #include <QtCore/QSet>
+#include <QtCore/QStringList>
 #include <QtCore/QVector>
 
 #include <rpl/lifetime.h>
@@ -39,6 +43,9 @@ struct PluginState {
 	bool enabled = false;
 	bool loaded = false;
 	QString error;
+	bool disabledByRecovery = false;
+	bool recoverySuspected = false;
+	QString recoveryReason;
 };
 
 struct ActionState {
@@ -64,6 +71,22 @@ struct PackagePreviewState {
 	bool previewAvailable = false;
 	bool installed = false;
 	bool update = false;
+};
+
+struct RecoveryOperationState {
+	bool active = false;
+	QString kind;
+	QStringList pluginIds;
+	QString details;
+	QString startedAt;
+};
+
+struct TraceOperationState {
+	quint64 id = 0;
+	QString kind;
+	QStringList pluginIds;
+	QString details;
+	QDateTime startedAt;
 };
 
 class Manager final : public QObject, public Host {
@@ -204,12 +227,55 @@ public:
 		QVector<MessageObserverId> messageObserverIds;
 	};
 
-	void loadConfig();
-	void saveConfig() const;
-	void appendLogLine(const QString &line) const;
-	void logLoadFailure(const QString &path, const QString &reason) const;
-	void scanPlugins();
-	void loadPlugin(const QString &path);
+		void loadConfig();
+		void saveConfig() const;
+		void appendLogLine(const QString &line) const;
+		void appendTraceLine(const QByteArray &line) const;
+		void writeLogRecord(
+			const QString &path,
+			const QByteArray &record,
+			bool jsonLog) const;
+		bool rotateLogFileIfNeeded(
+			const QString &path,
+			qsizetype recordSize,
+			bool jsonLog) const;
+		QJsonObject makeLogEvent(
+			QString phase,
+			QString event,
+			QJsonObject details = {}) const;
+		QString formatLogEventText(const QJsonObject &event) const;
+		void logEvent(
+			QString phase,
+			QString event,
+			QJsonObject details = {}) const;
+		void logLoadFailure(const QString &path, const QString &reason) const;
+		void logOperationStart(
+			const QString &kind,
+			const QStringList &pluginIds,
+			const QString &details);
+		void logOperationFinish(
+			const QString &result = QString(),
+			const QString &reason = QString());
+		quint64 currentOperationId() const;
+		QJsonObject pluginInfoToJson(const PluginInfo &info) const;
+		QJsonObject pluginStateToJson(const PluginState &state) const;
+		QJsonObject commandDescriptorToJson(
+			const CommandDescriptor &descriptor) const;
+		QJsonObject panelDescriptorToJson(
+			const PanelDescriptor &descriptor) const;
+		QJsonObject sendOptionsToJson(
+			const Api::SendOptions *options) const;
+		QJsonObject binaryInfoToJson(const BinaryInfo &info) const;
+		QJsonObject fileInfoToJson(const QFileInfo &info) const;
+		QJsonObject messageContextToJson(
+			const MessageEventContext &context) const;
+		QJsonObject commandResultToJson(const CommandResult &result) const;
+		QJsonObject registrationSummaryToJson(
+			const PluginRecord &record) const;
+		QString fileSha256(const QString &path) const;
+		void scanPlugins(bool metadataOnly = false);
+		void loadPluginMetadataOnly(const QString &path);
+		void loadPlugin(const QString &path);
 	void unloadAll();
 	PluginRecord *findRecord(const QString &pluginId);
 	const PluginRecord *findRecord(const QString &pluginId) const;
@@ -223,6 +289,29 @@ public:
 		QString commandKey(const QString &command) const;
 		bool hasPlugin(const QString &pluginId) const;
 		void disablePlugin(const QString &pluginId, const QString &reason);
+		void disablePlugin(
+			const QString &pluginId,
+			const QString &reason,
+			bool disabledByRecovery,
+			const QString &recoveryReason);
+		void loadRecoveryState();
+		void saveRecoveryState() const;
+		void recoverFromPendingState();
+		void startRecoveryOperation(
+			QString kind,
+			QStringList pluginIds = {},
+			QString details = QString());
+		void finishRecoveryOperation();
+		void syncRecoveryFlags(PluginState &state) const;
+		void clearRecoveryDisabled(const QString &pluginId);
+		void queueRecoveryNotice(
+			QString kind,
+			QStringList pluginIds,
+			QString details);
+		void showRecoveryNotice(Window::Controller *window);
+		QStringList describeRecoveryPlugins(
+			const QStringList &pluginIds) const;
+		QString composeRecoveryClipboardText() const;
 		void updateMessageObserverSubscriptions();
 		void handleActiveSessionChanged(Main::Session *session);
 		void dispatchMessageEvent(
@@ -231,14 +320,22 @@ public:
 		const MessageObserverOptions &options,
 		const MessageObserverEntry &entry);
 
-	QString _pluginsPath;
-	QString _configPath;
-	QString _logPath;
-	QString _safeModePath;
+		QString _pluginsPath;
+		QString _configPath;
+		QString _logPath;
+		QString _tracePath;
+		QString _safeModePath;
+		QString _recoveryPath;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;
-	QSet<QString> _disabled;
+		QSet<QString> _disabled;
+		QSet<QString> _disabledByRecovery;
+		RecoveryOperationState _recoveryPending;
+		RecoveryOperationState _recoveryNotice;
+		bool _recoveryNoticeShown = false;
+		QVector<TraceOperationState> _traceOperations;
+		quint64 _nextTraceOperationId = 1;
 
 	QHash<QString, CommandId> _commandIdByName;
 	QHash<CommandId, CommandEntry> _commands;

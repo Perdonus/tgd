@@ -7,8 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_plugins.h"
 
+#include "boxes/abstract_box.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "lang/lang_keys.h"
 #include "plugins/plugins_manager.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
@@ -17,154 +19,185 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_boxes.h"
 #include "styles/style_settings.h"
+
+#include <QtGui/QGuiApplication>
+
+#include <utility>
 
 namespace Settings {
 namespace {
+
+[[nodiscard]] bool UseRussianPluginUi() {
+	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
+}
+
+[[nodiscard]] QString PluginUiText(QString en, QString ru) {
+	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
+}
 
 QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 	const auto &info = state.info;
 	const auto name = !info.name.isEmpty()
 		? info.name
-		: (!info.id.isEmpty() ? info.id : u"Plugin"_q);
+		: (!info.id.isEmpty()
+			? info.id
+			: PluginUiText(u"Plugin"_q, u"Плагин"_q));
 	const auto version = info.version.trimmed();
 	return version.isEmpty() ? name : (name + u" "_q + version);
 }
 
-QString FormatPluginDetails(
-		const ::Plugins::PluginState &state,
-		const std::vector<::Plugins::CommandDescriptor> &commands) {
+QString FormatPluginDetails(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
-	if (!info.id.isEmpty()) {
-		lines.push_back(u"Id: "_q + info.id);
+	if (!info.author.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Author: "_q, u"Автор: "_q)
+			+ info.author.trimmed());
 	}
-	if (!info.author.isEmpty()) {
-		lines.push_back(u"Author: "_q + info.author);
+	if (!info.description.trimmed().isEmpty()) {
+		lines.push_back(info.description.trimmed());
 	}
-	if (!state.path.isEmpty()) {
-		lines.push_back(u"Path: "_q + state.path);
+	if (!info.version.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Version: "_q, u"Версия: "_q)
+			+ info.version.trimmed());
 	}
-	if (!info.website.isEmpty()) {
-		lines.push_back(u"Website: "_q + info.website);
+	if (!state.recoveryReason.trimmed().isEmpty()) {
+		lines.push_back(state.recoveryReason.trimmed());
 	}
-	if (!info.description.isEmpty()) {
-		lines.push_back(u"Description: "_q + info.description);
+	if (!state.error.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Error: "_q, u"Ошибка: "_q)
+			+ state.error.trimmed());
 	}
-	lines.push_back(state.loaded
-		? u"Status: Loaded"_q
-		: state.enabled
-		? u"Status: Enabled"_q
-		: u"Status: Disabled"_q);
-	if (!state.error.isEmpty()) {
-		lines.push_back(u"Error: "_q + state.error);
-	}
-	if (!commands.empty()) {
-		lines.push_back(u"Commands:"_q);
-		for (const auto &command : commands) {
-			auto line = u"  "_q + command.command;
-			if (!command.description.isEmpty()) {
-				line += u" - "_q + command.description;
-			}
-			lines.push_back(line);
-			if (!command.usage.isEmpty()) {
-				lines.push_back(u"    Usage: "_q + command.usage);
-			}
-		}
-	}
-	return lines.join('\n');
+	return lines.join(u"\n"_q);
 }
 
 QString PluginDocsText() {
-	return u"Overview\n"
-		"Plugins are native shared libraries loaded by Telegram Desktop at "
-		"startup. They can register slash commands, add actions and panels in "
-		"the Plugins menu, intercept outgoing messages, and observe backend "
-		"updates. Because plugins are native code, they can call internal APIs "
-		"and customize UI by using the same headers as the app. Use with care.\n\n"
-		"File format and location\n"
-		"- Extension: .tgd (shared library, renamed).\n"
-		"- Folder: <working dir>/tdata/plugins\n"
-		"- Config: <working dir>/tdata/plugins.json (disabled list)\n"
-		"- Safe mode flag: <working dir>/tdata/plugins.safe-mode\n"
-		"- Log: <working dir>/tdata/plugins.log (load/runtime failures)\n\n"
-		"API header (v2)\n"
-		"- Telegram/SourceFiles/plugins/plugins_api.h\n"
-		"- Main entry symbol: TgdPluginEntry\n"
-		"- Metadata symbol: TgdPluginBinaryInfo\n\n"
-		"Preview metadata (optional, recommended)\n"
-		"- Static symbol: TgdPluginPreviewInfo\n"
-		"- Used by in-chat install/update dialogs before the plugin loads.\n"
-		"- Supports name, version, author, description, website and icon.\n"
-		"- Icon format: StickerPackShortName/index\n\n"
-		"Plugin lifecycle\n"
-		"- The loader resolves TgdPluginEntry and constructs your plugin.\n"
-		"- Entry receives apiVersion; require an exact match.\n"
-		"- info() is called to read metadata (id, name, version).\n"
-		"- Keep constructors and info() side-effect free.\n"
-		"- onLoad() is called when enabled; register commands/actions here.\n"
-		"- onUnload() is called on reload or disable; cleanup here.\n\n"
-		"Runtime safety\n"
-		"- Exceptions escaping plugin callbacks disable that plugin\n"
-		"  automatically and save this state to config.\n"
-		"- Keep callbacks non-blocking; heavy work should run in worker\n"
-		"  threads or separate processes (IPC).\n\n"
-		"Commands\n"
-		"- Register with Host::registerCommand.\n"
-		"- Format: /command [args] at the start of the message.\n"
-		"- Commands that contain '@' are ignored to avoid bot conflicts.\n"
-		"- CommandContext provides session, history, text, command, args.\n"
-		"- Return CommandResult::Handled to stop sending.\n"
-		"- Return CommandResult::ReplaceText to send different text.\n\n"
-		"Actions\n"
-		"- Register with Host::registerAction (simple) or\n"
-		"  Host::registerActionWithContext (gets window + session).\n"
-		"- Actions appear in the Plugins section as buttons.\n\n"
-		"Panels (UI entry points)\n"
-		"- Register with Host::registerPanel.\n"
-		"- Panels appear in the Plugins section; when clicked you receive a\n"
-		"  Window::Controller* and can open UI (right column, box, dialog, etc).\n\n"
-		"Outgoing text interceptors\n"
-		"- Register with Host::registerOutgoingTextInterceptor.\n"
-		"- Called for every outgoing text message (before commands).\n"
-		"- Lower priority runs earlier.\n"
-		"- Return Cancel / Handled / ReplaceText to stop or change sending.\n\n"
-		"Message observers (backend)\n"
-		"- Register with Host::registerMessageObserver.\n"
-		"- Options allow new/edited/deleted and incoming/outgoing filters.\n"
-		"- Current scope: active session (account) only.\n"
-		"- HistoryItem pointers are only valid during the callback.\n\n"
-		"Windows\n"
-		"- Host::forEachWindow iterates existing windows.\n"
-		"- Host::onWindowCreated notifies about new windows.\n\n"
-		"Sessions\n"
-		"- Host::activeSession returns the active account session.\n"
-		"- Host::forEachSession iterates all loaded sessions.\n"
-		"- Host::onSessionActivated notifies when the active session changes.\n\n"
-		"UI access\n"
-		"- Use Window::Controller methods to open layers, right column, boxes.\n"
-		"- UI plugins usually link QtWidgets in addition to QtCore.\n\n"
-		"Libraries and toolchain\n"
-		"- Plugins are written in C++ (same language as Telegram Desktop).\n"
-		"- Use QtCore (QString, QLibrary) and the C++ standard library.\n"
-		"- For UI, also link QtWidgets.\n"
-		"- Link against the same Qt major/minor version used by the app.\n"
-		"- Build with the same compiler/ABI as Telegram Desktop.\n"
-		"- Platform, architecture and plugin API version must match exactly.\n\n"
-		"Other runtimes\n"
-		"- DEX/Java plugins are not supported on desktop.\n"
-		"- If you need another language, embed a runtime inside a C++ plugin\n"
-		"  or communicate with a separate process via IPC.\n\n"
-		"Build outline (Linux)\n"
-		"- g++ -std=c++20 -fPIC -shared -I../../SourceFiles \\\n"
-		"  -o my_plugin.so my_plugin.cpp "
-		"$(pkg-config --cflags --libs Qt6Core Qt6Widgets)\n"
-		"- mv my_plugin.so my_plugin.tgd\n\n"
-		"Security\n"
-		"- Plugins run as native code inside the app process.\n"
-		"- Only load plugins you trust.\n"
-		"- Safe mode disables plugin loading completely.\n"
-		"- You can also launch Telegram with -noplugins.\n"_q;
+	return UseRussianPluginUi()
+		? u"Плагины Telegram Desktop\n\n"
+			"Что это\n"
+			"Плагин — это нативная библиотека .tgd, которая загружается прямо в процесс Telegram Desktop. Плагины могут добавлять команды, действия, панели, перехватывать исходящий текст и слушать события сообщений. Из-за этого плагины очень мощные, но и небезопасные: они работают с тем же ABI и теми же зависимостями, что и сам клиент.\n\n"
+			"Где лежат файлы\n"
+			"- Папка плагинов: <working dir>/tdata/plugins\n"
+			"- Список вручную выключенных плагинов: <working dir>/tdata/plugins.json\n"
+			"- Безопасный режим: <working dir>/tdata/plugins.safe-mode\n"
+			"- Лог загрузки и runtime-сбоев: <working dir>/tdata/plugins.log\n"
+			"- Recovery-state: <working dir>/tdata/plugins.recovery.json\n\n"
+			"Установка и обновление\n"
+			"- При клике на .tgd из чата Telegram показывает preview-box.\n"
+			"- Preview берётся из статической metadata, без запуска кода плагина.\n"
+			"- После установки плагин подхватывается автоматически, отдельная кнопка Reload не нужна.\n"
+			"- Если пакет уже установлен, box покажет обновление со старой зачёркнутой версией.\n\n"
+			"Совместимость\n"
+			"- Плагин обязан совпадать с Telegram по platform, architecture, compiler ABI, Qt major/minor и plugin API version.\n"
+			"- Просто переименовать .cpp в .tgd нельзя: .tgd — это уже собранный бинарь.\n"
+			"- Несовместимый плагин не должен загружаться, а причина пишется в plugins.log.\n\n"
+			"Metadata preview\n"
+			"- Символ: TgdPluginPreviewInfo\n"
+			"- Поля: id, name, version, author, description, website, icon\n"
+			"- icon использует формат StickerPackShortName/index\n"
+			"- Если иконка недоступна, UI показывает fallback-аватар.\n\n"
+			"Жизненный цикл\n"
+			"- TgdPluginEntry создаёт объект плагина.\n"
+			"- info() должен быть дешёвым и без побочных эффектов.\n"
+			"- onLoad() — регистрация команд, действий, панелей и подписок.\n"
+			"- onUnload() — очистка при выключении/перезагрузке.\n\n"
+			"Возможности API\n"
+			"- registerCommand: slash-команды в поле ввода.\n"
+			"- registerAction / registerActionWithContext: кнопки-действия в разделе Plugins.\n"
+			"- registerPanel: полноценные UI entry points.\n"
+			"- registerOutgoingTextInterceptor: перехват исходящих сообщений.\n"
+			"- registerMessageObserver: наблюдение за new/edited/deleted сообщениями.\n"
+			"- forEachWindow / onWindowCreated / activeSession / forEachSession: доступ к окнам и аккаунтам.\n\n"
+			"Безопасность и recovery\n"
+			"- Исключения из managed callback'ов автоматически выключают проблемный плагин.\n"
+			"- При подозрении на native crash во время рискованной plugin-операции Telegram включает safe mode автоматически.\n"
+			"- Подозреваемый плагин выключается, лог копируется в буфер, а на следующем запуске показывается recovery-box.\n"
+			"- Safe mode не удаляет плагины, а только не даёт им загрузиться.\n\n"
+			"Практические советы\n"
+			"- Делайте конструктор и info() максимально лёгкими.\n"
+			"- Тяжёлую работу уносите в worker thread или отдельный процесс.\n"
+			"- Если вы открываете UI, дополнительно линкуйте QtWidgets.\n"
+			"- Не храните HistoryItem* вне callback'а.\n"
+			"- Проверяйте exact ABI match перед публикацией .tgd.\n"_q
+		: u"Telegram Desktop Plugins\n\n"
+			"What it is\n"
+			"A plugin is a native .tgd shared library loaded into the Telegram Desktop process. Plugins can add commands, actions, panels, outgoing text interceptors, and message observers. This makes them powerful, but also unsafe: they run with the same ABI and dependencies as the app itself.\n\n"
+			"Files and folders\n"
+			"- Plugin folder: <working dir>/tdata/plugins\n"
+			"- Manually disabled plugins: <working dir>/tdata/plugins.json\n"
+			"- Safe mode flag: <working dir>/tdata/plugins.safe-mode\n"
+			"- Load/runtime log: <working dir>/tdata/plugins.log\n"
+			"- Recovery state: <working dir>/tdata/plugins.recovery.json\n\n"
+			"Install and update\n"
+			"- Clicking a .tgd in chat opens a preview box.\n"
+			"- Preview metadata is read without running plugin code.\n"
+			"- After install, Telegram reloads plugins automatically. No separate Reload button is required.\n"
+			"- If the package is already installed, the box shows an update with the old version struck through.\n\n"
+			"Compatibility\n"
+			"- A plugin must match Telegram on platform, architecture, compiler ABI, Qt major/minor, and plugin API version.\n"
+			"- Renaming a .cpp file to .tgd does not work: .tgd is already a compiled binary.\n"
+			"- Incompatible plugins should fail to load and write the reason to plugins.log.\n\n"
+			"Preview metadata\n"
+			"- Symbol: TgdPluginPreviewInfo\n"
+			"- Fields: id, name, version, author, description, website, icon\n"
+			"- icon uses StickerPackShortName/index\n"
+			"- If the icon cannot be resolved, UI falls back to a generated avatar.\n\n"
+			"Lifecycle\n"
+			"- TgdPluginEntry constructs the plugin object.\n"
+			"- info() should stay cheap and side-effect free.\n"
+			"- onLoad() is where commands, actions, panels, and subscriptions are registered.\n"
+			"- onUnload() should clean up during disable/reload.\n\n"
+			"API surface\n"
+			"- registerCommand: slash commands in the compose field.\n"
+			"- registerAction / registerActionWithContext: action buttons in the Plugins section.\n"
+			"- registerPanel: full UI entry points.\n"
+			"- registerOutgoingTextInterceptor: intercept outgoing text.\n"
+			"- registerMessageObserver: observe new/edited/deleted messages.\n"
+			"- forEachWindow / onWindowCreated / activeSession / forEachSession: access windows and sessions.\n\n"
+			"Safety and recovery\n"
+			"- Exceptions escaping managed callbacks automatically disable the failing plugin.\n"
+			"- If Telegram suspects a native crash during a risky plugin operation, it enables safe mode automatically.\n"
+			"- The suspected plugin is turned off, the recovery log is copied to the clipboard, and the next launch shows a recovery box.\n"
+			"- Safe mode does not delete plugins; it only prevents loading them.\n\n"
+			"Practical advice\n"
+			"- Keep constructors and info() lightweight.\n"
+			"- Move heavy work to worker threads or a separate process.\n"
+			"- Link QtWidgets if your plugin opens UI.\n"
+			"- Do not keep HistoryItem* beyond the callback lifetime.\n"
+			"- Always verify exact ABI match before shipping a .tgd.\n"_q;
+}
+
+void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
+	const auto text = PluginDocsText();
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(
+			PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q)));
+		box->addLeftButton(
+			PluginUiText(u"Copy"_q, u"Копировать"_q),
+			[=] {
+				if (const auto clipboard = QGuiApplication::clipboard()) {
+					clipboard->setText(text);
+				}
+				controller->window().showToast(PluginUiText(
+					u"Documentation copied."_q,
+					u"Документация скопирована."_q));
+			});
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(text),
+			st::boxLabel),
+			style::margins(
+				st::boxPadding.left(),
+				0,
+				st::boxPadding.right(),
+				0),
+			style::al_top);
+	}));
 }
 
 } // namespace
@@ -180,7 +213,7 @@ Plugins::Plugins(
 }
 
 rpl::producer<QString> Plugins::title() {
-	return rpl::single(u"Plugins"_q);
+	return rpl::single(PluginUiText(u"Plugins"_q, u"Плагины"_q));
 }
 
 void Plugins::setupContent() {
@@ -189,16 +222,17 @@ void Plugins::setupContent() {
 
 	const auto docs = AddButtonWithIcon(
 		_content,
-		rpl::single(u"Documentation"_q),
+		rpl::single(PluginUiText(u"Documentation"_q, u"Документация"_q)),
 		st::settingsButton,
 		{ &st::menuIconFaq });
 	docs->addClickHandler([=] {
-		showOther(PluginsDocumentation::Id());
+		ShowPluginDocsBox(_controller);
 	});
 
 	const auto openFolder = AddButtonWithIcon(
 		_content,
-		rpl::single(u"Open Plugins Folder"_q),
+		rpl::single(
+			PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q)),
 		st::settingsButton,
 		{ &st::menuIconShowInFolder });
 	openFolder->addClickHandler([=] {
@@ -207,31 +241,28 @@ void Plugins::setupContent() {
 
 	const auto safeMode = _content->add(object_ptr<Ui::SettingsButton>(
 		_content,
-		rpl::single(u"Plugin Safe Mode"_q),
+		rpl::single(PluginUiText(
+			u"Plugin Safe Mode"_q,
+			u"Безопасный режим плагинов"_q)),
 		st::settingsButtonNoIcon
 	))->toggleOn(rpl::single(Core::App().plugins().safeModeEnabled()));
 	safeMode->toggledChanges(
 	) | rpl::on_next([=](bool value) {
 		if (!Core::App().plugins().setSafeModeEnabled(value)) {
-			_controller->window().showToast(u"Could not change safe mode."_q);
+			_controller->window().showToast(PluginUiText(
+				u"Could not change safe mode."_q,
+				u"Не удалось переключить безопасный режим."_q));
 		}
 		rebuildList();
 	}, safeMode->lifetime());
 	Ui::AddDividerText(
 		_content,
 		rpl::single(
-			u"When enabled, Telegram skips all plugin loading. "
-			u"Useful for recovery after a broken plugin."_q));
-
-	const auto reload = AddButtonWithIcon(
-		_content,
-		rpl::single(u"Reload Plugins"_q),
-		st::settingsButton,
-		{ &st::menuIconManage });
-	reload->addClickHandler([=] {
-		Core::App().plugins().reload();
-		rebuildList();
-	});
+			PluginUiText(
+				u"When enabled, Telegram skips plugin loading. "
+				u"Crash recovery may enable this mode automatically."_q,
+				u"Когда режим включён, Telegram не загружает плагины. "
+				u"После крэша плагина этот режим может включиться автоматически."_q)));
 
 	Ui::AddDivider(_content);
 	Ui::AddSkip(_content);
@@ -249,11 +280,15 @@ void Plugins::rebuildList() {
 			Ui::AddDividerText(
 				_list,
 				rpl::single(
-					u"Plugin safe mode is enabled. No plugins were loaded."_q));
+					PluginUiText(
+						u"Plugin safe mode is enabled. Plugins are listed without loading."_q,
+						u"Безопасный режим включён. Плагины показаны без загрузки."_q)));
 		} else {
 			Ui::AddDividerText(
 				_list,
-				rpl::single(u"No plugins found in tdata/plugins."_q));
+				rpl::single(PluginUiText(
+					u"No plugins found in tdata/plugins."_q,
+					u"В tdata/plugins плагины не найдены."_q)));
 		}
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
@@ -269,7 +304,9 @@ void Plugins::rebuildList() {
 		Ui::AddSkip(_list);
 
 		const auto title = FormatPluginTitle(state);
-		const auto buttonStyle = state.error.isEmpty()
+		const auto buttonStyle = state.recoverySuspected
+			? st::settingsAttentionButton
+			: state.error.isEmpty()
 			? st::settingsButtonNoIcon
 			: st::settingsOptionDisabled;
 		const auto toggle = _list->add(object_ptr<Ui::SettingsButton>(
@@ -277,21 +314,22 @@ void Plugins::rebuildList() {
 			rpl::single(title),
 			buttonStyle
 		))->toggleOn(rpl::single(state.enabled));
-		if (!state.error.isEmpty()) {
+		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			toggle->setToggleLocked(true);
 		}
 		toggle->toggledChanges(
 		) | rpl::on_next([=](bool value) {
 			if (!Core::App().plugins().setEnabled(state.info.id, value)) {
-				_controller->window().showToast(u"Could not change state."_q);
+				_controller->window().showToast(PluginUiText(
+					u"Could not change state."_q,
+					u"Не удалось изменить состояние плагина."_q));
 			}
 			rebuildList();
 		}, toggle->lifetime());
 
-		const auto commands = Core::App().plugins().commandsFor(state.info.id);
 		const auto actions = Core::App().plugins().actionsFor(state.info.id);
 		const auto panels = Core::App().plugins().panelsFor(state.info.id);
-		const auto details = FormatPluginDetails(state, commands);
+		const auto details = FormatPluginDetails(state);
 		if (!details.isEmpty()) {
 			Ui::AddSkip(_list);
 			Ui::AddDividerText(_list, rpl::single(details));
@@ -299,7 +337,9 @@ void Plugins::rebuildList() {
 
 		if (!actions.empty()) {
 			Ui::AddSkip(_list);
-			Ui::AddDividerText(_list, rpl::single(u"Actions"_q));
+			Ui::AddDividerText(
+				_list,
+				rpl::single(PluginUiText(u"Actions"_q, u"Действия"_q)));
 			Ui::AddSkip(_list);
 			for (const auto &action : actions) {
 				const auto actionButton = _list->add(
@@ -320,7 +360,9 @@ void Plugins::rebuildList() {
 
 		if (!panels.empty()) {
 			Ui::AddSkip(_list);
-			Ui::AddDividerText(_list, rpl::single(u"Panels"_q));
+			Ui::AddDividerText(
+				_list,
+				rpl::single(PluginUiText(u"Panels"_q, u"Панели"_q)));
 			Ui::AddSkip(_list);
 			for (const auto &panel : panels) {
 				const auto panelButton = _list->add(
@@ -354,7 +396,8 @@ PluginsDocumentation::PluginsDocumentation(
 }
 
 rpl::producer<QString> PluginsDocumentation::title() {
-	return rpl::single(u"Plugin Documentation"_q);
+	return rpl::single(
+		PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q));
 }
 
 void PluginsDocumentation::setupContent() {

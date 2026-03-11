@@ -7,30 +7,45 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "plugins/plugins_manager.h"
 
+#include "boxes/abstract_box.h"
+#include "api/api_common.h"
 #include "core/application.h"
 #include "core/launcher.h"
 #include "data/data_changes.h"
 #include "history/history_item.h"
+#include "history/history.h"
+#include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "settings.h"
-#include "window/window_controller.h"
+#include "ui/painter.h"
+#include "ui/rp_widget.h"
 #include "ui/text/text_entity.h"
 #include "ui/toast/toast.h"
+#include "ui/widgets/labels.h"
+#include "window/window_controller.h"
+#include "styles/style_boxes.h"
+#include "styles/style_layers.h"
+#include "styles/style_settings.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QDateTime>
 #include <QtCore/QByteArray>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLibrary>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QTimer>
+#include <QtGui/QGuiApplication>
 
 #include <algorithm>
 #include <exception>
+#include <utility>
 
 namespace Plugins {
 namespace {
@@ -38,11 +53,89 @@ namespace {
 constexpr auto kPluginsFolder = "tdata/plugins";
 constexpr auto kConfigFile = "tdata/plugins.json";
 constexpr auto kLogFile = "tdata/plugins.log";
+constexpr auto kTraceFile = "tdata/plugins.trace.jsonl";
 constexpr auto kSafeModeFile = "tdata/plugins.safe-mode";
+constexpr auto kRecoveryFile = "tdata/plugins.recovery.json";
 constexpr auto kBinaryInfoName = "TgdPluginBinaryInfo";
 constexpr auto kPreviewInfoName = "TgdPluginPreviewInfo";
 constexpr auto kEntryName = "TgdPluginEntry";
 constexpr auto kNoPluginsArgument = "-noplugins";
+constexpr auto kRecoveryDuckSize = 72;
+constexpr auto kMaxPluginLogBytes = qsizetype(25 * 1024 * 1024);
+constexpr auto kMaxPluginLogBackups = 5;
+
+[[nodiscard]] bool UseRussianPluginUi() {
+	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
+}
+
+[[nodiscard]] QString PluginUiText(QString en, QString ru) {
+	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
+}
+
+[[nodiscard]] QString RecoveryOperationText(const QString &kind) {
+	if (kind == u"install"_q) {
+		return PluginUiText(u"plugin install"_q, u"установки плагина"_q);
+	} else if (kind == u"update"_q) {
+		return PluginUiText(u"plugin update"_q, u"обновления плагина"_q);
+	} else if (kind == u"reload"_q) {
+		return PluginUiText(u"plugin reload"_q, u"перезагрузки плагинов"_q);
+	} else if (kind == u"enable"_q) {
+		return PluginUiText(u"plugin enable"_q, u"включения плагина"_q);
+	} else if (kind == u"disable"_q) {
+		return PluginUiText(u"plugin disable"_q, u"выключения плагина"_q);
+	} else if (kind == u"load"_q) {
+		return PluginUiText(u"plugin loading"_q, u"загрузки плагина"_q);
+	} else if (kind == u"onload"_q) {
+		return PluginUiText(u"plugin startup"_q, u"запуска плагина"_q);
+	} else if (kind == u"unload"_q) {
+		return PluginUiText(u"plugin unload"_q, u"выгрузки плагина"_q);
+	} else if (kind == u"command"_q) {
+		return PluginUiText(u"plugin command"_q, u"команды плагина"_q);
+	} else if (kind == u"action"_q) {
+		return PluginUiText(u"plugin action"_q, u"действия плагина"_q);
+	} else if (kind == u"panel"_q) {
+		return PluginUiText(u"plugin panel"_q, u"панели плагина"_q);
+	} else if (kind == u"window"_q) {
+		return PluginUiText(
+			u"plugin window callback"_q,
+			u"оконного callback плагина"_q);
+	} else if (kind == u"session"_q) {
+		return PluginUiText(
+			u"plugin session callback"_q,
+			u"session callback плагина"_q);
+	} else if (kind == u"outgoing"_q) {
+		return PluginUiText(
+			u"outgoing interceptor"_q,
+			u"перехватчика исходящего текста"_q);
+	} else if (kind == u"observer"_q) {
+		return PluginUiText(
+			u"message observer"_q,
+			u"наблюдателя сообщений"_q);
+	}
+	return PluginUiText(u"plugin operation"_q, u"операции плагина"_q);
+}
+
+class RecoveryDuckIcon final : public Ui::RpWidget {
+public:
+	explicit RecoveryDuckIcon(QWidget *parent) : Ui::RpWidget(parent) {
+		setMinimumSize(kRecoveryDuckSize, kRecoveryDuckSize);
+		setMaximumSize(kRecoveryDuckSize, kRecoveryDuckSize);
+		paintRequest(
+		) | rpl::on_next([=] {
+			auto p = QPainter(this);
+			p.setRenderHint(QPainter::Antialiasing);
+			const auto rect = QRect(0, 0, width(), height());
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(255, 214, 10));
+			p.drawEllipse(rect.adjusted(4, 4, -4, -4));
+			auto font = this->font();
+			font.setPointSize(font.pointSize() + 18);
+			p.setFont(font);
+			p.setPen(Qt::black);
+			p.drawText(rect, Qt::AlignCenter, QString::fromUtf8("🦆"));
+		}, lifetime());
+	}
+};
 
 QString TrimmedCommand(QString command) {
 	command = command.trimmed();
@@ -276,7 +369,152 @@ QString DescribeBinaryInfo(const Plugins::BinaryInfo &info) {
 		.arg(info.qtMinor)
 		.arg(QString::fromLatin1(info.compiler ? info.compiler : "unknown"))
 		.arg(info.compilerVersion)
-		.arg(QString::fromLatin1(info.platform ? info.platform : "unknown"));
+			.arg(QString::fromLatin1(info.platform ? info.platform : "unknown"));
+}
+
+QString DescribeBinaryInfoMismatchField(const Plugins::BinaryInfo &info) {
+	const auto pluginCompiler = QString::fromLatin1(
+		info.compiler ? info.compiler : "unknown");
+	const auto hostCompiler = QString::fromLatin1(Plugins::kCompilerId);
+	const auto pluginPlatform = QString::fromLatin1(
+		info.platform ? info.platform : "unknown");
+	const auto hostPlatform = QString::fromLatin1(Plugins::kPlatformId);
+
+	if (info.structVersion != Plugins::kBinaryInfoVersion) {
+		return u"structVersion"_q;
+	}
+	if (info.apiVersion != Plugins::kApiVersion) {
+		return u"apiVersion"_q;
+	}
+	if (info.pointerSize != int(sizeof(void*))) {
+		return u"pointerSize"_q;
+	}
+	if (pluginPlatform != hostPlatform) {
+		return u"platform"_q;
+	}
+	if (pluginCompiler != hostCompiler) {
+		return u"compiler"_q;
+	}
+	if (info.compilerVersion != Plugins::kCompilerVersion) {
+		return u"compilerVersion"_q;
+	}
+	if (info.qtMajor != QT_VERSION_MAJOR) {
+		return u"qtMajor"_q;
+	}
+	if (info.qtMinor != QT_VERSION_MINOR) {
+		return u"qtMinor"_q;
+	}
+	return QString();
+}
+
+QString JsonValueToText(const QJsonValue &value) {
+	if (value.isUndefined() || value.isNull()) {
+		return u"null"_q;
+	}
+	if (value.isBool()) {
+		return value.toBool() ? u"true"_q : u"false"_q;
+	}
+	if (value.isDouble()) {
+		return QString::number(value.toDouble(), 'g', 16);
+	}
+	if (value.isString()) {
+		auto text = value.toString();
+		text.replace(u'\\', u"\\\\"_q);
+		text.replace(u'\r', u"\\r"_q);
+		text.replace(u'\n', u"\\n"_q);
+		text.replace(u'\t', u"\\t"_q);
+		text.replace(u'"', u"\\\""_q);
+		return u"\""_q + text + u"\""_q;
+	}
+	return QString::fromUtf8(
+		QJsonDocument(value.isObject()
+			? QJsonDocument(value.toObject())
+			: QJsonDocument(value.toArray()))
+			.toJson(QJsonDocument::Compact));
+}
+
+void MergeJsonObject(QJsonObject &target, const QJsonObject &extra) {
+	for (auto i = extra.begin(); i != extra.end(); ++i) {
+		target.insert(i.key(), i.value());
+	}
+}
+
+QJsonArray JsonArrayFromStrings(const QStringList &list) {
+	auto result = QJsonArray();
+	for (const auto &value : list) {
+		result.push_back(value);
+	}
+	return result;
+}
+
+QStringList SortedJsonKeys(const QJsonObject &object) {
+	auto keys = object.keys();
+	keys.sort(Qt::CaseInsensitive);
+	return keys;
+}
+
+QString CommandResultActionName(const Plugins::CommandResult::Action action) {
+	using Action = Plugins::CommandResult::Action;
+	switch (action) {
+	case Action::Continue:
+		return u"continue"_q;
+	case Action::Cancel:
+		return u"cancel"_q;
+	case Action::Handled:
+		return u"handled"_q;
+	case Action::ReplaceText:
+		return u"replace_text"_q;
+	}
+	return u"unknown"_q;
+}
+
+QString MessageEventName(const Plugins::MessageEvent event) {
+	switch (event) {
+	case Plugins::MessageEvent::New:
+		return u"new"_q;
+	case Plugins::MessageEvent::Edited:
+		return u"edited"_q;
+	case Plugins::MessageEvent::Deleted:
+		return u"deleted"_q;
+	}
+	return u"unknown"_q;
+}
+
+QString DateTimeToIsoUtc(const QDateTime &value) {
+	return value.isValid()
+		? value.toUTC().toString(Qt::ISODateWithMs)
+		: QString();
+}
+
+QJsonObject RecoveryOperationToJson(
+		const RecoveryOperationState &state) {
+	auto object = QJsonObject{
+		{ u"kind"_q, state.kind },
+		{ u"details"_q, state.details },
+		{ u"startedAt"_q, state.startedAt },
+	};
+	auto pluginIds = QJsonArray();
+	for (const auto &id : state.pluginIds) {
+		pluginIds.push_back(id);
+	}
+	object.insert(u"pluginIds"_q, pluginIds);
+	return object;
+}
+
+RecoveryOperationState RecoveryOperationFromJson(
+		const QJsonObject &object) {
+	auto state = RecoveryOperationState();
+	state.kind = object.value(u"kind"_q).toString();
+	state.details = object.value(u"details"_q).toString();
+	state.startedAt = object.value(u"startedAt"_q).toString();
+	const auto pluginIds = object.value(u"pluginIds"_q).toArray();
+	for (const auto &value : pluginIds) {
+		if (value.isString()) {
+			state.pluginIds.push_back(value.toString());
+		}
+	}
+	state.active = !state.kind.isEmpty();
+	return state;
 }
 
 } // namespace
@@ -288,14 +526,356 @@ Manager::~Manager() {
 	unloadAll();
 }
 
+void Manager::loadRecoveryState() {
+	_disabledByRecovery.clear();
+	_recoveryPending = RecoveryOperationState();
+	_recoveryNotice = RecoveryOperationState();
+	_recoveryNoticeShown = false;
+
+	QFile file(_recoveryPath);
+	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+		return;
+	}
+	const auto document = QJsonDocument::fromJson(file.readAll());
+	if (!document.isObject()) {
+		return;
+	}
+	const auto object = document.object();
+	const auto disabledArray = object.value(u"disabledByRecovery"_q).toArray();
+	for (const auto &value : disabledArray) {
+		if (value.isString()) {
+			_disabledByRecovery.insert(value.toString());
+		}
+	}
+	if (const auto pending = object.value(u"pending"_q); pending.isObject()) {
+		_recoveryPending = RecoveryOperationFromJson(pending.toObject());
+	}
+	if (const auto notice = object.value(u"notice"_q); notice.isObject()) {
+		_recoveryNotice = RecoveryOperationFromJson(notice.toObject());
+	}
+	logEvent(
+		u"recovery"_q,
+		u"state-loaded"_q,
+		QJsonObject{
+			{ u"path"_q, _recoveryPath },
+			{ u"disabledByRecovery"_q, JsonArrayFromStrings(_disabledByRecovery.values()) },
+			{ u"pendingActive"_q, _recoveryPending.active },
+			{ u"pendingKind"_q, _recoveryPending.kind },
+			{ u"noticeActive"_q, _recoveryNotice.active },
+			{ u"noticeKind"_q, _recoveryNotice.kind },
+		});
+}
+
+void Manager::saveRecoveryState() const {
+	if (_recoveryPath.isEmpty()) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(_recoveryPath).absolutePath());
+
+	auto disabledByRecovery = _disabledByRecovery.values();
+	disabledByRecovery.sort(Qt::CaseInsensitive);
+
+	auto object = QJsonObject();
+	auto disabledArray = QJsonArray();
+	for (const auto &id : disabledByRecovery) {
+		disabledArray.push_back(id);
+	}
+	object.insert(u"disabledByRecovery"_q, disabledArray);
+	if (_recoveryPending.active) {
+		object.insert(u"pending"_q, RecoveryOperationToJson(_recoveryPending));
+	}
+	if (_recoveryNotice.active) {
+		object.insert(u"notice"_q, RecoveryOperationToJson(_recoveryNotice));
+	}
+
+	QFile file(_recoveryPath);
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+	}
+	logEvent(
+		u"recovery"_q,
+		u"state-saved"_q,
+		QJsonObject{
+			{ u"path"_q, _recoveryPath },
+			{ u"disabledByRecovery"_q, JsonArrayFromStrings(disabledByRecovery) },
+			{ u"pendingActive"_q, _recoveryPending.active },
+			{ u"noticeActive"_q, _recoveryNotice.active },
+		});
+}
+
+void Manager::recoverFromPendingState() {
+	if (!_recoveryPending.active) {
+		return;
+	}
+	const auto pluginIds = _recoveryPending.pluginIds;
+	const auto details = _recoveryPending.details;
+	const auto kind = _recoveryPending.kind;
+
+	for (const auto &pluginId : pluginIds) {
+		if (pluginId.isEmpty()) {
+			continue;
+		}
+		_disabled.insert(pluginId);
+		_disabledByRecovery.insert(pluginId);
+	}
+	saveConfig();
+	QDir().mkpath(QFileInfo(_safeModePath).absolutePath());
+	auto file = QFile(_safeModePath);
+	if (!file.exists() && file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		file.close();
+	}
+	_recoveryPending = RecoveryOperationState();
+	queueRecoveryNotice(kind, pluginIds, details);
+	logEvent(
+		u"recovery"_q,
+		u"safe-mode-enabled-after-crash"_q,
+		QJsonObject{
+			{ u"kind"_q, kind },
+			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+			{ u"details"_q, details },
+			{ u"safeModePath"_q, _safeModePath },
+		});
+	saveRecoveryState();
+}
+
+void Manager::startRecoveryOperation(
+		QString kind,
+		QStringList pluginIds,
+		QString details) {
+	_recoveryPending.active = true;
+	_recoveryPending.kind = std::move(kind);
+	_recoveryPending.pluginIds = std::move(pluginIds);
+	_recoveryPending.details = std::move(details);
+	_recoveryPending.startedAt = QDateTime::currentDateTimeUtc().toString(
+		Qt::ISODateWithMs);
+	logOperationStart(
+		_recoveryPending.kind,
+		_recoveryPending.pluginIds,
+		_recoveryPending.details);
+	saveRecoveryState();
+}
+
+void Manager::finishRecoveryOperation() {
+	if (!_recoveryPending.active) {
+		return;
+	}
+	_recoveryPending = RecoveryOperationState();
+	saveRecoveryState();
+	logOperationFinish();
+}
+
+void Manager::syncRecoveryFlags(PluginState &state) const {
+	state.disabledByRecovery = _disabledByRecovery.contains(state.info.id);
+	state.recoverySuspected = state.disabledByRecovery;
+	state.recoveryReason = state.disabledByRecovery
+		? PluginUiText(
+			u"Disabled automatically after a suspected plugin crash."_q,
+			u"Автоматически выключен после подозрения на крэш плагина."_q)
+		: QString();
+}
+
+void Manager::clearRecoveryDisabled(const QString &pluginId) {
+	if (pluginId.isEmpty()) {
+		return;
+	}
+	_disabledByRecovery.remove(pluginId);
+	if (_recoveryNotice.active) {
+		_recoveryNotice.pluginIds.removeAll(pluginId);
+		if (_recoveryNotice.pluginIds.isEmpty()) {
+			_recoveryNotice = RecoveryOperationState();
+		}
+	}
+	saveRecoveryState();
+}
+
+void Manager::queueRecoveryNotice(
+		QString kind,
+		QStringList pluginIds,
+		QString details) {
+	_recoveryNotice.active = true;
+	_recoveryNotice.kind = std::move(kind);
+	_recoveryNotice.pluginIds = std::move(pluginIds);
+	_recoveryNotice.details = std::move(details);
+	_recoveryNotice.startedAt = QDateTime::currentDateTimeUtc().toString(
+		Qt::ISODateWithMs);
+	_recoveryNoticeShown = false;
+	logEvent(
+		u"recovery"_q,
+		u"notice-queued"_q,
+		QJsonObject{
+			{ u"kind"_q, _recoveryNotice.kind },
+			{ u"pluginIds"_q, JsonArrayFromStrings(_recoveryNotice.pluginIds) },
+			{ u"details"_q, _recoveryNotice.details },
+			{ u"startedAt"_q, _recoveryNotice.startedAt },
+		});
+}
+
+QStringList Manager::describeRecoveryPlugins(
+		const QStringList &pluginIds) const {
+	auto result = QStringList();
+	for (const auto &pluginId : pluginIds) {
+		if (pluginId.isEmpty()) {
+			continue;
+		}
+		if (const auto record = findRecord(pluginId)) {
+			const auto name = record->state.info.name.trimmed();
+			result.push_back(name.isEmpty() ? pluginId : name);
+		} else {
+			result.push_back(pluginId);
+		}
+	}
+	result.removeDuplicates();
+	return result;
+}
+
+QString Manager::composeRecoveryClipboardText() const {
+	auto lines = QStringList();
+	lines.push_back(PluginUiText(
+		u"Telegram Desktop plugin recovery log"_q,
+		u"Лог восстановления плагинов Telegram Desktop"_q));
+	if (_recoveryNotice.active) {
+		const auto plugins = describeRecoveryPlugins(_recoveryNotice.pluginIds);
+		lines.push_back(
+			PluginUiText(u"Operation: "_q, u"Операция: "_q)
+			+ RecoveryOperationText(_recoveryNotice.kind));
+		if (!plugins.isEmpty()) {
+			lines.push_back(
+				PluginUiText(u"Plugins: "_q, u"Плагины: "_q)
+				+ plugins.join(u", "_q));
+		}
+		if (!_recoveryNotice.details.trimmed().isEmpty()) {
+			lines.push_back(
+				PluginUiText(u"Details: "_q, u"Детали: "_q)
+				+ _recoveryNotice.details.trimmed());
+		}
+	}
+	if (!_logPath.isEmpty()) {
+		auto file = QFile(_logPath);
+		if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			const auto content = QString::fromUtf8(file.readAll()).trimmed();
+			if (!content.isEmpty()) {
+				lines.push_back(QString());
+				lines.push_back(u"plugins.log"_q);
+				lines.push_back(content);
+			}
+		}
+	}
+	if (!_tracePath.isEmpty()) {
+		auto file = QFile(_tracePath);
+		if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			const auto content = QString::fromUtf8(file.readAll()).trimmed();
+			if (!content.isEmpty()) {
+				lines.push_back(QString());
+				lines.push_back(u"plugins.trace.jsonl"_q);
+				lines.push_back(content);
+			}
+		}
+	}
+	return lines.join(u"\n"_q);
+}
+
+void Manager::showRecoveryNotice(Window::Controller *window) {
+	if (_recoveryNoticeShown || !_recoveryNotice.active || !window) {
+		return;
+	}
+	_recoveryNoticeShown = true;
+	const auto clipboardText = composeRecoveryClipboardText();
+	if (const auto clipboard = QGuiApplication::clipboard()) {
+		clipboard->setText(clipboardText);
+	}
+
+	const auto plugins = describeRecoveryPlugins(_recoveryNotice.pluginIds);
+	const auto pluginText = plugins.isEmpty()
+		? PluginUiText(u"unknown plugin"_q, u"неизвестный плагин"_q)
+		: plugins.join(u", "_q);
+	const auto title = PluginUiText(u"Safe Mode"_q, u"Безопасный режим"_q);
+	const auto body = plugins.size() == 1
+		? PluginUiText(
+			u"Telegram noticed a crash during "_q
+				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ u".\n\nSuspected plugin: "_q
+				+ pluginText
+				+ u"\n\nSafe mode was enabled automatically, the plugin was turned off, and the recovery log was copied to the clipboard."_q,
+			u"Telegram заметил крэш во время "_q
+				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ u".\n\nПодозреваемый плагин: "_q
+				+ pluginText
+				+ u"\n\nБезопасный режим включён автоматически, плагин выключен, лог восстановления уже скопирован в буфер обмена."_q)
+		: PluginUiText(
+			u"Telegram noticed a crash during "_q
+				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ u".\n\nSuspected plugins: "_q
+				+ pluginText
+				+ u"\n\nSafe mode was enabled automatically, the listed plugins were turned off, and the recovery log was copied to the clipboard."_q,
+			u"Telegram заметил крэш во время "_q
+				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ u".\n\nПодозреваемые плагины: "_q
+				+ pluginText
+				+ u"\n\nБезопасный режим включён автоматически, указанные плагины выключены, лог восстановления уже скопирован в буфер обмена."_q);
+
+	window->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(title));
+		box->addLeftButton(PluginUiText(u"Copy"_q, u"Копировать"_q), [=] {
+			if (const auto clipboard = QGuiApplication::clipboard()) {
+				clipboard->setText(clipboardText);
+			}
+			window->showToast(PluginUiText(
+				u"Recovery log copied."_q,
+				u"Лог восстановления скопирован."_q));
+		});
+		box->addRow(
+			object_ptr<RecoveryDuckIcon>(box),
+			style::margins(
+				st::boxPadding.left(),
+				0,
+				st::boxPadding.right(),
+				st::boxPadding.bottom() / 2),
+			style::al_top);
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(body),
+			st::boxLabel),
+			style::margins(
+				st::boxPadding.left(),
+				0,
+				st::boxPadding.right(),
+				0),
+			style::al_top);
+		box->addButton(PluginUiText(u"Continue"_q, u"Продолжить"_q), [=] {
+			box->closeBox();
+		});
+	}));
+
+	_recoveryNotice = RecoveryOperationState();
+	saveRecoveryState();
+}
+
 void Manager::start() {
 	_pluginsPath = cWorkingDir() + QString::fromLatin1(kPluginsFolder);
 	_configPath = cWorkingDir() + QString::fromLatin1(kConfigFile);
 	_logPath = cWorkingDir() + QString::fromLatin1(kLogFile);
+	_tracePath = cWorkingDir() + QString::fromLatin1(kTraceFile);
 	_safeModePath = cWorkingDir() + QString::fromLatin1(kSafeModeFile);
+	_recoveryPath = cWorkingDir() + QString::fromLatin1(kRecoveryFile);
+	logEvent(
+		u"manager"_q,
+		u"start"_q,
+		QJsonObject{
+			{ u"pluginsPath"_q, _pluginsPath },
+			{ u"configPath"_q, _configPath },
+			{ u"logPath"_q, _logPath },
+			{ u"tracePath"_q, _tracePath },
+			{ u"safeModePath"_q, _safeModePath },
+			{ u"recoveryPath"_q, _recoveryPath },
+			{ u"apiVersion"_q, kApiVersion },
+		});
 	loadConfig();
+	loadRecoveryState();
+	recoverFromPendingState();
 	if (safeModeEnabled()) {
-		appendLogLine(u"[safe-mode] Plugins skipped at startup."_q);
+		logEvent(u"safe-mode"_q, u"startup-scan-metadata-only"_q);
+		scanPlugins(true);
 	} else {
 		scanPlugins();
 	}
@@ -307,20 +887,38 @@ void Manager::start() {
 }
 
 void Manager::reload() {
+	logEvent(
+		u"manager"_q,
+		u"reload-requested"_q,
+		QJsonObject{
+			{ u"safeMode"_q, safeModeEnabled() },
+			{ u"knownPlugins"_q, int(_plugins.size()) },
+		});
 	unloadAll();
 	loadConfig();
+	loadRecoveryState();
 	if (safeModeEnabled()) {
-		appendLogLine(u"[safe-mode] Plugins skipped on reload."_q);
+		logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
+		scanPlugins(true);
 		return;
 	}
+	const auto ownsRecovery = !_recoveryPending.active;
+	if (ownsRecovery) {
+		startRecoveryOperation(u"reload"_q);
+	}
 	scanPlugins();
+	if (ownsRecovery) {
+		finishRecoveryOperation();
+	}
 }
 
 std::vector<PluginState> Manager::plugins() const {
 	auto result = std::vector<PluginState>();
 	result.reserve(_plugins.size());
 	for (const auto &plugin : _plugins) {
-		result.push_back(plugin.state);
+		auto state = plugin.state;
+		syncRecoveryFlags(state);
+		result.push_back(std::move(state));
 	}
 	return result;
 }
@@ -348,6 +946,13 @@ bool Manager::setSafeModeEnabled(bool enabled) {
 	} else if (QFileInfo::exists(_safeModePath) && !QFile::remove(_safeModePath)) {
 		return false;
 	}
+	logEvent(
+		u"safe-mode"_q,
+		u"set"_q,
+		QJsonObject{
+			{ u"enabled"_q, enabled },
+			{ u"path"_q, _safeModePath },
+		});
 	reload();
 	return true;
 }
@@ -362,15 +967,36 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 	const auto fileInfo = QFileInfo(path);
 	if (!fileInfo.exists() || !fileInfo.isFile()) {
 		result.error = u"Plugin package file was not found."_q;
+		logEvent(
+			u"package"_q,
+			u"inspect-failed"_q,
+			QJsonObject{
+				{ u"reason"_q, result.error },
+				{ u"file"_q, fileInfoToJson(fileInfo) },
+			});
 		return result;
 	}
 	auto file = QFile(path);
 	if (!file.open(QIODevice::ReadOnly)) {
 		result.error = u"Could not read the plugin package."_q;
+		logEvent(
+			u"package"_q,
+			u"inspect-failed"_q,
+			QJsonObject{
+				{ u"reason"_q, result.error },
+				{ u"file"_q, fileInfoToJson(fileInfo) },
+			});
 		return result;
 	}
 	if (file.size() <= 0) {
 		result.error = u"Plugin package is empty."_q;
+		logEvent(
+			u"package"_q,
+			u"inspect-failed"_q,
+			QJsonObject{
+				{ u"reason"_q, result.error },
+				{ u"file"_q, fileInfoToJson(fileInfo) },
+			});
 		return result;
 	}
 	file.close();
@@ -397,6 +1023,22 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 			result.installedPath = installed->state.path;
 		}
 	}
+	logEvent(
+		u"package"_q,
+		u"inspect"_q,
+		QJsonObject{
+			{ u"file"_q, fileInfoToJson(fileInfo) },
+			{ u"sha256"_q, fileSha256(path) },
+			{ u"previewAvailable"_q, result.previewAvailable },
+			{ u"compatible"_q, result.compatible },
+			{ u"installed"_q, result.installed },
+			{ u"update"_q, result.update },
+			{ u"installedVersion"_q, result.installedVersion },
+			{ u"installedPath"_q, result.installedPath },
+			{ u"icon"_q, result.icon },
+			{ u"plugin"_q, pluginInfoToJson(result.info) },
+			{ u"error"_q, result.error },
+		});
 	return result;
 }
 
@@ -408,6 +1050,14 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 				? u"Plugin package is incompatible."_q
 				: preview.error;
 		}
+		logEvent(
+			u"package"_q,
+			u"install-rejected"_q,
+			QJsonObject{
+				{ u"sourcePath"_q, sourcePath },
+				{ u"reason"_q, error ? *error : preview.error },
+				{ u"plugin"_q, pluginInfoToJson(preview.info) },
+			});
 		return false;
 	}
 
@@ -421,74 +1071,146 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	const auto tempPath = targetPath + u".tmp"_q;
 	const auto rescanNow = [this] {
 		if (safeModeEnabled()) {
-			appendLogLine(u"[safe-mode] Plugins skipped after install attempt."_q);
+			logEvent(u"safe-mode"_q, u"install-rescan-metadata-only"_q);
+			scanPlugins(true);
 		} else {
 			scanPlugins();
 		}
 	};
+	startRecoveryOperation(
+			preview.update ? u"update"_q : u"install"_q,
+			preview.info.id.isEmpty() ? QStringList() : QStringList{ preview.info.id },
+			preview.info.name.isEmpty() ? targetPath : preview.info.name);
+	logEvent(
+		u"package"_q,
+		u"install-start"_q,
+		QJsonObject{
+			{ u"sourcePath"_q, sourcePath },
+			{ u"targetPath"_q, targetPath },
+			{ u"tempPath"_q, tempPath },
+			{ u"sourceSha256"_q, fileSha256(sourcePath) },
+			{ u"source"_q, fileInfoToJson(sourceInfo) },
+			{ u"plugin"_q, pluginInfoToJson(preview.info) },
+			{ u"update"_q, preview.update },
+			{ u"installedPath"_q, preview.installedPath },
+		});
 
 	unloadAll();
 	loadConfig();
+	loadRecoveryState();
 
 	QFile::remove(tempPath);
 
 	if (sourceInfo.absoluteFilePath() != targetPath) {
 		if (!QFile::copy(sourcePath, tempPath)) {
+			logEvent(
+				u"package"_q,
+				u"copy-failed"_q,
+				QJsonObject{
+					{ u"sourcePath"_q, sourcePath },
+					{ u"tempPath"_q, tempPath },
+				});
 			rescanNow();
 			if (error) {
 				*error = u"Could not copy the plugin package into tdata/plugins."_q;
 			}
+			finishRecoveryOperation();
 			return false;
 		}
 		if (!preview.installedPath.isEmpty()
 			&& preview.installedPath != targetPath
 			&& QFileInfo::exists(preview.installedPath)
 			&& !QFile::remove(preview.installedPath)) {
+			logEvent(
+				u"package"_q,
+				u"remove-previous-failed"_q,
+				QJsonObject{
+					{ u"installedPath"_q, preview.installedPath },
+					{ u"targetPath"_q, targetPath },
+				});
 			QFile::remove(tempPath);
 			rescanNow();
 			if (error) {
 				*error = u"Could not replace the previous plugin file."_q;
 			}
+			finishRecoveryOperation();
 			return false;
 		}
 		if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
+			logEvent(
+				u"package"_q,
+				u"overwrite-remove-failed"_q,
+				QJsonObject{
+					{ u"targetPath"_q, targetPath },
+				});
 			QFile::remove(tempPath);
 			rescanNow();
 			if (error) {
 				*error = u"Could not overwrite the target plugin file."_q;
 			}
+			finishRecoveryOperation();
 			return false;
 		}
 		if (!QFile::rename(tempPath, targetPath)) {
+			logEvent(
+				u"package"_q,
+				u"rename-failed"_q,
+				QJsonObject{
+					{ u"tempPath"_q, tempPath },
+					{ u"targetPath"_q, targetPath },
+				});
 			QFile::remove(tempPath);
 			rescanNow();
 			if (error) {
 				*error = u"Could not finalize the installed plugin file."_q;
 			}
+			finishRecoveryOperation();
 			return false;
 		}
 	}
 
 	if (safeModeEnabled()) {
-		appendLogLine(
-			u"[install] "_q
-			+ QFileInfo(targetPath).fileName()
-			+ u" copied while plugin safe mode is enabled."_q);
+		logEvent(
+			u"package"_q,
+			u"installed-while-safe-mode"_q,
+			QJsonObject{
+				{ u"targetPath"_q, targetPath },
+				{ u"plugin"_q, pluginInfoToJson(preview.info) },
+			});
 	} else {
 		scanPlugins();
 		if (!preview.info.id.isEmpty()) {
 			if (const auto record = findRecord(preview.info.id);
 				record && !record->state.error.trimmed().isEmpty()) {
+				logEvent(
+					u"package"_q,
+					u"install-load-failed"_q,
+					QJsonObject{
+						{ u"targetPath"_q, targetPath },
+						{ u"plugin"_q, pluginInfoToJson(preview.info) },
+						{ u"loadError"_q, record->state.error.trimmed() },
+					});
 				if (error) {
 					*error = record->state.error.trimmed();
 				}
+				finishRecoveryOperation();
 				return false;
 			}
 		}
 	}
+	finishRecoveryOperation();
 	if (error) {
 		error->clear();
 	}
+	logEvent(
+		u"package"_q,
+		u"install-finished"_q,
+		QJsonObject{
+			{ u"targetPath"_q, targetPath },
+			{ u"targetSha256"_q, fileSha256(targetPath) },
+			{ u"plugin"_q, pluginInfoToJson(preview.info) },
+			{ u"safeMode"_q, safeModeEnabled() },
+		});
 	return true;
 }
 
@@ -549,10 +1271,17 @@ std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
 bool Manager::triggerAction(ActionId id) {
 	const auto it = _actions.find(id);
 	if (it == _actions.end()) {
+		logEvent(
+			u"action"_q,
+			u"missing"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+			});
 		return false;
 	}
 	try {
 		if (it->handlerWithContext) {
+			startRecoveryOperation(u"action"_q, { it->pluginId }, it->title);
 			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = it->pluginId;
 			auto context = ActionContext();
@@ -566,21 +1295,70 @@ bool Manager::triggerAction(ActionId id) {
 			if (!context.session) {
 				context.session = activeSession();
 			}
+			logEvent(
+				u"action"_q,
+				u"invoke-context"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(id) },
+					{ u"pluginId"_q, it->pluginId },
+					{ u"title"_q, it->title },
+					{ u"hasWindow"_q, context.window != nullptr },
+					{ u"hasSession"_q, context.session != nullptr },
+				});
 			it->handlerWithContext(context);
 			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"action"_q,
+				u"success"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(id) },
+					{ u"pluginId"_q, it->pluginId },
+					{ u"title"_q, it->title },
+				});
+			finishRecoveryOperation();
 			return true;
 		}
 		if (it->handler) {
+			startRecoveryOperation(u"action"_q, { it->pluginId }, it->title);
 			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = it->pluginId;
+			logEvent(
+				u"action"_q,
+				u"invoke"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(id) },
+					{ u"pluginId"_q, it->pluginId },
+					{ u"title"_q, it->title },
+				});
 			it->handler();
 			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"action"_q,
+				u"success"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(id) },
+					{ u"pluginId"_q, it->pluginId },
+					{ u"title"_q, it->title },
+				});
+			finishRecoveryOperation();
 			return true;
 		}
 	} catch (...) {
 		_registeringPluginId.clear();
+		logEvent(
+			u"action"_q,
+			u"failed"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"title"_q, it->title },
+				{ u"reason"_q, CurrentExceptionText() },
+			});
 		disablePlugin(it->pluginId, u"Action failed: "_q + CurrentExceptionText());
-		showToast(u"Plugin action failed and was disabled."_q);
+		showToast(PluginUiText(
+			u"Plugin action failed and was disabled."_q,
+			u"Действие плагина завершилось с ошибкой и было выключено."_q));
+		finishRecoveryOperation();
 	}
 	return false;
 }
@@ -588,43 +1366,113 @@ bool Manager::triggerAction(ActionId id) {
 bool Manager::openPanel(PanelId id) {
 	const auto it = _panels.find(id);
 	if (it == _panels.end()) {
+		logEvent(
+			u"panel"_q,
+			u"missing"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+			});
 		return false;
 	}
 	const auto window = activeWindow()
 		? activeWindow()
 		: Core::App().activePrimaryWindow();
 	if (!window) {
+		logEvent(
+			u"panel"_q,
+			u"no-active-window"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"title"_q, it->descriptor.title },
+			});
 		showToast(u"No active window to show panel."_q);
 		return false;
 	}
 	if (!it->handler) {
+		logEvent(
+			u"panel"_q,
+			u"missing-handler"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+			});
 		return false;
 	}
 	try {
+		startRecoveryOperation(u"panel"_q, { it->pluginId }, it->descriptor.title);
 		const auto previousPluginId = _registeringPluginId;
 		_registeringPluginId = it->pluginId;
+		logEvent(
+			u"panel"_q,
+			u"invoke"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"descriptor"_q, panelDescriptorToJson(it->descriptor) },
+			});
 		it->handler(window);
 		_registeringPluginId = previousPluginId;
+		logEvent(
+			u"panel"_q,
+			u"success"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"title"_q, it->descriptor.title },
+			});
+		finishRecoveryOperation();
 		return true;
 	} catch (...) {
 		_registeringPluginId.clear();
+		logEvent(
+			u"panel"_q,
+			u"failed"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"title"_q, it->descriptor.title },
+				{ u"reason"_q, CurrentExceptionText() },
+			});
 		disablePlugin(it->pluginId, u"Panel failed: "_q + CurrentExceptionText());
-		showToast(u"Plugin panel failed and was disabled."_q);
+		showToast(PluginUiText(
+			u"Plugin panel failed and was disabled."_q,
+			u"Панель плагина завершилась с ошибкой и была выключена."_q));
+		finishRecoveryOperation();
 		return false;
 	}
 }
 
 bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 	if (!_pluginIndexById.contains(pluginId)) {
+		logEvent(
+			u"plugin"_q,
+			u"toggle-missing"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"enabled"_q, enabled },
+			});
 		return false;
 	}
 	if (enabled) {
 		_disabled.remove(pluginId);
+		clearRecoveryDisabled(pluginId);
 	} else {
 		_disabled.insert(pluginId);
 	}
 	saveConfig();
+	logEvent(
+		u"plugin"_q,
+		u"toggle"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"enabled"_q, enabled },
+		});
+	startRecoveryOperation(
+		enabled ? u"enable"_q : u"disable"_q,
+		{ pluginId });
 	reload();
+	finishRecoveryOperation();
 	return true;
 }
 
@@ -661,19 +1509,53 @@ CommandResult Manager::interceptOutgoingText(
 				continue;
 			}
 			try {
+				startRecoveryOperation(
+					u"outgoing"_q,
+					{ entry.pluginId });
+				logEvent(
+					u"outgoing"_q,
+					u"invoke"_q,
+					QJsonObject{
+						{ u"id"_q, QString::number(entry.id) },
+						{ u"pluginId"_q, entry.pluginId },
+						{ u"priority"_q, entry.priority },
+						{ u"text"_q, context.text },
+						{ u"sendOptions"_q, sendOptionsToJson(context.options) },
+					});
 				const auto previousPluginId = _registeringPluginId;
 				_registeringPluginId = entry.pluginId;
 				const auto handled = entry.handler(context);
 				_registeringPluginId = previousPluginId;
+				logEvent(
+					u"outgoing"_q,
+					u"result"_q,
+					QJsonObject{
+						{ u"id"_q, QString::number(entry.id) },
+						{ u"pluginId"_q, entry.pluginId },
+						{ u"result"_q, commandResultToJson(handled) },
+					});
+				finishRecoveryOperation();
 				if (handled.action != CommandResult::Action::Continue) {
 					return handled;
 				}
 			} catch (...) {
 				_registeringPluginId.clear();
+				logEvent(
+					u"outgoing"_q,
+					u"failed"_q,
+					QJsonObject{
+						{ u"id"_q, QString::number(entry.id) },
+						{ u"pluginId"_q, entry.pluginId },
+						{ u"reason"_q, CurrentExceptionText() },
+						{ u"text"_q, context.text },
+					});
 				disablePlugin(
 					entry.pluginId,
 					u"Outgoing interceptor failed: "_q + CurrentExceptionText());
-				showToast(u"Plugin interceptor failed and was disabled."_q);
+				showToast(PluginUiText(
+					u"Plugin interceptor failed and was disabled."_q,
+					u"Перехватчик плагина завершился с ошибкой и был выключен."_q));
+				finishRecoveryOperation();
 			}
 		}
 	}
@@ -716,17 +1598,56 @@ CommandResult Manager::interceptOutgoingText(
 	};
 	if (entryIt->handler) {
 		try {
+			startRecoveryOperation(
+				u"command"_q,
+				{ entryIt->pluginId },
+				entryIt->descriptor.command);
 			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = entryIt->pluginId;
+			logEvent(
+				u"command"_q,
+				u"invoke"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(entryIt->id) },
+					{ u"pluginId"_q, entryIt->pluginId },
+					{ u"descriptor"_q, commandDescriptorToJson(entryIt->descriptor) },
+					{ u"text"_q, context.text },
+					{ u"commandText"_q, context.command },
+					{ u"args"_q, context.args },
+					{ u"sendOptions"_q, sendOptionsToJson(context.options) },
+				});
 			const auto handled = entryIt->handler(context);
 			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"command"_q,
+				u"result"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(entryIt->id) },
+					{ u"pluginId"_q, entryIt->pluginId },
+					{ u"result"_q, commandResultToJson(handled) },
+				});
+			finishRecoveryOperation();
 			return handled;
 		} catch (...) {
 			_registeringPluginId.clear();
+			logEvent(
+				u"command"_q,
+				u"failed"_q,
+				QJsonObject{
+					{ u"id"_q, QString::number(entryIt->id) },
+					{ u"pluginId"_q, entryIt->pluginId },
+					{ u"reason"_q, CurrentExceptionText() },
+					{ u"text"_q, context.text },
+					{ u"commandText"_q, context.command },
+					{ u"args"_q, context.args },
+				});
 			disablePlugin(
 				entryIt->pluginId,
 				u"Command handler failed: "_q + CurrentExceptionText());
-			showToast(u"Plugin command failed and was disabled."_q);
+			showToast(PluginUiText(
+				u"Plugin command failed and was disabled."_q,
+				u"Команда плагина завершилась с ошибкой и была выключена."_q));
+			finishRecoveryOperation();
 			return {
 				.action = CommandResult::Action::Cancel,
 			};
@@ -736,24 +1657,60 @@ CommandResult Manager::interceptOutgoingText(
 }
 
 void Manager::notifyWindowCreated(Window::Controller *window) {
+	logEvent(
+		u"window"_q,
+		u"created"_q,
+		QJsonObject{
+			{ u"hasWindow"_q, window != nullptr },
+		});
+	if (_recoveryNotice.active && !_recoveryNoticeShown) {
+		QTimer::singleShot(0, this, [=] {
+			showRecoveryNotice(window);
+		});
+	}
 	const auto handlers = _windowHandlers;
 	for (const auto &entry : handlers) {
 		if (!entry.handler) {
 			continue;
 		}
 		try {
+			startRecoveryOperation(u"window"_q, { entry.pluginId });
 			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = entry.pluginId;
+			logEvent(
+				u"window"_q,
+				u"invoke-callback"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"hasWindow"_q, window != nullptr },
+				});
 			entry.handler(window);
 			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"window"_q,
+				u"callback-success"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+				});
+			finishRecoveryOperation();
 		} catch (...) {
 			_registeringPluginId.clear();
+			logEvent(
+				u"window"_q,
+				u"callback-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"reason"_q, CurrentExceptionText() },
+				});
 			if (!entry.pluginId.isEmpty()) {
 				disablePlugin(
 					entry.pluginId,
 					u"Window callback failed: "_q + CurrentExceptionText());
 			}
-			showToast(u"Plugin window callback failed."_q);
+			showToast(PluginUiText(
+				u"Plugin window callback failed."_q,
+				u"Оконный callback плагина завершился с ошибкой."_q));
+			finishRecoveryOperation();
 		}
 	}
 }
@@ -771,10 +1728,26 @@ CommandId Manager::registerCommand(
 	CommandDescriptor descriptor,
 	CommandHandler handler) {
 	if (!hasPlugin(pluginId) || !handler) {
+		logEvent(
+			u"registry"_q,
+			u"register-command-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
 		return 0;
 	}
 	const auto key = commandKey(descriptor.command);
 	if (!IsValidCommandKey(key) || _commandIdByName.contains(key)) {
+		logEvent(
+			u"registry"_q,
+			u"register-command-invalid"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"descriptor"_q, commandDescriptorToJson(descriptor) },
+				{ u"normalizedKey"_q, key },
+				{ u"duplicate"_q, _commandIdByName.contains(key) },
+			});
 		return 0;
 	}
 	descriptor.command = '/' + key;
@@ -790,6 +1763,14 @@ CommandId Manager::registerCommand(
 	if (auto record = findRecord(pluginId)) {
 		record->commandIds.push_back(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"register-command"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"descriptor"_q, commandDescriptorToJson(_commands.value(id).descriptor) },
+		});
 	return id;
 }
 
@@ -812,6 +1793,13 @@ void Manager::unregisterCommand(CommandId id) {
 	if (auto record = findRecord(pluginId)) {
 		record->commandIds.removeAll(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-command"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
 }
 
 ActionId Manager::registerAction(
@@ -820,6 +1808,14 @@ ActionId Manager::registerAction(
 		const QString &description,
 		ActionHandler handler) {
 	if (!hasPlugin(pluginId) || !handler || title.trimmed().isEmpty()) {
+		logEvent(
+			u"registry"_q,
+			u"register-action-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"title"_q, title },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
 		return 0;
 	}
 	const auto id = _nextActionId++;
@@ -834,6 +1830,16 @@ ActionId Manager::registerAction(
 	if (auto record = findRecord(pluginId)) {
 		record->actionIds.push_back(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"register-action"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"title"_q, title },
+			{ u"description"_q, description },
+			{ u"contextAware"_q, false },
+		});
 	return id;
 }
 
@@ -854,6 +1860,13 @@ void Manager::unregisterAction(ActionId id) {
 	if (auto record = findRecord(pluginId)) {
 		record->actionIds.removeAll(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-action"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
 }
 
 ActionId Manager::registerActionWithContext(
@@ -862,6 +1875,14 @@ ActionId Manager::registerActionWithContext(
 		const QString &description,
 		ActionWithContextHandler handler) {
 	if (!hasPlugin(pluginId) || !handler || title.trimmed().isEmpty()) {
+		logEvent(
+			u"registry"_q,
+			u"register-action-context-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"title"_q, title },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
 		return 0;
 	}
 	const auto id = _nextActionId++;
@@ -877,6 +1898,16 @@ ActionId Manager::registerActionWithContext(
 	if (auto record = findRecord(pluginId)) {
 		record->actionIds.push_back(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"register-action"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"title"_q, title },
+			{ u"description"_q, description },
+			{ u"contextAware"_q, true },
+		});
 	return id;
 }
 
@@ -885,6 +1916,14 @@ OutgoingInterceptorId Manager::registerOutgoingTextInterceptor(
 		OutgoingTextHandler handler,
 		int priority) {
 	if (!hasPlugin(pluginId) || !handler) {
+		logEvent(
+			u"registry"_q,
+			u"register-outgoing-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"priority"_q, priority },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
 		return 0;
 	}
 	const auto id = _nextOutgoingInterceptorId++;
@@ -898,6 +1937,14 @@ OutgoingInterceptorId Manager::registerOutgoingTextInterceptor(
 	if (auto record = findRecord(pluginId)) {
 		record->outgoingInterceptorIds.push_back(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"register-outgoing"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"priority"_q, priority },
+		});
 	return id;
 }
 
@@ -918,6 +1965,13 @@ void Manager::unregisterOutgoingTextInterceptor(OutgoingInterceptorId id) {
 	if (auto record = findRecord(pluginId)) {
 		record->outgoingInterceptorIds.removeAll(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-outgoing"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
 }
 
 MessageObserverId Manager::registerMessageObserver(
@@ -925,6 +1979,13 @@ MessageObserverId Manager::registerMessageObserver(
 		MessageObserverOptions options,
 		MessageEventHandler handler) {
 	if (!hasPlugin(pluginId) || !handler) {
+		logEvent(
+			u"registry"_q,
+			u"register-observer-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
 		return 0;
 	}
 	const auto id = _nextMessageObserverId++;
@@ -938,6 +1999,18 @@ MessageObserverId Manager::registerMessageObserver(
 	if (auto record = findRecord(pluginId)) {
 		record->messageObserverIds.push_back(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"register-observer"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"newMessages"_q, options.newMessages },
+			{ u"editedMessages"_q, options.editedMessages },
+			{ u"deletedMessages"_q, options.deletedMessages },
+			{ u"incoming"_q, options.incoming },
+			{ u"outgoing"_q, options.outgoing },
+		});
 	updateMessageObserverSubscriptions();
 	return id;
 }
@@ -959,6 +2032,13 @@ void Manager::unregisterMessageObserver(MessageObserverId id) {
 	if (auto record = findRecord(pluginId)) {
 		record->messageObserverIds.removeAll(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-observer"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
 	updateMessageObserverSubscriptions();
 }
 
@@ -967,6 +2047,14 @@ PanelId Manager::registerPanel(
 		PanelDescriptor descriptor,
 		PanelHandler handler) {
 	if (!hasPlugin(pluginId) || !handler || descriptor.title.trimmed().isEmpty()) {
+		logEvent(
+			u"registry"_q,
+			u"register-panel-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"descriptor"_q, panelDescriptorToJson(descriptor) },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
 		return 0;
 	}
 	const auto id = _nextPanelId++;
@@ -980,6 +2068,14 @@ PanelId Manager::registerPanel(
 	if (auto record = findRecord(pluginId)) {
 		record->panelIds.push_back(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"register-panel"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"descriptor"_q, panelDescriptorToJson(_panels.value(id).descriptor) },
+		});
 	return id;
 }
 
@@ -1000,9 +2096,22 @@ void Manager::unregisterPanel(PanelId id) {
 	if (auto record = findRecord(pluginId)) {
 		record->panelIds.removeAll(id);
 	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-panel"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
 }
 
 void Manager::showToast(const QString &text) {
+	logEvent(
+		u"ui"_q,
+		u"toast"_q,
+		QJsonObject{
+			{ u"text"_q, text },
+		});
 	if (const auto window = Core::App().activeWindow()) {
 		window->showToast(text);
 		return;
@@ -1031,6 +2140,12 @@ void Manager::onWindowCreated(
 			.pluginId = _registeringPluginId,
 			.handler = std::move(handler),
 		});
+		logEvent(
+			u"registry"_q,
+			u"register-window-handler"_q,
+			QJsonObject{
+				{ u"pluginId"_q, _registeringPluginId },
+			});
 	}
 }
 
@@ -1078,6 +2193,12 @@ void Manager::onSessionActivated(
 			.pluginId = _registeringPluginId,
 			.handler = std::move(handler),
 		});
+		logEvent(
+			u"registry"_q,
+			u"register-session-handler"_q,
+			QJsonObject{
+				{ u"pluginId"_q, _registeringPluginId },
+			});
 	}
 }
 
@@ -1085,10 +2206,22 @@ void Manager::loadConfig() {
 	_disabled.clear();
 	QFile file(_configPath);
 	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+		logEvent(
+			u"config"_q,
+			u"load-empty"_q,
+			QJsonObject{
+				{ u"path"_q, _configPath },
+			});
 		return;
 	}
 	const auto document = QJsonDocument::fromJson(file.readAll());
 	if (!document.isObject()) {
+		logEvent(
+			u"config"_q,
+			u"load-invalid-json"_q,
+			QJsonObject{
+				{ u"path"_q, _configPath },
+			});
 		return;
 	}
 	const auto array = document.object().value(u"disabled"_q).toArray();
@@ -1097,6 +2230,13 @@ void Manager::loadConfig() {
 			_disabled.insert(value.toString());
 		}
 	}
+	logEvent(
+		u"config"_q,
+		u"loaded"_q,
+		QJsonObject{
+			{ u"path"_q, _configPath },
+			{ u"disabled"_q, JsonArrayFromStrings(_disabled.values()) },
+		});
 }
 
 void Manager::saveConfig() const {
@@ -1115,41 +2255,452 @@ void Manager::saveConfig() const {
 	if (file.open(QIODevice::WriteOnly)) {
 		file.write(document.toJson(QJsonDocument::Indented));
 	}
+	logEvent(
+		u"config"_q,
+		u"saved"_q,
+		QJsonObject{
+			{ u"path"_q, _configPath },
+			{ u"disabled"_q, JsonArrayFromStrings(list) },
+		});
+}
+
+void Manager::appendTraceLine(const QByteArray &line) const {
+	writeLogRecord(_tracePath, line, true);
+}
+
+void Manager::writeLogRecord(
+		const QString &path,
+		const QByteArray &record,
+		bool jsonLog) const {
+	if (path.isEmpty() || record.isEmpty()) {
+		return;
+	}
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	const auto rotated = rotateLogFileIfNeeded(path, record.size(), jsonLog);
+	QFile file(path);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+		return;
+	}
+	if (rotated) {
+		const auto rotationEvent = makeLogEvent(
+			u"log"_q,
+			u"rotated"_q,
+			QJsonObject{
+				{ u"target"_q, QFileInfo(path).fileName() },
+				{ u"json"_q, jsonLog },
+				{ u"reason"_q, u"max-size"_q },
+				{ u"maxBytes"_q, QString::number(kMaxPluginLogBytes) },
+			});
+		const auto rotationLine = jsonLog
+			? (QJsonDocument(rotationEvent).toJson(QJsonDocument::Compact) + '\n')
+			: ((rotationEvent.value(u"timestampUtc"_q).toString()
+				+ u" "_q
+				+ formatLogEventText(rotationEvent)
+				+ u"\n"_q).toUtf8());
+		file.write(rotationLine);
+	}
+	file.write(record);
+}
+
+bool Manager::rotateLogFileIfNeeded(
+		const QString &path,
+		qsizetype recordSize,
+		bool jsonLog) const {
+	Q_UNUSED(jsonLog);
+	if (path.isEmpty()) {
+		return false;
+	}
+	const auto info = QFileInfo(path);
+	if (!info.exists()) {
+		return false;
+	}
+	if ((info.size() + recordSize) <= kMaxPluginLogBytes) {
+		return false;
+	}
+	const auto rotatedName = [&](int index) {
+		return path + u'.' + QString::number(index);
+	};
+	for (auto index = kMaxPluginLogBackups; index >= 1; --index) {
+		const auto source = (index == 1) ? path : rotatedName(index - 1);
+		const auto target = rotatedName(index);
+		if (!QFileInfo::exists(source)) {
+			continue;
+		}
+		if (QFileInfo::exists(target)) {
+			QFile::remove(target);
+		}
+		QFile::rename(source, target);
+	}
+	return true;
 }
 
 void Manager::appendLogLine(const QString &line) const {
 	if (_logPath.isEmpty()) {
 		return;
 	}
-	QDir().mkpath(QFileInfo(_logPath).absolutePath());
-	QFile file(_logPath);
-	if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+	const auto stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+	writeLogRecord(
+		_logPath,
+		(stamp + u" "_q + line.trimmed() + u"\n"_q).toUtf8(),
+		false);
+}
+
+QJsonObject Manager::makeLogEvent(
+		QString phase,
+		QString event,
+		QJsonObject details) const {
+	auto result = QJsonObject{
+		{ u"timestampUtc"_q, DateTimeToIsoUtc(QDateTime::currentDateTimeUtc()) },
+		{ u"pid"_q, int(QCoreApplication::applicationPid()) },
+		{ u"phase"_q, std::move(phase) },
+		{ u"event"_q, std::move(event) },
+		{ u"language"_q, UseRussianPluginUi() ? u"ru"_q : u"en"_q },
+	};
+	if (_activeSession) {
+		result.insert(
+			u"sessionUniqueId"_q,
+			QString::number(_activeSession->uniqueId()));
+	}
+	if (!_traceOperations.isEmpty()) {
+		const auto &operation = _traceOperations.back();
+		result.insert(u"operationId"_q, QString::number(operation.id));
+		result.insert(u"operationKind"_q, operation.kind);
+		result.insert(u"operationDepth"_q, _traceOperations.size());
+		if (!operation.pluginIds.isEmpty()) {
+			result.insert(
+				u"operationPluginIds"_q,
+				JsonArrayFromStrings(operation.pluginIds));
+		}
+		if (!operation.details.isEmpty()) {
+			result.insert(u"operationDetails"_q, operation.details);
+		}
+	}
+	MergeJsonObject(result, details);
+	return result;
+}
+
+QString Manager::formatLogEventText(const QJsonObject &event) const {
+	auto parts = QStringList();
+	if (const auto phase = event.value(u"phase"_q).toString(); !phase.isEmpty()) {
+		parts.push_back(u"phase="_q + JsonValueToText(phase));
+	}
+	if (const auto name = event.value(u"event"_q).toString(); !name.isEmpty()) {
+		parts.push_back(u"event="_q + JsonValueToText(name));
+	}
+	for (const auto &key : SortedJsonKeys(event)) {
+		if (key == u"timestampUtc"_q || key == u"phase"_q || key == u"event"_q) {
+			continue;
+		}
+		parts.push_back(key + u"="_q + JsonValueToText(event.value(key)));
+	}
+	return parts.join(u" "_q);
+}
+
+void Manager::logEvent(
+		QString phase,
+		QString event,
+		QJsonObject details) const {
+	const auto payload = makeLogEvent(
+		std::move(phase),
+		std::move(event),
+		std::move(details));
+	appendLogLine(formatLogEventText(payload));
+	appendTraceLine(QJsonDocument(payload).toJson(QJsonDocument::Compact) + '\n');
+}
+
+void Manager::logOperationStart(
+		const QString &kind,
+		const QStringList &pluginIds,
+		const QString &details) {
+	auto operation = TraceOperationState();
+	operation.id = _nextTraceOperationId++;
+	operation.kind = kind;
+	operation.pluginIds = pluginIds;
+	operation.details = details;
+	operation.startedAt = QDateTime::currentDateTimeUtc();
+	_traceOperations.push_back(operation);
+	logEvent(
+		u"operation"_q,
+		u"start"_q,
+		QJsonObject{
+			{ u"kind"_q, kind },
+			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+			{ u"details"_q, details },
+			{ u"startedAt"_q, DateTimeToIsoUtc(operation.startedAt) },
+		});
+}
+
+void Manager::logOperationFinish(
+		const QString &result,
+		const QString &reason) {
+	if (_traceOperations.isEmpty()) {
 		return;
 	}
-	const auto stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-	file.write((stamp + u" "_q + line.trimmed() + u"\n"_q).toUtf8());
+	const auto operation = _traceOperations.back();
+	_traceOperations.pop_back();
+	const auto finishedAt = QDateTime::currentDateTimeUtc();
+	logEvent(
+		u"operation"_q,
+		u"finish"_q,
+		QJsonObject{
+			{ u"operationId"_q, QString::number(operation.id) },
+			{ u"kind"_q, operation.kind },
+			{ u"pluginIds"_q, JsonArrayFromStrings(operation.pluginIds) },
+			{ u"details"_q, operation.details },
+			{ u"startedAt"_q, DateTimeToIsoUtc(operation.startedAt) },
+			{ u"finishedAt"_q, DateTimeToIsoUtc(finishedAt) },
+			{ u"durationMs"_q, QString::number(operation.startedAt.msecsTo(finishedAt)) },
+			{ u"result"_q, result.isEmpty() ? u"ok"_q : result },
+			{ u"reason"_q, reason },
+		});
+}
+
+quint64 Manager::currentOperationId() const {
+	return _traceOperations.isEmpty() ? 0 : _traceOperations.back().id;
+}
+
+QJsonObject Manager::pluginInfoToJson(const PluginInfo &info) const {
+	return QJsonObject{
+		{ u"id"_q, info.id },
+		{ u"name"_q, info.name },
+		{ u"version"_q, info.version },
+		{ u"author"_q, info.author },
+		{ u"description"_q, info.description },
+		{ u"website"_q, info.website },
+	};
+}
+
+QJsonObject Manager::pluginStateToJson(const PluginState &state) const {
+	auto result = pluginInfoToJson(state.info);
+	result.insert(u"path"_q, state.path);
+	result.insert(u"enabled"_q, state.enabled);
+	result.insert(u"loaded"_q, state.loaded);
+	result.insert(u"error"_q, state.error);
+	result.insert(u"disabledByRecovery"_q, state.disabledByRecovery);
+	result.insert(u"recoverySuspected"_q, state.recoverySuspected);
+	result.insert(u"recoveryReason"_q, state.recoveryReason);
+	return result;
+}
+
+QJsonObject Manager::commandDescriptorToJson(
+		const CommandDescriptor &descriptor) const {
+	return QJsonObject{
+		{ u"command"_q, descriptor.command },
+		{ u"description"_q, descriptor.description },
+		{ u"usage"_q, descriptor.usage },
+	};
+}
+
+QJsonObject Manager::panelDescriptorToJson(
+		const PanelDescriptor &descriptor) const {
+	return QJsonObject{
+		{ u"title"_q, descriptor.title },
+		{ u"description"_q, descriptor.description },
+	};
+}
+
+QJsonObject Manager::sendOptionsToJson(
+		const Api::SendOptions *options) const {
+	if (!options) {
+		return {};
+	}
+	return QJsonObject{
+		{ u"price"_q, QString::number(options->price) },
+		{ u"scheduled"_q, QString::number(options->scheduled) },
+		{ u"scheduleRepeatPeriod"_q, QString::number(options->scheduleRepeatPeriod) },
+		{ u"shortcutId"_q, QString::number(options->shortcutId) },
+		{ u"effectId"_q, QString::number(options->effectId) },
+		{ u"stakeNanoTon"_q, QString::number(options->stakeNanoTon) },
+		{ u"starsApproved"_q, options->starsApproved },
+		{ u"silent"_q, options->silent },
+		{ u"handleSupportSwitch"_q, options->handleSupportSwitch },
+		{ u"invertCaption"_q, options->invertCaption },
+		{ u"hideViaBot"_q, options->hideViaBot },
+		{ u"mediaSpoiler"_q, options->mediaSpoiler },
+		{ u"ttlSeconds"_q, QString::number(options->ttlSeconds) },
+		{ u"hasSendAs"_q, options->sendAs != nullptr },
+		{ u"stakeSeedHashHex"_q, QString::fromLatin1(options->stakeSeedHash.toHex()) },
+	};
+}
+
+QJsonObject Manager::binaryInfoToJson(const BinaryInfo &info) const {
+	return QJsonObject{
+		{ u"structVersion"_q, info.structVersion },
+		{ u"apiVersion"_q, info.apiVersion },
+		{ u"pointerSize"_q, info.pointerSize },
+		{ u"qtMajor"_q, info.qtMajor },
+		{ u"qtMinor"_q, info.qtMinor },
+		{ u"compiler"_q, QString::fromLatin1(info.compiler ? info.compiler : "unknown") },
+		{ u"compilerVersion"_q, info.compilerVersion },
+		{ u"platform"_q, QString::fromLatin1(info.platform ? info.platform : "unknown") },
+	};
+}
+
+QJsonObject Manager::fileInfoToJson(const QFileInfo &info) const {
+	return QJsonObject{
+		{ u"fileName"_q, info.fileName() },
+		{ u"path"_q, info.absoluteFilePath() },
+		{ u"canonicalPath"_q, info.canonicalFilePath() },
+		{ u"exists"_q, info.exists() },
+		{ u"size"_q, QString::number(info.size()) },
+		{ u"lastModifiedUtc"_q, DateTimeToIsoUtc(info.lastModified()) },
+	};
+}
+
+QJsonObject Manager::messageContextToJson(
+		const MessageEventContext &context) const {
+	auto result = QJsonObject{
+		{ u"event"_q, MessageEventName(context.event) },
+		{ u"hasSession"_q, context.session != nullptr },
+		{ u"hasHistory"_q, context.history != nullptr },
+		{ u"hasItem"_q, context.item != nullptr },
+	};
+	if (context.item) {
+		const auto fullId = context.item->fullId();
+		result.insert(u"peerId"_q, QString::number(fullId.peer.value));
+		result.insert(u"msgId"_q, QString::number(fullId.msg.bare));
+		result.insert(u"outgoing"_q, context.item->out());
+		result.insert(u"text"_q, context.item->originalText().text);
+	}
+	return result;
+}
+
+QJsonObject Manager::commandResultToJson(const CommandResult &result) const {
+	return QJsonObject{
+		{ u"action"_q, CommandResultActionName(result.action) },
+		{ u"replacementText"_q, result.replacementText },
+	};
+}
+
+QJsonObject Manager::registrationSummaryToJson(
+		const PluginRecord &record) const {
+	auto windowHandlers = 0;
+	for (const auto &entry : _windowHandlers) {
+		if (entry.pluginId == record.state.info.id) {
+			++windowHandlers;
+		}
+	}
+	auto sessionHandlers = 0;
+	for (const auto &entry : _sessionHandlers) {
+		if (entry.pluginId == record.state.info.id) {
+			++sessionHandlers;
+		}
+	}
+	return QJsonObject{
+		{ u"commands"_q, record.commandIds.size() },
+		{ u"actions"_q, record.actionIds.size() },
+		{ u"panels"_q, record.panelIds.size() },
+		{ u"outgoingInterceptors"_q, record.outgoingInterceptorIds.size() },
+		{ u"messageObservers"_q, record.messageObserverIds.size() },
+		{ u"windowHandlers"_q, windowHandlers },
+		{ u"sessionHandlers"_q, sessionHandlers },
+	};
+}
+
+QString Manager::fileSha256(const QString &path) const {
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return QString();
+	}
+	return QString::fromLatin1(
+		QCryptographicHash::hash(
+			file.readAll(),
+			QCryptographicHash::Sha256).toHex());
 }
 
 void Manager::logLoadFailure(const QString &path, const QString &reason) const {
-	appendLogLine(
-		u"[load-failed] "_q
-		+ QFileInfo(path).fileName()
-		+ u" ("_q
-		+ path
-		+ u"): "_q
-		+ reason);
+	logEvent(
+		u"load"_q,
+		u"failed"_q,
+		QJsonObject{
+			{ u"reason"_q, reason },
+			{ u"sha256"_q, fileSha256(path) },
+			{ u"file"_q, fileInfoToJson(QFileInfo(path)) },
+		});
 }
 
-void Manager::scanPlugins() {
+void Manager::scanPlugins(bool metadataOnly) {
 	QDir().mkpath(_pluginsPath);
 	auto dir = QDir(_pluginsPath);
 	const auto files = dir.entryInfoList(
 		{ u"*.tgd"_q },
 		QDir::Files,
 		QDir::Name | QDir::IgnoreCase);
+	logEvent(
+		u"scan"_q,
+		u"start"_q,
+		QJsonObject{
+			{ u"metadataOnly"_q, metadataOnly },
+			{ u"pluginsPath"_q, _pluginsPath },
+			{ u"count"_q, files.size() },
+		});
 	for (const auto &info : files) {
-		loadPlugin(info.absoluteFilePath());
+		logEvent(
+			u"scan"_q,
+			u"discovered-file"_q,
+			QJsonObject{
+				{ u"metadataOnly"_q, metadataOnly },
+				{ u"file"_q, fileInfoToJson(info) },
+				{ u"sha256"_q, fileSha256(info.absoluteFilePath()) },
+			});
+		if (metadataOnly) {
+			loadPluginMetadataOnly(info.absoluteFilePath());
+		} else {
+			loadPlugin(info.absoluteFilePath());
+		}
 	}
+	logEvent(
+		u"scan"_q,
+		u"finish"_q,
+		QJsonObject{
+			{ u"metadataOnly"_q, metadataOnly },
+			{ u"loadedPlugins"_q, int(_plugins.size()) },
+		});
+}
+
+void Manager::loadPluginMetadataOnly(const QString &path) {
+	auto record = PluginRecord();
+	record.state.path = path;
+	record.state.enabled = true;
+	record.state.loaded = false;
+	record.state.info.id = PluginBaseName(path);
+	record.state.info.name = record.state.info.id;
+
+	auto previewInfo = PluginInfo();
+	auto previewIcon = QString();
+	if (ReadPreviewManifest(path, &previewInfo, &previewIcon)) {
+		MergePluginInfo(record.state.info, previewInfo);
+		logEvent(
+			u"plugin"_q,
+			u"metadata-preview"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+				{ u"icon"_q, previewIcon },
+				{ u"plugin"_q, pluginInfoToJson(previewInfo) },
+			});
+	} else {
+		logEvent(
+			u"plugin"_q,
+			u"metadata-preview-missing"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
+	}
+	record.state.info.id = record.state.info.id.trimmed();
+	if (record.state.info.name.isEmpty()) {
+		record.state.info.name = record.state.info.id;
+	}
+	record.state.enabled = !_disabled.contains(record.state.info.id);
+	syncRecoveryFlags(record.state);
+	const auto index = int(_plugins.size());
+	_plugins.push_back(std::move(record));
+	_pluginIndexById.insert(_plugins.back().state.info.id, index);
+	logEvent(
+		u"plugin"_q,
+		u"metadata-loaded"_q,
+		QJsonObject{
+			{ u"state"_q, pluginStateToJson(_plugins.back().state) },
+		});
 }
 
 void Manager::loadPlugin(const QString &path) {
@@ -1159,26 +2710,66 @@ void Manager::loadPlugin(const QString &path) {
 	record.state.loaded = false;
 	record.state.info.id = PluginBaseName(path);
 	record.state.info.name = record.state.info.id;
+	logEvent(
+		u"load"_q,
+		u"begin"_q,
+		QJsonObject{
+			{ u"path"_q, path },
+			{ u"file"_q, fileInfoToJson(QFileInfo(path)) },
+			{ u"sha256"_q, fileSha256(path) },
+			{ u"baseName"_q, record.state.info.id },
+		});
+
+	startRecoveryOperation(u"load"_q, { record.state.info.id }, path);
 
 	auto library = std::make_unique<QLibrary>(path);
 	if (!library->load()) {
 		record.state.error = library->errorString();
 		logLoadFailure(path, record.state.error);
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 	const auto previewInfo = reinterpret_cast<PreviewInfoFn>(
 		library->resolve(kPreviewInfoName));
 	if (previewInfo) {
+		logEvent(
+			u"load"_q,
+			u"preview-export-found"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
 		if (const auto preview = previewInfo();
 			preview
 			&& preview->structVersion == kPreviewInfoVersion
 			&& preview->apiVersion == kApiVersion) {
 			MergePluginInfo(record.state.info, PluginInfoFromPreview(*preview));
+			logEvent(
+				u"load"_q,
+				u"preview-export-read"_q,
+				QJsonObject{
+					{ u"path"_q, path },
+					{ u"plugin"_q, pluginInfoToJson(record.state.info) },
+					{ u"icon"_q, PreviewIconFromInfo(*preview) },
+				});
 			if (record.state.info.name.isEmpty()) {
 				record.state.info.name = record.state.info.id;
 			}
+		} else {
+			logEvent(
+				u"load"_q,
+				u"preview-export-invalid"_q,
+				QJsonObject{
+					{ u"path"_q, path },
+				});
 		}
+	} else {
+		logEvent(
+			u"load"_q,
+			u"preview-export-missing"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
 	}
 	const auto entry = reinterpret_cast<EntryFn>(
 		library->resolve(kEntryName));
@@ -1189,6 +2780,7 @@ void Manager::loadPlugin(const QString &path) {
 		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 	const auto info = binaryInfo();
@@ -1197,32 +2789,67 @@ void Manager::loadPlugin(const QString &path) {
 		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
+	logEvent(
+		u"load"_q,
+		u"binary-info"_q,
+		QJsonObject{
+			{ u"path"_q, path },
+			{ u"binary"_q, binaryInfoToJson(*info) },
+			{ u"hostBinary"_q, binaryInfoToJson(kBinaryInfo) },
+		});
 	if (const auto mismatch = DescribeBinaryInfoMismatch(*info);
 		!mismatch.isEmpty()) {
 		record.state.error = mismatch;
+		logEvent(
+			u"load"_q,
+			u"abi-mismatch"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+				{ u"reason"_q, mismatch },
+				{ u"field"_q, DescribeBinaryInfoMismatchField(*info) },
+				{ u"pluginBinary"_q, binaryInfoToJson(*info) },
+				{ u"hostBinary"_q, binaryInfoToJson(kBinaryInfo) },
+			});
 		logLoadFailure(path, mismatch + u" ["_q + DescribeBinaryInfo(*info) + u"]"_q);
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 	if (!entry) {
 		record.state.error = u"Missing TgdPluginEntry export."_q;
+		logEvent(
+			u"load"_q,
+			u"entry-export-missing"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
 		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 
 	auto instance = std::unique_ptr<Plugin>();
 	try {
+		logEvent(
+			u"load"_q,
+			u"entry-call"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+				{ u"apiVersion"_q, kApiVersion },
+			});
 		instance.reset(entry(this, kApiVersion));
 	} catch (...) {
 		record.state.error = u"Plugin entry failed: "_q + CurrentExceptionText();
 		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 	if (!instance) {
@@ -1230,10 +2857,17 @@ void Manager::loadPlugin(const QString &path) {
 		logLoadFailure(path, record.state.error);
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 
 	try {
+		logEvent(
+			u"load"_q,
+			u"info-call"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
 		record.state.info = instance->info();
 	} catch (...) {
 		record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
@@ -1241,6 +2875,7 @@ void Manager::loadPlugin(const QString &path) {
 		instance.reset();
 		library->unload();
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 	record.state.info.id = record.state.info.id.trimmed();
@@ -1263,6 +2898,7 @@ void Manager::loadPlugin(const QString &path) {
 		library->unload();
 		record.state.loaded = false;
 		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
 		return;
 	}
 
@@ -1270,9 +2906,21 @@ void Manager::loadPlugin(const QString &path) {
 		record.library = std::move(library);
 		record.instance = std::move(instance);
 		record.state.loaded = true;
+		logEvent(
+			u"load"_q,
+			u"library-loaded"_q,
+			QJsonObject{
+				{ u"state"_q, pluginStateToJson(record.state) },
+			});
 	} else {
 		instance.reset();
 		library->unload();
+		logEvent(
+			u"load"_q,
+			u"library-not-enabled"_q,
+			QJsonObject{
+				{ u"state"_q, pluginStateToJson(record.state) },
+			});
 	}
 
 	const auto index = int(_plugins.size());
@@ -1280,35 +2928,84 @@ void Manager::loadPlugin(const QString &path) {
 	_pluginIndexById.insert(_plugins.back().state.info.id, index);
 
 	if (_plugins.back().state.enabled) {
+		startRecoveryOperation(
+			u"onload"_q,
+			{ _plugins.back().state.info.id },
+			_plugins.back().state.path);
 		_registeringPluginId = _plugins.back().state.info.id;
-		try {
-			_plugins.back().instance->onLoad();
+			try {
+				logEvent(
+					u"load"_q,
+					u"onload-call"_q,
+					QJsonObject{
+						{ u"pluginId"_q, _plugins.back().state.info.id },
+						{ u"path"_q, _plugins.back().state.path },
+					});
+				_plugins.back().instance->onLoad();
 		} catch (...) {
 			const auto pluginId = _plugins.back().state.info.id;
 			_registeringPluginId.clear();
 			disablePlugin(
 				pluginId,
 				u"onLoad failed: "_q + CurrentExceptionText());
-			showToast(u"Plugin failed to load and was disabled."_q);
+			showToast(PluginUiText(
+				u"Plugin failed to load and was disabled."_q,
+				u"Плагин упал при загрузке и был выключен."_q));
+			finishRecoveryOperation();
 			return;
-		}
-		_registeringPluginId.clear();
-	} else {
-		_plugins.back().instance.reset();
-		_plugins.back().library.reset();
+			}
+			_registeringPluginId.clear();
+			logEvent(
+				u"load"_q,
+				u"success"_q,
+				QJsonObject{
+					{ u"state"_q, pluginStateToJson(_plugins.back().state) },
+					{ u"registrations"_q, registrationSummaryToJson(_plugins.back()) },
+				});
+			finishRecoveryOperation();
+		} else {
+			_plugins.back().instance.reset();
+			_plugins.back().library.reset();
 	}
+	finishRecoveryOperation();
 }
 
 void Manager::unloadAll() {
+	logEvent(
+		u"unload"_q,
+		u"begin"_q,
+		QJsonObject{
+			{ u"count"_q, int(_plugins.size()) },
+		});
 	for (auto &plugin : _plugins) {
 		if (plugin.state.loaded && plugin.instance) {
+			startRecoveryOperation(
+				u"unload"_q,
+				{ plugin.state.info.id },
+				plugin.state.path);
 			_registeringPluginId = plugin.state.info.id;
 			try {
+				logEvent(
+					u"unload"_q,
+					u"onunload-call"_q,
+					QJsonObject{
+						{ u"pluginId"_q, plugin.state.info.id },
+						{ u"path"_q, plugin.state.path },
+						{ u"registrations"_q, registrationSummaryToJson(plugin) },
+					});
 				plugin.instance->onUnload();
 			} catch (...) {
 				plugin.state.error = u"onUnload failed: "_q + CurrentExceptionText();
+				logEvent(
+					u"unload"_q,
+					u"onunload-failed"_q,
+					QJsonObject{
+						{ u"pluginId"_q, plugin.state.info.id },
+						{ u"reason"_q, plugin.state.error },
+					});
 			}
 			_registeringPluginId.clear();
+			finishRecoveryOperation();
 		}
 	}
 	_commands.clear();
@@ -1339,13 +3036,14 @@ void Manager::unloadAll() {
 		plugin.messageObserverIds.clear();
 		plugin.state.loaded = false;
 		plugin.instance.reset();
-		if (plugin.library) {
-			plugin.library->unload();
-			plugin.library.reset();
+			if (plugin.library) {
+				plugin.library->unload();
+				plugin.library.reset();
+			}
 		}
-	}
 	_plugins.clear();
 	_pluginIndexById.clear();
+	logEvent(u"unload"_q, u"finish"_q);
 }
 
 Manager::PluginRecord *Manager::findRecord(const QString &pluginId) {
@@ -1442,6 +3140,14 @@ bool Manager::hasPlugin(const QString &pluginId) const {
 }
 
 void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
+	disablePlugin(pluginId, reason, false, QString());
+}
+
+void Manager::disablePlugin(
+		const QString &pluginId,
+		const QString &reason,
+		bool disabledByRecovery,
+		const QString &recoveryReason) {
 	auto *record = findRecord(pluginId);
 	if (!record) {
 		return;
@@ -1452,11 +3158,25 @@ void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
 		+ (reason.trimmed().isEmpty()
 			? QString()
 			: (u": "_q + reason.trimmed())));
+	logEvent(
+		u"plugin"_q,
+		u"disabled"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"reason"_q, reason.trimmed() },
+			{ u"disabledByRecovery"_q, disabledByRecovery },
+			{ u"recoveryReason"_q, recoveryReason },
+			{ u"stateBefore"_q, pluginStateToJson(record->state) },
+			{ u"registrationsBefore"_q, registrationSummaryToJson(*record) },
+		});
 	record->state.enabled = false;
 	record->state.loaded = false;
 	if (!reason.trimmed().isEmpty()) {
 		record->state.error = reason.trimmed();
 	}
+	record->state.disabledByRecovery = disabledByRecovery;
+	record->state.recoverySuspected = disabledByRecovery;
+	record->state.recoveryReason = recoveryReason;
 	unregisterPluginCommands(pluginId);
 	unregisterPluginActions(pluginId);
 	unregisterPluginPanels(pluginId);
@@ -1479,12 +3199,32 @@ void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
 		record->library.reset();
 	}
 	_disabled.insert(pluginId);
+	if (disabledByRecovery) {
+		_disabledByRecovery.insert(pluginId);
+	} else {
+		_disabledByRecovery.remove(pluginId);
+	}
 	saveConfig();
+	saveRecoveryState();
+	logEvent(
+		u"plugin"_q,
+		u"disabled-finished"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"stateAfter"_q, pluginStateToJson(record->state) },
+		});
 }
 
 void Manager::updateMessageObserverSubscriptions() {
 	_messageObserverLifetime.destroy();
 	if (!_activeSession || _messageObservers.isEmpty()) {
+		logEvent(
+			u"observer"_q,
+			u"subscriptions-cleared"_q,
+			QJsonObject{
+				{ u"hasActiveSession"_q, _activeSession != nullptr },
+				{ u"observerCount"_q, _messageObservers.size() },
+			});
 		return;
 	}
 	const auto observerSnapshot = [=] {
@@ -1511,6 +3251,16 @@ void Manager::updateMessageObserverSubscriptions() {
 			break;
 		}
 	}
+	logEvent(
+		u"observer"_q,
+		u"subscriptions-updated"_q,
+		QJsonObject{
+			{ u"observerCount"_q, _messageObservers.size() },
+			{ u"wantsNew"_q, wantsNew },
+			{ u"wantsEdited"_q, wantsEdited },
+			{ u"wantsDeleted"_q, wantsDeleted },
+			{ u"sessionUniqueId"_q, _activeSession ? QString::number(_activeSession->uniqueId()) : QString() },
+		});
 	if (wantsNew) {
 		_activeSession->changes().realtimeMessageUpdates(
 			Data::MessageUpdate::Flag::NewAdded
@@ -1575,24 +3325,58 @@ void Manager::updateMessageObserverSubscriptions() {
 
 void Manager::handleActiveSessionChanged(Main::Session *session) {
 	_activeSession = session;
+	logEvent(
+		u"session"_q,
+		u"active-changed"_q,
+		QJsonObject{
+			{ u"hasSession"_q, session != nullptr },
+			{ u"sessionUniqueId"_q, session ? QString::number(session->uniqueId()) : QString() },
+			{ u"handlerCount"_q, int(_sessionHandlers.size()) },
+		});
 	const auto handlers = _sessionHandlers;
 	for (const auto &entry : handlers) {
 		if (!entry.handler) {
 			continue;
 		}
 		try {
+			startRecoveryOperation(u"session"_q, { entry.pluginId });
 			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = entry.pluginId;
+			logEvent(
+				u"session"_q,
+				u"invoke-callback"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"hasSession"_q, session != nullptr },
+					{ u"sessionUniqueId"_q, session ? QString::number(session->uniqueId()) : QString() },
+				});
 			entry.handler(session);
 			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"session"_q,
+				u"callback-success"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+				});
+			finishRecoveryOperation();
 		} catch (...) {
 			_registeringPluginId.clear();
+			logEvent(
+				u"session"_q,
+				u"callback-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"reason"_q, CurrentExceptionText() },
+				});
 			if (!entry.pluginId.isEmpty()) {
 				disablePlugin(
 					entry.pluginId,
 					u"Session callback failed: "_q + CurrentExceptionText());
 			}
-			showToast(u"Plugin session callback failed."_q);
+			showToast(PluginUiText(
+				u"Plugin session callback failed."_q,
+				u"Session callback плагина завершился с ошибкой."_q));
+			finishRecoveryOperation();
 		}
 	}
 	updateMessageObserverSubscriptions();
@@ -1637,16 +3421,45 @@ void Manager::dispatchMessageEvent(
 	auto callContext = context;
 	callContext.session = session;
 	try {
+		startRecoveryOperation(u"observer"_q, { entry.pluginId });
 		const auto previousPluginId = _registeringPluginId;
 		_registeringPluginId = entry.pluginId;
+		logEvent(
+			u"observer"_q,
+			u"invoke"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(entry.id) },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"context"_q, messageContextToJson(callContext) },
+			});
 		entry.handler(callContext);
 		_registeringPluginId = previousPluginId;
+		logEvent(
+			u"observer"_q,
+			u"success"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(entry.id) },
+				{ u"pluginId"_q, entry.pluginId },
+			});
+		finishRecoveryOperation();
 	} catch (...) {
 		_registeringPluginId.clear();
+		logEvent(
+			u"observer"_q,
+			u"failed"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(entry.id) },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"reason"_q, CurrentExceptionText() },
+				{ u"context"_q, messageContextToJson(callContext) },
+			});
 		disablePlugin(
 			entry.pluginId,
 			u"Message observer failed: "_q + CurrentExceptionText());
-		showToast(u"Plugin observer failed and was disabled."_q);
+		showToast(PluginUiText(
+			u"Plugin observer failed and was disabled."_q,
+			u"Наблюдатель плагина завершился с ошибкой и был выключен."_q));
+		finishRecoveryOperation();
 	}
 }
 

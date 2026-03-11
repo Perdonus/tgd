@@ -3,7 +3,6 @@ Example plugin for Telegram Desktop.
 Adds a panel with a slider that makes Telegram windows transparent.
 */
 #include "plugins/plugins_api.h"
-#include "window/window_controller.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
@@ -12,7 +11,6 @@ Adds a panel with a slider that makes Telegram windows transparent.
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QPointer>
-#include <QtCore/QSet>
 #include <QtCore/QTimer>
 
 #include <QtWidgets/QApplication>
@@ -32,7 +30,7 @@ TGD_PLUGIN_PREVIEW(
 	"Codex",
 	"Makes Telegram windows transparent with a live slider.",
 	"",
-	"")
+	"GusTheDuck/4")
 
 namespace {
 
@@ -79,15 +77,11 @@ public:
 				QStringLiteral("Transparency"),
 				QStringLiteral("Adjust Telegram window opacity."),
 			},
-			[=](Window::Controller *window) {
-				openSettingsDialog(window);
+			[=](Window::Controller *) {
+				openSettingsDialog();
 			});
 
-		_host->forEachWindow([=](Window::Controller *window) {
-			trackRootWindow(window);
-		});
-		_host->onWindowCreated([=](Window::Controller *window) {
-			trackRootWindow(window);
+		_host->onWindowCreated([=](Window::Controller *) {
 			applyCurrentOpacity();
 		});
 
@@ -107,7 +101,6 @@ public:
 			_panelId = 0;
 		}
 		restoreOpaque();
-		_rootWindows.clear();
 	}
 
 protected:
@@ -135,29 +128,14 @@ protected:
 	}
 
 private:
-	void trackRootWindow(Window::Controller *window) {
-		if (!window) {
-			return;
-		}
-		const auto widget = window->widget().get();
-		if (!widget || _rootWindows.contains(widget)) {
-			return;
-		}
-		_rootWindows.insert(widget);
-		QObject::connect(widget, &QObject::destroyed, this, [=] {
-			_rootWindows.remove(widget);
-		});
-		applyOpacityToWidget(widget);
-	}
-
-	void openSettingsDialog(Window::Controller *window) {
+	void openSettingsDialog() {
 		if (_settingsDialog) {
 			_settingsDialog->raise();
 			_settingsDialog->activateWindow();
 			return;
 		}
 
-		auto parent = window ? window->widget().get() : nullptr;
+		auto parent = QApplication::activeWindow();
 		auto dialog = new QDialog(parent);
 		_settingsDialog = dialog;
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
@@ -248,22 +226,14 @@ private:
 	}
 
 	void applyCurrentOpacity() {
-		for (auto widget : _rootWindows) {
-			applyOpacityToWidget(widget);
-		}
 		for (auto widget : QApplication::topLevelWidgets()) {
 			applyOpacityToWidget(widget);
 		}
 	}
 
 	void restoreOpaque() {
-		for (auto widget : _rootWindows) {
-			if (widget) {
-				widget->setWindowOpacity(1.0);
-			}
-		}
 		for (auto widget : QApplication::topLevelWidgets()) {
-			if (widget && isManagedWidget(widget)) {
+			if (widget) {
 				widget->setWindowOpacity(1.0);
 			}
 		}
@@ -273,27 +243,10 @@ private:
 		if (!widget || !widget->isWindow()) {
 			return;
 		}
-		if (!isManagedWidget(widget) || shouldSkipWidget(widget)) {
+		if (shouldSkipWidget(widget)) {
 			return;
 		}
 		widget->setWindowOpacity(opacityValue());
-	}
-
-	bool isManagedWidget(QWidget *widget) const {
-		if (!widget || !widget->isWindow()) {
-			return false;
-		}
-		if (_rootWindows.contains(widget)) {
-			return true;
-		}
-		for (auto parent = widget->parentWidget();
-			parent != nullptr;
-			parent = parent->parentWidget()) {
-			if (_rootWindows.contains(parent)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	bool shouldSkipWidget(QWidget *widget) const {
@@ -349,7 +302,6 @@ private:
 	Plugins::PluginInfo _info;
 	QString _configPath;
 	int _opacityPercent = kDefaultOpacityPercent;
-	QSet<QWidget*> _rootWindows;
 	QPointer<QDialog> _settingsDialog;
 };
 

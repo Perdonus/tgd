@@ -13,7 +13,7 @@ TGD_PLUGIN_PREVIEW(
 	"Example",
 	"Adds a menu action that shows a toast.",
 	"",
-	"")
+	"GusTheDuck/1")
 
 class HelloMenuPlugin final : public Plugins::Plugin {
 public:
@@ -34,13 +34,8 @@ public:
 			_info.id,
 			QStringLiteral("Say Hello"),
 			QStringLiteral("Show a hello toast."),
-			[=](const Plugins::ActionContext &context) {
-				if (context.window) {
-					context.window->showToast(
-						QStringLiteral("Hello from plugin."));
-				} else {
-					_host->showToast(QStringLiteral("Hello from plugin."));
-				}
+			[=](const Plugins::ActionContext &) {
+				_host->showToast(QStringLiteral("Hello from plugin."));
 			});
 	}
 
