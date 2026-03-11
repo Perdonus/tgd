@@ -17,7 +17,7 @@ TGD_PLUGIN_PREVIEW(
 	"Example",
 	"Opens a demo UI panel.",
 	"",
-	"")
+	"GusTheDuck/3")
 
 class PanelDemoPlugin final : public Plugins::Plugin {
 public:

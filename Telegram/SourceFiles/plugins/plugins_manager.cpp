@@ -22,12 +22,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDir>
 #include <QtCore/QDateTime>
 #include <QtCore/QByteArray>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLocale>
 #include <QtCore/QLibrary>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QSysInfo>
+#include <QtCore/QThread>
+#include <QtCore/QTimeZone>
 
 #include <algorithm>
 #include <exception>
@@ -43,6 +48,19 @@ constexpr auto kBinaryInfoName = "TgdPluginBinaryInfo";
 constexpr auto kPreviewInfoName = "TgdPluginPreviewInfo";
 constexpr auto kEntryName = "TgdPluginEntry";
 constexpr auto kNoPluginsArgument = "-noplugins";
+
+QString ProcessUserName() {
+#if defined(Q_OS_WIN)
+	return qEnvironmentVariable("USERNAME");
+#else
+	return qEnvironmentVariable("USER");
+#endif
+}
+
+int PhysicalCpuCoresFallback() {
+	const auto logical = QThread::idealThreadCount();
+	return logical > 0 ? logical : 1;
+}
 
 QString TrimmedCommand(QString command) {
 	command = command.trimmed();
@@ -1079,6 +1097,40 @@ void Manager::onSessionActivated(
 			.handler = std::move(handler),
 		});
 	}
+}
+
+HostInfo Manager::hostInfo() const {
+	auto info = HostInfo();
+	info.compiler = QString::fromLatin1(kCompilerId);
+	info.platform = QString::fromLatin1(kPlatformId);
+	info.workingPath = cWorkingDir();
+	info.pluginsPath = _pluginsPath;
+	info.safeModeEnabled = safeModeEnabled();
+	info.runtimeApiEnabled = false;
+	info.runtimeApiPort = 0;
+	return info;
+}
+
+SystemInfo Manager::systemInfo() const {
+	auto info = SystemInfo();
+	const auto locale = QLocale::system();
+	info.processId = quint64(QCoreApplication::applicationPid());
+	info.logicalCpuCores = std::max(QThread::idealThreadCount(), 1);
+	info.physicalCpuCores = PhysicalCpuCoresFallback();
+	info.productType = QSysInfo::productType();
+	info.productVersion = QSysInfo::productVersion();
+	info.prettyProductName = QSysInfo::prettyProductName();
+	info.kernelType = QSysInfo::kernelType();
+	info.kernelVersion = QSysInfo::kernelVersion();
+	info.architecture = QSysInfo::currentCpuArchitecture();
+	info.buildAbi = QSysInfo::buildAbi();
+	info.hostName = QSysInfo::machineHostName();
+	info.userName = ProcessUserName();
+	info.locale = locale.name();
+	const auto uiLanguages = locale.uiLanguages();
+	info.uiLanguage = uiLanguages.isEmpty() ? QString() : uiLanguages.value(0);
+	info.timeZone = QString::fromLatin1(QTimeZone::systemTimeZoneId());
+	return info;
 }
 
 void Manager::loadConfig() {

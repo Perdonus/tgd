@@ -26,6 +26,7 @@ EXPECTED_EXAMPLES = {
     "hello_menu.cpp",
     "message_observer.cpp",
     "panel_demo.cpp",
+    "runtime_info.cpp",
     "transparent_telegram.cpp",
 }
 

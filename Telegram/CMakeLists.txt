@@ -2099,6 +2099,7 @@ add_tg_plugin_example(TgPluginExampleCommandShrug command_shrug Plugins/Examples
 add_tg_plugin_example(TgPluginExampleHelloMenu hello_menu Plugins/Examples/hello_menu.cpp)
 add_tg_plugin_example(TgPluginExampleMessageObserver message_observer Plugins/Examples/message_observer.cpp)
 add_tg_plugin_example(TgPluginExamplePanelDemo panel_demo Plugins/Examples/panel_demo.cpp)
+add_tg_plugin_example(TgPluginExampleRuntimeInfo runtime_info Plugins/Examples/runtime_info.cpp)
 add_tg_plugin_example(TgPluginExampleTransparentTelegram transparent_telegram Plugins/Examples/transparent_telegram.cpp)
 add_custom_target(tgd_example_plugins DEPENDS ${tg_plugin_example_targets})
 

@@ -13,7 +13,7 @@ TGD_PLUGIN_PREVIEW(
 	"Example",
 	"Adds a menu action that shows a toast.",
 	"",
-	"")
+	"GusTheDuck/1")
 
 class HelloMenuPlugin final : public Plugins::Plugin {
 public:

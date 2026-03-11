@@ -12,6 +12,7 @@ Examples
 - hello_menu.cpp: adds a context action with access to the active window.
 - panel_demo.cpp: registers a panel that opens a dialog.
 - message_observer.cpp: shows a toast on new incoming messages.
+- runtime_info.cpp: reads host/system/runtime information from the host API.
 - transparent_telegram.cpp: adds a transparency slider for Telegram windows.
 
 Build (Linux)
@@ -30,7 +31,7 @@ Build (Linux)
    mv transparent_telegram.so transparent_telegram.tgd
 3) Copy the .tgd file into:
    <working dir>/tdata/plugins
-4) Open Settings > Plugins and click Reload Plugins.
+4) Open Settings > Plugins. The plugin manager reloads automatically after install/update.
 
 Notes
 - The entry symbol is `TgdPluginEntry`.
@@ -39,5 +40,6 @@ Notes
 - In-chat plugin install/update uses the static preview metadata before load.
 - Preview icons use the format `StickerPackShortName/index`.
 - The plugin API lives in `Telegram/SourceFiles/plugins/plugins_api.h`.
+- `Host::hostInfo()` and `Host::systemInfo()` expose app/runtime/system metadata.
 - Plugins must match the app ABI exactly: same API version, platform, pointer size, compiler ABI and Qt major/minor.
 - CI touch: keep this file unchanged functionally.

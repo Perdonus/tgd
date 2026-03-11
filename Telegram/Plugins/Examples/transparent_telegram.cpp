@@ -30,7 +30,7 @@ TGD_PLUGIN_PREVIEW(
 	"Codex",
 	"Makes Telegram windows transparent with a live slider.",
 	"",
-	"")
+	"GusTheDuck/4")
 
 namespace {
 

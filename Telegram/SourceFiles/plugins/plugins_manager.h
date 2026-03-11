@@ -151,6 +151,8 @@ public:
 		std::function<void(Main::Session*)> visitor) override;
 	void onSessionActivated(
 		std::function<void(Main::Session*)> handler) override;
+	HostInfo hostInfo() const override;
+	SystemInfo systemInfo() const override;
 
 	private:
 		struct WindowHandlerEntry {
