@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/launcher.h"
 #include "core/version.h"
 #include "data/data_changes.h"
+#include "data/data_user.h"
 #include "history/history_item.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
@@ -3175,14 +3176,15 @@ QJsonArray Manager::sessionStatesToJson() const {
 		if (!session) {
 			continue;
 		}
-		result.push_back(QJsonObject{
-			{ u"uniqueId"_q, QString::number(session->uniqueId()) },
-			{ u"userPeerId"_q, QString::number(session->userPeerId().value) },
-			{ u"name"_q, session->user()->name() },
-			{ u"username"_q, session->user()->username() },
-			{ u"active"_q, session == activeSession() },
-			{ u"testMode"_q, session->isTestMode() },
-		});
+		const auto user = session->user();
+		auto object = QJsonObject();
+		object.insert(u"uniqueId"_q, QString::number(session->uniqueId()));
+		object.insert(u"userPeerId"_q, QString::number(session->userPeerId().value));
+		object.insert(u"name"_q, user->name());
+		object.insert(u"username"_q, user->username());
+		object.insert(u"active"_q, session == activeSession());
+		object.insert(u"testMode"_q, session->isTestMode());
+		result.push_back(object);
 	}
 	return result;
 }
@@ -3197,8 +3199,9 @@ QJsonArray Manager::windowStatesToJson() const {
 			{ u"hasSession"_q, window->maybeSession() != nullptr },
 		};
 		if (const auto session = window->maybeSession()) {
+			const auto user = session->user();
 			object.insert(u"sessionUniqueId"_q, QString::number(session->uniqueId()));
-			object.insert(u"userName"_q, session->user()->name());
+			object.insert(u"userName"_q, user->name());
 		}
 		result.push_back(object);
 	});
