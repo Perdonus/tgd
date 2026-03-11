@@ -92,8 +92,34 @@ function(add_catalog_plugin source_path)
     set(TGD_PLUGIN_TARGETS "${TGD_PLUGIN_TARGETS}" PARENT_SCOPE)
 endfunction()
 
-file(GLOB_RECURSE catalog_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*/*/*.cpp")
-list(SORT catalog_sources)
+set(catalog_sources)
+file(GLOB plugin_dirs CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*")
+
+foreach(plugin_dir IN LISTS plugin_dirs)
+    if (NOT IS_DIRECTORY "${plugin_dir}")
+        continue()
+    endif()
+
+    file(GLOB version_entries RELATIVE "${plugin_dir}" CONFIGURE_DEPENDS "${plugin_dir}/*")
+    set(version_dirs)
+    foreach(version_entry IN LISTS version_entries)
+        if (IS_DIRECTORY "${plugin_dir}/${version_entry}")
+            list(APPEND version_dirs "${version_entry}")
+        endif()
+    endforeach()
+
+    if (NOT version_dirs)
+        continue()
+    endif()
+
+    list(SORT version_dirs COMPARE NATURAL ORDER ASCENDING)
+    list(GET version_dirs -1 latest_version)
+    file(GLOB latest_sources CONFIGURE_DEPENDS "${plugin_dir}/${latest_version}/*.cpp")
+    list(SORT latest_sources)
+    list(APPEND catalog_sources ${latest_sources})
+endforeach()
+
+list(REMOVE_DUPLICATES catalog_sources)
 
 foreach(source_path IN LISTS catalog_sources)
     add_catalog_plugin("${source_path}")

@@ -11,7 +11,7 @@ TGD_PLUGIN_PREVIEW(
 	"Example",
 	"Toasts on new incoming messages.",
 	"",
-	"GusTheDuck/2")
+	"")
 
 class MessageObserverPlugin final : public Plugins::Plugin {
 public:

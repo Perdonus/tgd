@@ -10,9 +10,11 @@ Rules
 - Each plugin gets its own folder.
 - Each released version gets its own subfolder.
 - The version folder keeps the source file and the compiled `.tgd` built from the same branch state.
+- Compatibility rebuilds should be published as a new version folder instead of rewriting older releases in place.
 - `.tgd` files are native binaries and must be rebuilt against the exact Telegram Desktop ABI they target.
 - This branch tracks the current plugin ABI from `Telegram/SourceFiles/plugins/plugins_api.h`.
 - If `kApiVersion`, compiler ABI, platform, architecture, or Qt major/minor changes, the catalog binaries must be rebuilt.
+- CI rebuilds only the latest version folder for each plugin; older folders stay as archived releases.
 
 CI
 - The `Plugins` branch uses the `Build Plugin Catalog` workflow.

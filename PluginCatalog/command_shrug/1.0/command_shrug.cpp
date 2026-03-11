@@ -13,7 +13,7 @@ TGD_PLUGIN_PREVIEW(
 	"Example",
 	"Replaces /shrug with [shrug].",
 	"",
-	"GusTheDuck/0")
+	"")
 
 class ShrugPlugin final : public Plugins::Plugin {
 public:
