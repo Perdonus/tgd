@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_settings.h"
 
+#include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 
@@ -29,6 +30,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Settings {
 namespace {
+
+constexpr auto kDeveloperModeTapThreshold = 7;
+constexpr auto kDeveloperModeTapTimeoutMs = 600;
 
 [[nodiscard]] bool UseRussianPluginUi() {
 	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
@@ -76,8 +80,8 @@ QString FormatPluginDetails(const ::Plugins::PluginState &state) {
 	return lines.join(u"\n"_q);
 }
 
-QString PluginDocsText() {
-	return UseRussianPluginUi()
+QString PluginDocsText(bool developerMode) {
+	auto text = UseRussianPluginUi()
 		? u"Плагины Telegram Desktop\n\n"
 			"Что это\n"
 			"Плагин — это нативная библиотека .tgd, которая загружается прямо в процесс Telegram Desktop. Плагины могут добавлять команды, действия, панели, перехватывать исходящий текст и слушать события сообщений. Из-за этого плагины очень мощные, но и небезопасные: они работают с тем же ABI и теми же зависимостями, что и сам клиент.\n\n"
@@ -117,18 +121,7 @@ QString PluginDocsText() {
 			"- Исключения из managed callback'ов автоматически выключают проблемный плагин.\n"
 			"- При подозрении на native crash во время рискованной plugin-операции Telegram включает safe mode автоматически.\n"
 			"- Подозреваемый плагин выключается, лог копируется в буфер, а на следующем запуске показывается recovery-box.\n"
-			"- Safe mode не удаляет плагины, а только не даёт им загрузиться.\n\n"
-			"Runtime API\n"
-			"- При включении Telegram поднимает локальный HTTP endpoint на 127.0.0.1.\n"
-			"- API позволяет получить host/system info, список плагинов, окна, сессии, выполнить reload и установить .tgd по локальному пути.\n"
-			"- Для всех endpoint'ов кроме /api/ping нужен токен авторизации.\n"
-			"- Токен можно скопировать или перевыпустить в разделе Plugins.\n\n"
-			"Практические советы\n"
-			"- Делайте конструктор и info() максимально лёгкими.\n"
-			"- Тяжёлую работу уносите в worker thread или отдельный процесс.\n"
-			"- Если вы открываете UI, дополнительно линкуйте QtWidgets.\n"
-			"- Не храните HistoryItem* вне callback'а.\n"
-			"- Проверяйте exact ABI match перед публикацией .tgd.\n"_q
+			"- Safe mode не удаляет плагины, а только не даёт им загрузиться.\n\n"_q
 		: u"Telegram Desktop Plugins\n\n"
 			"What it is\n"
 			"A plugin is a native .tgd shared library loaded into the Telegram Desktop process. Plugins can add commands, actions, panels, outgoing text interceptors, and message observers. This makes them powerful, but also unsafe: they run with the same ABI and dependencies as the app itself.\n\n"
@@ -168,22 +161,40 @@ QString PluginDocsText() {
 			"- Exceptions escaping managed callbacks automatically disable the failing plugin.\n"
 			"- If Telegram suspects a native crash during a risky plugin operation, it enables safe mode automatically.\n"
 			"- The suspected plugin is turned off, the recovery log is copied to the clipboard, and the next launch shows a recovery box.\n"
-			"- Safe mode does not delete plugins; it only prevents loading them.\n\n"
-			"Runtime API\n"
-			"- When enabled, Telegram starts a local HTTP endpoint on 127.0.0.1.\n"
-			"- The API can return host/system info, plugin lists, windows, sessions, trigger reload, and install a .tgd from a local path.\n"
-			"- Every endpoint except /api/ping requires an authorization token.\n"
-			"- The token can be copied or rotated from the Plugins section.\n\n"
-			"Practical advice\n"
+			"- Safe mode does not delete plugins; it only prevents loading them.\n\n"_q;
+	if (developerMode) {
+		text += UseRussianPluginUi()
+			? u"Runtime API\n"
+				"- При включении Telegram поднимает локальный HTTP endpoint на 127.0.0.1.\n"
+				"- API позволяет получить host/system info, список плагинов, окна, сессии, выполнить reload и установить .tgd по локальному пути.\n"
+				"- Для всех endpoint'ов кроме /api/ping нужен токен авторизации.\n"
+				"- Токен можно скопировать или перевыпустить в режиме разработчика.\n\n"_q
+			: u"Runtime API\n"
+				"- When enabled, Telegram starts a local HTTP endpoint on 127.0.0.1.\n"
+				"- The API can return host/system info, plugin lists, windows, sessions, trigger reload, and install a .tgd from a local path.\n"
+				"- Every endpoint except /api/ping requires an authorization token.\n"
+				"- The token can be copied or rotated from developer mode.\n\n"_q;
+	}
+	text += UseRussianPluginUi()
+		? u"Практические советы\n"
+			"- Делайте конструктор и info() максимально лёгкими.\n"
+			"- Тяжёлую работу уносите в worker thread или отдельный процесс.\n"
+			"- Если вы открываете UI, дополнительно линкуйте QtWidgets.\n"
+			"- Не храните HistoryItem* вне callback'а.\n"
+			"- Проверяйте exact ABI match перед публикацией .tgd.\n"_q
+		: u"Practical advice\n"
 			"- Keep constructors and info() lightweight.\n"
 			"- Move heavy work to worker threads or a separate process.\n"
 			"- Link QtWidgets if your plugin opens UI.\n"
 			"- Do not keep HistoryItem* beyond the callback lifetime.\n"
 			"- Always verify exact ABI match before shipping a .tgd.\n"_q;
+	return text;
 }
 
-void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
-	const auto text = PluginDocsText();
+void ShowPluginDocsBox(
+		not_null<Window::SessionController*> controller,
+		bool developerMode) {
+	const auto text = PluginDocsText(developerMode);
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(
@@ -220,6 +231,15 @@ Plugins::Plugins(
 , _controller(controller)
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
 , _list(_content->add(object_ptr<Ui::VerticalLayout>(_content))) {
+	_developerTapTimer = new QTimer(this);
+	_developerTapTimer->setSingleShot(true);
+	connect(_developerTapTimer, &QTimer::timeout, this, [=] {
+		if (_documentationTapCount > 0
+			&& _documentationTapCount < kDeveloperModeTapThreshold) {
+			ShowPluginDocsBox(_controller, _developerMode);
+		}
+		_documentationTapCount = 0;
+	});
 	setupContent();
 }
 
@@ -237,7 +257,7 @@ void Plugins::setupContent() {
 		st::settingsButton,
 		{ &st::menuIconFaq });
 	docs->addClickHandler([=] {
-		ShowPluginDocsBox(_controller);
+		handleDocumentationTap();
 	});
 
 	const auto openFolder = AddButtonWithIcon(
@@ -275,8 +295,37 @@ void Plugins::setupContent() {
 				u"Когда режим включён, Telegram не загружает плагины. "
 				u"После крэша плагина этот режим может включиться автоматически."_q)));
 
-	const auto runtimeApi = _content->add(object_ptr<Ui::SettingsButton>(
-		_content,
+	_developer = _content->add(object_ptr<Ui::VerticalLayout>(_content));
+	rebuildDeveloperSection();
+
+	Ui::AddDivider(_content);
+	Ui::AddSkip(_content);
+
+	rebuildList();
+	Ui::ResizeFitChild(this, _content);
+}
+
+void Plugins::rebuildDeveloperSection() {
+	if (!_developer) {
+		return;
+	}
+	_developer->clear();
+	if (!_developerMode) {
+		Ui::ResizeFitChild(this, _content);
+		return;
+	}
+
+	Ui::AddSkip(_developer);
+	Ui::AddDivider(_developer);
+	Ui::AddSkip(_developer);
+	Ui::AddDividerText(
+		_developer,
+		rpl::single(PluginUiText(
+			u"Developer mode is active. Runtime API controls are intentionally hidden from normal users."_q,
+			u"Режим разработчика активен. Элементы Runtime API специально скрыты от обычных пользователей."_q)));
+
+	const auto runtimeApi = _developer->add(object_ptr<Ui::SettingsButton>(
+		_developer,
 		rpl::single(PluginUiText(
 			u"Plugin Runtime API"_q,
 			u"Runtime API плагинов"_q)),
@@ -289,16 +338,17 @@ void Plugins::setupContent() {
 				u"Could not change runtime API state."_q,
 				u"Не удалось переключить runtime API."_q));
 		}
-		rebuildList();
+		rebuildDeveloperSection();
 	}, runtimeApi->lifetime());
+
 	Ui::AddDividerText(
-		_content,
+		_developer,
 		rpl::single(PluginUiText(
 			u"When enabled, Telegram listens on a localhost HTTP endpoint and requires the runtime token for privileged requests."_q,
 			u"Когда режим включён, Telegram поднимает локальный HTTP endpoint и требует runtime-токен для привилегированных запросов."_q)));
 
-	const auto copyRuntimeUrl = _content->add(object_ptr<Ui::SettingsButton>(
-		_content,
+	const auto copyRuntimeUrl = _developer->add(object_ptr<Ui::SettingsButton>(
+		_developer,
 		rpl::single(PluginUiText(
 			u"Copy Runtime API URL"_q,
 			u"Скопировать URL Runtime API"_q)),
@@ -312,8 +362,8 @@ void Plugins::setupContent() {
 			u"URL Runtime API скопирован."_q));
 	});
 
-	const auto copyRuntimeToken = _content->add(object_ptr<Ui::SettingsButton>(
-		_content,
+	const auto copyRuntimeToken = _developer->add(object_ptr<Ui::SettingsButton>(
+		_developer,
 		rpl::single(PluginUiText(
 			u"Copy Runtime API Token"_q,
 			u"Скопировать токен Runtime API"_q)),
@@ -327,8 +377,8 @@ void Plugins::setupContent() {
 			u"Токен Runtime API скопирован."_q));
 	});
 
-	const auto rotateRuntimeToken = _content->add(object_ptr<Ui::SettingsButton>(
-		_content,
+	const auto rotateRuntimeToken = _developer->add(object_ptr<Ui::SettingsButton>(
+		_developer,
 		rpl::single(PluginUiText(
 			u"Rotate Runtime API Token"_q,
 			u"Перевыпустить токен Runtime API"_q)),
@@ -343,11 +393,30 @@ void Plugins::setupContent() {
 			u"Новый токен Runtime API скопирован."_q));
 	});
 
-	Ui::AddDivider(_content);
-	Ui::AddSkip(_content);
-
-	rebuildList();
 	Ui::ResizeFitChild(this, _content);
+}
+
+void Plugins::handleDocumentationTap() {
+	++_documentationTapCount;
+	if (_documentationTapCount >= kDeveloperModeTapThreshold) {
+		_developerTapTimer->stop();
+		_documentationTapCount = 0;
+		toggleDeveloperMode();
+		return;
+	}
+	_developerTapTimer->start(kDeveloperModeTapTimeoutMs);
+}
+
+void Plugins::toggleDeveloperMode() {
+	_developerMode = !_developerMode;
+	rebuildDeveloperSection();
+	_controller->window().showToast(PluginUiText(
+		_developerMode
+			? u"Developer mode enabled."_q
+			: u"Developer mode disabled."_q,
+		_developerMode
+			? u"Режим разработчика включён."_q
+			: u"Режим разработчика выключен."_q));
 }
 
 void Plugins::rebuildList() {
@@ -483,7 +552,7 @@ void PluginsDocumentation::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);
-	Ui::AddDividerText(content, rpl::single(PluginDocsText()));
+	Ui::AddDividerText(content, rpl::single(PluginDocsText(false)));
 	Ui::AddSkip(content);
 	Ui::ResizeFitChild(this, content);
 }

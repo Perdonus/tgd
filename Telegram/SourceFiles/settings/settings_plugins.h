@@ -17,6 +17,8 @@ namespace Ui {
 class VerticalLayout;
 } // namespace Ui
 
+class QTimer;
+
 namespace Settings {
 
 class Plugins : public Section<Plugins> {
@@ -27,11 +29,18 @@ public:
 
 private:
 	void setupContent();
+	void rebuildDeveloperSection();
 	void rebuildList();
+	void handleDocumentationTap();
+	void toggleDeveloperMode();
 
 	const not_null<Window::SessionController*> _controller;
 	not_null<Ui::VerticalLayout*> _content;
 	not_null<Ui::VerticalLayout*> _list;
+	Ui::VerticalLayout *_developer = nullptr;
+	QTimer *_developerTapTimer = nullptr;
+	bool _developerMode = false;
+	int _documentationTapCount = 0;
 };
 
 class PluginsDocumentation : public Section<PluginsDocumentation> {
