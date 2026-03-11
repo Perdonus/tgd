@@ -30,9 +30,11 @@ class HistoryItem;
 
 namespace Plugins {
 
-constexpr int kApiVersion = 2;
+constexpr int kApiVersion = 3;
 constexpr int kBinaryInfoVersion = 1;
 constexpr int kPreviewInfoVersion = 1;
+constexpr int kHostInfoVersion = 1;
+constexpr int kSystemInfoVersion = 1;
 
 #if defined(_MSC_VER)
 inline constexpr auto kCompilerId = "msvc";
@@ -103,6 +105,45 @@ struct PluginInfo {
 	QString author;
 	QString description;
 	QString website;
+};
+
+struct HostInfo {
+	int structVersion = kHostInfoVersion;
+	int apiVersion = kApiVersion;
+	int pointerSize = int(sizeof(void*));
+	int qtMajor = QT_VERSION_MAJOR;
+	int qtMinor = QT_VERSION_MINOR;
+	int compilerVersion = kCompilerVersion;
+	QString appVersion;
+	QString compiler;
+	QString platform;
+	QString workingPath;
+	QString pluginsPath;
+	bool safeModeEnabled = false;
+	bool runtimeApiEnabled = false;
+	int runtimeApiPort = 0;
+	QString runtimeApiBaseUrl;
+};
+
+struct SystemInfo {
+	int structVersion = kSystemInfoVersion;
+	quint64 processId = 0;
+	quint64 totalMemoryBytes = 0;
+	quint64 availableMemoryBytes = 0;
+	int logicalCpuCores = 0;
+	int physicalCpuCores = 0;
+	QString productType;
+	QString productVersion;
+	QString prettyProductName;
+	QString kernelType;
+	QString kernelVersion;
+	QString architecture;
+	QString buildAbi;
+	QString hostName;
+	QString userName;
+	QString locale;
+	QString uiLanguage;
+	QString timeZone;
 };
 
 struct CommandDescriptor {
@@ -244,6 +285,8 @@ public:
 		std::function<void(Main::Session*)> visitor) = 0;
 	virtual void onSessionActivated(
 		std::function<void(Main::Session*)> handler) = 0;
+	virtual HostInfo hostInfo() const = 0;
+	virtual SystemInfo systemInfo() const = 0;
 };
 
 class Plugin {

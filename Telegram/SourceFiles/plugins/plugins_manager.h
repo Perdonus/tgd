@@ -12,7 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
+#include <QtCore/QJsonValue>
 #include <QtCore/QObject>
 #include <QtCore/QSet>
 #include <QtCore/QStringList>
@@ -24,6 +26,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 class QLibrary;
+class QTcpServer;
+class QTcpSocket;
+class QUrlQuery;
 
 struct TextWithTags;
 
@@ -174,6 +179,14 @@ public:
 		std::function<void(Main::Session*)> visitor) override;
 	void onSessionActivated(
 		std::function<void(Main::Session*)> handler) override;
+	HostInfo hostInfo() const override;
+	SystemInfo systemInfo() const override;
+
+	bool runtimeApiEnabled() const;
+	bool setRuntimeApiEnabled(bool enabled);
+	QString runtimeApiBaseUrl() const;
+	QString runtimeApiToken() const;
+	QString rotateRuntimeApiToken();
 
 	private:
 		struct WindowHandlerEntry {
@@ -272,6 +285,29 @@ public:
 		QJsonObject commandResultToJson(const CommandResult &result) const;
 		QJsonObject registrationSummaryToJson(
 			const PluginRecord &record) const;
+		QJsonObject hostInfoToJson(const HostInfo &info) const;
+		QJsonObject systemInfoToJson(const SystemInfo &info) const;
+		QJsonObject runtimeStateToJson() const;
+		QJsonArray pluginStatesToJson() const;
+		QJsonArray sessionStatesToJson() const;
+		QJsonArray windowStatesToJson() const;
+		QByteArray readLogTail(const QString &path, qsizetype maxBytes) const;
+		QByteArray makeRuntimeApiResponse(
+			int statusCode,
+			const QJsonObject &payload) const;
+		QJsonObject runtimeApiEnvelope(
+			bool ok,
+			QJsonValue result = QJsonValue(),
+			QString error = QString()) const;
+		void ensureRuntimeApiToken();
+		bool startRuntimeApiServer();
+		void stopRuntimeApiServer();
+		void handleRuntimeApiNewConnection();
+		void handleRuntimeApiReadyRead(QTcpSocket *socket);
+		void closeRuntimeApiSocket(QTcpSocket *socket);
+		bool runtimeApiAuthorized(
+			const QHash<QByteArray, QByteArray> &headers,
+			const QUrlQuery &query) const;
 		QString fileSha256(const QString &path) const;
 		void scanPlugins(bool metadataOnly = false);
 		void loadPluginMetadataOnly(const QString &path);
@@ -326,6 +362,11 @@ public:
 		QString _tracePath;
 		QString _safeModePath;
 		QString _recoveryPath;
+		bool _runtimeApiEnabled = false;
+		quint16 _runtimeApiPort = 8096;
+		QString _runtimeApiToken;
+		QTcpServer *_runtimeApiServer = nullptr;
+		QHash<QTcpSocket*, QByteArray> _runtimeApiBuffers;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;

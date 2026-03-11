@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_settings.h"
 
+#include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 
 #include <utility>
@@ -117,6 +118,11 @@ QString PluginDocsText() {
 			"- При подозрении на native crash во время рискованной plugin-операции Telegram включает safe mode автоматически.\n"
 			"- Подозреваемый плагин выключается, лог копируется в буфер, а на следующем запуске показывается recovery-box.\n"
 			"- Safe mode не удаляет плагины, а только не даёт им загрузиться.\n\n"
+			"Runtime API\n"
+			"- При включении Telegram поднимает локальный HTTP endpoint на 127.0.0.1.\n"
+			"- API позволяет получить host/system info, список плагинов, окна, сессии, выполнить reload и установить .tgd по локальному пути.\n"
+			"- Для всех endpoint'ов кроме /api/ping нужен токен авторизации.\n"
+			"- Токен можно скопировать или перевыпустить в разделе Plugins.\n\n"
 			"Практические советы\n"
 			"- Делайте конструктор и info() максимально лёгкими.\n"
 			"- Тяжёлую работу уносите в worker thread или отдельный процесс.\n"
@@ -163,6 +169,11 @@ QString PluginDocsText() {
 			"- If Telegram suspects a native crash during a risky plugin operation, it enables safe mode automatically.\n"
 			"- The suspected plugin is turned off, the recovery log is copied to the clipboard, and the next launch shows a recovery box.\n"
 			"- Safe mode does not delete plugins; it only prevents loading them.\n\n"
+			"Runtime API\n"
+			"- When enabled, Telegram starts a local HTTP endpoint on 127.0.0.1.\n"
+			"- The API can return host/system info, plugin lists, windows, sessions, trigger reload, and install a .tgd from a local path.\n"
+			"- Every endpoint except /api/ping requires an authorization token.\n"
+			"- The token can be copied or rotated from the Plugins section.\n\n"
 			"Practical advice\n"
 			"- Keep constructors and info() lightweight.\n"
 			"- Move heavy work to worker threads or a separate process.\n"
@@ -263,6 +274,74 @@ void Plugins::setupContent() {
 				u"Crash recovery may enable this mode automatically."_q,
 				u"Когда режим включён, Telegram не загружает плагины. "
 				u"После крэша плагина этот режим может включиться автоматически."_q)));
+
+	const auto runtimeApi = _content->add(object_ptr<Ui::SettingsButton>(
+		_content,
+		rpl::single(PluginUiText(
+			u"Plugin Runtime API"_q,
+			u"Runtime API плагинов"_q)),
+		st::settingsButtonNoIcon
+	))->toggleOn(rpl::single(Core::App().plugins().runtimeApiEnabled()));
+	runtimeApi->toggledChanges(
+	) | rpl::on_next([=](bool value) {
+		if (!Core::App().plugins().setRuntimeApiEnabled(value)) {
+			_controller->window().showToast(PluginUiText(
+				u"Could not change runtime API state."_q,
+				u"Не удалось переключить runtime API."_q));
+		}
+		rebuildList();
+	}, runtimeApi->lifetime());
+	Ui::AddDividerText(
+		_content,
+		rpl::single(PluginUiText(
+			u"When enabled, Telegram listens on a localhost HTTP endpoint and requires the runtime token for privileged requests."_q,
+			u"Когда режим включён, Telegram поднимает локальный HTTP endpoint и требует runtime-токен для привилегированных запросов."_q)));
+
+	const auto copyRuntimeUrl = _content->add(object_ptr<Ui::SettingsButton>(
+		_content,
+		rpl::single(PluginUiText(
+			u"Copy Runtime API URL"_q,
+			u"Скопировать URL Runtime API"_q)),
+		st::settingsButtonNoIcon));
+	copyRuntimeUrl->setClickedCallback([=] {
+		if (const auto clipboard = QGuiApplication::clipboard()) {
+			clipboard->setText(Core::App().plugins().runtimeApiBaseUrl());
+		}
+		_controller->window().showToast(PluginUiText(
+			u"Runtime API URL copied."_q,
+			u"URL Runtime API скопирован."_q));
+	});
+
+	const auto copyRuntimeToken = _content->add(object_ptr<Ui::SettingsButton>(
+		_content,
+		rpl::single(PluginUiText(
+			u"Copy Runtime API Token"_q,
+			u"Скопировать токен Runtime API"_q)),
+		st::settingsButtonNoIcon));
+	copyRuntimeToken->setClickedCallback([=] {
+		if (const auto clipboard = QGuiApplication::clipboard()) {
+			clipboard->setText(Core::App().plugins().runtimeApiToken());
+		}
+		_controller->window().showToast(PluginUiText(
+			u"Runtime API token copied."_q,
+			u"Токен Runtime API скопирован."_q));
+	});
+
+	const auto rotateRuntimeToken = _content->add(object_ptr<Ui::SettingsButton>(
+		_content,
+		rpl::single(PluginUiText(
+			u"Rotate Runtime API Token"_q,
+			u"Перевыпустить токен Runtime API"_q)),
+		st::settingsButtonNoIcon));
+	rotateRuntimeToken->setClickedCallback([=] {
+		const auto token = Core::App().plugins().rotateRuntimeApiToken();
+		if (const auto clipboard = QGuiApplication::clipboard()) {
+			clipboard->setText(token);
+		}
+		_controller->window().showToast(PluginUiText(
+			u"New runtime API token copied."_q,
+			u"Новый токен Runtime API скопирован."_q));
+	});
 
 	Ui::AddDivider(_content);
 	Ui::AddSkip(_content);
