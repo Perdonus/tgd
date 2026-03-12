@@ -3374,6 +3374,60 @@ void Manager::loadPlugin(const QString &path) {
 			{ u"baseName"_q, record.state.info.id },
 		});
 
+	auto previewManifestInfo = PluginInfo();
+	auto previewManifestIcon = QString();
+	const auto hasPreviewManifest = ReadPreviewManifest(
+		path,
+		&previewManifestInfo,
+		&previewManifestIcon);
+	if (hasPreviewManifest) {
+		MergePluginInfo(record.state.info, previewManifestInfo);
+		logEvent(
+			u"load"_q,
+			u"preview-manifest-read"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+				{ u"icon"_q, previewManifestIcon },
+				{ u"plugin"_q, pluginInfoToJson(previewManifestInfo) },
+			});
+	} else {
+		logEvent(
+			u"load"_q,
+			u"preview-manifest-missing"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
+	}
+	record.state.info.id = record.state.info.id.trimmed();
+	if (record.state.info.name.isEmpty()) {
+		record.state.info.name = record.state.info.id;
+	}
+	if (record.state.info.id.isEmpty()) {
+		record.state.error = u"Plugin id is empty."_q;
+	}
+	if (_pluginIndexById.contains(record.state.info.id)) {
+		record.state.error = u"Duplicate plugin id."_q;
+	}
+	record.state.enabled = !_disabled.contains(record.state.info.id);
+	syncRecoveryFlags(record.state);
+	if (!record.state.error.isEmpty()) {
+		logLoadFailure(path, record.state.error);
+		_plugins.push_back(std::move(record));
+		return;
+	}
+	if (!record.state.enabled) {
+		logEvent(
+			u"load"_q,
+			u"skip-disabled-metadata-only"_q,
+			QJsonObject{
+				{ u"state"_q, pluginStateToJson(record.state) },
+			});
+		const auto index = int(_plugins.size());
+		_plugins.push_back(std::move(record));
+		_pluginIndexById.insert(_plugins.back().state.info.id, index);
+		return;
+	}
+
 	startRecoveryOperation(u"load"_q, { record.state.info.id }, path);
 
 	auto library = std::make_unique<QLibrary>(path);
@@ -3515,22 +3569,32 @@ void Manager::loadPlugin(const QString &path) {
 		return;
 	}
 
-	try {
+	if (hasPreviewManifest) {
 		logEvent(
 			u"load"_q,
-			u"info-call"_q,
+			u"info-call-skipped-preview-manifest"_q,
 			QJsonObject{
 				{ u"path"_q, path },
+				{ u"pluginId"_q, record.state.info.id },
 			});
-		record.state.info = instance->info();
-	} catch (...) {
-		record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
-		logLoadFailure(path, record.state.error);
-		instance.reset();
-		library->unload();
-		_plugins.push_back(std::move(record));
-		finishRecoveryOperation();
-		return;
+	} else {
+		try {
+			logEvent(
+				u"load"_q,
+				u"info-call"_q,
+				QJsonObject{
+					{ u"path"_q, path },
+				});
+			record.state.info = instance->info();
+		} catch (...) {
+			record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
+			logLoadFailure(path, record.state.error);
+			instance.reset();
+			library->unload();
+			_plugins.push_back(std::move(record));
+			finishRecoveryOperation();
+			return;
+		}
 	}
 	record.state.info.id = record.state.info.id.trimmed();
 	if (record.state.info.name.isEmpty()) {
@@ -3544,6 +3608,7 @@ void Manager::loadPlugin(const QString &path) {
 	}
 
 	record.state.enabled = !_disabled.contains(record.state.info.id);
+	syncRecoveryFlags(record.state);
 
 	if (!record.state.error.isEmpty()) {
 		logLoadFailure(path, record.state.error);
