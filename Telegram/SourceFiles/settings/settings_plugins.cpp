@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "plugins/plugins_manager.h"
+#include "ui/layers/generic_box.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/widgets/buttons.h"
@@ -20,8 +21,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_boxes.h"
+#include "styles/style_layers.h"
 #include "styles/style_settings.h"
 
+#include <QtCore/QMargins>
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -195,7 +198,7 @@ void ShowPluginDocsBox(
 		not_null<Window::SessionController*> controller,
 		bool developerMode) {
 	const auto text = PluginDocsText(developerMode);
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(
 			PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q)));
@@ -213,7 +216,7 @@ void ShowPluginDocsBox(
 			box,
 			rpl::single(text),
 			st::boxLabel),
-			style::margins(
+			QMargins(
 				st::boxPadding.left(),
 				0,
 				st::boxPadding.right(),
