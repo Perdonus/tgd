@@ -904,7 +904,7 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 	window->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(title));
-		box->addLeftButton(PluginUiText(u"Copy"_q, u"Копировать"_q), [=] {
+		box->addLeftButton(rpl::single(PluginUiText(u"Copy"_q, u"Копировать"_q)), [=] {
 			if (const auto clipboard = QGuiApplication::clipboard()) {
 				clipboard->setText(clipboardText);
 			}

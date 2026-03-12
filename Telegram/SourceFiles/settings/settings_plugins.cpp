@@ -200,7 +200,7 @@ void ShowPluginDocsBox(
 		box->setTitle(rpl::single(
 			PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q)));
 		box->addLeftButton(
-			PluginUiText(u"Copy"_q, u"Копировать"_q),
+			rpl::single(PluginUiText(u"Copy"_q, u"Копировать"_q)),
 			[=] {
 				if (const auto clipboard = QGuiApplication::clipboard()) {
 					clipboard->setText(text);
