@@ -7,8 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_plugins.h"
 
+#include "boxes/abstract_box.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "lang/lang_keys.h"
 #include "plugins/plugins_manager.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
@@ -17,154 +19,473 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_boxes.h"
 #include "styles/style_settings.h"
+
+#include <QtGui/QGuiApplication>
+
+#include <utility>
 
 namespace Settings {
 namespace {
+
+[[nodiscard]] bool UseRussianPluginUi() {
+	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
+}
+
+[[nodiscard]] QString PluginUiText(QString en, QString ru) {
+	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
+}
 
 QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 	const auto &info = state.info;
 	const auto name = !info.name.isEmpty()
 		? info.name
-		: (!info.id.isEmpty() ? info.id : u"Plugin"_q);
+		: (!info.id.isEmpty()
+			? info.id
+			: PluginUiText(u"Plugin"_q, u"Плагин"_q));
 	const auto version = info.version.trimmed();
 	return version.isEmpty() ? name : (name + u" "_q + version);
 }
 
-QString FormatPluginDetails(
-		const ::Plugins::PluginState &state,
-		const std::vector<::Plugins::CommandDescriptor> &commands) {
+QString FormatPluginDetails(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
-	if (!info.id.isEmpty()) {
-		lines.push_back(u"Id: "_q + info.id);
+	if (!info.author.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Author: "_q, u"Автор: "_q)
+			+ info.author.trimmed());
 	}
-	if (!info.author.isEmpty()) {
-		lines.push_back(u"Author: "_q + info.author);
+	if (!info.description.trimmed().isEmpty()) {
+		lines.push_back(info.description.trimmed());
 	}
-	if (!state.path.isEmpty()) {
-		lines.push_back(u"Path: "_q + state.path);
+	if (!info.version.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Version: "_q, u"Версия: "_q)
+			+ info.version.trimmed());
 	}
-	if (!info.website.isEmpty()) {
-		lines.push_back(u"Website: "_q + info.website);
+	if (!state.recoveryReason.trimmed().isEmpty()) {
+		lines.push_back(state.recoveryReason.trimmed());
 	}
-	if (!info.description.isEmpty()) {
-		lines.push_back(u"Description: "_q + info.description);
+	if (!state.error.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Error: "_q, u"Ошибка: "_q)
+			+ state.error.trimmed());
 	}
-	lines.push_back(state.loaded
-		? u"Status: Loaded"_q
-		: state.enabled
-		? u"Status: Enabled"_q
-		: u"Status: Disabled"_q);
-	if (!state.error.isEmpty()) {
-		lines.push_back(u"Error: "_q + state.error);
-	}
-	if (!commands.empty()) {
-		lines.push_back(u"Commands:"_q);
-		for (const auto &command : commands) {
-			auto line = u"  "_q + command.command;
-			if (!command.description.isEmpty()) {
-				line += u" - "_q + command.description;
-			}
-			lines.push_back(line);
-			if (!command.usage.isEmpty()) {
-				lines.push_back(u"    Usage: "_q + command.usage);
-			}
-		}
-	}
-	return lines.join('\n');
+	return lines.join(u"\n"_q);
 }
 
 QString PluginDocsText() {
-	return u"Overview\n"
-		"Plugins are native shared libraries loaded by Telegram Desktop at "
-		"startup. They can register slash commands, add actions and panels in "
-		"the Plugins menu, intercept outgoing messages, and observe backend "
-		"updates. Because plugins are native code, they can call internal APIs "
-		"and customize UI by using the same headers as the app. Use with care.\n\n"
-		"File format and location\n"
-		"- Extension: .tgd (shared library, renamed).\n"
-		"- Folder: <working dir>/tdata/plugins\n"
-		"- Config: <working dir>/tdata/plugins.json (disabled list)\n"
-		"- Safe mode flag: <working dir>/tdata/plugins.safe-mode\n"
-		"- Log: <working dir>/tdata/plugins.log (load/runtime failures)\n\n"
-		"API header (v2)\n"
-		"- Telegram/SourceFiles/plugins/plugins_api.h\n"
-		"- Main entry symbol: TgdPluginEntry\n"
-		"- Metadata symbol: TgdPluginBinaryInfo\n\n"
-		"Preview metadata (optional, recommended)\n"
-		"- Static symbol: TgdPluginPreviewInfo\n"
-		"- Used by in-chat install/update dialogs before the plugin loads.\n"
-		"- Supports name, version, author, description, website and icon.\n"
-		"- Icon format: StickerPackShortName/index\n\n"
-		"Plugin lifecycle\n"
-		"- The loader resolves TgdPluginEntry and constructs your plugin.\n"
-		"- Entry receives apiVersion; require an exact match.\n"
-		"- info() is called to read metadata (id, name, version).\n"
-		"- Keep constructors and info() side-effect free.\n"
-		"- onLoad() is called when enabled; register commands/actions here.\n"
-		"- onUnload() is called on reload or disable; cleanup here.\n\n"
-		"Runtime safety\n"
-		"- Exceptions escaping plugin callbacks disable that plugin\n"
-		"  automatically and save this state to config.\n"
-		"- Keep callbacks non-blocking; heavy work should run in worker\n"
-		"  threads or separate processes (IPC).\n\n"
-		"Commands\n"
-		"- Register with Host::registerCommand.\n"
-		"- Format: /command [args] at the start of the message.\n"
-		"- Commands that contain '@' are ignored to avoid bot conflicts.\n"
-		"- CommandContext provides session, history, text, command, args.\n"
-		"- Return CommandResult::Handled to stop sending.\n"
-		"- Return CommandResult::ReplaceText to send different text.\n\n"
-		"Actions\n"
-		"- Register with Host::registerAction (simple) or\n"
-		"  Host::registerActionWithContext (gets window + session).\n"
-		"- Actions appear in the Plugins section as buttons.\n\n"
-		"Panels (UI entry points)\n"
-		"- Register with Host::registerPanel.\n"
-		"- Panels appear in the Plugins section; when clicked you receive a\n"
-		"  Window::Controller* and can open UI (right column, box, dialog, etc).\n\n"
-		"Outgoing text interceptors\n"
-		"- Register with Host::registerOutgoingTextInterceptor.\n"
-		"- Called for every outgoing text message (before commands).\n"
-		"- Lower priority runs earlier.\n"
-		"- Return Cancel / Handled / ReplaceText to stop or change sending.\n\n"
-		"Message observers (backend)\n"
-		"- Register with Host::registerMessageObserver.\n"
-		"- Options allow new/edited/deleted and incoming/outgoing filters.\n"
-		"- Current scope: active session (account) only.\n"
-		"- HistoryItem pointers are only valid during the callback.\n\n"
-		"Windows\n"
-		"- Host::forEachWindow iterates existing windows.\n"
-		"- Host::onWindowCreated notifies about new windows.\n\n"
-		"Sessions\n"
-		"- Host::activeSession returns the active account session.\n"
-		"- Host::forEachSession iterates all loaded sessions.\n"
-		"- Host::onSessionActivated notifies when the active session changes.\n\n"
-		"UI access\n"
-		"- Use Window::Controller methods to open layers, right column, boxes.\n"
-		"- UI plugins usually link QtWidgets in addition to QtCore.\n\n"
-		"Libraries and toolchain\n"
-		"- Plugins are written in C++ (same language as Telegram Desktop).\n"
-		"- Use QtCore (QString, QLibrary) and the C++ standard library.\n"
-		"- For UI, also link QtWidgets.\n"
-		"- Link against the same Qt major/minor version used by the app.\n"
-		"- Build with the same compiler/ABI as Telegram Desktop.\n"
-		"- Platform, architecture and plugin API version must match exactly.\n\n"
-		"Other runtimes\n"
-		"- DEX/Java plugins are not supported on desktop.\n"
-		"- If you need another language, embed a runtime inside a C++ plugin\n"
-		"  or communicate with a separate process via IPC.\n\n"
-		"Build outline (Linux)\n"
-		"- g++ -std=c++20 -fPIC -shared -I../../SourceFiles \\\n"
-		"  -o my_plugin.so my_plugin.cpp "
-		"$(pkg-config --cflags --libs Qt6Core Qt6Widgets)\n"
-		"- mv my_plugin.so my_plugin.tgd\n\n"
-		"Security\n"
-		"- Plugins run as native code inside the app process.\n"
-		"- Only load plugins you trust.\n"
-		"- Safe mode disables plugin loading completely.\n"
-		"- You can also launch Telegram with -noplugins.\n"_q;
+	return UseRussianPluginUi()
+		? QString::fromUtf8(R"PLUGIN(Плагины Telegram Desktop (техническая документация)
+
+0) Кратко про архитектуру
+- Плагин = нативная библиотека .tgd, загружается в процесс Telegram Desktop.
+- Любая ошибка ABI или native-crash в плагине может уронить процесс.
+- Менеджер плагинов ведёт recovery-state и может включить safe mode.
+
+1) Пути и файлы
+- Папка плагинов: <working dir>/tdata/plugins
+- Ручные выключения: <working dir>/tdata/plugins.json
+- Флаг safe mode: <working dir>/tdata/plugins.safe-mode
+- Основной лог: <working dir>/tdata/plugins.log
+- Recovery-state: <working dir>/tdata/plugins.recovery.json
+
+2) Минимальный каркас плагина
+```cpp
+#include "plugins/plugins_api.h"
+
+class MyPlugin final : public Plugins::Plugin {
+public:
+	explicit MyPlugin(Plugins::Host *host) : _host(host) {}
+	Plugins::PluginInfo info() const override {
+		return {
+			.id = "example.my_plugin",
+			.name = "My Plugin",
+			.version = "1.0.0",
+			.author = "You",
+			.description = "Example plugin",
+		};
+	}
+	void onLoad() override {}
+	void onUnload() override {}
+private:
+	Plugins::Host *_host = nullptr;
+};
+
+TGD_PLUGIN_ENTRY {
+	if (apiVersion != Plugins::kApiVersion) return nullptr;
+	return new MyPlugin(host);
+}
+```
+
+3) Preview metadata (без запуска кода плагина)
+```cpp
+TGD_PLUGIN_PREVIEW(
+	"example.my_plugin",
+	"My Plugin",
+	"1.0.0",
+	"You",
+	"Example plugin",
+	"https://example.com",
+	"GusTheDuck/4")
+```
+
+4) Регистрация slash-команды
+```cpp
+_commandId = _host->registerCommand(
+	"example.my_plugin",
+	{ .command = "/ping", .description = "Ping command" },
+	[=](const Plugins::CommandContext &ctx) {
+		_host->showToast("pong");
+		return Plugins::CommandResult{
+			.action = Plugins::CommandResult::Action::Cancel
+		};
+	});
+```
+
+5) Кнопка-действие в Settings > Plugins
+```cpp
+_actionId = _host->registerAction(
+	"example.my_plugin",
+	"Open popup",
+	"Opens a toast",
+	[=] { _host->showToast("Action called"); });
+```
+
+6) Action с контекстом (окно/сессия)
+```cpp
+_actionCtxId = _host->registerActionWithContext(
+	"example.my_plugin",
+	"Context action",
+	"Uses active window/session",
+	[=](const Plugins::ActionContext &ctx) {
+		if (!ctx.window) return;
+		_host->showToast("Window is available");
+	});
+```
+
+7) Панель плагина (UI entry)
+```cpp
+_panelId = _host->registerPanel(
+	"example.my_plugin",
+	{ .title = "My Panel", .description = "Open settings panel" },
+	[=](Window::Controller *window) {
+		Q_UNUSED(window);
+		_host->showToast("Panel opened");
+	});
+```
+
+8) Перехват исходящего текста
+```cpp
+_outgoingId = _host->registerOutgoingTextInterceptor(
+	"example.my_plugin",
+	[=](const Plugins::OutgoingTextContext &ctx) {
+		if (ctx.text.startsWith("/shout ")) {
+			_host->showToast("Intercepted");
+			return Plugins::CommandResult{
+				.action = Plugins::CommandResult::Action::Cancel
+			};
+		}
+		return Plugins::CommandResult{
+			.action = Plugins::CommandResult::Action::Continue
+		};
+	},
+	/*priority=*/100);
+```
+
+9) Observer новых/изменённых/удалённых сообщений
+```cpp
+Plugins::MessageObserverOptions opts;
+opts.newMessages = true;
+opts.editedMessages = true;
+opts.deletedMessages = true;
+opts.incoming = true;
+opts.outgoing = true;
+
+_observerId = _host->registerMessageObserver(
+	"example.my_plugin",
+	opts,
+	[=](const Plugins::MessageEventContext &ctx) {
+		switch (ctx.event) {
+		case Plugins::MessageEvent::New: _host->showToast("New"); break;
+		case Plugins::MessageEvent::Edited: _host->showToast("Edited"); break;
+		case Plugins::MessageEvent::Deleted: _host->showToast("Deleted"); break;
+		}
+	});
+```
+
+10) Window/session callbacks
+```cpp
+_host->onWindowCreated([=](Window::Controller *window) {
+	Q_UNUSED(window);
+	_host->showToast("Window created");
+});
+
+_host->onSessionActivated([=](Main::Session *session) {
+	Q_UNUSED(session);
+	_host->showToast("Session activated");
+});
+```
+
+11) Корректная очистка в onUnload
+```cpp
+void onUnload() override {
+	if (_commandId) _host->unregisterCommand(_commandId);
+	if (_actionId) _host->unregisterAction(_actionId);
+	if (_panelId) _host->unregisterPanel(_panelId);
+	if (_outgoingId) _host->unregisterOutgoingTextInterceptor(_outgoingId);
+	if (_observerId) _host->unregisterMessageObserver(_observerId);
+}
+```
+
+12) CMake пример для плагина
+```cmake
+add_library(my_plugin MODULE my_plugin.cpp)
+target_include_directories(my_plugin PRIVATE ${TGD_PLUGIN_API_DIR})
+target_link_libraries(my_plugin PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets)
+set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
+```
+
+13) ABI/совместимость (обязательно)
+- platform, pointer size, compiler ABI, Qt major/minor, plugin API version должны совпадать.
+- Простое переименование файла в `.tgd` не работает: нужен реальный compile+link.
+- Несовместимость пишется в plugins.log как load-failed/abi-mismatch.
+
+14) Safe mode и recovery
+- При падении в рискованной операции (load/onload/panel/command/window/session/observer...) менеджер включает safe mode.
+- Подозрительный плагин выключается автоматически.
+- На следующем запуске появляется recovery-уведомление.
+
+15) Диагностика: что смотреть сначала
+1. plugins.log: `load-failed`, `abi-mismatch`, `onload failed`, `panel failed`.
+2. Путь и SHA пакета в логе.
+3. Совпадение compiler + Qt.
+4. Не храните long-lived сырые указатели на объекты Telegram.
+5. Уберите тяжёлую синхронную работу из callback'ов UI.
+
+16) Практика надёжности
+- `info()` и конструктор плагина должны быть дешёвыми и без I/O.
+- Любые сетевые/тяжёлые операции уносите в worker.
+- UI код открывайте только из UI callback'ов.
+- Всегда тестируйте onUnload после reload/disable.
+)PLUGIN")
+		: QString::fromUtf8(R"PLUGIN(Telegram Desktop Plugins (technical documentation)
+
+0) Architecture
+- Plugin = native .tgd shared library loaded into Telegram Desktop process.
+- ABI mismatch or native crash in plugin code can crash the process.
+- Plugin manager stores recovery-state and can auto-enable safe mode.
+
+1) Paths
+- Plugin folder: <working dir>/tdata/plugins
+- Manual disable list: <working dir>/tdata/plugins.json
+- Safe mode flag: <working dir>/tdata/plugins.safe-mode
+- Main log: <working dir>/tdata/plugins.log
+- Recovery state: <working dir>/tdata/plugins.recovery.json
+
+2) Minimal plugin skeleton
+```cpp
+#include "plugins/plugins_api.h"
+
+class MyPlugin final : public Plugins::Plugin {
+public:
+	explicit MyPlugin(Plugins::Host *host) : _host(host) {}
+	Plugins::PluginInfo info() const override {
+		return {
+			.id = "example.my_plugin",
+			.name = "My Plugin",
+			.version = "1.0.0",
+			.author = "You",
+			.description = "Example plugin",
+		};
+	}
+	void onLoad() override {}
+	void onUnload() override {}
+private:
+	Plugins::Host *_host = nullptr;
+};
+
+TGD_PLUGIN_ENTRY {
+	if (apiVersion != Plugins::kApiVersion) return nullptr;
+	return new MyPlugin(host);
+}
+```
+
+3) Preview metadata export
+```cpp
+TGD_PLUGIN_PREVIEW(
+	"example.my_plugin",
+	"My Plugin",
+	"1.0.0",
+	"You",
+	"Example plugin",
+	"https://example.com",
+	"GusTheDuck/4")
+```
+
+4) Slash command
+```cpp
+_commandId = _host->registerCommand(
+	"example.my_plugin",
+	{ .command = "/ping", .description = "Ping command" },
+	[=](const Plugins::CommandContext &ctx) {
+		_host->showToast("pong");
+		return Plugins::CommandResult{
+			.action = Plugins::CommandResult::Action::Cancel
+		};
+	});
+```
+
+5) Action button
+```cpp
+_actionId = _host->registerAction(
+	"example.my_plugin",
+	"Open popup",
+	"Opens a toast",
+	[=] { _host->showToast("Action called"); });
+```
+
+6) Action with context
+```cpp
+_actionCtxId = _host->registerActionWithContext(
+	"example.my_plugin",
+	"Context action",
+	"Uses active window/session",
+	[=](const Plugins::ActionContext &ctx) {
+		if (!ctx.window) return;
+		_host->showToast("Window is available");
+	});
+```
+
+7) Panel registration
+```cpp
+_panelId = _host->registerPanel(
+	"example.my_plugin",
+	{ .title = "My Panel", .description = "Open settings panel" },
+	[=](Window::Controller *window) {
+		Q_UNUSED(window);
+		_host->showToast("Panel opened");
+	});
+```
+
+8) Outgoing text interceptor
+```cpp
+_outgoingId = _host->registerOutgoingTextInterceptor(
+	"example.my_plugin",
+	[=](const Plugins::OutgoingTextContext &ctx) {
+		if (ctx.text.startsWith("/shout ")) {
+			_host->showToast("Intercepted");
+			return Plugins::CommandResult{
+				.action = Plugins::CommandResult::Action::Cancel
+			};
+		}
+		return Plugins::CommandResult{
+			.action = Plugins::CommandResult::Action::Continue
+		};
+	},
+	/*priority=*/100);
+```
+
+9) Message observer
+```cpp
+Plugins::MessageObserverOptions opts;
+opts.newMessages = true;
+opts.editedMessages = true;
+opts.deletedMessages = true;
+opts.incoming = true;
+opts.outgoing = true;
+
+_observerId = _host->registerMessageObserver(
+	"example.my_plugin",
+	opts,
+	[=](const Plugins::MessageEventContext &ctx) {
+		switch (ctx.event) {
+		case Plugins::MessageEvent::New: _host->showToast("New"); break;
+		case Plugins::MessageEvent::Edited: _host->showToast("Edited"); break;
+		case Plugins::MessageEvent::Deleted: _host->showToast("Deleted"); break;
+		}
+	});
+```
+
+10) Window/session callbacks
+```cpp
+_host->onWindowCreated([=](Window::Controller *window) {
+	Q_UNUSED(window);
+	_host->showToast("Window created");
+});
+
+_host->onSessionActivated([=](Main::Session *session) {
+	Q_UNUSED(session);
+	_host->showToast("Session activated");
+});
+```
+
+11) onUnload cleanup
+```cpp
+void onUnload() override {
+	if (_commandId) _host->unregisterCommand(_commandId);
+	if (_actionId) _host->unregisterAction(_actionId);
+	if (_panelId) _host->unregisterPanel(_panelId);
+	if (_outgoingId) _host->unregisterOutgoingTextInterceptor(_outgoingId);
+	if (_observerId) _host->unregisterMessageObserver(_observerId);
+}
+```
+
+12) CMake sample
+```cmake
+add_library(my_plugin MODULE my_plugin.cpp)
+target_include_directories(my_plugin PRIVATE ${TGD_PLUGIN_API_DIR})
+target_link_libraries(my_plugin PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets)
+set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
+```
+
+13) ABI checklist
+- Match platform, architecture, compiler ABI, Qt major/minor, plugin API version.
+- Renaming files to `.tgd` is not enough; you must compile/link.
+- ABI failures are logged as load-failed/abi-mismatch in plugins.log.
+
+14) Recovery/safe mode
+- If Telegram detects crash risk in plugin operation, it enables safe mode.
+- Suspected plugin is disabled automatically.
+- Recovery notice appears on next start.
+
+15) Debug order
+1. Check plugins.log (`load-failed`, `abi-mismatch`, `onload failed`, `panel failed`).
+2. Verify package path and SHA in log.
+3. Verify compiler + Qt match.
+4. Avoid long-lived raw pointers to Telegram internals.
+5. Move heavy sync work out of UI callbacks.
+)PLUGIN");
+}
+
+void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
+	const auto text = PluginDocsText();
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(
+			PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q)));
+		box->addLeftButton(
+			PluginUiText(u"Copy"_q, u"Копировать"_q),
+			[=] {
+				if (const auto clipboard = QGuiApplication::clipboard()) {
+					clipboard->setText(text);
+				}
+				controller->window().showToast(PluginUiText(
+					u"Documentation copied."_q,
+					u"Документация скопирована."_q));
+			});
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(text),
+			st::boxLabel),
+			style::margins(
+				st::boxPadding.left(),
+				0,
+				st::boxPadding.right(),
+				0),
+			style::al_top);
+	}));
 }
 
 } // namespace
@@ -180,7 +501,7 @@ Plugins::Plugins(
 }
 
 rpl::producer<QString> Plugins::title() {
-	return rpl::single(u"Plugins"_q);
+	return rpl::single(PluginUiText(u"Plugins"_q, u"Плагины"_q));
 }
 
 void Plugins::setupContent() {
@@ -189,16 +510,17 @@ void Plugins::setupContent() {
 
 	const auto docs = AddButtonWithIcon(
 		_content,
-		rpl::single(u"Documentation"_q),
+		rpl::single(PluginUiText(u"Documentation"_q, u"Документация"_q)),
 		st::settingsButton,
 		{ &st::menuIconFaq });
 	docs->addClickHandler([=] {
-		showOther(PluginsDocumentation::Id());
+		ShowPluginDocsBox(_controller);
 	});
 
 	const auto openFolder = AddButtonWithIcon(
 		_content,
-		rpl::single(u"Open Plugins Folder"_q),
+		rpl::single(
+			PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q)),
 		st::settingsButton,
 		{ &st::menuIconShowInFolder });
 	openFolder->addClickHandler([=] {
@@ -207,31 +529,28 @@ void Plugins::setupContent() {
 
 	const auto safeMode = _content->add(object_ptr<Ui::SettingsButton>(
 		_content,
-		rpl::single(u"Plugin Safe Mode"_q),
+		rpl::single(PluginUiText(
+			u"Plugin Safe Mode"_q,
+			u"Безопасный режим плагинов"_q)),
 		st::settingsButtonNoIcon
 	))->toggleOn(rpl::single(Core::App().plugins().safeModeEnabled()));
 	safeMode->toggledChanges(
 	) | rpl::on_next([=](bool value) {
 		if (!Core::App().plugins().setSafeModeEnabled(value)) {
-			_controller->window().showToast(u"Could not change safe mode."_q);
+			_controller->window().showToast(PluginUiText(
+				u"Could not change safe mode."_q,
+				u"Не удалось переключить безопасный режим."_q));
 		}
 		rebuildList();
 	}, safeMode->lifetime());
 	Ui::AddDividerText(
 		_content,
 		rpl::single(
-			u"When enabled, Telegram skips all plugin loading. "
-			u"Useful for recovery after a broken plugin."_q));
-
-	const auto reload = AddButtonWithIcon(
-		_content,
-		rpl::single(u"Reload Plugins"_q),
-		st::settingsButton,
-		{ &st::menuIconManage });
-	reload->addClickHandler([=] {
-		Core::App().plugins().reload();
-		rebuildList();
-	});
+			PluginUiText(
+				u"When enabled, Telegram skips plugin loading. "
+				u"Crash recovery may enable this mode automatically."_q,
+				u"Когда режим включён, Telegram не загружает плагины. "
+				u"После крэша плагина этот режим может включиться автоматически."_q)));
 
 	Ui::AddDivider(_content);
 	Ui::AddSkip(_content);
@@ -249,11 +568,15 @@ void Plugins::rebuildList() {
 			Ui::AddDividerText(
 				_list,
 				rpl::single(
-					u"Plugin safe mode is enabled. No plugins were loaded."_q));
+					PluginUiText(
+						u"Plugin safe mode is enabled. Plugins are listed without loading."_q,
+						u"Безопасный режим включён. Плагины показаны без загрузки."_q)));
 		} else {
 			Ui::AddDividerText(
 				_list,
-				rpl::single(u"No plugins found in tdata/plugins."_q));
+				rpl::single(PluginUiText(
+					u"No plugins found in tdata/plugins."_q,
+					u"В tdata/plugins плагины не найдены."_q)));
 		}
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
@@ -269,7 +592,9 @@ void Plugins::rebuildList() {
 		Ui::AddSkip(_list);
 
 		const auto title = FormatPluginTitle(state);
-		const auto buttonStyle = state.error.isEmpty()
+		const auto buttonStyle = state.recoverySuspected
+			? st::settingsAttentionButton
+			: state.error.isEmpty()
 			? st::settingsButtonNoIcon
 			: st::settingsOptionDisabled;
 		const auto toggle = _list->add(object_ptr<Ui::SettingsButton>(
@@ -277,21 +602,22 @@ void Plugins::rebuildList() {
 			rpl::single(title),
 			buttonStyle
 		))->toggleOn(rpl::single(state.enabled));
-		if (!state.error.isEmpty()) {
+		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			toggle->setToggleLocked(true);
 		}
 		toggle->toggledChanges(
 		) | rpl::on_next([=](bool value) {
 			if (!Core::App().plugins().setEnabled(state.info.id, value)) {
-				_controller->window().showToast(u"Could not change state."_q);
+				_controller->window().showToast(PluginUiText(
+					u"Could not change state."_q,
+					u"Не удалось изменить состояние плагина."_q));
 			}
 			rebuildList();
 		}, toggle->lifetime());
 
-		const auto commands = Core::App().plugins().commandsFor(state.info.id);
 		const auto actions = Core::App().plugins().actionsFor(state.info.id);
 		const auto panels = Core::App().plugins().panelsFor(state.info.id);
-		const auto details = FormatPluginDetails(state, commands);
+		const auto details = FormatPluginDetails(state);
 		if (!details.isEmpty()) {
 			Ui::AddSkip(_list);
 			Ui::AddDividerText(_list, rpl::single(details));
@@ -299,7 +625,9 @@ void Plugins::rebuildList() {
 
 		if (!actions.empty()) {
 			Ui::AddSkip(_list);
-			Ui::AddDividerText(_list, rpl::single(u"Actions"_q));
+			Ui::AddDividerText(
+				_list,
+				rpl::single(PluginUiText(u"Actions"_q, u"Действия"_q)));
 			Ui::AddSkip(_list);
 			for (const auto &action : actions) {
 				const auto actionButton = _list->add(
@@ -320,7 +648,9 @@ void Plugins::rebuildList() {
 
 		if (!panels.empty()) {
 			Ui::AddSkip(_list);
-			Ui::AddDividerText(_list, rpl::single(u"Panels"_q));
+			Ui::AddDividerText(
+				_list,
+				rpl::single(PluginUiText(u"Panels"_q, u"Панели"_q)));
 			Ui::AddSkip(_list);
 			for (const auto &panel : panels) {
 				const auto panelButton = _list->add(
@@ -354,7 +684,8 @@ PluginsDocumentation::PluginsDocumentation(
 }
 
 rpl::producer<QString> PluginsDocumentation::title() {
-	return rpl::single(u"Plugin Documentation"_q);
+	return rpl::single(
+		PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q));
 }
 
 void PluginsDocumentation::setupContent() {

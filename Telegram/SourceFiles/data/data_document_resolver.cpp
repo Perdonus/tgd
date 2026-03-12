@@ -50,6 +50,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QMimeType>
 #include <QtCore/QMimeDatabase>
 
+#include <utility>
+
 namespace Data {
 namespace {
 
@@ -141,9 +143,12 @@ QString LocalPluginPackagePath(not_null<DocumentData*> document) {
 	return path;
 }
 
+[[nodiscard]] bool UseRussianPluginUi();
+[[nodiscard]] QString PluginUiText(QString en, QString ru);
+
 TextWithEntities PluginVersionText(const Plugins::PackagePreviewState &preview) {
 	auto result = TextWithEntities();
-	result.append(u"Version: "_q);
+	result.append(UseRussianPluginUi() ? u"Версия: "_q : u"Version: "_q);
 	const auto oldVersion = preview.installedVersion.trimmed();
 	const auto newVersion = preview.info.version.trimmed();
 	if (preview.update && !oldVersion.isEmpty()) {
@@ -152,32 +157,24 @@ TextWithEntities PluginVersionText(const Plugins::PackagePreviewState &preview) 
 			result.append(u"  "_q);
 		}
 	}
-	result.append(newVersion.isEmpty() ? u"unknown"_q : newVersion);
+	result.append(newVersion.isEmpty()
+		? (UseRussianPluginUi() ? u"неизвестно"_q : u"unknown"_q)
+		: newVersion);
 	return result;
 }
 
 QString PluginPackageButtonText(const Plugins::PackagePreviewState &preview) {
-	return preview.update ? u"Update"_q : u"Install"_q;
+	return preview.update
+		? (UseRussianPluginUi() ? u"Обновить"_q : u"Update"_q)
+		: (UseRussianPluginUi() ? u"Установить"_q : u"Install"_q);
 }
 
-QString PluginPackageStatusText(const Plugins::PackagePreviewState &preview) {
-	if (!preview.error.isEmpty()) {
-		return u"Status: "_q + preview.error;
-	}
-	if (Core::App().plugins().safeModeEnabled()) {
-		return u"Status: Plugin safe mode is enabled. "
-			u"Telegram will copy the package, but it will not load "
-			u"any plugins until safe mode is turned off."_q;
-	}
-	if (!preview.previewAvailable) {
-		return u"Status: No static preview metadata. "
-			u"Compatibility will be checked during install."_q;
-	}
-	return preview.update
-		? u"Status: This package will replace the installed plugin. "
-			u"Compatibility will be checked during install."_q
-		: u"Status: Ready to install. "
-			u"Compatibility will be checked during install."_q;
+[[nodiscard]] bool UseRussianPluginUi() {
+	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
+}
+
+[[nodiscard]] QString PluginUiText(QString en, QString ru) {
+	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
 }
 
 class PluginPackageIcon final : public Ui::RpWidget {
@@ -303,7 +300,9 @@ void ShowPluginPackageBox(
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(
-			preview.update ? u"Update Plugin"_q : u"Install Plugin"_q));
+			preview.update
+				? PluginUiText(u"Update Plugin"_q, u"Обновить плагин"_q)
+				: PluginUiText(u"Install Plugin"_q, u"Установить плагин"_q)));
 
 		box->addRow(object_ptr<PluginPackageIcon>(
 			box,
@@ -325,7 +324,9 @@ void ShowPluginPackageBox(
 		if (!preview.info.author.trimmed().isEmpty()) {
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(u"Author: "_q + preview.info.author.trimmed()),
+				rpl::single(
+					PluginUiText(u"Author: "_q, u"Автор: "_q)
+					+ preview.info.author.trimmed()),
 				st::defaultFlatLabel),
 				style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 				style::al_top);
@@ -338,24 +339,18 @@ void ShowPluginPackageBox(
 				style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 				style::al_top);
 		}
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			rpl::single(PluginPackageStatusText(preview)),
-			st::boxLabel),
-			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
-			style::al_top);
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			rpl::single(
-				u"Plugins run as native code inside Telegram. "
-				u"Install only if you trust this file."_q),
-			st::boxLabel),
-			style::margins(
-				st::boxPadding.left(),
-				st::boxPadding.bottom() / 2,
-				st::boxPadding.right(),
-				0),
-			style::al_top);
+		if (!preview.error.trimmed().isEmpty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(preview.error.trimmed()),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					st::boxPadding.bottom() / 2,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+		}
 
 		if (preview.compatible) {
 			box->addButton(rpl::single(PluginPackageButtonText(preview)), [=] {
@@ -363,7 +358,9 @@ void ShowPluginPackageBox(
 				if (!Core::App().plugins().installPackage(preview.sourcePath, &error)) {
 					controller->showToast(
 						error.isEmpty()
-							? u"Could not install the plugin."_q
+							? PluginUiText(
+								u"Could not install the plugin."_q,
+								u"Не удалось установить плагин."_q)
 							: error);
 					return;
 				}
@@ -373,12 +370,12 @@ void ShowPluginPackageBox(
 				}
 				controller->showToast(
 					preview.update
-						? u"Plugin updated."_q
-						: u"Plugin installed."_q);
+						? PluginUiText(u"Plugin updated."_q, u"Плагин обновлён."_q)
+						: PluginUiText(u"Plugin installed."_q, u"Плагин установлен."_q));
 				box->closeBox();
 			});
 		}
-		box->addButton(rpl::single(u"Close"_q), [=] {
+		box->addLeftButton(PluginUiText(u"Cancel"_q, u"Отмена"_q), [=] {
 			box->closeBox();
 		});
 	}));
