@@ -349,6 +349,7 @@ public:
 			QStringList pluginIds,
 			QString details);
 		void showRecoveryNotice(Window::Controller *window);
+		void scheduleRecoveryNoticeIfPossible();
 		QStringList describeRecoveryPlugins(
 			const QStringList &pluginIds) const;
 		QString composeRecoveryClipboardText() const;
