@@ -1097,6 +1097,19 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 	saveRecoveryState();
 }
 
+void Manager::scheduleRecoveryNoticeIfPossible() {
+	if (_recoveryNoticeShown || !_recoveryNotice.active) {
+		return;
+	}
+	QTimer::singleShot(0, this, [=] {
+		auto *window = activeWindow();
+		if (!window) {
+			window = Core::App().activePrimaryWindow();
+		}
+		showRecoveryNotice(window);
+	});
+}
+
 void Manager::start() {
 	_pluginsPath = cWorkingDir() + QString::fromLatin1(kPluginsFolder);
 	_configPath = cWorkingDir() + QString::fromLatin1(kConfigFile);
@@ -1136,6 +1149,7 @@ void Manager::start() {
 	) | rpl::on_next([=](Main::Session *session) {
 		handleActiveSessionChanged(session);
 	}, _sessionLifetime);
+	scheduleRecoveryNoticeIfPossible();
 }
 
 void Manager::reload() {
@@ -1165,6 +1179,7 @@ void Manager::reload() {
 		finishRecoveryOperation();
 	}
 	updateRuntimeCrashGuard();
+	scheduleRecoveryNoticeIfPossible();
 }
 
 std::vector<PluginState> Manager::plugins() const {
@@ -1271,11 +1286,25 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 		result.info.name = result.info.id;
 	}
 	if (!result.info.id.isEmpty()) {
+		const auto installedStem = SanitizedPluginFileStem(result.info.id);
+		const auto installedPath = QDir(_pluginsPath).absoluteFilePath(
+			installedStem + u".tgd"_q);
 		if (const auto installed = findRecord(result.info.id)) {
 			result.installed = true;
 			result.update = true;
 			result.installedVersion = installed->state.info.version;
 			result.installedPath = installed->state.path;
+		} else if (QFileInfo::exists(installedPath)) {
+			result.installed = true;
+			result.update = true;
+			result.installedPath = installedPath;
+			auto installedInfo = PluginInfo();
+			auto installedIcon = QString();
+			if (ReadPreviewManifest(installedPath, &installedInfo, &installedIcon)) {
+				if (result.installedVersion.isEmpty()) {
+					result.installedVersion = installedInfo.version.trimmed();
+				}
+			}
 		}
 	}
 	logEvent(
@@ -1353,6 +1382,19 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	unloadAll();
 	loadConfig();
 	loadRecoveryState();
+	if (!preview.info.id.isEmpty()
+		&& _disabledByRecovery.contains(preview.info.id)) {
+		_disabled.remove(preview.info.id);
+		clearRecoveryDisabled(preview.info.id);
+		saveConfig();
+		logEvent(
+			u"package"_q,
+			u"install-cleared-recovery-disable"_q,
+			QJsonObject{
+				{ u"pluginId"_q, preview.info.id },
+				{ u"update"_q, preview.update },
+			});
+	}
 
 	QFile::remove(tempPath);
 
@@ -1422,6 +1464,23 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 			finishRecoveryOperation();
 			return false;
 		}
+	}
+
+	if (!preview.info.id.isEmpty()) {
+		const auto wasDisabled = _disabled.contains(preview.info.id);
+		const auto wasDisabledByRecovery = _disabledByRecovery.contains(preview.info.id);
+		_disabled.remove(preview.info.id);
+		clearRecoveryDisabled(preview.info.id);
+		saveConfig();
+		logEvent(
+			u"package"_q,
+			u"install-cleared-disabled-state"_q,
+			QJsonObject{
+				{ u"pluginId"_q, preview.info.id },
+				{ u"wasDisabled"_q, wasDisabled },
+				{ u"wasDisabledByRecovery"_q, wasDisabledByRecovery },
+				{ u"targetPath"_q, targetPath },
+			});
 	}
 
 	if (safeModeEnabled()) {
@@ -1920,9 +1979,7 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 			{ u"hasWindow"_q, window != nullptr },
 		});
 	if (_recoveryNotice.active && !_recoveryNoticeShown) {
-		QTimer::singleShot(0, this, [=] {
-			showRecoveryNotice(window);
-		});
+		scheduleRecoveryNoticeIfPossible();
 	}
 	const auto handlers = _windowHandlers;
 	for (const auto &entry : handlers) {
@@ -4219,6 +4276,7 @@ void Manager::handleActiveSessionChanged(Main::Session *session) {
 			{ u"sessionUniqueId"_q, session ? QString::number(session->uniqueId()) : QString() },
 			{ u"handlerCount"_q, int(_sessionHandlers.size()) },
 		});
+	scheduleRecoveryNoticeIfPossible();
 	const auto handlers = _sessionHandlers;
 	for (const auto &entry : handlers) {
 		if (!entry.handler) {
