@@ -3,7 +3,6 @@ Example plugin for Telegram Desktop.
 Adds a panel with a slider that makes Telegram windows transparent.
 */
 #include "plugins/plugins_api.h"
-#include "window/window_controller.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -96,26 +95,21 @@ public:
 	}
 
 private:
-	QWidget *resolveDialogParent(Window::Controller *window) const {
-		if (window) {
-			if (const auto widget = window->widget().get()) {
-				return widget->window();
-			}
-		}
+	QWidget *resolveDialogParent() const {
 		if (const auto active = QApplication::activeWindow()) {
 			return active->window();
 		}
 		return nullptr;
 	}
 
-	void openSettingsDialog(Window::Controller *window) {
+	void openSettingsDialog(Window::Controller *) {
 		if (_settingsDialog) {
 			_settingsDialog->raise();
 			_settingsDialog->activateWindow();
 			return;
 		}
 
-		auto *parent = resolveDialogParent(window);
+		auto *parent = resolveDialogParent();
 		auto dialog = parent ? new QDialog(parent) : new QDialog();
 		_settingsDialog = dialog;
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
