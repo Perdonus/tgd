@@ -3,15 +3,14 @@ Example plugin for Telegram Desktop.
 Adds a panel with a slider that makes Telegram windows transparent.
 */
 #include "plugins/plugins_api.h"
+#include "window/window_controller.h"
 
 #include <QtCore/QDir>
-#include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QPointer>
-#include <QtCore/QTimer>
 
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QDialog>
@@ -26,9 +25,9 @@ Adds a panel with a slider that makes Telegram windows transparent.
 TGD_PLUGIN_PREVIEW(
 	"example.transparent_telegram",
 	"Transparent Telegram",
-	"1.0",
+	"1.1",
 	"Codex",
-	"Makes Telegram windows transparent with a live slider.",
+	"Makes Telegram main windows transparent with a live slider.",
 	"",
 	"GusTheDuck/4")
 
@@ -53,10 +52,10 @@ public:
 	explicit TransparentTelegramPlugin(Plugins::Host *host) : _host(host) {
 		_info.id = QStringLiteral("example.transparent_telegram");
 		_info.name = QStringLiteral("Transparent Telegram");
-		_info.version = QStringLiteral("1.0");
+		_info.version = QStringLiteral("1.1");
 		_info.author = QStringLiteral("Codex");
 		_info.description = QStringLiteral(
-			"Makes Telegram windows transparent with a live slider.");
+			"Makes Telegram main windows transparent with a live slider.");
 		_configPath = QDir(_host->pluginsPath()).filePath(
 			_info.id + QStringLiteral(".json"));
 		loadConfig();
@@ -67,31 +66,24 @@ public:
 	}
 
 	void onLoad() override {
-		if (const auto app = QApplication::instance()) {
-			app->installEventFilter(this);
-		}
-
 		_panelId = _host->registerPanel(
 			_info.id,
 			{
 				QStringLiteral("Transparency"),
-				QStringLiteral("Adjust Telegram window opacity."),
+				QStringLiteral("Adjust Telegram main window opacity."),
 			},
 			[=](Window::Controller *) {
 				openSettingsDialog();
 			});
 
-		_host->onWindowCreated([=](Window::Controller *) {
-			applyCurrentOpacity();
+		_host->onWindowCreated([=](Window::Controller *window) {
+			applyOpacityToWindow(window);
 		});
 
-		applyCurrentOpacity();
+		applyCurrentOpacityToTelegramWindows();
 	}
 
 	void onUnload() override {
-		if (const auto app = QApplication::instance()) {
-			app->removeEventFilter(this);
-		}
 		if (_settingsDialog) {
 			_settingsDialog->close();
 			_settingsDialog = nullptr;
@@ -101,30 +93,6 @@ public:
 			_panelId = 0;
 		}
 		restoreOpaque();
-	}
-
-protected:
-	bool eventFilter(QObject *watched, QEvent *event) override {
-		if (!event) {
-			return QObject::eventFilter(watched, event);
-		}
-		switch (event->type()) {
-		case QEvent::Show:
-		case QEvent::Polish:
-		case QEvent::PolishRequest: {
-			const auto widget = qobject_cast<QWidget*>(watched);
-			if (widget && widget->isWindow()) {
-				auto safe = QPointer<QWidget>(widget);
-				QTimer::singleShot(0, this, [=] {
-					if (safe) {
-						applyOpacityToWidget(safe.data());
-					}
-				});
-			}
-		} break;
-		default: break;
-		}
-		return QObject::eventFilter(watched, event);
 	}
 
 private:
@@ -148,8 +116,8 @@ private:
 
 		auto intro = new QLabel(
 			QStringLiteral(
-				"Changes are applied immediately to Telegram windows. "
-				"Internal layers and menus inherit the same opacity."),
+				"Changes are applied immediately to Telegram main windows. "
+				"Transient menus and popup layers stay opaque for stability."),
 			dialog);
 		intro->setWordWrap(true);
 		layout->addWidget(intro);
@@ -219,34 +187,44 @@ private:
 			return;
 		}
 		_opacityPercent = clamped;
-		applyCurrentOpacity();
+		applyCurrentOpacityToTelegramWindows();
 		if (persist) {
 			saveConfig();
 		}
 	}
 
-	void applyCurrentOpacity() {
-		for (auto widget : QApplication::topLevelWidgets()) {
-			applyOpacityToWidget(widget);
-		}
+	void applyCurrentOpacityToTelegramWindows() {
+		_host->forEachWindow([=](Window::Controller *window) {
+			applyOpacityToWindow(window);
+		});
 	}
 
 	void restoreOpaque() {
-		for (auto widget : QApplication::topLevelWidgets()) {
-			if (widget) {
-				widget->setWindowOpacity(1.0);
-			}
-		}
+		_host->forEachWindow([=](Window::Controller *window) {
+			restoreOpacityForWindow(window);
+		});
 	}
 
-	void applyOpacityToWidget(QWidget *widget) const {
-		if (!widget || !widget->isWindow()) {
+	void applyOpacityToWindow(Window::Controller *window) const {
+		if (!window) {
 			return;
 		}
-		if (shouldSkipWidget(widget)) {
+		auto *widget = window->widget().get();
+		if (!widget || !widget->isWindow() || shouldSkipWidget(widget)) {
 			return;
 		}
 		widget->setWindowOpacity(opacityValue());
+	}
+
+	void restoreOpacityForWindow(Window::Controller *window) const {
+		if (!window) {
+			return;
+		}
+		auto *widget = window->widget().get();
+		if (!widget || !widget->isWindow()) {
+			return;
+		}
+		widget->setWindowOpacity(1.0);
 	}
 
 	bool shouldSkipWidget(QWidget *widget) const {
