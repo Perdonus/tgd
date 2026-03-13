@@ -77,6 +77,7 @@ constexpr auto kLogFile = "tdata/plugins.log";
 constexpr auto kTraceFile = "tdata/plugins.trace.jsonl";
 constexpr auto kSafeModeFile = "tdata/plugins.safe-mode";
 constexpr auto kRecoveryFile = "tdata/plugins.recovery.json";
+constexpr auto kRuntimeGuardFile = "tdata/plugins.runtime-guard.json";
 constexpr auto kBinaryInfoName = "TgdPluginBinaryInfo";
 constexpr auto kPreviewInfoName = "TgdPluginPreviewInfo";
 constexpr auto kEntryName = "TgdPluginEntry";
@@ -195,6 +196,10 @@ QString HttpStatusText(int statusCode) {
 		return PluginUiText(
 			u"message observer"_q,
 			u"наблюдателя сообщений"_q);
+	} else if (kind == u"runtime"_q) {
+		return PluginUiText(
+			u"plugin runtime"_q,
+			u"работы плагина"_q);
 	}
 	return PluginUiText(u"plugin operation"_q, u"операции плагина"_q);
 }
@@ -611,6 +616,7 @@ Manager::Manager(QObject *parent) : QObject(parent) {
 
 Manager::~Manager() {
 	stopRuntimeApiServer();
+	clearRuntimeCrashGuard();
 	unloadAll();
 }
 
@@ -724,6 +730,7 @@ void Manager::recoverFromPendingState() {
 			{ u"safeModePath"_q, _safeModePath },
 		});
 	saveRecoveryState();
+	clearRuntimeCrashGuard();
 }
 
 void Manager::startRecoveryOperation(
@@ -750,6 +757,157 @@ void Manager::finishRecoveryOperation() {
 	_recoveryPending = RecoveryOperationState();
 	saveRecoveryState();
 	logOperationFinish();
+}
+
+void Manager::recoverFromRuntimeGuard() {
+	if (_runtimeGuardPath.isEmpty()) {
+		return;
+	}
+	auto file = QFile(_runtimeGuardPath);
+	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+		return;
+	}
+	const auto document = QJsonDocument::fromJson(file.readAll());
+	file.close();
+	if (!document.isObject()) {
+		QFile::remove(_runtimeGuardPath);
+		return;
+	}
+	const auto object = document.object();
+	auto pluginIds = QStringList();
+	for (const auto &value : object.value(u"pluginIds"_q).toArray()) {
+		if (value.isString()) {
+			const auto pluginId = value.toString().trimmed();
+			if (!pluginId.isEmpty()) {
+				pluginIds.push_back(pluginId);
+			}
+		}
+	}
+	pluginIds.removeDuplicates();
+	const auto armedAt = object.value(u"armedAt"_q).toString();
+	logEvent(
+		u"recovery"_q,
+		u"runtime-guard-detected"_q,
+		QJsonObject{
+			{ u"path"_q, _runtimeGuardPath },
+			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+			{ u"armedAt"_q, armedAt },
+		});
+	QFile::remove(_runtimeGuardPath);
+	if (pluginIds.isEmpty()) {
+		return;
+	}
+	for (const auto &pluginId : pluginIds) {
+		_disabled.insert(pluginId);
+		_disabledByRecovery.insert(pluginId);
+	}
+	saveConfig();
+	QDir().mkpath(QFileInfo(_safeModePath).absolutePath());
+	auto safeModeFile = QFile(_safeModePath);
+	if (!safeModeFile.exists()
+		&& safeModeFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		safeModeFile.close();
+	}
+	auto details = PluginUiText(
+		u"Process terminated unexpectedly after plugin startup."_q,
+		u"Процесс завершился аварийно уже после запуска плагина."_q);
+	if (!armedAt.trimmed().isEmpty()) {
+		details += PluginUiText(
+			u" Armed at: "_q,
+			u" Вооружено в: "_q) + armedAt.trimmed();
+	}
+	queueRecoveryNotice(u"runtime"_q, pluginIds, details);
+	logEvent(
+		u"recovery"_q,
+		u"runtime-guard-recovered"_q,
+		QJsonObject{
+			{ u"path"_q, _runtimeGuardPath },
+			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+			{ u"armedAt"_q, armedAt },
+			{ u"safeModePath"_q, _safeModePath },
+		});
+	saveRecoveryState();
+}
+
+QStringList Manager::loadedEnabledPluginIds() const {
+	auto result = QStringList();
+	for (const auto &plugin : _plugins) {
+		if (!plugin.state.enabled || !plugin.state.loaded) {
+			continue;
+		}
+		const auto pluginId = plugin.state.info.id.trimmed();
+		if (!pluginId.isEmpty()) {
+			result.push_back(pluginId);
+		}
+	}
+	result.removeDuplicates();
+	result.sort(Qt::CaseInsensitive);
+	return result;
+}
+
+void Manager::updateRuntimeCrashGuard() {
+	if (_runtimeGuardPath.isEmpty()) {
+		return;
+	}
+	if (safeModeEnabled()) {
+		clearRuntimeCrashGuard();
+		return;
+	}
+	const auto pluginIds = loadedEnabledPluginIds();
+	if (pluginIds.isEmpty()) {
+		clearRuntimeCrashGuard();
+		return;
+	}
+	QDir().mkpath(QFileInfo(_runtimeGuardPath).absolutePath());
+	auto object = QJsonObject{
+		{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+		{ u"armedAt"_q, DateTimeToIsoUtc(QDateTime::currentDateTimeUtc()) },
+		{ u"pid"_q, QString::number(QCoreApplication::applicationPid()) },
+	};
+	auto file = QFile(_runtimeGuardPath);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		logEvent(
+			u"recovery"_q,
+			u"runtime-guard-arm-failed"_q,
+			QJsonObject{
+				{ u"path"_q, _runtimeGuardPath },
+				{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+			});
+		return;
+	}
+	file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+	file.close();
+	logEvent(
+		u"recovery"_q,
+		u"runtime-guard-armed"_q,
+		QJsonObject{
+			{ u"path"_q, _runtimeGuardPath },
+			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+		});
+}
+
+void Manager::clearRuntimeCrashGuard() {
+	if (_runtimeGuardPath.isEmpty()) {
+		return;
+	}
+	if (!QFileInfo::exists(_runtimeGuardPath)) {
+		return;
+	}
+	if (!QFile::remove(_runtimeGuardPath)) {
+		logEvent(
+			u"recovery"_q,
+			u"runtime-guard-clear-failed"_q,
+			QJsonObject{
+				{ u"path"_q, _runtimeGuardPath },
+			});
+		return;
+	}
+	logEvent(
+		u"recovery"_q,
+		u"runtime-guard-cleared"_q,
+		QJsonObject{
+			{ u"path"_q, _runtimeGuardPath },
+		});
 }
 
 void Manager::syncRecoveryFlags(PluginState &state) const {
@@ -946,6 +1104,7 @@ void Manager::start() {
 	_tracePath = cWorkingDir() + QString::fromLatin1(kTraceFile);
 	_safeModePath = cWorkingDir() + QString::fromLatin1(kSafeModeFile);
 	_recoveryPath = cWorkingDir() + QString::fromLatin1(kRecoveryFile);
+	_runtimeGuardPath = cWorkingDir() + QString::fromLatin1(kRuntimeGuardFile);
 	logEvent(
 		u"manager"_q,
 		u"start"_q,
@@ -964,12 +1123,14 @@ void Manager::start() {
 	}
 	loadRecoveryState();
 	recoverFromPendingState();
+	recoverFromRuntimeGuard();
 	if (safeModeEnabled()) {
 		logEvent(u"safe-mode"_q, u"startup-scan-metadata-only"_q);
 		scanPlugins(true);
 	} else {
 		scanPlugins();
 	}
+	updateRuntimeCrashGuard();
 	_sessionLifetime.destroy();
 	Core::App().domain().activeSessionValue(
 	) | rpl::on_next([=](Main::Session *session) {
@@ -985,12 +1146,14 @@ void Manager::reload() {
 			{ u"safeMode"_q, safeModeEnabled() },
 			{ u"knownPlugins"_q, int(_plugins.size()) },
 		});
+	clearRuntimeCrashGuard();
 	unloadAll();
 	loadConfig();
 	loadRecoveryState();
 	if (safeModeEnabled()) {
 		logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
 		scanPlugins(true);
+		updateRuntimeCrashGuard();
 		return;
 	}
 	const auto ownsRecovery = !_recoveryPending.active;
@@ -1001,6 +1164,7 @@ void Manager::reload() {
 	if (ownsRecovery) {
 		finishRecoveryOperation();
 	}
+	updateRuntimeCrashGuard();
 }
 
 std::vector<PluginState> Manager::plugins() const {
@@ -1293,6 +1457,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	if (error) {
 		error->clear();
 	}
+	updateRuntimeCrashGuard();
 	logEvent(
 		u"package"_q,
 		u"install-finished"_q,
@@ -3690,6 +3855,7 @@ void Manager::loadPlugin(const QString &path) {
 }
 
 void Manager::unloadAll() {
+	clearRuntimeCrashGuard();
 	logEvent(
 		u"unload"_q,
 		u"begin"_q,
@@ -3925,6 +4091,7 @@ void Manager::disablePlugin(
 	}
 	saveConfig();
 	saveRecoveryState();
+	updateRuntimeCrashGuard();
 	logEvent(
 		u"plugin"_q,
 		u"disabled-finished"_q,

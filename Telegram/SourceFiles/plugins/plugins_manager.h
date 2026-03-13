@@ -333,11 +333,15 @@ public:
 		void loadRecoveryState();
 		void saveRecoveryState() const;
 		void recoverFromPendingState();
+		void recoverFromRuntimeGuard();
 		void startRecoveryOperation(
 			QString kind,
 			QStringList pluginIds = {},
 			QString details = QString());
 		void finishRecoveryOperation();
+		QStringList loadedEnabledPluginIds() const;
+		void updateRuntimeCrashGuard();
+		void clearRuntimeCrashGuard();
 		void syncRecoveryFlags(PluginState &state) const;
 		void clearRecoveryDisabled(const QString &pluginId);
 		void queueRecoveryNotice(
@@ -362,6 +366,7 @@ public:
 		QString _tracePath;
 		QString _safeModePath;
 		QString _recoveryPath;
+		QString _runtimeGuardPath;
 		bool _runtimeApiEnabled = false;
 		quint16 _runtimeApiPort = 8096;
 		QString _runtimeApiToken;
