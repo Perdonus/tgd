@@ -1021,16 +1021,33 @@ QString Manager::composeRecoveryClipboardText() const {
 }
 
 void Manager::showRecoveryNotice(Window::Controller *window) {
-	if (_recoveryNoticeShown || !_recoveryNotice.active || !window) {
+	if (_recoveryNoticeShown || !_recoveryNotice.active) {
+		return;
+	}
+	if (!window) {
+		logEvent(
+			u"recovery"_q,
+			u"notice-deferred-no-window"_q,
+			QJsonObject{
+				{ u"kind"_q, _recoveryNotice.kind },
+				{ u"details"_q, _recoveryNotice.details },
+				{ u"pluginIds"_q, JsonArrayFromStrings(_recoveryNotice.pluginIds) },
+			});
+		QTimer::singleShot(300, this, [this] {
+			scheduleRecoveryNoticeIfPossible();
+		});
 		return;
 	}
 	_recoveryNoticeShown = true;
+	const auto kind = _recoveryNotice.kind;
+	const auto details = _recoveryNotice.details;
+	const auto pluginIds = _recoveryNotice.pluginIds;
 	const auto clipboardText = composeRecoveryClipboardText();
 	if (const auto clipboard = QGuiApplication::clipboard()) {
 		clipboard->setText(clipboardText);
 	}
 
-	const auto plugins = describeRecoveryPlugins(_recoveryNotice.pluginIds);
+	const auto plugins = describeRecoveryPlugins(pluginIds);
 	const auto pluginText = plugins.isEmpty()
 		? PluginUiText(u"unknown plugin"_q, u"неизвестный плагин"_q)
 		: plugins.join(u", "_q);
@@ -1038,28 +1055,48 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 	const auto body = plugins.size() == 1
 		? PluginUiText(
 			u"Telegram noticed a crash during "_q
-				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ RecoveryOperationText(kind)
 				+ u".\n\nSuspected plugin: "_q
 				+ pluginText
 				+ u"\n\nSafe mode was enabled automatically, the plugin was turned off, and the recovery log was copied to the clipboard."_q,
 			u"Telegram заметил крэш во время "_q
-				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ RecoveryOperationText(kind)
 				+ u".\n\nПодозреваемый плагин: "_q
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, плагин выключен, лог восстановления уже скопирован в буфер обмена."_q)
 		: PluginUiText(
 			u"Telegram noticed a crash during "_q
-				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ RecoveryOperationText(kind)
 				+ u".\n\nSuspected plugins: "_q
 				+ pluginText
 				+ u"\n\nSafe mode was enabled automatically, the listed plugins were turned off, and the recovery log was copied to the clipboard."_q,
 			u"Telegram заметил крэш во время "_q
-				+ RecoveryOperationText(_recoveryNotice.kind)
+				+ RecoveryOperationText(kind)
 				+ u".\n\nПодозреваемые плагины: "_q
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, указанные плагины выключены, лог восстановления уже скопирован в буфер обмена."_q);
 
+	logEvent(
+		u"recovery"_q,
+		u"notice-showing"_q,
+		QJsonObject{
+			{ u"kind"_q, kind },
+			{ u"details"_q, details },
+			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+		});
 	window->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		logEvent(
+			u"recovery"_q,
+			u"notice-box-created"_q,
+			QJsonObject{
+				{ u"kind"_q, kind },
+				{ u"details"_q, details },
+				{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
+			});
+		if (_recoveryNotice.active) {
+			_recoveryNotice = RecoveryOperationState();
+			saveRecoveryState();
+		}
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(title));
 		box->addLeftButton(rpl::single(PluginUiText(u"Copy"_q, u"Копировать"_q)), [=] {
@@ -1092,16 +1129,13 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 			box->closeBox();
 		});
 	}));
-
-	_recoveryNotice = RecoveryOperationState();
-	saveRecoveryState();
 }
 
 void Manager::scheduleRecoveryNoticeIfPossible() {
 	if (_recoveryNoticeShown || !_recoveryNotice.active) {
 		return;
 	}
-	QTimer::singleShot(0, this, [=] {
+	QTimer::singleShot(150, this, [this] {
 		auto *window = activeWindow();
 		if (!window) {
 			window = Core::App().activePrimaryWindow();
@@ -1382,19 +1416,6 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	unloadAll();
 	loadConfig();
 	loadRecoveryState();
-	if (!preview.info.id.isEmpty()
-		&& _disabledByRecovery.contains(preview.info.id)) {
-		_disabled.remove(preview.info.id);
-		clearRecoveryDisabled(preview.info.id);
-		saveConfig();
-		logEvent(
-			u"package"_q,
-			u"install-cleared-recovery-disable"_q,
-			QJsonObject{
-				{ u"pluginId"_q, preview.info.id },
-				{ u"update"_q, preview.update },
-			});
-	}
 
 	QFile::remove(tempPath);
 

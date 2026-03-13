@@ -25,7 +25,7 @@ Adds a panel with a slider that makes Telegram windows transparent.
 TGD_PLUGIN_PREVIEW(
 	"example.transparent_telegram",
 	"Transparent Telegram",
-	"1.1",
+	"1.3",
 	"Codex",
 	"Makes Telegram main windows transparent with a live slider.",
 	"",
@@ -52,7 +52,7 @@ public:
 	explicit TransparentTelegramPlugin(Plugins::Host *host) : _host(host) {
 		_info.id = QStringLiteral("example.transparent_telegram");
 		_info.name = QStringLiteral("Transparent Telegram");
-		_info.version = QStringLiteral("1.1");
+		_info.version = QStringLiteral("1.3");
 		_info.author = QStringLiteral("Codex");
 		_info.description = QStringLiteral(
 			"Makes Telegram main windows transparent with a live slider.");
@@ -72,8 +72,8 @@ public:
 				QStringLiteral("Transparency"),
 				QStringLiteral("Adjust Telegram main window opacity."),
 			},
-			[=](Window::Controller *) {
-				openSettingsDialog();
+			[=](Window::Controller *window) {
+				openSettingsDialog(window);
 			});
 
 		_host->onWindowCreated([=](Window::Controller *window) {
@@ -96,19 +96,31 @@ public:
 	}
 
 private:
-	void openSettingsDialog() {
+	QWidget *resolveDialogParent(Window::Controller *window) const {
+		if (window) {
+			if (const auto widget = window->widget().get()) {
+				return widget->window();
+			}
+		}
+		if (const auto active = QApplication::activeWindow()) {
+			return active->window();
+		}
+		return nullptr;
+	}
+
+	void openSettingsDialog(Window::Controller *window) {
 		if (_settingsDialog) {
 			_settingsDialog->raise();
 			_settingsDialog->activateWindow();
 			return;
 		}
 
-		auto parent = QApplication::activeWindow();
-		auto dialog = new QDialog(parent);
+		auto *parent = resolveDialogParent(window);
+		auto dialog = parent ? new QDialog(parent) : new QDialog();
 		_settingsDialog = dialog;
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
 		dialog->setProperty(kDialogMarkerProperty, true);
-		dialog->setWindowModality(Qt::WindowModal);
+		dialog->setWindowModality(parent ? Qt::WindowModal : Qt::NonModal);
 		dialog->setWindowTitle(QStringLiteral("Telegram Transparency"));
 		dialog->setMinimumWidth(420);
 
