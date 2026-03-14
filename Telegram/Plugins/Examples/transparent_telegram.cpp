@@ -71,12 +71,12 @@ public:
 				QStringLiteral("Transparency"),
 				QStringLiteral("Adjust Telegram main window opacity."),
 			},
-			[=](Window::Controller *window) {
-				openSettingsDialog(window);
+			[=](Window::Controller *) {
+				openSettingsDialog();
 			});
 
-		_host->onWindowCreated([=](Window::Controller *window) {
-			applyOpacityToWindow(window);
+		_host->onWindowCreated([=](Window::Controller *) {
+			applyCurrentOpacityToTelegramWindows();
 		});
 
 		applyCurrentOpacityToTelegramWindows();
@@ -102,7 +102,7 @@ private:
 		return nullptr;
 	}
 
-	void openSettingsDialog(Window::Controller *) {
+	void openSettingsDialog() {
 		if (_settingsDialog) {
 			_settingsDialog->raise();
 			_settingsDialog->activateWindow();
@@ -200,42 +200,34 @@ private:
 	}
 
 	void applyCurrentOpacityToTelegramWindows() {
-		_host->forEachWindow([=](Window::Controller *window) {
-			applyOpacityToWindow(window);
-		});
+		for (auto widget : QApplication::topLevelWidgets()) {
+			applyOpacityToWidget(widget);
+		}
 	}
 
 	void restoreOpaque() {
-		_host->forEachWindow([=](Window::Controller *window) {
-			restoreOpacityForWindow(window);
-		});
+		for (auto widget : QApplication::topLevelWidgets()) {
+			if (widget && !shouldSkipWidget(widget)) {
+				widget->setWindowOpacity(1.0);
+			}
+		}
 	}
 
-	void applyOpacityToWindow(Window::Controller *window) const {
-		if (!window) {
-			return;
-		}
-		auto *widget = window->widget().get();
+	void applyOpacityToWidget(QWidget *widget) const {
 		if (!widget || !widget->isWindow() || shouldSkipWidget(widget)) {
 			return;
 		}
 		widget->setWindowOpacity(opacityValue());
 	}
 
-	void restoreOpacityForWindow(Window::Controller *window) const {
-		if (!window) {
-			return;
-		}
-		auto *widget = window->widget().get();
-		if (!widget || !widget->isWindow()) {
-			return;
-		}
-		widget->setWindowOpacity(1.0);
-	}
-
 	bool shouldSkipWidget(QWidget *widget) const {
-		return widget
-			&& widget->property(kDialogMarkerProperty).toBool();
+		if (!widget) {
+			return true;
+		}
+		if (widget->property(kDialogMarkerProperty).toBool()) {
+			return true;
+		}
+		return widget->windowType() != Qt::Window;
 	}
 
 	double opacityValue() const {
