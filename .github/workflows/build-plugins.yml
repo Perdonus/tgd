@@ -112,11 +112,11 @@ jobs:
             "$log = $env:PREPARE_LOG;" ^
             "if (Test-Path $log) { Remove-Item $log -Force }" ^
             "New-Item -ItemType File -Path $log -Force | Out-Null;" ^
-            "$cmd = 'call Telegram\\build\\prepare\\win.bat silent incremental patches msys64 python NuGet jom zlib mozjpeg openssl3 libwebp tg_angle qt_5.15.18 >> \"' + $log + '\" 2>&1';" ^
+            "$cmd = 'call Telegram\\build\\prepare\\win.bat silent patches msys64 python NuGet jom zlib mozjpeg openssl3 libwebp tg_angle qt_5.15.18 >> \"' + $log + '\" 2>&1';" ^
             "$proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/s','/c',$cmd -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru -NoNewWindow;" ^
             "$last = '';" ^
             "while (-not $proc.HasExited) {" ^
-            "  Start-Sleep -Seconds 60;" ^
+            "  Start-Sleep -Seconds 30;" ^
             "  if (Test-Path $log) {" ^
             "    $tail = (Get-Content -Path $log -Tail 40 -ErrorAction SilentlyContinue) -join \"`n\";" ^
             "    if ($tail -and $tail -ne $last) { Write-Host $tail; $last = $tail }" ^
