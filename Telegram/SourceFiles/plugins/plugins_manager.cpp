@@ -105,6 +105,10 @@ constexpr auto kMaxPluginLogBackups = 5;
 		return PluginUiText(u"plugin action"_q, u"действия плагина"_q);
 	} else if (kind == u"panel"_q) {
 		return PluginUiText(u"plugin panel"_q, u"панели плагина"_q);
+	} else if (kind == u"settings"_q) {
+		return PluginUiText(
+			u"plugin settings"_q,
+			u"настроек плагина"_q);
 	} else if (kind == u"window"_q) {
 		return PluginUiText(
 			u"plugin window callback"_q,
@@ -558,6 +562,58 @@ QString MessageEventName(const Plugins::MessageEvent event) {
 		return u"deleted"_q;
 	}
 	return u"unknown"_q;
+}
+
+QString SettingControlName(const Plugins::SettingControl control) {
+	using Control = Plugins::SettingControl;
+	switch (control) {
+	case Control::Toggle:
+		return u"toggle"_q;
+	case Control::IntSlider:
+		return u"int_slider"_q;
+	case Control::ActionButton:
+		return u"action_button"_q;
+	case Control::InfoText:
+		return u"info_text"_q;
+	}
+	return u"unknown"_q;
+}
+
+bool HasAnySettings(const Plugins::SettingsPageDescriptor &descriptor) {
+	for (const auto &section : descriptor.sections) {
+		if (!section.settings.isEmpty()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+Plugins::SettingDescriptor NormalizeSettingDescriptor(
+		Plugins::SettingDescriptor descriptor) {
+	descriptor.id = descriptor.id.trimmed();
+	descriptor.title = descriptor.title.trimmed();
+	descriptor.description = descriptor.description.trimmed();
+	descriptor.valueSuffix = descriptor.valueSuffix.trimmed();
+	descriptor.buttonText = descriptor.buttonText.trimmed();
+	switch (descriptor.type) {
+	case Plugins::SettingControl::Toggle:
+	case Plugins::SettingControl::ActionButton:
+	case Plugins::SettingControl::InfoText:
+		break;
+	case Plugins::SettingControl::IntSlider: {
+		if (descriptor.intMinimum > descriptor.intMaximum) {
+			std::swap(descriptor.intMinimum, descriptor.intMaximum);
+		}
+		if (descriptor.intStep <= 0) {
+			descriptor.intStep = 1;
+		}
+		descriptor.intValue = std::clamp(
+			descriptor.intValue,
+			descriptor.intMinimum,
+			descriptor.intMaximum);
+	} break;
+	}
+	return descriptor;
 }
 
 QString DateTimeToIsoUtc(const QDateTime &value) {
@@ -1026,6 +1082,14 @@ bool Manager::setSafeModeEnabled(bool enabled) {
 	} else if (QFileInfo::exists(_safeModePath) && !QFile::remove(_safeModePath)) {
 		return false;
 	}
+	if (!enabled) {
+		const auto recovered = _disabledByRecovery.values();
+		for (const auto &pluginId : recovered) {
+			_disabled.remove(pluginId);
+			clearRecoveryDisabled(pluginId);
+		}
+		saveConfig();
+	}
 	logEvent(
 		u"safe-mode"_q,
 		u"set"_q,
@@ -1249,6 +1313,12 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 		}
 	}
 
+	if (!preview.info.id.isEmpty()) {
+		_disabled.remove(preview.info.id);
+		clearRecoveryDisabled(preview.info.id);
+		saveConfig();
+	}
+
 	if (safeModeEnabled()) {
 		logEvent(
 			u"package"_q,
@@ -1342,6 +1412,27 @@ std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
 				.id = entry->id,
 				.title = entry->descriptor.title,
 				.description = entry->descriptor.description,
+			});
+		}
+	}
+	return result;
+}
+
+std::vector<SettingsPageState> Manager::settingsPagesFor(
+		const QString &pluginId) const {
+	auto result = std::vector<SettingsPageState>();
+	const auto it = _settingsPagesByPlugin.find(pluginId);
+	if (it == _settingsPagesByPlugin.end()) {
+		return result;
+	}
+	for (const auto id : it.value()) {
+		const auto entry = _settingsPages.find(id);
+		if (entry != _settingsPages.end()) {
+			result.push_back({
+				.id = entry->id,
+				.title = entry->descriptor.title,
+				.description = entry->descriptor.description,
+				.sections = entry->descriptor.sections,
 			});
 		}
 	}
@@ -1524,6 +1615,123 @@ bool Manager::openPanel(PanelId id) {
 		showToast(PluginUiText(
 			u"Plugin panel failed and was disabled."_q,
 			u"Панель плагина завершилась с ошибкой и была выключена."_q));
+		finishRecoveryOperation();
+		return false;
+	}
+}
+
+bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
+	const auto it = _settingsPages.find(id);
+	if (it == _settingsPages.end()) {
+		logEvent(
+			u"settings"_q,
+			u"missing-page"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+			});
+		return false;
+	}
+	if (!it->handler) {
+		logEvent(
+			u"settings"_q,
+			u"missing-handler"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+			});
+		return false;
+	}
+	setting = NormalizeSettingDescriptor(std::move(setting));
+	auto *target = (SettingDescriptor*)nullptr;
+	for (auto &section : it->descriptor.sections) {
+		for (auto &candidate : section.settings) {
+			if (candidate.id == setting.id) {
+				target = &candidate;
+				break;
+			}
+		}
+		if (target) {
+			break;
+		}
+	}
+	if (!target) {
+		logEvent(
+			u"settings"_q,
+			u"missing-setting"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"settingId"_q, setting.id },
+			});
+		return false;
+	}
+	const auto previous = *target;
+	switch (target->type) {
+	case SettingControl::Toggle:
+		target->boolValue = setting.boolValue;
+		break;
+	case SettingControl::IntSlider:
+		target->intValue = std::clamp(
+			setting.intValue,
+			target->intMinimum,
+			target->intMaximum);
+		break;
+	case SettingControl::ActionButton:
+	case SettingControl::InfoText:
+		break;
+	}
+	const auto snapshot = *target;
+	rememberSettingValue(it->pluginId, snapshot);
+	saveConfig();
+	try {
+		startRecoveryOperation(
+			u"settings"_q,
+			{ it->pluginId },
+			snapshot.title.isEmpty() ? snapshot.id : snapshot.title);
+		const auto previousPluginId = _registeringPluginId;
+		_registeringPluginId = it->pluginId;
+		logEvent(
+			u"settings"_q,
+			u"invoke"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"setting"_q, settingDescriptorToJson(snapshot) },
+			});
+		InvokePluginCallbackOrThrow([&] {
+			it->handler(snapshot);
+		});
+		_registeringPluginId = previousPluginId;
+		logEvent(
+			u"settings"_q,
+			u"success"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"settingId"_q, snapshot.id },
+			});
+		finishRecoveryOperation();
+		return true;
+	} catch (...) {
+		*target = previous;
+		rememberSettingValue(it->pluginId, previous);
+		saveConfig();
+		_registeringPluginId.clear();
+		logEvent(
+			u"settings"_q,
+			u"failed"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"setting"_q, settingDescriptorToJson(snapshot) },
+				{ u"reason"_q, CurrentExceptionText() },
+			});
+		disablePlugin(
+			it->pluginId,
+			u"Settings update failed: "_q + CurrentExceptionText());
+		showToast(PluginUiText(
+			u"Plugin settings failed and plugin was disabled."_q,
+			u"Настройки плагина завершились с ошибкой, плагин был выключен."_q));
 		finishRecoveryOperation();
 		return false;
 	}
@@ -1754,6 +1962,7 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 		u"created"_q,
 		QJsonObject{
 			{ u"hasWindow"_q, window != nullptr },
+			{ u"hasWidget"_q, (window && window->widget()) },
 		});
 	if (_recoveryNotice.active && !_recoveryNoticeShown) {
 		QTimer::singleShot(0, this, [=] {
@@ -1804,6 +2013,57 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 			showToast(PluginUiText(
 				u"Plugin window callback failed."_q,
 				u"Оконный callback плагина завершился с ошибкой."_q));
+			finishRecoveryOperation();
+		}
+	}
+	const auto widget = window ? window->widget() : nullptr;
+	if (!widget) {
+		return;
+	}
+	const auto widgetHandlers = _windowWidgetHandlers;
+	for (const auto &entry : widgetHandlers) {
+		if (!entry.handler) {
+			continue;
+		}
+		try {
+			startRecoveryOperation(u"window"_q, { entry.pluginId });
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = entry.pluginId;
+			logEvent(
+				u"window"_q,
+				u"invoke-widget-callback"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"hasWidget"_q, true },
+				});
+			InvokePluginCallbackOrThrow([&] {
+				entry.handler(widget);
+			});
+			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"window"_q,
+				u"widget-callback-success"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+				});
+			finishRecoveryOperation();
+		} catch (...) {
+			_registeringPluginId.clear();
+			logEvent(
+				u"window"_q,
+				u"widget-callback-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"reason"_q, CurrentExceptionText() },
+				});
+			if (!entry.pluginId.isEmpty()) {
+				disablePlugin(
+					entry.pluginId,
+					u"Window widget callback failed: "_q + CurrentExceptionText());
+			}
+			showToast(PluginUiText(
+				u"Plugin window widget callback failed."_q,
+				u"Window widget callback плагина завершился с ошибкой."_q));
 			finishRecoveryOperation();
 		}
 	}
@@ -2199,6 +2459,78 @@ void Manager::unregisterPanel(PanelId id) {
 		});
 }
 
+SettingsPageId Manager::registerSettingsPage(
+		const QString &pluginId,
+		SettingsPageDescriptor descriptor,
+		SettingsChangedHandler handler) {
+	if (!hasPlugin(pluginId) || !handler || !HasAnySettings(descriptor)) {
+		logEvent(
+			u"registry"_q,
+			u"register-settings-page-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"descriptor"_q, settingsPageDescriptorToJson(descriptor) },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
+		return 0;
+	}
+	for (auto &section : descriptor.sections) {
+		section.id = section.id.trimmed();
+		section.title = section.title.trimmed();
+		section.description = section.description.trimmed();
+		for (auto &setting : section.settings) {
+			setting = NormalizeSettingDescriptor(std::move(setting));
+		}
+	}
+	applyStoredSettings(pluginId, descriptor);
+	const auto id = _nextSettingsPageId++;
+	_settingsPages.insert(id, {
+		.id = id,
+		.pluginId = pluginId,
+		.descriptor = std::move(descriptor),
+		.handler = std::move(handler),
+	});
+	_settingsPagesByPlugin[pluginId].push_back(id);
+	if (auto record = findRecord(pluginId)) {
+		record->settingsPageIds.push_back(id);
+	}
+	logEvent(
+		u"registry"_q,
+		u"register-settings-page"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"descriptor"_q, settingsPageDescriptorToJson(_settingsPages.value(id).descriptor) },
+		});
+	return id;
+}
+
+void Manager::unregisterSettingsPage(SettingsPageId id) {
+	const auto it = _settingsPages.find(id);
+	if (it == _settingsPages.end()) {
+		return;
+	}
+	const auto pluginId = it->pluginId;
+	_settingsPages.remove(id);
+	const auto listIt = _settingsPagesByPlugin.find(pluginId);
+	if (listIt != _settingsPagesByPlugin.end()) {
+		listIt->removeAll(id);
+		if (listIt->isEmpty()) {
+			_settingsPagesByPlugin.erase(listIt);
+		}
+	}
+	if (auto record = findRecord(pluginId)) {
+		record->settingsPageIds.removeAll(id);
+	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-settings-page"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
+}
+
 void Manager::showToast(const QString &text) {
 	logEvent(
 		u"ui"_q,
@@ -2243,11 +2575,62 @@ void Manager::onWindowCreated(
 	}
 }
 
+void Manager::forEachWindowWidget(
+		std::function<void(QWidget*)> visitor) {
+	if (!visitor) {
+		return;
+	}
+	Core::App().forEachWindow([&](not_null<Window::Controller*> window) {
+		if (const auto widget = window->widget()) {
+			visitor(widget);
+		}
+	});
+}
+
+void Manager::onWindowWidgetCreated(
+		std::function<void(QWidget*)> handler) {
+	if (handler) {
+		_windowWidgetHandlers.push_back({
+			.pluginId = _registeringPluginId,
+			.handler = std::move(handler),
+		});
+		logEvent(
+			u"registry"_q,
+			u"register-window-widget-handler"_q,
+			QJsonObject{
+				{ u"pluginId"_q, _registeringPluginId },
+			});
+	}
+}
+
 Window::Controller *Manager::activeWindow() const {
 	if (const auto window = Core::App().activeWindow()) {
 		return window;
 	}
 	return Core::App().activePrimaryWindow();
+}
+
+QWidget *Manager::activeWindowWidget() const {
+	if (const auto window = activeWindow()) {
+		return window->widget();
+	}
+	return nullptr;
+}
+
+bool Manager::settingBoolValue(
+		const QString &pluginId,
+		const QString &settingId,
+		bool fallback) const {
+	const auto value = storedSettingValue(pluginId, settingId);
+	return value.isBool() ? value.toBool(fallback) : fallback;
+}
+
+int Manager::settingIntValue(
+		const QString &pluginId,
+		const QString &settingId,
+		int fallback) const {
+	const auto value = storedSettingValue(pluginId, settingId);
+	return value.isDouble() ? value.toInt(fallback) : fallback;
 }
 
 Main::Session *Manager::activeSession() const {
@@ -2332,6 +2715,7 @@ SystemInfo Manager::systemInfo() const {
 
 void Manager::loadConfig() {
 	_disabled.clear();
+	_storedSettings.clear();
 	QFile file(_configPath);
 	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
 		logEvent(
@@ -2352,10 +2736,18 @@ void Manager::loadConfig() {
 			});
 		return;
 	}
-	const auto array = document.object().value(u"disabled"_q).toArray();
+	const auto object = document.object();
+	const auto array = object.value(u"disabled"_q).toArray();
 	for (const auto &value : array) {
 		if (value.isString()) {
 			_disabled.insert(value.toString());
+		}
+	}
+	const auto settings = object.value(u"settings"_q).toObject();
+	for (const auto &pluginId : SortedJsonKeys(settings)) {
+		const auto value = settings.value(pluginId);
+		if (value.isObject()) {
+			_storedSettings.insert(pluginId, value.toObject());
 		}
 	}
 	logEvent(
@@ -2364,6 +2756,7 @@ void Manager::loadConfig() {
 		QJsonObject{
 			{ u"path"_q, _configPath },
 			{ u"disabled"_q, JsonArrayFromStrings(_disabled.values()) },
+			{ u"settingsPlugins"_q, _storedSettings.size() },
 		});
 }
 
@@ -2375,8 +2768,18 @@ void Manager::saveConfig() const {
 	for (const auto &id : list) {
 		array.push_back(id);
 	}
+	auto settings = QJsonObject();
+	auto settingPluginIds = _storedSettings.keys();
+	settingPluginIds.sort(Qt::CaseInsensitive);
+	for (const auto &pluginId : settingPluginIds) {
+		const auto values = _storedSettings.value(pluginId);
+		if (!values.isEmpty()) {
+			settings.insert(pluginId, values);
+		}
+	}
 	const auto object = QJsonObject{
 		{ u"disabled"_q, array },
+		{ u"settings"_q, settings },
 	};
 	const auto document = QJsonDocument(object);
 	QFile file(_configPath);
@@ -2389,6 +2792,7 @@ void Manager::saveConfig() const {
 		QJsonObject{
 			{ u"path"_q, _configPath },
 			{ u"disabled"_q, JsonArrayFromStrings(list) },
+			{ u"settingsPlugins"_q, settings.size() },
 		});
 }
 
@@ -2627,6 +3031,46 @@ QJsonObject Manager::panelDescriptorToJson(
 	};
 }
 
+QJsonObject Manager::settingDescriptorToJson(
+		const SettingDescriptor &descriptor) const {
+	return QJsonObject{
+		{ u"id"_q, descriptor.id },
+		{ u"title"_q, descriptor.title },
+		{ u"description"_q, descriptor.description },
+		{ u"type"_q, SettingControlName(descriptor.type) },
+		{ u"boolValue"_q, descriptor.boolValue },
+		{ u"intValue"_q, descriptor.intValue },
+		{ u"intMinimum"_q, descriptor.intMinimum },
+		{ u"intMaximum"_q, descriptor.intMaximum },
+		{ u"intStep"_q, descriptor.intStep },
+		{ u"valueSuffix"_q, descriptor.valueSuffix },
+		{ u"buttonText"_q, descriptor.buttonText },
+	};
+}
+
+QJsonObject Manager::settingsPageDescriptorToJson(
+		const SettingsPageDescriptor &descriptor) const {
+	auto sections = QJsonArray();
+	for (const auto &section : descriptor.sections) {
+		auto settings = QJsonArray();
+		for (const auto &setting : section.settings) {
+			settings.push_back(settingDescriptorToJson(setting));
+		}
+		sections.push_back(QJsonObject{
+			{ u"id"_q, section.id },
+			{ u"title"_q, section.title },
+			{ u"description"_q, section.description },
+			{ u"settings"_q, settings },
+		});
+	}
+	return QJsonObject{
+		{ u"id"_q, descriptor.id },
+		{ u"title"_q, descriptor.title },
+		{ u"description"_q, descriptor.description },
+		{ u"sections"_q, sections },
+	};
+}
+
 QJsonObject Manager::sendOptionsToJson(
 		const Api::SendOptions *options) const {
 	if (!options) {
@@ -2708,6 +3152,12 @@ QJsonObject Manager::registrationSummaryToJson(
 			++windowHandlers;
 		}
 	}
+	auto windowWidgetHandlers = 0;
+	for (const auto &entry : _windowWidgetHandlers) {
+		if (entry.pluginId == record.state.info.id) {
+			++windowWidgetHandlers;
+		}
+	}
 	auto sessionHandlers = 0;
 	for (const auto &entry : _sessionHandlers) {
 		if (entry.pluginId == record.state.info.id) {
@@ -2718,9 +3168,11 @@ QJsonObject Manager::registrationSummaryToJson(
 		{ u"commands"_q, record.commandIds.size() },
 		{ u"actions"_q, record.actionIds.size() },
 		{ u"panels"_q, record.panelIds.size() },
+		{ u"settingsPages"_q, record.settingsPageIds.size() },
 		{ u"outgoingInterceptors"_q, record.outgoingInterceptorIds.size() },
 		{ u"messageObservers"_q, record.messageObserverIds.size() },
 		{ u"windowHandlers"_q, windowHandlers },
+		{ u"windowWidgetHandlers"_q, windowWidgetHandlers },
 		{ u"sessionHandlers"_q, sessionHandlers },
 	};
 }
@@ -2734,6 +3186,73 @@ QString Manager::fileSha256(const QString &path) const {
 		QCryptographicHash::hash(
 			file.readAll(),
 			QCryptographicHash::Sha256).toHex());
+}
+
+QJsonValue Manager::storedSettingValue(
+		const QString &pluginId,
+		const QString &settingId) const {
+	const auto it = _storedSettings.constFind(pluginId);
+	if (it == _storedSettings.cend()) {
+		return QJsonValue();
+	}
+	return it.value().value(settingId);
+}
+
+void Manager::applyStoredSettings(
+		const QString &pluginId,
+		SettingsPageDescriptor &descriptor) const {
+	for (auto &section : descriptor.sections) {
+		for (auto &setting : section.settings) {
+			const auto value = storedSettingValue(pluginId, setting.id);
+			if (value.isUndefined() || value.isNull()) {
+				continue;
+			}
+			switch (setting.type) {
+			case SettingControl::Toggle:
+				if (value.isBool()) {
+					setting.boolValue = value.toBool(setting.boolValue);
+				}
+				break;
+			case SettingControl::IntSlider:
+				if (value.isDouble()) {
+					setting.intValue = std::clamp(
+						value.toInt(setting.intValue),
+						setting.intMinimum,
+						setting.intMaximum);
+				}
+				break;
+			case SettingControl::ActionButton:
+			case SettingControl::InfoText:
+				break;
+			}
+		}
+	}
+}
+
+void Manager::rememberSettingValue(
+		const QString &pluginId,
+		const SettingDescriptor &descriptor) {
+	if (pluginId.trimmed().isEmpty() || descriptor.id.trimmed().isEmpty()) {
+		return;
+	}
+	auto values = _storedSettings.value(pluginId);
+	switch (descriptor.type) {
+	case SettingControl::Toggle:
+		values.insert(descriptor.id, descriptor.boolValue);
+		break;
+	case SettingControl::IntSlider:
+		values.insert(descriptor.id, descriptor.intValue);
+		break;
+	case SettingControl::ActionButton:
+	case SettingControl::InfoText:
+		values.remove(descriptor.id);
+		break;
+	}
+	if (values.isEmpty()) {
+		_storedSettings.remove(pluginId);
+	} else {
+		_storedSettings.insert(pluginId, values);
+	}
 }
 
 void Manager::logLoadFailure(const QString &path, const QString &reason) const {
@@ -2847,6 +3366,60 @@ void Manager::loadPlugin(const QString &path) {
 			{ u"sha256"_q, fileSha256(path) },
 			{ u"baseName"_q, record.state.info.id },
 		});
+
+	auto previewManifestInfo = PluginInfo();
+	auto previewManifestIcon = QString();
+	const auto hasPreviewManifest = ReadPreviewManifest(
+		path,
+		&previewManifestInfo,
+		&previewManifestIcon);
+	if (hasPreviewManifest) {
+		MergePluginInfo(record.state.info, previewManifestInfo);
+		logEvent(
+			u"load"_q,
+			u"preview-manifest-read"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+				{ u"icon"_q, previewManifestIcon },
+				{ u"plugin"_q, pluginInfoToJson(previewManifestInfo) },
+			});
+	} else {
+		logEvent(
+			u"load"_q,
+			u"preview-manifest-missing"_q,
+			QJsonObject{
+				{ u"path"_q, path },
+			});
+	}
+	record.state.info.id = record.state.info.id.trimmed();
+	if (record.state.info.name.isEmpty()) {
+		record.state.info.name = record.state.info.id;
+	}
+	if (record.state.info.id.isEmpty()) {
+		record.state.error = u"Plugin id is empty."_q;
+	}
+	if (_pluginIndexById.contains(record.state.info.id)) {
+		record.state.error = u"Duplicate plugin id."_q;
+	}
+	record.state.enabled = !_disabled.contains(record.state.info.id);
+	syncRecoveryFlags(record.state);
+	if (!record.state.error.isEmpty()) {
+		logLoadFailure(path, record.state.error);
+		_plugins.push_back(std::move(record));
+		return;
+	}
+	if (!record.state.enabled) {
+		logEvent(
+			u"load"_q,
+			u"skip-disabled-metadata-only"_q,
+			QJsonObject{
+				{ u"state"_q, pluginStateToJson(record.state) },
+			});
+		const auto index = int(_plugins.size());
+		_plugins.push_back(std::move(record));
+		_pluginIndexById.insert(_plugins.back().state.info.id, index);
+		return;
+	}
 
 	startRecoveryOperation(u"load"_q, { record.state.info.id }, path);
 
@@ -3015,24 +3588,34 @@ void Manager::loadPlugin(const QString &path) {
 		return;
 	}
 
-	try {
+	if (hasPreviewManifest) {
 		logEvent(
 			u"load"_q,
-			u"info-call"_q,
+			u"info-call-skipped-preview-manifest"_q,
 			QJsonObject{
 				{ u"path"_q, path },
+				{ u"pluginId"_q, record.state.info.id },
 			});
-		InvokePluginCallbackOrThrow([&] {
-			record.state.info = instance->info();
-		});
-	} catch (...) {
-		record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
-		logLoadFailure(path, record.state.error);
-		instance.reset();
-		library->unload();
-		_plugins.push_back(std::move(record));
-		finishRecoveryOperation();
-		return;
+	} else {
+		try {
+			logEvent(
+				u"load"_q,
+				u"info-call"_q,
+				QJsonObject{
+					{ u"path"_q, path },
+				});
+			InvokePluginCallbackOrThrow([&] {
+				record.state.info = instance->info();
+			});
+		} catch (...) {
+			record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
+			logLoadFailure(path, record.state.error);
+			instance.reset();
+			library->unload();
+			_plugins.push_back(std::move(record));
+			finishRecoveryOperation();
+			return;
+		}
 	}
 	record.state.info.id = record.state.info.id.trimmed();
 	if (record.state.info.name.isEmpty()) {
@@ -3046,6 +3629,7 @@ void Manager::loadPlugin(const QString &path) {
 	}
 
 	record.state.enabled = !_disabled.contains(record.state.info.id);
+	syncRecoveryFlags(record.state);
 
 	if (!record.state.error.isEmpty()) {
 		logLoadFailure(path, record.state.error);
@@ -3178,6 +3762,9 @@ void Manager::unloadAll() {
 	_panels.clear();
 	_panelsByPlugin.clear();
 	_nextPanelId = 1;
+	_settingsPages.clear();
+	_settingsPagesByPlugin.clear();
+	_nextSettingsPageId = 1;
 	_outgoingInterceptors.clear();
 	_outgoingInterceptorsByPlugin.clear();
 	_nextOutgoingInterceptorId = 1;
@@ -3186,12 +3773,14 @@ void Manager::unloadAll() {
 	_nextMessageObserverId = 1;
 	_messageObserverLifetime.destroy();
 	_windowHandlers.clear();
+	_windowWidgetHandlers.clear();
 	_sessionHandlers.clear();
 
 	for (auto &plugin : _plugins) {
 		plugin.commandIds.clear();
 		plugin.actionIds.clear();
 		plugin.panelIds.clear();
+		plugin.settingsPageIds.clear();
 		plugin.outgoingInterceptorIds.clear();
 		plugin.messageObserverIds.clear();
 		plugin.state.loaded = false;
@@ -3252,6 +3841,13 @@ void Manager::unregisterPluginPanels(const QString &pluginId) {
 	}
 }
 
+void Manager::unregisterPluginSettingsPages(const QString &pluginId) {
+	const auto ids = _settingsPagesByPlugin.value(pluginId);
+	for (const auto id : ids) {
+		unregisterSettingsPage(id);
+	}
+}
+
 void Manager::unregisterPluginOutgoingInterceptors(const QString &pluginId) {
 	const auto ids = _outgoingInterceptorsByPlugin.value(pluginId);
 	for (const auto id : ids) {
@@ -3275,6 +3871,17 @@ void Manager::unregisterPluginWindowHandlers(const QString &pluginId) {
 				return entry.pluginId == pluginId;
 			}),
 		_windowHandlers.end());
+}
+
+void Manager::unregisterPluginWindowWidgetHandlers(const QString &pluginId) {
+	_windowWidgetHandlers.erase(
+		std::remove_if(
+			_windowWidgetHandlers.begin(),
+			_windowWidgetHandlers.end(),
+			[&](const WindowWidgetHandlerEntry &entry) {
+				return entry.pluginId == pluginId;
+			}),
+		_windowWidgetHandlers.end());
 }
 
 void Manager::unregisterPluginSessionHandlers(const QString &pluginId) {
@@ -3340,9 +3947,11 @@ void Manager::disablePlugin(
 	unregisterPluginCommands(pluginId);
 	unregisterPluginActions(pluginId);
 	unregisterPluginPanels(pluginId);
+	unregisterPluginSettingsPages(pluginId);
 	unregisterPluginOutgoingInterceptors(pluginId);
 	unregisterPluginMessageObservers(pluginId);
 	unregisterPluginWindowHandlers(pluginId);
+	unregisterPluginWindowWidgetHandlers(pluginId);
 	unregisterPluginSessionHandlers(pluginId);
 	if (record->instance) {
 		_registeringPluginId = pluginId;

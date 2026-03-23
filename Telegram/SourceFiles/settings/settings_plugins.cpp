@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_plugins.h"
+#include "settings/settings_common.h"
 
 #include "boxes/abstract_box.h"
 #include "core/application.h"
@@ -14,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "plugins/plugins_manager.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "window/window_controller.h"
@@ -24,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QGuiApplication>
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace Settings {
@@ -165,16 +169,34 @@ _actionCtxId = _host->registerActionWithContext(
 	});
 ```
 
-7) Панель плагина (UI entry)
+7) Host-rendered settings page
 ```cpp
-_panelId = _host->registerPanel(
+Plugins::SettingDescriptor slider;
+slider.id = "opacity";
+slider.title = "Window opacity";
+slider.type = Plugins::SettingControl::IntSlider;
+slider.intValue = 85;
+slider.intMinimum = 20;
+slider.intMaximum = 100;
+slider.intStep = 1;
+slider.valueSuffix = "%";
+
+Plugins::SettingsSectionDescriptor section;
+section.id = "appearance";
+section.title = "Appearance";
+section.settings.push_back(slider);
+
+_settingsPageId = _host->registerSettingsPage(
 	"example.my_plugin",
-	{ .title = "My Panel", .description = "Open settings panel" },
-	[=](Window::Controller *window) {
-		Q_UNUSED(window);
-		_host->showToast("Panel opened");
+	{ .id = "my_plugin", .title = "My Plugin", .sections = { section } },
+	[=](const Plugins::SettingDescriptor &setting) {
+		if (setting.id == "opacity") {
+			_host->showToast(QString::number(setting.intValue));
+		}
 	});
 ```
+
+Старый `registerPanel()` всё ещё доступен для legacy UI, но сырой plugin-owned dialog значительно менее надёжен, чем host-rendered controls на странице Settings > Plugins.
 
 8) Перехват исходящего текста
 ```cpp
@@ -220,6 +242,12 @@ _observerId = _host->registerMessageObserver(
 _host->onWindowCreated([=](Window::Controller *window) {
 	Q_UNUSED(window);
 	_host->showToast("Window created");
+});
+
+_host->onWindowWidgetCreated([=](QWidget *widget) {
+	if (widget && widget->isWindow()) {
+		widget->setWindowOpacity(0.85);
+	}
 });
 
 _host->onSessionActivated([=](Main::Session *session) {
@@ -358,16 +386,34 @@ _actionCtxId = _host->registerActionWithContext(
 	});
 ```
 
-7) Panel registration
+7) Host-rendered settings page
 ```cpp
-_panelId = _host->registerPanel(
+Plugins::SettingDescriptor slider;
+slider.id = "opacity";
+slider.title = "Window opacity";
+slider.type = Plugins::SettingControl::IntSlider;
+slider.intValue = 85;
+slider.intMinimum = 20;
+slider.intMaximum = 100;
+slider.intStep = 1;
+slider.valueSuffix = "%";
+
+Plugins::SettingsSectionDescriptor section;
+section.id = "appearance";
+section.title = "Appearance";
+section.settings.push_back(slider);
+
+_settingsPageId = _host->registerSettingsPage(
 	"example.my_plugin",
-	{ .title = "My Panel", .description = "Open settings panel" },
-	[=](Window::Controller *window) {
-		Q_UNUSED(window);
-		_host->showToast("Panel opened");
+	{ .id = "my_plugin", .title = "My Plugin", .sections = { section } },
+	[=](const Plugins::SettingDescriptor &setting) {
+		if (setting.id == "opacity") {
+			_host->showToast(QString::number(setting.intValue));
+		}
 	});
 ```
+
+Legacy `registerPanel()` is still available for plugin-owned UI, but raw native dialogs are less stable than host-rendered controls in Settings > Plugins.
 
 8) Outgoing text interceptor
 ```cpp
@@ -413,6 +459,12 @@ _observerId = _host->registerMessageObserver(
 _host->onWindowCreated([=](Window::Controller *window) {
 	Q_UNUSED(window);
 	_host->showToast("Window created");
+});
+
+_host->onWindowWidgetCreated([=](QWidget *widget) {
+	if (widget && widget->isWindow()) {
+		widget->setWindowOpacity(0.85);
+	}
 });
 
 _host->onSessionActivated([=](Main::Session *session) {
@@ -617,10 +669,169 @@ void Plugins::rebuildList() {
 
 		const auto actions = Core::App().plugins().actionsFor(state.info.id);
 		const auto panels = Core::App().plugins().panelsFor(state.info.id);
+		const auto settingsPages = Core::App().plugins().settingsPagesFor(
+			state.info.id);
 		const auto details = FormatPluginDetails(state);
 		if (!details.isEmpty()) {
 			Ui::AddSkip(_list);
 			Ui::AddDividerText(_list, rpl::single(details));
+		}
+
+		if (!settingsPages.empty()) {
+			Ui::AddSkip(_list);
+			Ui::AddDividerText(
+				_list,
+				rpl::single(PluginUiText(u"Settings"_q, u"Настройки"_q)));
+			for (const auto &page : settingsPages) {
+				if (!page.title.trimmed().isEmpty()) {
+					Ui::AddSkip(_list);
+					Ui::AddDividerText(_list, rpl::single(page.title.trimmed()));
+				}
+				if (!page.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						_list,
+						rpl::single(page.description.trimmed()));
+				}
+				for (const auto &section : page.sections) {
+					if (!section.title.trimmed().isEmpty()) {
+						Ui::AddSkip(_list);
+						Ui::AddSubsectionTitle(
+							_list,
+							rpl::single(section.title.trimmed()));
+					}
+					if (!section.description.trimmed().isEmpty()) {
+						Ui::AddDividerText(
+							_list,
+							rpl::single(section.description.trimmed()));
+					}
+					for (const auto &setting : section.settings) {
+						switch (setting.type) {
+						case ::Plugins::SettingControl::Toggle: {
+							const auto button = _list->add(object_ptr<Ui::SettingsButton>(
+								_list,
+								rpl::single(setting.title),
+								st::settingsButtonNoIcon
+							))->toggleOn(rpl::single(setting.boolValue));
+							button->toggledChanges(
+							) | rpl::filter([=](bool value) {
+								return value != setting.boolValue;
+							}) | rpl::on_next([=, this](bool value) {
+								auto updated = setting;
+								updated.boolValue = value;
+								if (!Core::App().plugins().updateSetting(page.id, updated)) {
+									rebuildList();
+								}
+							}, button->lifetime());
+							if (!setting.description.trimmed().isEmpty()) {
+								Ui::AddDividerText(
+									_list,
+									rpl::single(setting.description.trimmed()));
+							}
+						} break;
+						case ::Plugins::SettingControl::IntSlider: {
+							if (!setting.title.trimmed().isEmpty()) {
+								Ui::AddSkip(_list);
+								Ui::AddSubsectionTitle(
+									_list,
+									rpl::single(setting.title.trimmed()));
+							}
+							const auto minValue = std::min(
+								setting.intMinimum,
+								setting.intMaximum);
+							const auto maxValue = std::max(
+								setting.intMinimum,
+								setting.intMaximum);
+							const auto step = std::max(1, setting.intStep);
+							const auto formatValue = [=](int value) {
+								return QString::number(value) + setting.valueSuffix;
+							};
+							const auto sliderWithLabel = MakeSliderWithLabel(
+								_list,
+								st::settingsScale,
+								st::settingsScaleLabel,
+								st::normalFont->spacew * 2,
+								std::max(
+									st::settingsScaleLabel.style.font->width(
+										formatValue(minValue)),
+									st::settingsScaleLabel.style.font->width(
+										formatValue(maxValue))),
+								true);
+							const auto slider = sliderWithLabel.slider;
+							const auto valueLabel = sliderWithLabel.label;
+							slider->setAccessibleName(setting.title);
+							const auto valueFromSlider = [=](double raw) {
+								if (maxValue <= minValue) {
+									return minValue;
+								}
+								auto candidate = minValue + int(std::lround(
+									raw * (maxValue - minValue)));
+								candidate = minValue + int(std::lround(
+									(candidate - minValue) / double(step))) * step;
+								return std::clamp(candidate, minValue, maxValue);
+							};
+							const auto sliderFromValue = [=](int value) {
+								if (maxValue <= minValue) {
+									return 0.;
+								}
+								return (value - minValue)
+									/ double(maxValue - minValue);
+							};
+							valueLabel->setText(formatValue(setting.intValue));
+							slider->setAdjustCallback([=](double raw) {
+								return sliderFromValue(valueFromSlider(raw));
+							});
+							slider->setValue(sliderFromValue(setting.intValue));
+							slider->setChangeProgressCallback([=](double raw) {
+								valueLabel->setText(formatValue(valueFromSlider(raw)));
+							});
+							slider->setChangeFinishedCallback([=, this](double raw) {
+								auto updated = setting;
+								updated.intValue = valueFromSlider(raw);
+								valueLabel->setText(formatValue(updated.intValue));
+								if (!Core::App().plugins().updateSetting(page.id, updated)) {
+									rebuildList();
+								}
+							});
+							_list->add(
+								std::move(sliderWithLabel.widget),
+								st::settingsBigScalePadding);
+							if (!setting.description.trimmed().isEmpty()) {
+								Ui::AddDividerText(
+									_list,
+									rpl::single(setting.description.trimmed()));
+							}
+						} break;
+						case ::Plugins::SettingControl::ActionButton: {
+							const auto buttonTitle = setting.buttonText.isEmpty()
+								? setting.title
+								: setting.buttonText;
+							const auto button = _list->add(object_ptr<Ui::SettingsButton>(
+								_list,
+								rpl::single(buttonTitle),
+								st::settingsButtonNoIcon));
+							button->setClickedCallback([=, this] {
+								if (!Core::App().plugins().updateSetting(page.id, setting)) {
+									rebuildList();
+								}
+							});
+							if (!setting.description.trimmed().isEmpty()) {
+								Ui::AddDividerText(
+									_list,
+									rpl::single(setting.description.trimmed()));
+							}
+						} break;
+						case ::Plugins::SettingControl::InfoText: {
+							const auto text = setting.description.trimmed().isEmpty()
+								? setting.title.trimmed()
+								: setting.description.trimmed();
+							if (!text.isEmpty()) {
+								Ui::AddDividerText(_list, rpl::single(text));
+							}
+						} break;
+						}
+					}
+				}
+			}
 		}
 
 		if (!actions.empty()) {

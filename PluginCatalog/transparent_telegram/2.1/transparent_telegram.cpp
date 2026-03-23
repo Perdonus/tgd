@@ -1,6 +1,6 @@
 /*
-Example plugin for Telegram Desktop.
-Adds a host-managed settings slider that makes Telegram windows transparent.
+Catalog migration version of the Transparent Telegram plugin.
+Uses host-managed settings and window callbacks instead of raw plugin dialogs.
 */
 #include "plugins/plugins_api.h"
 

@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtCore/QString>
+#include <QtCore/QJsonValue>
+#include <QtCore/QVector>
 #include <QtCore/QtGlobal>
 
 #include <cstdint>
@@ -25,12 +27,13 @@ namespace Window {
 class Controller;
 } // namespace Window
 
+class QWidget;
 class History;
 class HistoryItem;
 
 namespace Plugins {
 
-constexpr int kApiVersion = 3;
+constexpr int kApiVersion = 4;
 constexpr int kBinaryInfoVersion = 1;
 constexpr int kPreviewInfoVersion = 1;
 constexpr int kHostInfoVersion = 1;
@@ -228,12 +231,53 @@ struct PanelDescriptor {
 using PanelHandler = std::function<void(Window::Controller*)>;
 using PanelId = uint64_t;
 
+enum class SettingControl {
+	Toggle,
+	IntSlider,
+	ActionButton,
+	InfoText,
+};
+
+struct SettingDescriptor {
+	QString id;
+	QString title;
+	QString description;
+	SettingControl type = SettingControl::InfoText;
+	bool boolValue = false;
+	int intValue = 0;
+	int intMinimum = 0;
+	int intMaximum = 100;
+	int intStep = 1;
+	QString valueSuffix;
+	QString buttonText;
+};
+
+struct SettingsSectionDescriptor {
+	QString id;
+	QString title;
+	QString description;
+	QVector<SettingDescriptor> settings;
+};
+
+struct SettingsPageDescriptor {
+	QString id;
+	QString title;
+	QString description;
+	QVector<SettingsSectionDescriptor> sections;
+};
+
+using SettingsChangedHandler = std::function<void(const SettingDescriptor &)>;
+using SettingsPageId = uint64_t;
+
 class Host {
 public:
 	virtual ~Host() = default;
 
 	virtual int apiVersion() const = 0;
 	virtual QString pluginsPath() const = 0;
+	virtual QJsonValue storedSettingValue(
+		const QString &pluginId,
+		const QString &settingId) const = 0;
 
 	virtual CommandId registerCommand(
 		const QString &pluginId,
@@ -273,13 +317,35 @@ public:
 		PanelHandler handler) = 0;
 	virtual void unregisterPanel(PanelId id) = 0;
 
+	virtual SettingsPageId registerSettingsPage(
+		const QString &pluginId,
+		SettingsPageDescriptor descriptor,
+		SettingsChangedHandler handler) = 0;
+	virtual void unregisterSettingsPage(SettingsPageId id) = 0;
+
 	virtual void showToast(const QString &text) = 0;
 	virtual void forEachWindow(
 		std::function<void(Window::Controller*)> visitor) = 0;
 	virtual void onWindowCreated(
 		std::function<void(Window::Controller*)> handler) = 0;
+	virtual void forEachWindowWidget(
+		std::function<void(QWidget*)> visitor) = 0;
+	virtual void onWindowWidgetCreated(
+		std::function<void(QWidget*)> handler) = 0;
 
 	virtual Window::Controller *activeWindow() const = 0;
+	virtual QWidget *activeWindowWidget() const = 0;
+	virtual QJsonValue storedSettingValue(
+		const QString &pluginId,
+		const QString &settingId) const = 0;
+	virtual bool settingBoolValue(
+		const QString &pluginId,
+		const QString &settingId,
+		bool fallback) const = 0;
+	virtual int settingIntValue(
+		const QString &pluginId,
+		const QString &settingId,
+		int fallback) const = 0;
 	virtual Main::Session *activeSession() const = 0;
 	virtual void forEachSession(
 		std::function<void(Main::Session*)> visitor) = 0;

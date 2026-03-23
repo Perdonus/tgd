@@ -20,6 +20,7 @@ HDR = ROOT / "Telegram/SourceFiles/plugins/plugins_manager.h"
 API = ROOT / "Telegram/SourceFiles/plugins/plugins_api.h"
 EXAMPLES_DIR = ROOT / "Telegram/Plugins/Examples"
 PLUGIN_CATALOG_DIR = ROOT / "PluginCatalog"
+SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
     "command_shrug.cpp",
@@ -210,9 +211,11 @@ def main() -> int:
         "unregisterPluginCommands",
         "unregisterPluginActions",
         "unregisterPluginPanels",
+        "unregisterPluginSettingsPages",
         "unregisterPluginOutgoingInterceptors",
         "unregisterPluginMessageObservers",
         "unregisterPluginWindowHandlers",
+        "unregisterPluginWindowWidgetHandlers",
         "unregisterPluginSessionHandlers",
     ):
         require(
@@ -230,6 +233,7 @@ def main() -> int:
         r"OutgoingInterceptorId Manager::registerOutgoingTextInterceptor\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler\)",
         r"MessageObserverId Manager::registerMessageObserver\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler\)",
         r"PanelId Manager::registerPanel\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler",
+        r"SettingsPageId Manager::registerSettingsPage\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler",
     ):
         require(guard, cpp, f"ownership/handler guard: {guard}", errors)
 
@@ -279,6 +283,21 @@ def main() -> int:
     # Examples remain compatible with Host methods.
     check_examples(host_method_set, errors)
     check_catalog(host_method_set, errors)
+
+    if SETTINGS_UI.exists():
+        settings_ui = SETTINGS_UI.read_text(encoding="utf-8")
+        require(
+            r"settingsPagesFor\s*\(",
+            settings_ui,
+            "settings_plugins.cpp renders plugin settings pages",
+            errors,
+        )
+        require(
+            r"updateSetting\s*\(",
+            settings_ui,
+            "settings_plugins.cpp pushes setting updates back to manager",
+            errors,
+        )
 
     if errors:
         print("plugin_sanity_check: FAILED")
