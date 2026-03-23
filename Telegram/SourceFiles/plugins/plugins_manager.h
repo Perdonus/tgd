@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QFileInfo>
-#include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonValue>
 #include <QtCore/QObject>
@@ -26,9 +25,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 class QLibrary;
-class QTcpServer;
-class QTcpSocket;
-class QUrlQuery;
 
 struct TextWithTags;
 
@@ -63,6 +59,13 @@ struct PanelState {
 	PanelId id = 0;
 	QString title;
 	QString description;
+};
+
+struct SettingsPageState {
+	SettingsPageId id = 0;
+	QString title;
+	QString description;
+	QVector<SettingsSectionDescriptor> sections;
 };
 
 struct PackagePreviewState {
@@ -114,8 +117,11 @@ public:
 		const QString &pluginId) const;
 	std::vector<PanelState> panelsFor(
 		const QString &pluginId) const;
+	std::vector<SettingsPageState> settingsPagesFor(
+		const QString &pluginId) const;
 	bool triggerAction(ActionId id);
 	bool openPanel(PanelId id);
+	bool updateSetting(SettingsPageId id, SettingDescriptor setting);
 
 	bool setEnabled(const QString &pluginId, bool enabled);
 
@@ -129,6 +135,9 @@ public:
 
 	int apiVersion() const override;
 	QString pluginsPath() const override;
+	QJsonValue storedSettingValue(
+		const QString &pluginId,
+		const QString &settingId) const override;
 
 	CommandId registerCommand(
 		const QString &pluginId,
@@ -168,12 +177,31 @@ public:
 		PanelHandler handler) override;
 	void unregisterPanel(PanelId id) override;
 
+	SettingsPageId registerSettingsPage(
+		const QString &pluginId,
+		SettingsPageDescriptor descriptor,
+		SettingsChangedHandler handler) override;
+	void unregisterSettingsPage(SettingsPageId id) override;
+
 	void showToast(const QString &text) override;
 	void forEachWindow(
 		std::function<void(Window::Controller*)> visitor) override;
 	void onWindowCreated(
 		std::function<void(Window::Controller*)> handler) override;
+	void forEachWindowWidget(
+		std::function<void(QWidget*)> visitor) override;
+	void onWindowWidgetCreated(
+		std::function<void(QWidget*)> handler) override;
 	Window::Controller *activeWindow() const override;
+	QWidget *activeWindowWidget() const override;
+	bool settingBoolValue(
+		const QString &pluginId,
+		const QString &settingId,
+		bool fallback) const override;
+	int settingIntValue(
+		const QString &pluginId,
+		const QString &settingId,
+		int fallback) const override;
 	Main::Session *activeSession() const override;
 	void forEachSession(
 		std::function<void(Main::Session*)> visitor) override;
@@ -182,16 +210,14 @@ public:
 	HostInfo hostInfo() const override;
 	SystemInfo systemInfo() const override;
 
-	bool runtimeApiEnabled() const;
-	bool setRuntimeApiEnabled(bool enabled);
-	QString runtimeApiBaseUrl() const;
-	QString runtimeApiToken() const;
-	QString rotateRuntimeApiToken();
-
 	private:
 		struct WindowHandlerEntry {
 			QString pluginId;
 			std::function<void(Window::Controller*)> handler;
+		};
+		struct WindowWidgetHandlerEntry {
+			QString pluginId;
+			std::function<void(QWidget*)> handler;
 		};
 		struct SessionHandlerEntry {
 			QString pluginId;
@@ -217,6 +243,12 @@ public:
 		PanelDescriptor descriptor;
 		PanelHandler handler;
 	};
+	struct SettingsPageEntry {
+		SettingsPageId id = 0;
+		QString pluginId;
+		SettingsPageDescriptor descriptor;
+		SettingsChangedHandler handler;
+	};
 	struct OutgoingInterceptorEntry {
 		OutgoingInterceptorId id = 0;
 		QString pluginId;
@@ -236,6 +268,7 @@ public:
 		QVector<CommandId> commandIds;
 		QVector<ActionId> actionIds;
 		QVector<PanelId> panelIds;
+		QVector<SettingsPageId> settingsPageIds;
 		QVector<OutgoingInterceptorId> outgoingInterceptorIds;
 		QVector<MessageObserverId> messageObserverIds;
 	};
@@ -276,6 +309,10 @@ public:
 			const CommandDescriptor &descriptor) const;
 		QJsonObject panelDescriptorToJson(
 			const PanelDescriptor &descriptor) const;
+		QJsonObject settingDescriptorToJson(
+			const SettingDescriptor &descriptor) const;
+		QJsonObject settingsPageDescriptorToJson(
+			const SettingsPageDescriptor &descriptor) const;
 		QJsonObject sendOptionsToJson(
 			const Api::SendOptions *options) const;
 		QJsonObject binaryInfoToJson(const BinaryInfo &info) const;
@@ -285,30 +322,13 @@ public:
 		QJsonObject commandResultToJson(const CommandResult &result) const;
 		QJsonObject registrationSummaryToJson(
 			const PluginRecord &record) const;
-		QJsonObject hostInfoToJson(const HostInfo &info) const;
-		QJsonObject systemInfoToJson(const SystemInfo &info) const;
-		QJsonObject runtimeStateToJson() const;
-		QJsonArray pluginStatesToJson() const;
-		QJsonArray sessionStatesToJson() const;
-		QJsonArray windowStatesToJson() const;
-		QByteArray readLogTail(const QString &path, qsizetype maxBytes) const;
-		QByteArray makeRuntimeApiResponse(
-			int statusCode,
-			const QJsonObject &payload) const;
-		QJsonObject runtimeApiEnvelope(
-			bool ok,
-			QJsonValue result = QJsonValue(),
-			QString error = QString()) const;
-		void ensureRuntimeApiToken();
-		bool startRuntimeApiServer();
-		void stopRuntimeApiServer();
-		void handleRuntimeApiNewConnection();
-		void handleRuntimeApiReadyRead(QTcpSocket *socket);
-		void closeRuntimeApiSocket(QTcpSocket *socket);
-		bool runtimeApiAuthorized(
-			const QHash<QByteArray, QByteArray> &headers,
-			const QUrlQuery &query) const;
 		QString fileSha256(const QString &path) const;
+		void applyStoredSettings(
+			const QString &pluginId,
+			SettingsPageDescriptor &descriptor) const;
+		void rememberSettingValue(
+			const QString &pluginId,
+			const SettingDescriptor &descriptor);
 		void scanPlugins(bool metadataOnly = false);
 		void loadPluginMetadataOnly(const QString &path);
 		void loadPlugin(const QString &path);
@@ -318,9 +338,11 @@ public:
 	void unregisterPluginCommands(const QString &pluginId);
 		void unregisterPluginActions(const QString &pluginId);
 		void unregisterPluginPanels(const QString &pluginId);
+		void unregisterPluginSettingsPages(const QString &pluginId);
 		void unregisterPluginOutgoingInterceptors(const QString &pluginId);
 		void unregisterPluginMessageObservers(const QString &pluginId);
 		void unregisterPluginWindowHandlers(const QString &pluginId);
+		void unregisterPluginWindowWidgetHandlers(const QString &pluginId);
 		void unregisterPluginSessionHandlers(const QString &pluginId);
 		QString commandKey(const QString &command) const;
 		bool hasPlugin(const QString &pluginId) const;
@@ -333,15 +355,11 @@ public:
 		void loadRecoveryState();
 		void saveRecoveryState() const;
 		void recoverFromPendingState();
-		void recoverFromRuntimeGuard();
 		void startRecoveryOperation(
 			QString kind,
 			QStringList pluginIds = {},
 			QString details = QString());
 		void finishRecoveryOperation();
-		QStringList loadedEnabledPluginIds() const;
-		void updateRuntimeCrashGuard();
-		void clearRuntimeCrashGuard();
 		void syncRecoveryFlags(PluginState &state) const;
 		void clearRecoveryDisabled(const QString &pluginId);
 		void queueRecoveryNotice(
@@ -349,7 +367,6 @@ public:
 			QStringList pluginIds,
 			QString details);
 		void showRecoveryNotice(Window::Controller *window);
-		void scheduleRecoveryNoticeIfPossible();
 		QStringList describeRecoveryPlugins(
 			const QStringList &pluginIds) const;
 		QString composeRecoveryClipboardText() const;
@@ -367,16 +384,11 @@ public:
 		QString _tracePath;
 		QString _safeModePath;
 		QString _recoveryPath;
-		QString _runtimeGuardPath;
-		bool _runtimeApiEnabled = false;
-		quint16 _runtimeApiPort = 8096;
-		QString _runtimeApiToken;
-		QTcpServer *_runtimeApiServer = nullptr;
-		QHash<QTcpSocket*, QByteArray> _runtimeApiBuffers;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;
 		QSet<QString> _disabled;
+		QHash<QString, QJsonObject> _storedSettings;
 		QSet<QString> _disabledByRecovery;
 		RecoveryOperationState _recoveryPending;
 		RecoveryOperationState _recoveryNotice;
@@ -397,6 +409,10 @@ public:
 	QHash<QString, QVector<PanelId>> _panelsByPlugin;
 	PanelId _nextPanelId = 1;
 
+	QHash<SettingsPageId, SettingsPageEntry> _settingsPages;
+	QHash<QString, QVector<SettingsPageId>> _settingsPagesByPlugin;
+	SettingsPageId _nextSettingsPageId = 1;
+
 	QHash<OutgoingInterceptorId, OutgoingInterceptorEntry>
 		_outgoingInterceptors;
 	QHash<QString, QVector<OutgoingInterceptorId>>
@@ -408,6 +424,7 @@ public:
 	MessageObserverId _nextMessageObserverId = 1;
 
 		std::vector<WindowHandlerEntry> _windowHandlers;
+		std::vector<WindowWidgetHandlerEntry> _windowWidgetHandlers;
 		std::vector<SessionHandlerEntry> _sessionHandlers;
 		QString _registeringPluginId;
 		rpl::lifetime _sessionLifetime;

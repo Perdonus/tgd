@@ -11,9 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "core/application.h"
 #include "core/launcher.h"
-#include "core/version.h"
 #include "data/data_changes.h"
-#include "data/data_user.h"
 #include "history/history_item.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
@@ -21,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "settings.h"
-#include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
 #include "ui/text/text_entity.h"
@@ -39,34 +36,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLocale>
 #include <QtCore/QLibrary>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
-#include <QtCore/QLocale>
 #include <QtCore/QSysInfo>
 #include <QtCore/QThread>
 #include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
-#include <QtCore/QUuid>
-#include <QtCore/QUrl>
-#include <QtCore/QUrlQuery>
-#include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
-#include <QtNetwork/QHostAddress>
-#include <QtNetwork/QTcpServer>
-#include <QtNetwork/QTcpSocket>
 
 #include <algorithm>
 #include <exception>
+#include <stdexcept>
+#include <type_traits>
 #include <utility>
 
-#if defined(Q_OS_WIN)
+#if defined(_WIN32)
 #include <windows.h>
-#elif defined(Q_OS_LINUX)
-#include <sys/sysinfo.h>
-#include <unistd.h>
-#endif
+#endif // _WIN32
 
 namespace Plugins {
 namespace {
@@ -77,7 +66,6 @@ constexpr auto kLogFile = "tdata/plugins.log";
 constexpr auto kTraceFile = "tdata/plugins.trace.jsonl";
 constexpr auto kSafeModeFile = "tdata/plugins.safe-mode";
 constexpr auto kRecoveryFile = "tdata/plugins.recovery.json";
-constexpr auto kRuntimeGuardFile = "tdata/plugins.runtime-guard.json";
 constexpr auto kBinaryInfoName = "TgdPluginBinaryInfo";
 constexpr auto kPreviewInfoName = "TgdPluginPreviewInfo";
 constexpr auto kEntryName = "TgdPluginEntry";
@@ -85,8 +73,6 @@ constexpr auto kNoPluginsArgument = "-noplugins";
 constexpr auto kRecoveryDuckSize = 72;
 constexpr auto kMaxPluginLogBytes = qsizetype(25 * 1024 * 1024);
 constexpr auto kMaxPluginLogBackups = 5;
-constexpr auto kRuntimeApiHost = "127.0.0.1";
-constexpr auto kRuntimeApiAuthHeader = "x-tgd-token";
 
 [[nodiscard]] bool UseRussianPluginUi() {
 	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
@@ -94,67 +80,6 @@ constexpr auto kRuntimeApiAuthHeader = "x-tgd-token";
 
 [[nodiscard]] QString PluginUiText(QString en, QString ru) {
 	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
-}
-
-[[nodiscard]] QString RuntimeApiText(QString en, QString ru) {
-	return PluginUiText(std::move(en), std::move(ru));
-}
-
-QString ProcessUserName() {
-#if defined(Q_OS_WIN)
-	return qEnvironmentVariable("USERNAME");
-#else
-	return qEnvironmentVariable("USER");
-#endif
-}
-
-std::pair<quint64, quint64> SystemMemoryInfo() {
-#if defined(Q_OS_WIN)
-	auto memory = MEMORYSTATUSEX();
-	memory.dwLength = sizeof(memory);
-	if (GlobalMemoryStatusEx(&memory)) {
-		return {
-			quint64(memory.ullTotalPhys),
-			quint64(memory.ullAvailPhys),
-		};
-	}
-#elif defined(Q_OS_LINUX)
-	auto info = sysinfo();
-	if (sysinfo(&info) == 0) {
-		const auto unit = quint64(info.mem_unit ? info.mem_unit : 1);
-		return {
-			quint64(info.totalram) * unit,
-			quint64(info.freeram) * unit,
-		};
-	}
-#endif
-	return { 0, 0 };
-}
-
-int PhysicalCpuCoresFallback() {
-	const auto logical = QThread::idealThreadCount();
-	return logical > 0 ? logical : 1;
-}
-
-QString HttpStatusText(int statusCode) {
-	switch (statusCode) {
-	case 200:
-		return u"OK"_q;
-	case 400:
-		return u"Bad Request"_q;
-	case 401:
-		return u"Unauthorized"_q;
-	case 404:
-		return u"Not Found"_q;
-	case 405:
-		return u"Method Not Allowed"_q;
-	case 409:
-		return u"Conflict"_q;
-	case 500:
-		return u"Internal Server Error"_q;
-	default:
-		return u"Error"_q;
-	}
 }
 
 [[nodiscard]] QString RecoveryOperationText(const QString &kind) {
@@ -180,6 +105,10 @@ QString HttpStatusText(int statusCode) {
 		return PluginUiText(u"plugin action"_q, u"действия плагина"_q);
 	} else if (kind == u"panel"_q) {
 		return PluginUiText(u"plugin panel"_q, u"панели плагина"_q);
+	} else if (kind == u"settings"_q) {
+		return PluginUiText(
+			u"plugin settings"_q,
+			u"настроек плагина"_q);
 	} else if (kind == u"window"_q) {
 		return PluginUiText(
 			u"plugin window callback"_q,
@@ -196,10 +125,6 @@ QString HttpStatusText(int statusCode) {
 		return PluginUiText(
 			u"message observer"_q,
 			u"наблюдателя сообщений"_q);
-	} else if (kind == u"runtime"_q) {
-		return PluginUiText(
-			u"plugin runtime"_q,
-			u"работы плагина"_q);
 	}
 	return PluginUiText(u"plugin operation"_q, u"операции плагина"_q);
 }
@@ -221,13 +146,23 @@ public:
 			font.setPointSize(font.pointSize() + 18);
 			p.setFont(font);
 			p.setPen(Qt::black);
-			p.drawText(
-				rect,
-				Qt::AlignCenter,
-				QString::fromUtf8("\xF0\x9F\xA6\x86"));
+			p.drawText(rect, Qt::AlignCenter, QString::fromUtf8("🦆"));
 		}, lifetime());
 	}
 };
+
+QString ProcessUserName() {
+#if defined(Q_OS_WIN)
+	return qEnvironmentVariable("USERNAME");
+#else
+	return qEnvironmentVariable("USER");
+#endif
+}
+
+int PhysicalCpuCoresFallback() {
+	const auto logical = QThread::idealThreadCount();
+	return logical > 0 ? logical : 1;
+}
 
 QString TrimmedCommand(QString command) {
 	command = command.trimmed();
@@ -424,6 +359,63 @@ QString CurrentExceptionText() {
 	}
 }
 
+QString SehExceptionText(unsigned int code) {
+	return QString::fromLatin1("Structured exception (0x%1).")
+		.arg(QString::number(quint64(code), 16)
+			.rightJustified(8, QLatin1Char('0'))
+			.toUpper());
+}
+
+#if defined(_WIN32) && defined(_MSC_VER)
+
+constexpr auto kMsvcCppExceptionCode = 0xE06D7363u;
+
+int PluginSehFilter(unsigned int code) noexcept {
+	return (code == kMsvcCppExceptionCode)
+		? EXCEPTION_CONTINUE_SEARCH
+		: EXCEPTION_EXECUTE_HANDLER;
+}
+
+bool InvokeWithSehGuard(
+		void (*callback)(void*) noexcept,
+		void *opaque,
+		unsigned int *exceptionCode) noexcept {
+	__try {
+		callback(opaque);
+		if (exceptionCode) {
+			*exceptionCode = 0;
+		}
+		return true;
+	} __except (PluginSehFilter(GetExceptionCode())) {
+		if (exceptionCode) {
+			*exceptionCode = GetExceptionCode();
+		}
+		return false;
+	}
+}
+
+#endif // _WIN32 && _MSC_VER
+
+template <typename Callback>
+void InvokePluginCallbackOrThrow(Callback &&callback) {
+#if defined(_WIN32) && defined(_MSC_VER)
+	auto code = unsigned int(0);
+	auto *opaque = static_cast<void*>(&callback);
+	const auto ok = InvokeWithSehGuard(
+		+[](void *context) noexcept {
+			auto *fn = static_cast<std::remove_reference_t<Callback>*>(context);
+			(*fn)();
+		},
+		opaque,
+		&code);
+	if (!ok) {
+		throw std::runtime_error(SehExceptionText(code).toStdString());
+	}
+#else // _WIN32 && _MSC_VER
+	callback();
+#endif // _WIN32 && _MSC_VER
+}
+
 QString DescribeBinaryInfoMismatch(const Plugins::BinaryInfo &info) {
 	const auto pluginCompiler = QString::fromLatin1(info.compiler ? info.compiler : "unknown");
 	const auto hostCompiler = QString::fromLatin1(Plugins::kCompilerId);
@@ -572,6 +564,58 @@ QString MessageEventName(const Plugins::MessageEvent event) {
 	return u"unknown"_q;
 }
 
+QString SettingControlName(const Plugins::SettingControl control) {
+	using Control = Plugins::SettingControl;
+	switch (control) {
+	case Control::Toggle:
+		return u"toggle"_q;
+	case Control::IntSlider:
+		return u"int_slider"_q;
+	case Control::ActionButton:
+		return u"action_button"_q;
+	case Control::InfoText:
+		return u"info_text"_q;
+	}
+	return u"unknown"_q;
+}
+
+bool HasAnySettings(const Plugins::SettingsPageDescriptor &descriptor) {
+	for (const auto &section : descriptor.sections) {
+		if (!section.settings.isEmpty()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+Plugins::SettingDescriptor NormalizeSettingDescriptor(
+		Plugins::SettingDescriptor descriptor) {
+	descriptor.id = descriptor.id.trimmed();
+	descriptor.title = descriptor.title.trimmed();
+	descriptor.description = descriptor.description.trimmed();
+	descriptor.valueSuffix = descriptor.valueSuffix.trimmed();
+	descriptor.buttonText = descriptor.buttonText.trimmed();
+	switch (descriptor.type) {
+	case Plugins::SettingControl::Toggle:
+	case Plugins::SettingControl::ActionButton:
+	case Plugins::SettingControl::InfoText:
+		break;
+	case Plugins::SettingControl::IntSlider: {
+		if (descriptor.intMinimum > descriptor.intMaximum) {
+			std::swap(descriptor.intMinimum, descriptor.intMaximum);
+		}
+		if (descriptor.intStep <= 0) {
+			descriptor.intStep = 1;
+		}
+		descriptor.intValue = std::clamp(
+			descriptor.intValue,
+			descriptor.intMinimum,
+			descriptor.intMaximum);
+	} break;
+	}
+	return descriptor;
+}
+
 QString DateTimeToIsoUtc(const QDateTime &value) {
 	return value.isValid()
 		? value.toUTC().toString(Qt::ISODateWithMs)
@@ -615,8 +659,6 @@ Manager::Manager(QObject *parent) : QObject(parent) {
 }
 
 Manager::~Manager() {
-	stopRuntimeApiServer();
-	clearRuntimeCrashGuard();
 	unloadAll();
 }
 
@@ -730,7 +772,6 @@ void Manager::recoverFromPendingState() {
 			{ u"safeModePath"_q, _safeModePath },
 		});
 	saveRecoveryState();
-	clearRuntimeCrashGuard();
 }
 
 void Manager::startRecoveryOperation(
@@ -757,157 +798,6 @@ void Manager::finishRecoveryOperation() {
 	_recoveryPending = RecoveryOperationState();
 	saveRecoveryState();
 	logOperationFinish();
-}
-
-void Manager::recoverFromRuntimeGuard() {
-	if (_runtimeGuardPath.isEmpty()) {
-		return;
-	}
-	auto file = QFile(_runtimeGuardPath);
-	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
-		return;
-	}
-	const auto document = QJsonDocument::fromJson(file.readAll());
-	file.close();
-	if (!document.isObject()) {
-		QFile::remove(_runtimeGuardPath);
-		return;
-	}
-	const auto object = document.object();
-	auto pluginIds = QStringList();
-	for (const auto &value : object.value(u"pluginIds"_q).toArray()) {
-		if (value.isString()) {
-			const auto pluginId = value.toString().trimmed();
-			if (!pluginId.isEmpty()) {
-				pluginIds.push_back(pluginId);
-			}
-		}
-	}
-	pluginIds.removeDuplicates();
-	const auto armedAt = object.value(u"armedAt"_q).toString();
-	logEvent(
-		u"recovery"_q,
-		u"runtime-guard-detected"_q,
-		QJsonObject{
-			{ u"path"_q, _runtimeGuardPath },
-			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-			{ u"armedAt"_q, armedAt },
-		});
-	QFile::remove(_runtimeGuardPath);
-	if (pluginIds.isEmpty()) {
-		return;
-	}
-	for (const auto &pluginId : pluginIds) {
-		_disabled.insert(pluginId);
-		_disabledByRecovery.insert(pluginId);
-	}
-	saveConfig();
-	QDir().mkpath(QFileInfo(_safeModePath).absolutePath());
-	auto safeModeFile = QFile(_safeModePath);
-	if (!safeModeFile.exists()
-		&& safeModeFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-		safeModeFile.close();
-	}
-	auto details = PluginUiText(
-		u"Process terminated unexpectedly after plugin startup."_q,
-		u"Процесс завершился аварийно уже после запуска плагина."_q);
-	if (!armedAt.trimmed().isEmpty()) {
-		details += PluginUiText(
-			u" Armed at: "_q,
-			u" Вооружено в: "_q) + armedAt.trimmed();
-	}
-	queueRecoveryNotice(u"runtime"_q, pluginIds, details);
-	logEvent(
-		u"recovery"_q,
-		u"runtime-guard-recovered"_q,
-		QJsonObject{
-			{ u"path"_q, _runtimeGuardPath },
-			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-			{ u"armedAt"_q, armedAt },
-			{ u"safeModePath"_q, _safeModePath },
-		});
-	saveRecoveryState();
-}
-
-QStringList Manager::loadedEnabledPluginIds() const {
-	auto result = QStringList();
-	for (const auto &plugin : _plugins) {
-		if (!plugin.state.enabled || !plugin.state.loaded) {
-			continue;
-		}
-		const auto pluginId = plugin.state.info.id.trimmed();
-		if (!pluginId.isEmpty()) {
-			result.push_back(pluginId);
-		}
-	}
-	result.removeDuplicates();
-	result.sort(Qt::CaseInsensitive);
-	return result;
-}
-
-void Manager::updateRuntimeCrashGuard() {
-	if (_runtimeGuardPath.isEmpty()) {
-		return;
-	}
-	if (safeModeEnabled()) {
-		clearRuntimeCrashGuard();
-		return;
-	}
-	const auto pluginIds = loadedEnabledPluginIds();
-	if (pluginIds.isEmpty()) {
-		clearRuntimeCrashGuard();
-		return;
-	}
-	QDir().mkpath(QFileInfo(_runtimeGuardPath).absolutePath());
-	auto object = QJsonObject{
-		{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-		{ u"armedAt"_q, DateTimeToIsoUtc(QDateTime::currentDateTimeUtc()) },
-		{ u"pid"_q, QString::number(QCoreApplication::applicationPid()) },
-	};
-	auto file = QFile(_runtimeGuardPath);
-	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-		logEvent(
-			u"recovery"_q,
-			u"runtime-guard-arm-failed"_q,
-			QJsonObject{
-				{ u"path"_q, _runtimeGuardPath },
-				{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-			});
-		return;
-	}
-	file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
-	file.close();
-	logEvent(
-		u"recovery"_q,
-		u"runtime-guard-armed"_q,
-		QJsonObject{
-			{ u"path"_q, _runtimeGuardPath },
-			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-		});
-}
-
-void Manager::clearRuntimeCrashGuard() {
-	if (_runtimeGuardPath.isEmpty()) {
-		return;
-	}
-	if (!QFileInfo::exists(_runtimeGuardPath)) {
-		return;
-	}
-	if (!QFile::remove(_runtimeGuardPath)) {
-		logEvent(
-			u"recovery"_q,
-			u"runtime-guard-clear-failed"_q,
-			QJsonObject{
-				{ u"path"_q, _runtimeGuardPath },
-			});
-		return;
-	}
-	logEvent(
-		u"recovery"_q,
-		u"runtime-guard-cleared"_q,
-		QJsonObject{
-			{ u"path"_q, _runtimeGuardPath },
-		});
 }
 
 void Manager::syncRecoveryFlags(PluginState &state) const {
@@ -1021,33 +911,16 @@ QString Manager::composeRecoveryClipboardText() const {
 }
 
 void Manager::showRecoveryNotice(Window::Controller *window) {
-	if (_recoveryNoticeShown || !_recoveryNotice.active) {
-		return;
-	}
-	if (!window) {
-		logEvent(
-			u"recovery"_q,
-			u"notice-deferred-no-window"_q,
-			QJsonObject{
-				{ u"kind"_q, _recoveryNotice.kind },
-				{ u"details"_q, _recoveryNotice.details },
-				{ u"pluginIds"_q, JsonArrayFromStrings(_recoveryNotice.pluginIds) },
-			});
-		QTimer::singleShot(300, this, [this] {
-			scheduleRecoveryNoticeIfPossible();
-		});
+	if (_recoveryNoticeShown || !_recoveryNotice.active || !window) {
 		return;
 	}
 	_recoveryNoticeShown = true;
-	const auto kind = _recoveryNotice.kind;
-	const auto details = _recoveryNotice.details;
-	const auto pluginIds = _recoveryNotice.pluginIds;
 	const auto clipboardText = composeRecoveryClipboardText();
 	if (const auto clipboard = QGuiApplication::clipboard()) {
 		clipboard->setText(clipboardText);
 	}
 
-	const auto plugins = describeRecoveryPlugins(pluginIds);
+	const auto plugins = describeRecoveryPlugins(_recoveryNotice.pluginIds);
 	const auto pluginText = plugins.isEmpty()
 		? PluginUiText(u"unknown plugin"_q, u"неизвестный плагин"_q)
 		: plugins.join(u", "_q);
@@ -1055,51 +928,31 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 	const auto body = plugins.size() == 1
 		? PluginUiText(
 			u"Telegram noticed a crash during "_q
-				+ RecoveryOperationText(kind)
+				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nSuspected plugin: "_q
 				+ pluginText
 				+ u"\n\nSafe mode was enabled automatically, the plugin was turned off, and the recovery log was copied to the clipboard."_q,
 			u"Telegram заметил крэш во время "_q
-				+ RecoveryOperationText(kind)
+				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nПодозреваемый плагин: "_q
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, плагин выключен, лог восстановления уже скопирован в буфер обмена."_q)
 		: PluginUiText(
 			u"Telegram noticed a crash during "_q
-				+ RecoveryOperationText(kind)
+				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nSuspected plugins: "_q
 				+ pluginText
 				+ u"\n\nSafe mode was enabled automatically, the listed plugins were turned off, and the recovery log was copied to the clipboard."_q,
 			u"Telegram заметил крэш во время "_q
-				+ RecoveryOperationText(kind)
+				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nПодозреваемые плагины: "_q
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, указанные плагины выключены, лог восстановления уже скопирован в буфер обмена."_q);
 
-	logEvent(
-		u"recovery"_q,
-		u"notice-showing"_q,
-		QJsonObject{
-			{ u"kind"_q, kind },
-			{ u"details"_q, details },
-			{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-		});
-	window->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-		logEvent(
-			u"recovery"_q,
-			u"notice-box-created"_q,
-			QJsonObject{
-				{ u"kind"_q, kind },
-				{ u"details"_q, details },
-				{ u"pluginIds"_q, JsonArrayFromStrings(pluginIds) },
-			});
-		if (_recoveryNotice.active) {
-			_recoveryNotice = RecoveryOperationState();
-			saveRecoveryState();
-		}
+	window->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(title));
-		box->addLeftButton(rpl::single(PluginUiText(u"Copy"_q, u"Копировать"_q)), [=] {
+		box->addLeftButton(PluginUiText(u"Copy"_q, u"Копировать"_q), [=] {
 			if (const auto clipboard = QGuiApplication::clipboard()) {
 				clipboard->setText(clipboardText);
 			}
@@ -1125,23 +978,13 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 				st::boxPadding.right(),
 				0),
 			style::al_top);
-		box->addButton(rpl::single(PluginUiText(u"Continue"_q, u"Продолжить"_q)), [=] {
+		box->addButton(PluginUiText(u"Continue"_q, u"Продолжить"_q), [=] {
 			box->closeBox();
 		});
 	}));
-}
 
-void Manager::scheduleRecoveryNoticeIfPossible() {
-	if (_recoveryNoticeShown || !_recoveryNotice.active) {
-		return;
-	}
-	QTimer::singleShot(150, this, [this] {
-		auto *window = activeWindow();
-		if (!window) {
-			window = Core::App().activePrimaryWindow();
-		}
-		showRecoveryNotice(window);
-	});
+	_recoveryNotice = RecoveryOperationState();
+	saveRecoveryState();
 }
 
 void Manager::start() {
@@ -1151,7 +994,6 @@ void Manager::start() {
 	_tracePath = cWorkingDir() + QString::fromLatin1(kTraceFile);
 	_safeModePath = cWorkingDir() + QString::fromLatin1(kSafeModeFile);
 	_recoveryPath = cWorkingDir() + QString::fromLatin1(kRecoveryFile);
-	_runtimeGuardPath = cWorkingDir() + QString::fromLatin1(kRuntimeGuardFile);
 	logEvent(
 		u"manager"_q,
 		u"start"_q,
@@ -1165,25 +1007,19 @@ void Manager::start() {
 			{ u"apiVersion"_q, kApiVersion },
 		});
 	loadConfig();
-	if (_runtimeApiEnabled) {
-		startRuntimeApiServer();
-	}
 	loadRecoveryState();
 	recoverFromPendingState();
-	recoverFromRuntimeGuard();
 	if (safeModeEnabled()) {
 		logEvent(u"safe-mode"_q, u"startup-scan-metadata-only"_q);
 		scanPlugins(true);
 	} else {
 		scanPlugins();
 	}
-	updateRuntimeCrashGuard();
 	_sessionLifetime.destroy();
 	Core::App().domain().activeSessionValue(
 	) | rpl::on_next([=](Main::Session *session) {
 		handleActiveSessionChanged(session);
 	}, _sessionLifetime);
-	scheduleRecoveryNoticeIfPossible();
 }
 
 void Manager::reload() {
@@ -1194,14 +1030,12 @@ void Manager::reload() {
 			{ u"safeMode"_q, safeModeEnabled() },
 			{ u"knownPlugins"_q, int(_plugins.size()) },
 		});
-	clearRuntimeCrashGuard();
 	unloadAll();
 	loadConfig();
 	loadRecoveryState();
 	if (safeModeEnabled()) {
 		logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
 		scanPlugins(true);
-		updateRuntimeCrashGuard();
 		return;
 	}
 	const auto ownsRecovery = !_recoveryPending.active;
@@ -1212,8 +1046,6 @@ void Manager::reload() {
 	if (ownsRecovery) {
 		finishRecoveryOperation();
 	}
-	updateRuntimeCrashGuard();
-	scheduleRecoveryNoticeIfPossible();
 }
 
 std::vector<PluginState> Manager::plugins() const {
@@ -1249,6 +1081,14 @@ bool Manager::setSafeModeEnabled(bool enabled) {
 		}
 	} else if (QFileInfo::exists(_safeModePath) && !QFile::remove(_safeModePath)) {
 		return false;
+	}
+	if (!enabled) {
+		const auto recovered = _disabledByRecovery.values();
+		for (const auto &pluginId : recovered) {
+			_disabled.remove(pluginId);
+			clearRecoveryDisabled(pluginId);
+		}
+		saveConfig();
 	}
 	logEvent(
 		u"safe-mode"_q,
@@ -1320,25 +1160,11 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 		result.info.name = result.info.id;
 	}
 	if (!result.info.id.isEmpty()) {
-		const auto installedStem = SanitizedPluginFileStem(result.info.id);
-		const auto installedPath = QDir(_pluginsPath).absoluteFilePath(
-			installedStem + u".tgd"_q);
 		if (const auto installed = findRecord(result.info.id)) {
 			result.installed = true;
 			result.update = true;
 			result.installedVersion = installed->state.info.version;
 			result.installedPath = installed->state.path;
-		} else if (QFileInfo::exists(installedPath)) {
-			result.installed = true;
-			result.update = true;
-			result.installedPath = installedPath;
-			auto installedInfo = PluginInfo();
-			auto installedIcon = QString();
-			if (ReadPreviewManifest(installedPath, &installedInfo, &installedIcon)) {
-				if (result.installedVersion.isEmpty()) {
-					result.installedVersion = installedInfo.version.trimmed();
-				}
-			}
 		}
 	}
 	logEvent(
@@ -1488,20 +1314,9 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	}
 
 	if (!preview.info.id.isEmpty()) {
-		const auto wasDisabled = _disabled.contains(preview.info.id);
-		const auto wasDisabledByRecovery = _disabledByRecovery.contains(preview.info.id);
 		_disabled.remove(preview.info.id);
 		clearRecoveryDisabled(preview.info.id);
 		saveConfig();
-		logEvent(
-			u"package"_q,
-			u"install-cleared-disabled-state"_q,
-			QJsonObject{
-				{ u"pluginId"_q, preview.info.id },
-				{ u"wasDisabled"_q, wasDisabled },
-				{ u"wasDisabledByRecovery"_q, wasDisabledByRecovery },
-				{ u"targetPath"_q, targetPath },
-			});
 	}
 
 	if (safeModeEnabled()) {
@@ -1537,7 +1352,6 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	if (error) {
 		error->clear();
 	}
-	updateRuntimeCrashGuard();
 	logEvent(
 		u"package"_q,
 		u"install-finished"_q,
@@ -1604,6 +1418,27 @@ std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
 	return result;
 }
 
+std::vector<SettingsPageState> Manager::settingsPagesFor(
+		const QString &pluginId) const {
+	auto result = std::vector<SettingsPageState>();
+	const auto it = _settingsPagesByPlugin.find(pluginId);
+	if (it == _settingsPagesByPlugin.end()) {
+		return result;
+	}
+	for (const auto id : it.value()) {
+		const auto entry = _settingsPages.find(id);
+		if (entry != _settingsPages.end()) {
+			result.push_back({
+				.id = entry->id,
+				.title = entry->descriptor.title,
+				.description = entry->descriptor.description,
+				.sections = entry->descriptor.sections,
+			});
+		}
+	}
+	return result;
+}
+
 bool Manager::triggerAction(ActionId id) {
 	const auto it = _actions.find(id);
 	if (it == _actions.end()) {
@@ -1641,7 +1476,9 @@ bool Manager::triggerAction(ActionId id) {
 					{ u"hasWindow"_q, context.window != nullptr },
 					{ u"hasSession"_q, context.session != nullptr },
 				});
-			it->handlerWithContext(context);
+			InvokePluginCallbackOrThrow([&] {
+				it->handlerWithContext(context);
+			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
 				u"action"_q,
@@ -1666,7 +1503,9 @@ bool Manager::triggerAction(ActionId id) {
 					{ u"pluginId"_q, it->pluginId },
 					{ u"title"_q, it->title },
 				});
-			it->handler();
+			InvokePluginCallbackOrThrow([&] {
+				it->handler();
+			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
 				u"action"_q,
@@ -1747,7 +1586,9 @@ bool Manager::openPanel(PanelId id) {
 				{ u"pluginId"_q, it->pluginId },
 				{ u"descriptor"_q, panelDescriptorToJson(it->descriptor) },
 			});
-		it->handler(window);
+		InvokePluginCallbackOrThrow([&] {
+			it->handler(window);
+		});
 		_registeringPluginId = previousPluginId;
 		logEvent(
 			u"panel"_q,
@@ -1774,6 +1615,123 @@ bool Manager::openPanel(PanelId id) {
 		showToast(PluginUiText(
 			u"Plugin panel failed and was disabled."_q,
 			u"Панель плагина завершилась с ошибкой и была выключена."_q));
+		finishRecoveryOperation();
+		return false;
+	}
+}
+
+bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
+	const auto it = _settingsPages.find(id);
+	if (it == _settingsPages.end()) {
+		logEvent(
+			u"settings"_q,
+			u"missing-page"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+			});
+		return false;
+	}
+	if (!it->handler) {
+		logEvent(
+			u"settings"_q,
+			u"missing-handler"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+			});
+		return false;
+	}
+	setting = NormalizeSettingDescriptor(std::move(setting));
+	auto *target = (SettingDescriptor*)nullptr;
+	for (auto &section : it->descriptor.sections) {
+		for (auto &candidate : section.settings) {
+			if (candidate.id == setting.id) {
+				target = &candidate;
+				break;
+			}
+		}
+		if (target) {
+			break;
+		}
+	}
+	if (!target) {
+		logEvent(
+			u"settings"_q,
+			u"missing-setting"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"settingId"_q, setting.id },
+			});
+		return false;
+	}
+	const auto previous = *target;
+	switch (target->type) {
+	case SettingControl::Toggle:
+		target->boolValue = setting.boolValue;
+		break;
+	case SettingControl::IntSlider:
+		target->intValue = std::clamp(
+			setting.intValue,
+			target->intMinimum,
+			target->intMaximum);
+		break;
+	case SettingControl::ActionButton:
+	case SettingControl::InfoText:
+		break;
+	}
+	const auto snapshot = *target;
+	rememberSettingValue(it->pluginId, snapshot);
+	saveConfig();
+	try {
+		startRecoveryOperation(
+			u"settings"_q,
+			{ it->pluginId },
+			snapshot.title.isEmpty() ? snapshot.id : snapshot.title);
+		const auto previousPluginId = _registeringPluginId;
+		_registeringPluginId = it->pluginId;
+		logEvent(
+			u"settings"_q,
+			u"invoke"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"setting"_q, settingDescriptorToJson(snapshot) },
+			});
+		InvokePluginCallbackOrThrow([&] {
+			it->handler(snapshot);
+		});
+		_registeringPluginId = previousPluginId;
+		logEvent(
+			u"settings"_q,
+			u"success"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"settingId"_q, snapshot.id },
+			});
+		finishRecoveryOperation();
+		return true;
+	} catch (...) {
+		*target = previous;
+		rememberSettingValue(it->pluginId, previous);
+		saveConfig();
+		_registeringPluginId.clear();
+		logEvent(
+			u"settings"_q,
+			u"failed"_q,
+			QJsonObject{
+				{ u"id"_q, QString::number(id) },
+				{ u"pluginId"_q, it->pluginId },
+				{ u"setting"_q, settingDescriptorToJson(snapshot) },
+				{ u"reason"_q, CurrentExceptionText() },
+			});
+		disablePlugin(
+			it->pluginId,
+			u"Settings update failed: "_q + CurrentExceptionText());
+		showToast(PluginUiText(
+			u"Plugin settings failed and plugin was disabled."_q,
+			u"Настройки плагина завершились с ошибкой, плагин был выключен."_q));
 		finishRecoveryOperation();
 		return false;
 	}
@@ -1860,7 +1818,10 @@ CommandResult Manager::interceptOutgoingText(
 					});
 				const auto previousPluginId = _registeringPluginId;
 				_registeringPluginId = entry.pluginId;
-				const auto handled = entry.handler(context);
+				auto handled = CommandResult();
+				InvokePluginCallbackOrThrow([&] {
+					handled = entry.handler(context);
+				});
 				_registeringPluginId = previousPluginId;
 				logEvent(
 					u"outgoing"_q,
@@ -1952,7 +1913,10 @@ CommandResult Manager::interceptOutgoingText(
 					{ u"args"_q, context.args },
 					{ u"sendOptions"_q, sendOptionsToJson(context.options) },
 				});
-			const auto handled = entryIt->handler(context);
+			auto handled = CommandResult();
+			InvokePluginCallbackOrThrow([&] {
+				handled = entryIt->handler(context);
+			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
 				u"command"_q,
@@ -1998,9 +1962,12 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 		u"created"_q,
 		QJsonObject{
 			{ u"hasWindow"_q, window != nullptr },
+			{ u"hasWidget"_q, (window && window->widget()) },
 		});
 	if (_recoveryNotice.active && !_recoveryNoticeShown) {
-		scheduleRecoveryNoticeIfPossible();
+		QTimer::singleShot(0, this, [=] {
+			showRecoveryNotice(window);
+		});
 	}
 	const auto handlers = _windowHandlers;
 	for (const auto &entry : handlers) {
@@ -2018,7 +1985,9 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 					{ u"pluginId"_q, entry.pluginId },
 					{ u"hasWindow"_q, window != nullptr },
 				});
-			entry.handler(window);
+			InvokePluginCallbackOrThrow([&] {
+				entry.handler(window);
+			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
 				u"window"_q,
@@ -2047,6 +2016,57 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 			finishRecoveryOperation();
 		}
 	}
+	const auto widget = window ? window->widget() : nullptr;
+	if (!widget) {
+		return;
+	}
+	const auto widgetHandlers = _windowWidgetHandlers;
+	for (const auto &entry : widgetHandlers) {
+		if (!entry.handler) {
+			continue;
+		}
+		try {
+			startRecoveryOperation(u"window"_q, { entry.pluginId });
+			const auto previousPluginId = _registeringPluginId;
+			_registeringPluginId = entry.pluginId;
+			logEvent(
+				u"window"_q,
+				u"invoke-widget-callback"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"hasWidget"_q, true },
+				});
+			InvokePluginCallbackOrThrow([&] {
+				entry.handler(widget);
+			});
+			_registeringPluginId = previousPluginId;
+			logEvent(
+				u"window"_q,
+				u"widget-callback-success"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+				});
+			finishRecoveryOperation();
+		} catch (...) {
+			_registeringPluginId.clear();
+			logEvent(
+				u"window"_q,
+				u"widget-callback-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"reason"_q, CurrentExceptionText() },
+				});
+			if (!entry.pluginId.isEmpty()) {
+				disablePlugin(
+					entry.pluginId,
+					u"Window widget callback failed: "_q + CurrentExceptionText());
+			}
+			showToast(PluginUiText(
+				u"Plugin window widget callback failed."_q,
+				u"Window widget callback плагина завершился с ошибкой."_q));
+			finishRecoveryOperation();
+		}
+	}
 }
 
 int Manager::apiVersion() const {
@@ -2055,99 +2075,6 @@ int Manager::apiVersion() const {
 
 QString Manager::pluginsPath() const {
 	return _pluginsPath;
-}
-
-HostInfo Manager::hostInfo() const {
-	auto info = HostInfo();
-	info.appVersion = QString::fromLatin1(AppVersionStr);
-	info.compiler = QString::fromLatin1(kCompilerId);
-	info.platform = QString::fromLatin1(kPlatformId);
-	info.workingPath = cWorkingDir();
-	info.pluginsPath = _pluginsPath;
-	info.safeModeEnabled = safeModeEnabled();
-	info.runtimeApiEnabled = _runtimeApiEnabled && (_runtimeApiServer != nullptr);
-	info.runtimeApiPort = int(_runtimeApiPort);
-	info.runtimeApiBaseUrl = runtimeApiBaseUrl();
-	return info;
-}
-
-SystemInfo Manager::systemInfo() const {
-	auto info = SystemInfo();
-	const auto locale = QLocale::system();
-	const auto [totalMemoryBytes, availableMemoryBytes] = SystemMemoryInfo();
-	info.processId = quint64(QCoreApplication::applicationPid());
-	info.totalMemoryBytes = totalMemoryBytes;
-	info.availableMemoryBytes = availableMemoryBytes;
-	info.logicalCpuCores = std::max(QThread::idealThreadCount(), 1);
-	info.physicalCpuCores = PhysicalCpuCoresFallback();
-	info.productType = QSysInfo::productType();
-	info.productVersion = QSysInfo::productVersion();
-	info.prettyProductName = QSysInfo::prettyProductName();
-	info.kernelType = QSysInfo::kernelType();
-	info.kernelVersion = QSysInfo::kernelVersion();
-	info.architecture = QSysInfo::currentCpuArchitecture();
-	info.buildAbi = QSysInfo::buildAbi();
-	info.hostName = QSysInfo::machineHostName();
-	info.userName = ProcessUserName();
-	info.locale = locale.name();
-	const auto uiLanguages = locale.uiLanguages();
-	info.uiLanguage = uiLanguages.isEmpty() ? QString() : uiLanguages.value(0);
-	info.timeZone = QString::fromLatin1(QTimeZone::systemTimeZoneId());
-	return info;
-}
-
-bool Manager::runtimeApiEnabled() const {
-	return _runtimeApiEnabled;
-}
-
-QString Manager::runtimeApiBaseUrl() const {
-	return u"http://%1:%2"_q.arg(QString::fromLatin1(kRuntimeApiHost)).arg(
-		int(_runtimeApiPort));
-}
-
-QString Manager::runtimeApiToken() const {
-	return _runtimeApiToken;
-}
-
-bool Manager::setRuntimeApiEnabled(bool enabled) {
-	if (_runtimeApiEnabled == enabled) {
-		return true;
-	}
-	if (enabled) {
-		ensureRuntimeApiToken();
-		const auto previous = _runtimeApiEnabled;
-		_runtimeApiEnabled = true;
-		if (!startRuntimeApiServer()) {
-			_runtimeApiEnabled = previous;
-			return false;
-		}
-	} else {
-		stopRuntimeApiServer();
-		_runtimeApiEnabled = false;
-	}
-	saveConfig();
-	logEvent(
-		u"runtime-api"_q,
-		u"set-enabled"_q,
-		QJsonObject{
-			{ u"enabled"_q, _runtimeApiEnabled },
-			{ u"baseUrl"_q, runtimeApiBaseUrl() },
-			{ u"hasToken"_q, !_runtimeApiToken.isEmpty() },
-		});
-	return true;
-}
-
-QString Manager::rotateRuntimeApiToken() {
-	ensureRuntimeApiToken();
-	_runtimeApiToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
-	saveConfig();
-	logEvent(
-		u"runtime-api"_q,
-		u"rotate-token"_q,
-		QJsonObject{
-			{ u"baseUrl"_q, runtimeApiBaseUrl() },
-		});
-	return _runtimeApiToken;
 }
 
 CommandId Manager::registerCommand(
@@ -2532,6 +2459,78 @@ void Manager::unregisterPanel(PanelId id) {
 		});
 }
 
+SettingsPageId Manager::registerSettingsPage(
+		const QString &pluginId,
+		SettingsPageDescriptor descriptor,
+		SettingsChangedHandler handler) {
+	if (!hasPlugin(pluginId) || !handler || !HasAnySettings(descriptor)) {
+		logEvent(
+			u"registry"_q,
+			u"register-settings-page-rejected"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"descriptor"_q, settingsPageDescriptorToJson(descriptor) },
+				{ u"hasHandler"_q, handler != nullptr },
+			});
+		return 0;
+	}
+	for (auto &section : descriptor.sections) {
+		section.id = section.id.trimmed();
+		section.title = section.title.trimmed();
+		section.description = section.description.trimmed();
+		for (auto &setting : section.settings) {
+			setting = NormalizeSettingDescriptor(std::move(setting));
+		}
+	}
+	applyStoredSettings(pluginId, descriptor);
+	const auto id = _nextSettingsPageId++;
+	_settingsPages.insert(id, {
+		.id = id,
+		.pluginId = pluginId,
+		.descriptor = std::move(descriptor),
+		.handler = std::move(handler),
+	});
+	_settingsPagesByPlugin[pluginId].push_back(id);
+	if (auto record = findRecord(pluginId)) {
+		record->settingsPageIds.push_back(id);
+	}
+	logEvent(
+		u"registry"_q,
+		u"register-settings-page"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+			{ u"descriptor"_q, settingsPageDescriptorToJson(_settingsPages.value(id).descriptor) },
+		});
+	return id;
+}
+
+void Manager::unregisterSettingsPage(SettingsPageId id) {
+	const auto it = _settingsPages.find(id);
+	if (it == _settingsPages.end()) {
+		return;
+	}
+	const auto pluginId = it->pluginId;
+	_settingsPages.remove(id);
+	const auto listIt = _settingsPagesByPlugin.find(pluginId);
+	if (listIt != _settingsPagesByPlugin.end()) {
+		listIt->removeAll(id);
+		if (listIt->isEmpty()) {
+			_settingsPagesByPlugin.erase(listIt);
+		}
+	}
+	if (auto record = findRecord(pluginId)) {
+		record->settingsPageIds.removeAll(id);
+	}
+	logEvent(
+		u"registry"_q,
+		u"unregister-settings-page"_q,
+		QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"pluginId"_q, pluginId },
+		});
+}
+
 void Manager::showToast(const QString &text) {
 	logEvent(
 		u"ui"_q,
@@ -2576,11 +2575,62 @@ void Manager::onWindowCreated(
 	}
 }
 
+void Manager::forEachWindowWidget(
+		std::function<void(QWidget*)> visitor) {
+	if (!visitor) {
+		return;
+	}
+	Core::App().forEachWindow([&](not_null<Window::Controller*> window) {
+		if (const auto widget = window->widget()) {
+			visitor(widget);
+		}
+	});
+}
+
+void Manager::onWindowWidgetCreated(
+		std::function<void(QWidget*)> handler) {
+	if (handler) {
+		_windowWidgetHandlers.push_back({
+			.pluginId = _registeringPluginId,
+			.handler = std::move(handler),
+		});
+		logEvent(
+			u"registry"_q,
+			u"register-window-widget-handler"_q,
+			QJsonObject{
+				{ u"pluginId"_q, _registeringPluginId },
+			});
+	}
+}
+
 Window::Controller *Manager::activeWindow() const {
 	if (const auto window = Core::App().activeWindow()) {
 		return window;
 	}
 	return Core::App().activePrimaryWindow();
+}
+
+QWidget *Manager::activeWindowWidget() const {
+	if (const auto window = activeWindow()) {
+		return window->widget();
+	}
+	return nullptr;
+}
+
+bool Manager::settingBoolValue(
+		const QString &pluginId,
+		const QString &settingId,
+		bool fallback) const {
+	const auto value = storedSettingValue(pluginId, settingId);
+	return value.isBool() ? value.toBool(fallback) : fallback;
+}
+
+int Manager::settingIntValue(
+		const QString &pluginId,
+		const QString &settingId,
+		int fallback) const {
+	const auto value = storedSettingValue(pluginId, settingId);
+	return value.isDouble() ? value.toInt(fallback) : fallback;
 }
 
 Main::Session *Manager::activeSession() const {
@@ -2629,8 +2679,43 @@ void Manager::onSessionActivated(
 	}
 }
 
+HostInfo Manager::hostInfo() const {
+	auto info = HostInfo();
+	info.compiler = QString::fromLatin1(kCompilerId);
+	info.platform = QString::fromLatin1(kPlatformId);
+	info.workingPath = cWorkingDir();
+	info.pluginsPath = _pluginsPath;
+	info.safeModeEnabled = safeModeEnabled();
+	info.runtimeApiEnabled = false;
+	info.runtimeApiPort = 0;
+	return info;
+}
+
+SystemInfo Manager::systemInfo() const {
+	auto info = SystemInfo();
+	const auto locale = QLocale::system();
+	info.processId = quint64(QCoreApplication::applicationPid());
+	info.logicalCpuCores = std::max(QThread::idealThreadCount(), 1);
+	info.physicalCpuCores = PhysicalCpuCoresFallback();
+	info.productType = QSysInfo::productType();
+	info.productVersion = QSysInfo::productVersion();
+	info.prettyProductName = QSysInfo::prettyProductName();
+	info.kernelType = QSysInfo::kernelType();
+	info.kernelVersion = QSysInfo::kernelVersion();
+	info.architecture = QSysInfo::currentCpuArchitecture();
+	info.buildAbi = QSysInfo::buildAbi();
+	info.hostName = QSysInfo::machineHostName();
+	info.userName = ProcessUserName();
+	info.locale = locale.name();
+	const auto uiLanguages = locale.uiLanguages();
+	info.uiLanguage = uiLanguages.isEmpty() ? QString() : uiLanguages.value(0);
+	info.timeZone = QString::fromLatin1(QTimeZone::systemTimeZoneId());
+	return info;
+}
+
 void Manager::loadConfig() {
 	_disabled.clear();
+	_storedSettings.clear();
 	QFile file(_configPath);
 	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
 		logEvent(
@@ -2651,29 +2736,27 @@ void Manager::loadConfig() {
 			});
 		return;
 	}
-	const auto array = document.object().value(u"disabled"_q).toArray();
+	const auto object = document.object();
+	const auto array = object.value(u"disabled"_q).toArray();
 	for (const auto &value : array) {
 		if (value.isString()) {
 			_disabled.insert(value.toString());
 		}
 	}
-	const auto object = document.object();
-	_runtimeApiEnabled = object.value(u"runtimeApiEnabled"_q).toBool(false);
-	const auto configuredPort = object.value(u"runtimeApiPort"_q).toInt(
-		int(_runtimeApiPort));
-	if (configuredPort > 0 && configuredPort <= 65535) {
-		_runtimeApiPort = quint16(configuredPort);
+	const auto settings = object.value(u"settings"_q).toObject();
+	for (const auto &pluginId : SortedJsonKeys(settings)) {
+		const auto value = settings.value(pluginId);
+		if (value.isObject()) {
+			_storedSettings.insert(pluginId, value.toObject());
+		}
 	}
-	_runtimeApiToken = object.value(u"runtimeApiToken"_q).toString().trimmed();
 	logEvent(
 		u"config"_q,
 		u"loaded"_q,
 		QJsonObject{
 			{ u"path"_q, _configPath },
 			{ u"disabled"_q, JsonArrayFromStrings(_disabled.values()) },
-			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
-			{ u"runtimeApiPort"_q, int(_runtimeApiPort) },
-			{ u"hasRuntimeApiToken"_q, !_runtimeApiToken.isEmpty() },
+			{ u"settingsPlugins"_q, _storedSettings.size() },
 		});
 }
 
@@ -2685,11 +2768,18 @@ void Manager::saveConfig() const {
 	for (const auto &id : list) {
 		array.push_back(id);
 	}
+	auto settings = QJsonObject();
+	auto settingPluginIds = _storedSettings.keys();
+	settingPluginIds.sort(Qt::CaseInsensitive);
+	for (const auto &pluginId : settingPluginIds) {
+		const auto values = _storedSettings.value(pluginId);
+		if (!values.isEmpty()) {
+			settings.insert(pluginId, values);
+		}
+	}
 	const auto object = QJsonObject{
 		{ u"disabled"_q, array },
-		{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
-		{ u"runtimeApiPort"_q, int(_runtimeApiPort) },
-		{ u"runtimeApiToken"_q, _runtimeApiToken },
+		{ u"settings"_q, settings },
 	};
 	const auto document = QJsonDocument(object);
 	QFile file(_configPath);
@@ -2702,311 +2792,8 @@ void Manager::saveConfig() const {
 		QJsonObject{
 			{ u"path"_q, _configPath },
 			{ u"disabled"_q, JsonArrayFromStrings(list) },
-			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
-			{ u"runtimeApiPort"_q, int(_runtimeApiPort) },
-			{ u"hasRuntimeApiToken"_q, !_runtimeApiToken.isEmpty() },
+			{ u"settingsPlugins"_q, settings.size() },
 		});
-}
-
-void Manager::ensureRuntimeApiToken() {
-	if (_runtimeApiToken.trimmed().isEmpty()) {
-		_runtimeApiToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
-	}
-}
-
-bool Manager::startRuntimeApiServer() {
-	if (!_runtimeApiEnabled) {
-		return true;
-	}
-	if (_runtimeApiServer) {
-		return _runtimeApiServer->isListening();
-	}
-	ensureRuntimeApiToken();
-	auto *server = new QTcpServer(this);
-	if (!server->listen(QHostAddress(QString::fromLatin1(kRuntimeApiHost)), _runtimeApiPort)) {
-		logEvent(
-			u"runtime-api"_q,
-			u"listen-failed"_q,
-			QJsonObject{
-				{ u"baseUrl"_q, runtimeApiBaseUrl() },
-				{ u"reason"_q, server->errorString() },
-			});
-		server->deleteLater();
-		return false;
-	}
-	connect(server, &QTcpServer::newConnection, this, [=] {
-		handleRuntimeApiNewConnection();
-	});
-	_runtimeApiServer = server;
-	logEvent(
-		u"runtime-api"_q,
-		u"started"_q,
-		QJsonObject{
-			{ u"baseUrl"_q, runtimeApiBaseUrl() },
-			{ u"hasToken"_q, !_runtimeApiToken.isEmpty() },
-		});
-	return true;
-}
-
-void Manager::stopRuntimeApiServer() {
-	if (!_runtimeApiServer) {
-		return;
-	}
-	logEvent(
-		u"runtime-api"_q,
-		u"stopped"_q,
-		QJsonObject{
-			{ u"baseUrl"_q, runtimeApiBaseUrl() },
-		});
-	const auto sockets = _runtimeApiBuffers.keys();
-	for (auto *socket : sockets) {
-		closeRuntimeApiSocket(socket);
-	}
-	_runtimeApiServer->close();
-	_runtimeApiServer->deleteLater();
-	_runtimeApiServer = nullptr;
-}
-
-void Manager::handleRuntimeApiNewConnection() {
-	if (!_runtimeApiServer) {
-		return;
-	}
-	while (_runtimeApiServer->hasPendingConnections()) {
-		auto *socket = _runtimeApiServer->nextPendingConnection();
-		if (!socket) {
-			continue;
-		}
-		_runtimeApiBuffers.insert(socket, QByteArray());
-		connect(socket, &QTcpSocket::readyRead, this, [=] {
-			handleRuntimeApiReadyRead(socket);
-		});
-		connect(socket, &QTcpSocket::disconnected, this, [=] {
-			closeRuntimeApiSocket(socket);
-		});
-	}
-}
-
-void Manager::handleRuntimeApiReadyRead(QTcpSocket *socket) {
-	if (!socket) {
-		return;
-	}
-	auto it = _runtimeApiBuffers.find(socket);
-	if (it == _runtimeApiBuffers.end()) {
-		_runtimeApiBuffers.insert(socket, QByteArray());
-		it = _runtimeApiBuffers.find(socket);
-	}
-	it.value().append(socket->readAll());
-	const auto headerEnd = it.value().indexOf("\r\n\r\n");
-	if (headerEnd < 0) {
-		return;
-	}
-	const auto request = it.value();
-	auto headerBlock = request.left(headerEnd);
-	auto lines = headerBlock.split('\n');
-	if (lines.isEmpty()) {
-		socket->write(makeRuntimeApiResponse(400, runtimeApiEnvelope(
-			false,
-			QJsonValue(),
-			RuntimeApiText(
-				u"Malformed HTTP request."_q,
-				u"Некорректный HTTP-запрос."_q))));
-		socket->disconnectFromHost();
-		return;
-	}
-	const auto requestLine = QString::fromUtf8(lines.takeFirst()).trimmed();
-	const auto requestParts = requestLine.split(u' ', Qt::SkipEmptyParts);
-	if (requestParts.size() < 2) {
-		socket->write(makeRuntimeApiResponse(400, runtimeApiEnvelope(
-			false,
-			QJsonValue(),
-			RuntimeApiText(
-				u"Malformed HTTP request line."_q,
-				u"Некорректная строка HTTP-запроса."_q))));
-		socket->disconnectFromHost();
-		return;
-	}
-	const auto method = requestParts[0];
-	const auto target = requestParts[1];
-	auto headers = QHash<QByteArray, QByteArray>();
-	for (const auto &line : lines) {
-		const auto clean = line.trimmed();
-		if (clean.isEmpty()) {
-			continue;
-		}
-		const auto separator = clean.indexOf(':');
-		if (separator <= 0) {
-			continue;
-		}
-		headers.insert(
-			clean.left(separator).trimmed().toLower(),
-			clean.mid(separator + 1).trimmed());
-	}
-	if (method != u"GET"_q) {
-		socket->write(makeRuntimeApiResponse(405, runtimeApiEnvelope(
-			false,
-			QJsonValue(),
-			RuntimeApiText(
-				u"Only GET is supported."_q,
-				u"Поддерживается только GET."_q))));
-		socket->disconnectFromHost();
-		return;
-	}
-
-	const auto url = QUrl::fromEncoded(target.toUtf8());
-	const auto path = url.path().trimmed();
-	const auto query = QUrlQuery(url);
-	logEvent(
-		u"runtime-api"_q,
-		u"request"_q,
-		QJsonObject{
-			{ u"method"_q, method },
-			{ u"path"_q, path },
-			{ u"peer"_q, socket->peerAddress().toString() },
-		});
-
-	if (path == u"/api/ping"_q) {
-		socket->write(makeRuntimeApiResponse(
-			200,
-			runtimeApiEnvelope(true, QJsonObject{
-				{ u"status"_q, u"ok"_q },
-				{ u"apiVersion"_q, kApiVersion },
-			})));
-		socket->disconnectFromHost();
-		return;
-	}
-
-	if (!runtimeApiAuthorized(headers, query)) {
-		socket->write(makeRuntimeApiResponse(401, runtimeApiEnvelope(
-			false,
-			QJsonValue(),
-			RuntimeApiText(
-				u"Runtime API token is missing or invalid."_q,
-				u"Токен runtime API отсутствует или неверен."_q))));
-		socket->disconnectFromHost();
-		return;
-	}
-
-	auto statusCode = 200;
-	auto payload = runtimeApiEnvelope(true, QJsonObject());
-
-	if (path == u"/api/runtime/state"_q) {
-		payload = runtimeApiEnvelope(true, runtimeStateToJson());
-	} else if (path == u"/api/runtime/host"_q) {
-		payload = runtimeApiEnvelope(true, hostInfoToJson(hostInfo()));
-	} else if (path == u"/api/runtime/system"_q) {
-		payload = runtimeApiEnvelope(true, systemInfoToJson(systemInfo()));
-	} else if (path == u"/api/runtime/plugins"_q) {
-		payload = runtimeApiEnvelope(true, pluginStatesToJson());
-	} else if (path == u"/api/runtime/sessions"_q) {
-		payload = runtimeApiEnvelope(true, sessionStatesToJson());
-	} else if (path == u"/api/runtime/windows"_q) {
-		payload = runtimeApiEnvelope(true, windowStatesToJson());
-	} else if (path == u"/api/runtime/reload"_q) {
-		reload();
-		payload = runtimeApiEnvelope(true, runtimeStateToJson());
-	} else if (path == u"/api/runtime/plugin/enable"_q) {
-		const auto pluginId = query.queryItemValue(u"id"_q).trimmed();
-		if (pluginId.isEmpty()) {
-			statusCode = 400;
-			payload = runtimeApiEnvelope(false, QJsonValue(), RuntimeApiText(
-				u"Missing plugin id."_q,
-				u"Не указан id плагина."_q));
-		} else if (!setEnabled(pluginId, true)) {
-			statusCode = 404;
-			payload = runtimeApiEnvelope(false, QJsonValue(), RuntimeApiText(
-				u"Plugin could not be enabled."_q,
-				u"Не удалось включить плагин."_q));
-		} else if (const auto record = findRecord(pluginId)) {
-			payload = runtimeApiEnvelope(true, pluginStateToJson(record->state));
-		} else {
-			payload = runtimeApiEnvelope(true, runtimeStateToJson());
-		}
-	} else if (path == u"/api/runtime/plugin/disable"_q) {
-		const auto pluginId = query.queryItemValue(u"id"_q).trimmed();
-		if (pluginId.isEmpty()) {
-			statusCode = 400;
-			payload = runtimeApiEnvelope(false, QJsonValue(), RuntimeApiText(
-				u"Missing plugin id."_q,
-				u"Не указан id плагина."_q));
-		} else if (!setEnabled(pluginId, false)) {
-			statusCode = 404;
-			payload = runtimeApiEnvelope(false, QJsonValue(), RuntimeApiText(
-				u"Plugin could not be disabled."_q,
-				u"Не удалось выключить плагин."_q));
-		} else if (const auto record = findRecord(pluginId)) {
-			payload = runtimeApiEnvelope(true, pluginStateToJson(record->state));
-		} else {
-			payload = runtimeApiEnvelope(true, runtimeStateToJson());
-		}
-	} else if (path == u"/api/runtime/plugin/install"_q) {
-		const auto sourcePath = query.queryItemValue(u"path"_q).trimmed();
-		auto error = QString();
-		if (sourcePath.isEmpty()) {
-			statusCode = 400;
-			payload = runtimeApiEnvelope(false, QJsonValue(), RuntimeApiText(
-				u"Missing plugin package path."_q,
-				u"Не указан путь к пакету плагина."_q));
-		} else if (!installPackage(sourcePath, &error)) {
-			statusCode = 409;
-			payload = runtimeApiEnvelope(
-				false,
-				QJsonValue(),
-				error.isEmpty()
-					? RuntimeApiText(
-						u"Plugin install failed."_q,
-						u"Установка плагина не удалась."_q)
-					: error);
-		} else {
-			payload = runtimeApiEnvelope(true, runtimeStateToJson());
-		}
-	} else if (path == u"/api/runtime/logs/recent"_q) {
-		const auto requestedBytes = query.queryItemValue(u"bytes"_q).toLongLong();
-		const auto maxBytes = qsizetype(std::clamp<qint64>(
-			(requestedBytes > 0) ? requestedBytes : 65536,
-			1024,
-			qint64(kMaxPluginLogBytes)));
-		payload = runtimeApiEnvelope(true, QJsonObject{
-			{ u"log"_q, QString::fromUtf8(readLogTail(_logPath, maxBytes)) },
-			{ u"trace"_q, QString::fromUtf8(readLogTail(_tracePath, maxBytes)) },
-		});
-	} else {
-		statusCode = 404;
-		payload = runtimeApiEnvelope(false, QJsonValue(), RuntimeApiText(
-			u"Unknown runtime API endpoint."_q,
-			u"Неизвестный endpoint runtime API."_q));
-	}
-
-	socket->write(makeRuntimeApiResponse(statusCode, payload));
-	socket->disconnectFromHost();
-}
-
-void Manager::closeRuntimeApiSocket(QTcpSocket *socket) {
-	if (!socket) {
-		return;
-	}
-	_runtimeApiBuffers.remove(socket);
-	socket->close();
-	socket->deleteLater();
-}
-
-bool Manager::runtimeApiAuthorized(
-		const QHash<QByteArray, QByteArray> &headers,
-		const QUrlQuery &query) const {
-	if (!_runtimeApiEnabled || _runtimeApiToken.isEmpty()) {
-		return false;
-	}
-	auto token = query.queryItemValue(u"token"_q).trimmed();
-	if (token.isEmpty()) {
-		token = QString::fromUtf8(headers.value(kRuntimeApiAuthHeader)).trimmed();
-	}
-	if (token.isEmpty()) {
-		const auto authorization = QString::fromUtf8(
-			headers.value("authorization")).trimmed();
-		if (authorization.startsWith(u"Bearer "_q, Qt::CaseInsensitive)) {
-			token = authorization.mid(7).trimmed();
-		}
-	}
-	return token == _runtimeApiToken;
 }
 
 void Manager::appendTraceLine(const QByteArray &line) const {
@@ -3244,6 +3031,46 @@ QJsonObject Manager::panelDescriptorToJson(
 	};
 }
 
+QJsonObject Manager::settingDescriptorToJson(
+		const SettingDescriptor &descriptor) const {
+	return QJsonObject{
+		{ u"id"_q, descriptor.id },
+		{ u"title"_q, descriptor.title },
+		{ u"description"_q, descriptor.description },
+		{ u"type"_q, SettingControlName(descriptor.type) },
+		{ u"boolValue"_q, descriptor.boolValue },
+		{ u"intValue"_q, descriptor.intValue },
+		{ u"intMinimum"_q, descriptor.intMinimum },
+		{ u"intMaximum"_q, descriptor.intMaximum },
+		{ u"intStep"_q, descriptor.intStep },
+		{ u"valueSuffix"_q, descriptor.valueSuffix },
+		{ u"buttonText"_q, descriptor.buttonText },
+	};
+}
+
+QJsonObject Manager::settingsPageDescriptorToJson(
+		const SettingsPageDescriptor &descriptor) const {
+	auto sections = QJsonArray();
+	for (const auto &section : descriptor.sections) {
+		auto settings = QJsonArray();
+		for (const auto &setting : section.settings) {
+			settings.push_back(settingDescriptorToJson(setting));
+		}
+		sections.push_back(QJsonObject{
+			{ u"id"_q, section.id },
+			{ u"title"_q, section.title },
+			{ u"description"_q, section.description },
+			{ u"settings"_q, settings },
+		});
+	}
+	return QJsonObject{
+		{ u"id"_q, descriptor.id },
+		{ u"title"_q, descriptor.title },
+		{ u"description"_q, descriptor.description },
+		{ u"sections"_q, sections },
+	};
+}
+
 QJsonObject Manager::sendOptionsToJson(
 		const Api::SendOptions *options) const {
 	if (!options) {
@@ -3325,6 +3152,12 @@ QJsonObject Manager::registrationSummaryToJson(
 			++windowHandlers;
 		}
 	}
+	auto windowWidgetHandlers = 0;
+	for (const auto &entry : _windowWidgetHandlers) {
+		if (entry.pluginId == record.state.info.id) {
+			++windowWidgetHandlers;
+		}
+	}
 	auto sessionHandlers = 0;
 	for (const auto &entry : _sessionHandlers) {
 		if (entry.pluginId == record.state.info.id) {
@@ -3335,162 +3168,12 @@ QJsonObject Manager::registrationSummaryToJson(
 		{ u"commands"_q, record.commandIds.size() },
 		{ u"actions"_q, record.actionIds.size() },
 		{ u"panels"_q, record.panelIds.size() },
+		{ u"settingsPages"_q, record.settingsPageIds.size() },
 		{ u"outgoingInterceptors"_q, record.outgoingInterceptorIds.size() },
 		{ u"messageObservers"_q, record.messageObserverIds.size() },
 		{ u"windowHandlers"_q, windowHandlers },
+		{ u"windowWidgetHandlers"_q, windowWidgetHandlers },
 		{ u"sessionHandlers"_q, sessionHandlers },
-	};
-}
-
-QJsonObject Manager::hostInfoToJson(const HostInfo &info) const {
-	return QJsonObject{
-		{ u"structVersion"_q, info.structVersion },
-		{ u"apiVersion"_q, info.apiVersion },
-		{ u"pointerSize"_q, info.pointerSize },
-		{ u"qtMajor"_q, info.qtMajor },
-		{ u"qtMinor"_q, info.qtMinor },
-		{ u"compilerVersion"_q, info.compilerVersion },
-		{ u"appVersion"_q, info.appVersion },
-		{ u"compiler"_q, info.compiler },
-		{ u"platform"_q, info.platform },
-		{ u"workingPath"_q, info.workingPath },
-		{ u"pluginsPath"_q, info.pluginsPath },
-		{ u"safeModeEnabled"_q, info.safeModeEnabled },
-		{ u"runtimeApiEnabled"_q, info.runtimeApiEnabled },
-		{ u"runtimeApiPort"_q, info.runtimeApiPort },
-		{ u"runtimeApiBaseUrl"_q, info.runtimeApiBaseUrl },
-	};
-}
-
-QJsonObject Manager::systemInfoToJson(const SystemInfo &info) const {
-	return QJsonObject{
-		{ u"structVersion"_q, info.structVersion },
-		{ u"processId"_q, QString::number(info.processId) },
-		{ u"totalMemoryBytes"_q, QString::number(info.totalMemoryBytes) },
-		{ u"availableMemoryBytes"_q, QString::number(info.availableMemoryBytes) },
-		{ u"logicalCpuCores"_q, info.logicalCpuCores },
-		{ u"physicalCpuCores"_q, info.physicalCpuCores },
-		{ u"productType"_q, info.productType },
-		{ u"productVersion"_q, info.productVersion },
-		{ u"prettyProductName"_q, info.prettyProductName },
-		{ u"kernelType"_q, info.kernelType },
-		{ u"kernelVersion"_q, info.kernelVersion },
-		{ u"architecture"_q, info.architecture },
-		{ u"buildAbi"_q, info.buildAbi },
-		{ u"hostName"_q, info.hostName },
-		{ u"userName"_q, info.userName },
-		{ u"locale"_q, info.locale },
-		{ u"uiLanguage"_q, info.uiLanguage },
-		{ u"timeZone"_q, info.timeZone },
-	};
-}
-
-QJsonObject Manager::runtimeStateToJson() const {
-	const auto sessions = sessionStatesToJson();
-	const auto windows = windowStatesToJson();
-	return QJsonObject{
-		{ u"enabled"_q, _runtimeApiEnabled },
-		{ u"listening"_q, _runtimeApiServer != nullptr },
-		{ u"baseUrl"_q, runtimeApiBaseUrl() },
-		{ u"safeModeEnabled"_q, safeModeEnabled() },
-		{ u"pluginCount"_q, int(_plugins.size()) },
-		{ u"sessionCount"_q, sessions.size() },
-		{ u"windowCount"_q, windows.size() },
-		{ u"host"_q, hostInfoToJson(hostInfo()) },
-	};
-}
-
-QJsonArray Manager::pluginStatesToJson() const {
-	auto result = QJsonArray();
-	for (const auto &state : plugins()) {
-		result.push_back(pluginStateToJson(state));
-	}
-	return result;
-}
-
-QJsonArray Manager::sessionStatesToJson() const {
-	auto result = QJsonArray();
-	if (!Core::App().domain().started()) {
-		return result;
-	}
-	for (const auto &[index, account] : Core::App().domain().accounts()) {
-		Q_UNUSED(index);
-		const auto session = account->maybeSession();
-		if (!session) {
-			continue;
-		}
-		const auto user = session->user();
-		auto object = QJsonObject();
-		object.insert(u"uniqueId"_q, QString::number(session->uniqueId()));
-		object.insert(u"userPeerId"_q, QString::number(session->userPeerId().value));
-		object.insert(u"name"_q, user->name());
-		object.insert(u"username"_q, user->username());
-		object.insert(u"active"_q, session == activeSession());
-		object.insert(u"testMode"_q, session->isTestMode());
-		result.push_back(object);
-	}
-	return result;
-}
-
-QJsonArray Manager::windowStatesToJson() const {
-	auto result = QJsonArray();
-	Core::App().forEachWindow([&](not_null<Window::Controller*> window) {
-		auto object = QJsonObject{
-			{ u"id"_q, QString::number(quintptr(window.get()), 16) },
-			{ u"active"_q, window.get() == activeWindow() },
-			{ u"primary"_q, window->isPrimary() },
-			{ u"hasSession"_q, window->maybeSession() != nullptr },
-		};
-		if (const auto session = window->maybeSession()) {
-			const auto user = session->user();
-			object.insert(u"sessionUniqueId"_q, QString::number(session->uniqueId()));
-			object.insert(u"userName"_q, user->name());
-		}
-		result.push_back(object);
-	});
-	return result;
-}
-
-QByteArray Manager::readLogTail(const QString &path, qsizetype maxBytes) const {
-	auto file = QFile(path);
-	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		return QByteArray();
-	}
-	const auto size = file.size();
-	if (maxBytes > 0 && size > maxBytes) {
-		file.seek(size - maxBytes);
-	}
-	return file.readAll();
-}
-
-QByteArray Manager::makeRuntimeApiResponse(
-		int statusCode,
-		const QJsonObject &payload) const {
-	const auto body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
-	auto response = QByteArray();
-	response.append("HTTP/1.1 ");
-	response.append(QByteArray::number(statusCode));
-	response.append(" ");
-	response.append(HttpStatusText(statusCode).toUtf8());
-	response.append("\r\n");
-	response.append("Content-Type: application/json; charset=utf-8\r\n");
-	response.append("Cache-Control: no-store\r\n");
-	response.append("Connection: close\r\n");
-	response.append("Content-Length: ");
-	response.append(QByteArray::number(body.size()));
-	response.append("\r\n\r\n");
-	response.append(body);
-	return response;
-}
-
-QJsonObject Manager::runtimeApiEnvelope(
-		bool ok,
-		QJsonValue result,
-		QString error) const {
-	return QJsonObject{
-		{ u"ok"_q, ok },
-		{ u"error"_q, error },
-		{ u"result"_q, result.isUndefined() ? QJsonValue() : result },
 	};
 }
 
@@ -3503,6 +3186,73 @@ QString Manager::fileSha256(const QString &path) const {
 		QCryptographicHash::hash(
 			file.readAll(),
 			QCryptographicHash::Sha256).toHex());
+}
+
+QJsonValue Manager::storedSettingValue(
+		const QString &pluginId,
+		const QString &settingId) const {
+	const auto it = _storedSettings.constFind(pluginId);
+	if (it == _storedSettings.cend()) {
+		return QJsonValue();
+	}
+	return it.value().value(settingId);
+}
+
+void Manager::applyStoredSettings(
+		const QString &pluginId,
+		SettingsPageDescriptor &descriptor) const {
+	for (auto &section : descriptor.sections) {
+		for (auto &setting : section.settings) {
+			const auto value = storedSettingValue(pluginId, setting.id);
+			if (value.isUndefined() || value.isNull()) {
+				continue;
+			}
+			switch (setting.type) {
+			case SettingControl::Toggle:
+				if (value.isBool()) {
+					setting.boolValue = value.toBool(setting.boolValue);
+				}
+				break;
+			case SettingControl::IntSlider:
+				if (value.isDouble()) {
+					setting.intValue = std::clamp(
+						value.toInt(setting.intValue),
+						setting.intMinimum,
+						setting.intMaximum);
+				}
+				break;
+			case SettingControl::ActionButton:
+			case SettingControl::InfoText:
+				break;
+			}
+		}
+	}
+}
+
+void Manager::rememberSettingValue(
+		const QString &pluginId,
+		const SettingDescriptor &descriptor) {
+	if (pluginId.trimmed().isEmpty() || descriptor.id.trimmed().isEmpty()) {
+		return;
+	}
+	auto values = _storedSettings.value(pluginId);
+	switch (descriptor.type) {
+	case SettingControl::Toggle:
+		values.insert(descriptor.id, descriptor.boolValue);
+		break;
+	case SettingControl::IntSlider:
+		values.insert(descriptor.id, descriptor.intValue);
+		break;
+	case SettingControl::ActionButton:
+	case SettingControl::InfoText:
+		values.remove(descriptor.id);
+		break;
+	}
+	if (values.isEmpty()) {
+		_storedSettings.remove(pluginId);
+	} else {
+		_storedSettings.insert(pluginId, values);
+	}
 }
 
 void Manager::logLoadFailure(const QString &path, const QString &reason) const {
@@ -3690,8 +3440,20 @@ void Manager::loadPlugin(const QString &path) {
 			QJsonObject{
 				{ u"path"_q, path },
 			});
-		if (const auto preview = previewInfo();
-			preview
+		auto preview = static_cast<const Plugins::PreviewInfo*>(nullptr);
+		try {
+			InvokePluginCallbackOrThrow([&] {
+				preview = previewInfo();
+			});
+		} catch (...) {
+			record.state.error = u"Plugin preview export failed: "_q + CurrentExceptionText();
+			logLoadFailure(path, record.state.error);
+			library->unload();
+			_plugins.push_back(std::move(record));
+			finishRecoveryOperation();
+			return;
+		}
+		if (preview
 			&& preview->structVersion == kPreviewInfoVersion
 			&& preview->apiVersion == kApiVersion) {
 			MergePluginInfo(record.state.info, PluginInfoFromPreview(*preview));
@@ -3734,7 +3496,19 @@ void Manager::loadPlugin(const QString &path) {
 		finishRecoveryOperation();
 		return;
 	}
-	const auto info = binaryInfo();
+	auto info = static_cast<const Plugins::BinaryInfo*>(nullptr);
+	try {
+		InvokePluginCallbackOrThrow([&] {
+			info = binaryInfo();
+		});
+	} catch (...) {
+		record.state.error = u"TgdPluginBinaryInfo failed: "_q + CurrentExceptionText();
+		logLoadFailure(path, record.state.error);
+		library->unload();
+		_plugins.push_back(std::move(record));
+		finishRecoveryOperation();
+		return;
+	}
 	if (!info) {
 		record.state.error = u"Plugin binary metadata is null."_q;
 		logLoadFailure(path, record.state.error);
@@ -3794,7 +3568,9 @@ void Manager::loadPlugin(const QString &path) {
 				{ u"path"_q, path },
 				{ u"apiVersion"_q, kApiVersion },
 			});
-		instance.reset(entry(this, kApiVersion));
+		InvokePluginCallbackOrThrow([&] {
+			instance.reset(entry(this, kApiVersion));
+		});
 	} catch (...) {
 		record.state.error = u"Plugin entry failed: "_q + CurrentExceptionText();
 		logLoadFailure(path, record.state.error);
@@ -3828,7 +3604,9 @@ void Manager::loadPlugin(const QString &path) {
 				QJsonObject{
 					{ u"path"_q, path },
 				});
-			record.state.info = instance->info();
+			InvokePluginCallbackOrThrow([&] {
+				record.state.info = instance->info();
+			});
 		} catch (...) {
 			record.state.error = u"Plugin info() failed: "_q + CurrentExceptionText();
 			logLoadFailure(path, record.state.error);
@@ -3903,7 +3681,9 @@ void Manager::loadPlugin(const QString &path) {
 						{ u"pluginId"_q, _plugins.back().state.info.id },
 						{ u"path"_q, _plugins.back().state.path },
 					});
-				_plugins.back().instance->onLoad();
+				InvokePluginCallbackOrThrow([&] {
+					_plugins.back().instance->onLoad();
+				});
 		} catch (...) {
 			const auto pluginId = _plugins.back().state.info.id;
 			_registeringPluginId.clear();
@@ -3933,7 +3713,6 @@ void Manager::loadPlugin(const QString &path) {
 }
 
 void Manager::unloadAll() {
-	clearRuntimeCrashGuard();
 	logEvent(
 		u"unload"_q,
 		u"begin"_q,
@@ -3956,7 +3735,9 @@ void Manager::unloadAll() {
 						{ u"path"_q, plugin.state.path },
 						{ u"registrations"_q, registrationSummaryToJson(plugin) },
 					});
-				plugin.instance->onUnload();
+				InvokePluginCallbackOrThrow([&] {
+					plugin.instance->onUnload();
+				});
 			} catch (...) {
 				plugin.state.error = u"onUnload failed: "_q + CurrentExceptionText();
 				logEvent(
@@ -3981,6 +3762,9 @@ void Manager::unloadAll() {
 	_panels.clear();
 	_panelsByPlugin.clear();
 	_nextPanelId = 1;
+	_settingsPages.clear();
+	_settingsPagesByPlugin.clear();
+	_nextSettingsPageId = 1;
 	_outgoingInterceptors.clear();
 	_outgoingInterceptorsByPlugin.clear();
 	_nextOutgoingInterceptorId = 1;
@@ -3989,12 +3773,14 @@ void Manager::unloadAll() {
 	_nextMessageObserverId = 1;
 	_messageObserverLifetime.destroy();
 	_windowHandlers.clear();
+	_windowWidgetHandlers.clear();
 	_sessionHandlers.clear();
 
 	for (auto &plugin : _plugins) {
 		plugin.commandIds.clear();
 		plugin.actionIds.clear();
 		plugin.panelIds.clear();
+		plugin.settingsPageIds.clear();
 		plugin.outgoingInterceptorIds.clear();
 		plugin.messageObserverIds.clear();
 		plugin.state.loaded = false;
@@ -4055,6 +3841,13 @@ void Manager::unregisterPluginPanels(const QString &pluginId) {
 	}
 }
 
+void Manager::unregisterPluginSettingsPages(const QString &pluginId) {
+	const auto ids = _settingsPagesByPlugin.value(pluginId);
+	for (const auto id : ids) {
+		unregisterSettingsPage(id);
+	}
+}
+
 void Manager::unregisterPluginOutgoingInterceptors(const QString &pluginId) {
 	const auto ids = _outgoingInterceptorsByPlugin.value(pluginId);
 	for (const auto id : ids) {
@@ -4078,6 +3871,17 @@ void Manager::unregisterPluginWindowHandlers(const QString &pluginId) {
 				return entry.pluginId == pluginId;
 			}),
 		_windowHandlers.end());
+}
+
+void Manager::unregisterPluginWindowWidgetHandlers(const QString &pluginId) {
+	_windowWidgetHandlers.erase(
+		std::remove_if(
+			_windowWidgetHandlers.begin(),
+			_windowWidgetHandlers.end(),
+			[&](const WindowWidgetHandlerEntry &entry) {
+				return entry.pluginId == pluginId;
+			}),
+		_windowWidgetHandlers.end());
 }
 
 void Manager::unregisterPluginSessionHandlers(const QString &pluginId) {
@@ -4143,14 +3947,18 @@ void Manager::disablePlugin(
 	unregisterPluginCommands(pluginId);
 	unregisterPluginActions(pluginId);
 	unregisterPluginPanels(pluginId);
+	unregisterPluginSettingsPages(pluginId);
 	unregisterPluginOutgoingInterceptors(pluginId);
 	unregisterPluginMessageObservers(pluginId);
 	unregisterPluginWindowHandlers(pluginId);
+	unregisterPluginWindowWidgetHandlers(pluginId);
 	unregisterPluginSessionHandlers(pluginId);
 	if (record->instance) {
 		_registeringPluginId = pluginId;
 		try {
-			record->instance->onUnload();
+			InvokePluginCallbackOrThrow([&] {
+				record->instance->onUnload();
+			});
 		} catch (...) {
 			// Keep the original failure reason.
 		}
@@ -4169,7 +3977,6 @@ void Manager::disablePlugin(
 	}
 	saveConfig();
 	saveRecoveryState();
-	updateRuntimeCrashGuard();
 	logEvent(
 		u"plugin"_q,
 		u"disabled-finished"_q,
@@ -4297,7 +4104,6 @@ void Manager::handleActiveSessionChanged(Main::Session *session) {
 			{ u"sessionUniqueId"_q, session ? QString::number(session->uniqueId()) : QString() },
 			{ u"handlerCount"_q, int(_sessionHandlers.size()) },
 		});
-	scheduleRecoveryNoticeIfPossible();
 	const auto handlers = _sessionHandlers;
 	for (const auto &entry : handlers) {
 		if (!entry.handler) {
@@ -4315,7 +4121,9 @@ void Manager::handleActiveSessionChanged(Main::Session *session) {
 					{ u"hasSession"_q, session != nullptr },
 					{ u"sessionUniqueId"_q, session ? QString::number(session->uniqueId()) : QString() },
 				});
-			entry.handler(session);
+			InvokePluginCallbackOrThrow([&] {
+				entry.handler(session);
+			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
 				u"session"_q,
@@ -4397,7 +4205,9 @@ void Manager::dispatchMessageEvent(
 				{ u"pluginId"_q, entry.pluginId },
 				{ u"context"_q, messageContextToJson(callContext) },
 			});
-		entry.handler(callContext);
+		InvokePluginCallbackOrThrow([&] {
+			entry.handler(callContext);
+		});
 		_registeringPluginId = previousPluginId;
 		logEvent(
 			u"observer"_q,

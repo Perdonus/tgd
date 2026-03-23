@@ -19,6 +19,8 @@ CPP = ROOT / "Telegram/SourceFiles/plugins/plugins_manager.cpp"
 HDR = ROOT / "Telegram/SourceFiles/plugins/plugins_manager.h"
 API = ROOT / "Telegram/SourceFiles/plugins/plugins_api.h"
 EXAMPLES_DIR = ROOT / "Telegram/Plugins/Examples"
+PLUGIN_CATALOG_DIR = ROOT / "PluginCatalog"
+SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
     "command_shrug.cpp",
@@ -60,6 +62,44 @@ def extract_host_method_names(api_text: str) -> list[str]:
     return sorted(set(result))
 
 
+def check_plugin_source(
+    path: pathlib.Path,
+    host_methods: set[str],
+    errors: list[str],
+    prefix: str,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+    require(
+        r'#include\s+"plugins/plugins_api.h"',
+        text,
+        f"{prefix}: includes plugins_api.h",
+        errors,
+    )
+    require(
+        r"TGD_PLUGIN_ENTRY\s*\{",
+        text,
+        f"{prefix}: defines TGD_PLUGIN_ENTRY",
+        errors,
+    )
+    require(
+        r"TGD_PLUGIN_PREVIEW\s*\(",
+        text,
+        f"{prefix}: defines TGD_PLUGIN_PREVIEW",
+        errors,
+    )
+    require(
+        r"apiVersion\s*!=\s*Plugins::kApiVersion",
+        text,
+        f"{prefix}: has exact apiVersion compatibility check",
+        errors,
+    )
+
+    used_methods = set(re.findall(r"_host->([A-Za-z_]\w*)\s*\(", text))
+    for method in sorted(used_methods):
+        if method not in host_methods:
+            errors.append(f"{prefix}: uses unknown Host method _host->{method}()")
+
+
 def check_examples(host_methods: set[str], errors: list[str]) -> None:
     if not EXAMPLES_DIR.exists():
         errors.append("Examples directory exists")
@@ -72,36 +112,36 @@ def check_examples(host_methods: set[str], errors: list[str]) -> None:
         errors.append(f"missing example source: {filename}")
 
     for path in sources:
-        text = path.read_text(encoding="utf-8")
-        require(
-            r'#include\s+"plugins/plugins_api.h"',
-            text,
-            f"{path.name}: includes plugins_api.h",
-            errors,
-        )
-        require(
-            r"TGD_PLUGIN_ENTRY\s*\{",
-            text,
-            f"{path.name}: defines TGD_PLUGIN_ENTRY",
-            errors,
-        )
-        require(
-            r"TGD_PLUGIN_PREVIEW\s*\(",
-            text,
-            f"{path.name}: defines TGD_PLUGIN_PREVIEW",
-            errors,
-        )
-        require(
-            r"apiVersion\s*!=\s*Plugins::kApiVersion",
-            text,
-            f"{path.name}: has exact apiVersion compatibility check",
-            errors,
-        )
+        check_plugin_source(path, host_methods, errors, path.name)
 
-        used_methods = set(re.findall(r"_host->([A-Za-z_]\w*)\s*\(", text))
-        for method in sorted(used_methods):
-            if method not in host_methods:
-                errors.append(f"{path.name}: uses unknown Host method _host->{method}()")
+
+def check_catalog(host_methods: set[str], errors: list[str]) -> None:
+    if not PLUGIN_CATALOG_DIR.exists():
+        errors.append("PluginCatalog directory exists")
+        return
+
+    sources = sorted(PLUGIN_CATALOG_DIR.glob("*/*/*.cpp"))
+    if not sources:
+        errors.append("PluginCatalog contains versioned plugin sources")
+        return
+
+    for path in sources:
+        rel = path.relative_to(PLUGIN_CATALOG_DIR)
+        if len(rel.parts) != 3:
+            errors.append(f"{rel}: must be PluginCatalog/<plugin>/<version>/<source>.cpp")
+            continue
+
+        plugin_name, version_name, filename = rel.parts
+        if path.stem != plugin_name:
+            errors.append(f"{rel}: source filename must match plugin folder name")
+        if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", version_name) is None:
+            errors.append(f"{rel}: version folder must look like 1.0 or 1.0.0")
+
+        binary = path.with_suffix(".tgd")
+        if binary.exists() and binary.stem != plugin_name:
+            errors.append(f"{binary.relative_to(PLUGIN_CATALOG_DIR)}: binary filename must match plugin folder name")
+
+        check_plugin_source(path, host_methods, errors, str(rel))
 
 
 def main() -> int:
@@ -171,9 +211,11 @@ def main() -> int:
         "unregisterPluginCommands",
         "unregisterPluginActions",
         "unregisterPluginPanels",
+        "unregisterPluginSettingsPages",
         "unregisterPluginOutgoingInterceptors",
         "unregisterPluginMessageObservers",
         "unregisterPluginWindowHandlers",
+        "unregisterPluginWindowWidgetHandlers",
         "unregisterPluginSessionHandlers",
     ):
         require(
@@ -191,6 +233,7 @@ def main() -> int:
         r"OutgoingInterceptorId Manager::registerOutgoingTextInterceptor\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler\)",
         r"MessageObserverId Manager::registerMessageObserver\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler\)",
         r"PanelId Manager::registerPanel\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler",
+        r"SettingsPageId Manager::registerSettingsPage\([^)]*\)\s*\{[\s\S]*if \(!hasPlugin\(pluginId\) \|\| !handler",
     ):
         require(guard, cpp, f"ownership/handler guard: {guard}", errors)
 
@@ -239,6 +282,22 @@ def main() -> int:
 
     # Examples remain compatible with Host methods.
     check_examples(host_method_set, errors)
+    check_catalog(host_method_set, errors)
+
+    if SETTINGS_UI.exists():
+        settings_ui = SETTINGS_UI.read_text(encoding="utf-8")
+        require(
+            r"settingsPagesFor\s*\(",
+            settings_ui,
+            "settings_plugins.cpp renders plugin settings pages",
+            errors,
+        )
+        require(
+            r"updateSetting\s*\(",
+            settings_ui,
+            "settings_plugins.cpp pushes setting updates back to manager",
+            errors,
+        )
 
     if errors:
         print("plugin_sanity_check: FAILED")
