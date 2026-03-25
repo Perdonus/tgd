@@ -332,6 +332,9 @@ public:
 
 	virtual Window::Controller *activeWindow() const = 0;
 	virtual QWidget *activeWindowWidget() const = 0;
+	virtual QJsonValue storedSettingValue(
+		const QString &pluginId,
+		const QString &settingId) const = 0;
 	virtual bool settingBoolValue(
 		const QString &pluginId,
 		const QString &settingId,
