@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_boxes.h"
+#include "styles/style_layers.h"
 #include "styles/style_settings.h"
 
 #include <QtGui/QGuiApplication>
@@ -513,7 +514,7 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 
 void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
 	const auto text = PluginDocsText();
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(
 			PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q)));

@@ -275,9 +275,6 @@ public:
 
 	virtual int apiVersion() const = 0;
 	virtual QString pluginsPath() const = 0;
-	virtual QJsonValue storedSettingValue(
-		const QString &pluginId,
-		const QString &settingId) const = 0;
 
 	virtual CommandId registerCommand(
 		const QString &pluginId,
@@ -335,9 +332,6 @@ public:
 
 	virtual Window::Controller *activeWindow() const = 0;
 	virtual QWidget *activeWindowWidget() const = 0;
-	virtual QJsonValue storedSettingValue(
-		const QString &pluginId,
-		const QString &settingId) const = 0;
 	virtual bool settingBoolValue(
 		const QString &pluginId,
 		const QString &settingId,

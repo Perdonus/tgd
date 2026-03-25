@@ -399,7 +399,7 @@ bool InvokeWithSehGuard(
 template <typename Callback>
 void InvokePluginCallbackOrThrow(Callback &&callback) {
 #if defined(_WIN32) && defined(_MSC_VER)
-	auto code = unsigned int(0);
+	unsigned int code = 0;
 	auto *opaque = static_cast<void*>(&callback);
 	const auto ok = InvokeWithSehGuard(
 		+[](void *context) noexcept {
@@ -949,7 +949,7 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, указанные плагины выключены, лог восстановления уже скопирован в буфер обмена."_q);
 
-	window->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+	window->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(title));
 		box->addLeftButton(PluginUiText(u"Copy"_q, u"Копировать"_q), [=] {
