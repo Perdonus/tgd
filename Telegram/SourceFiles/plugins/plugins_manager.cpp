@@ -979,7 +979,8 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 				st::boxPadding.right(),
 				0),
 			style::al_top);
-		box->addButton(PluginUiText(u"Continue"_q, u"Продолжить"_q), [=] {
+		box->addButton(rpl::single(
+			PluginUiText(u"Continue"_q, u"Продолжить"_q)), [=] {
 			box->closeBox();
 		});
 	}));
