@@ -520,7 +520,7 @@ void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
 		box->setTitle(rpl::single(
 			PluginUiText(u"Plugin Documentation"_q, u"Документация плагинов"_q)));
 		box->addLeftButton(
-			PluginUiText(u"Copy"_q, u"Копировать"_q),
+			rpl::single(PluginUiText(u"Copy"_q, u"Копировать"_q)),
 			[=] {
 				if (const auto clipboard = QGuiApplication::clipboard()) {
 					clipboard->setText(text);
@@ -747,7 +747,7 @@ void Plugins::rebuildList() {
 							const auto formatValue = [=](int value) {
 								return QString::number(value) + setting.valueSuffix;
 							};
-							const auto sliderWithLabel = MakeSliderWithLabel(
+							auto sliderWithLabel = MakeSliderWithLabel(
 								_list,
 								st::settingsScale,
 								st::settingsScaleLabel,
