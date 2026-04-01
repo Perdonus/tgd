@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "settings.h"
+#include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
 #include "ui/text/text_entity.h"
@@ -399,7 +400,7 @@ bool InvokeWithSehGuard(
 template <typename Callback>
 void InvokePluginCallbackOrThrow(Callback &&callback) {
 #if defined(_WIN32) && defined(_MSC_VER)
-	auto code = unsigned int(0);
+	unsigned int code = 0;
 	auto *opaque = static_cast<void*>(&callback);
 	const auto ok = InvokeWithSehGuard(
 		+[](void *context) noexcept {
@@ -954,10 +955,11 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, указанные плагины выключены, лог восстановления уже скопирован в буфер обмена."_q);
 
-	window->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+	window->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(title));
-		box->addLeftButton(PluginUiText(u"Copy"_q, u"Копировать"_q), [=] {
+		box->addLeftButton(rpl::single(
+			PluginUiText(u"Copy"_q, u"Копировать"_q)), [=] {
 			if (const auto clipboard = QGuiApplication::clipboard()) {
 				clipboard->setText(clipboardText);
 			}
@@ -983,7 +985,8 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 				st::boxPadding.right(),
 				0),
 			style::al_top);
-		box->addButton(PluginUiText(u"Continue"_q, u"Продолжить"_q), [=] {
+		box->addButton(rpl::single(
+			PluginUiText(u"Continue"_q, u"Продолжить"_q)), [=] {
 			box->closeBox();
 		});
 	}));
@@ -1365,6 +1368,103 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 			{ u"targetSha256"_q, fileSha256(targetPath) },
 			{ u"plugin"_q, pluginInfoToJson(preview.info) },
 			{ u"safeMode"_q, safeModeEnabled() },
+		});
+	return true;
+}
+
+bool Manager::removePlugin(const QString &pluginId, QString *error) {
+	const auto *record = findRecord(pluginId);
+	if (!record) {
+		if (error) {
+			*error = u"Plugin was not found."_q;
+		}
+		logEvent(
+			u"package"_q,
+			u"remove-missing"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+			});
+		return false;
+	}
+
+	const auto pluginInfo = record->state.info;
+	const auto pluginPath = record->state.path;
+	const auto rescanNow = [this] {
+		if (safeModeEnabled()) {
+			logEvent(u"safe-mode"_q, u"remove-rescan-metadata-only"_q);
+			scanPlugins(true);
+		} else {
+			scanPlugins();
+		}
+	};
+
+	startRecoveryOperation(
+		u"remove"_q,
+		{ pluginId },
+		pluginInfo.name.isEmpty() ? pluginId : pluginInfo.name);
+	logEvent(
+		u"package"_q,
+		u"remove-start"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"path"_q, pluginPath },
+			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
+		});
+
+	unloadAll();
+	loadConfig();
+	loadRecoveryState();
+
+	if (pluginPath.trimmed().isEmpty() || !QFileInfo::exists(pluginPath)) {
+		logEvent(
+			u"package"_q,
+			u"remove-missing-file"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"path"_q, pluginPath },
+			});
+		rescanNow();
+		if (error) {
+			*error = u"Plugin package file was not found."_q;
+		}
+		finishRecoveryOperation();
+		return false;
+	}
+
+	if (!QFile::remove(pluginPath)) {
+		logEvent(
+			u"package"_q,
+			u"remove-file-failed"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"path"_q, pluginPath },
+			});
+		rescanNow();
+		if (error) {
+			*error = u"Could not delete the plugin package file."_q;
+		}
+		finishRecoveryOperation();
+		return false;
+	}
+
+	_disabled.remove(pluginId);
+	_disabledByRecovery.remove(pluginId);
+	_storedSettings.remove(pluginId);
+	saveConfig();
+	saveRecoveryState();
+	rescanNow();
+	finishRecoveryOperation();
+
+	if (error) {
+		error->clear();
+	}
+	logEvent(
+		u"package"_q,
+		u"remove-finished"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"path"_q, pluginPath },
+			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
 		});
 	return true;
 }
@@ -2024,10 +2124,10 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 			finishRecoveryOperation();
 		}
 	}
-	const auto widget = window ? window->widget() : nullptr;
-	if (!widget) {
+	if (!window) {
 		return;
 	}
+	const auto widget = window->widget();
 	const auto widgetHandlers = _windowWidgetHandlers;
 	for (const auto &entry : widgetHandlers) {
 		if (!entry.handler) {
@@ -2701,6 +2801,7 @@ HostInfo Manager::hostInfo() const {
 	info.platform = QString::fromLatin1(kPlatformId);
 	info.workingPath = cWorkingDir();
 	info.pluginsPath = _pluginsPath;
+	info.appUiLanguage = Lang::LanguageIdOrDefault(Lang::Id());
 	info.safeModeEnabled = safeModeEnabled();
 	info.runtimeApiEnabled = false;
 	info.runtimeApiPort = 0;
@@ -3059,9 +3160,11 @@ QJsonObject Manager::settingDescriptorToJson(
 		{ u"intMinimum"_q, descriptor.intMinimum },
 		{ u"intMaximum"_q, descriptor.intMaximum },
 		{ u"intStep"_q, descriptor.intStep },
-		{ u"textValue"_q, descriptor.textValue },
-		{ u"placeholderText"_q, descriptor.placeholderText },
 		{ u"valueSuffix"_q, descriptor.valueSuffix },
+		{ u"textLength"_q, descriptor.textValue.size() },
+		{ u"hasTextValue"_q, !descriptor.textValue.isEmpty() },
+		{ u"placeholderText"_q, descriptor.placeholderText },
+		{ u"secret"_q, descriptor.secret },
 		{ u"buttonText"_q, descriptor.buttonText },
 	};
 }
@@ -3751,6 +3854,15 @@ void Manager::unloadAll() {
 				u"unload"_q,
 				{ plugin.state.info.id },
 				plugin.state.path);
+			unregisterPluginCommands(plugin.state.info.id);
+			unregisterPluginActions(plugin.state.info.id);
+			unregisterPluginPanels(plugin.state.info.id);
+			unregisterPluginSettingsPages(plugin.state.info.id);
+			unregisterPluginOutgoingInterceptors(plugin.state.info.id);
+			unregisterPluginMessageObservers(plugin.state.info.id);
+			unregisterPluginWindowHandlers(plugin.state.info.id);
+			unregisterPluginWindowWidgetHandlers(plugin.state.info.id);
+			unregisterPluginSessionHandlers(plugin.state.info.id);
 			_registeringPluginId = plugin.state.info.id;
 			try {
 				logEvent(

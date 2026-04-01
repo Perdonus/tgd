@@ -11,9 +11,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QStringList>
-#include <QtCore/QTimer>
 #include <QtCore/QUrl>
-#include <QtCore/QVector>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QKeySequence>
 #include <QtNetwork/QNetworkAccessManager>
@@ -29,13 +27,12 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
 
-#include <utility>
 #include <unordered_map>
 
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.2",
+	"1.1",
 	"Codex",
 	"Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -44,12 +41,11 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.2";
+constexpr auto kPluginVersion = "1.1";
 constexpr auto kPluginAuthor = "Codex";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
 constexpr auto kModelName = "gpt-4o-mini";
-constexpr auto kOpenChatActionId = "open_ai_chat";
 
 constexpr auto kApiKeySettingId = "api_key";
 constexpr auto kOpenSiteSettingId = "open_site";
@@ -59,7 +55,6 @@ constexpr int kDialogWidth = 560;
 constexpr int kDialogHeight = 640;
 constexpr int kTranscriptMinimumHeight = 320;
 constexpr int kInputHeight = 110;
-constexpr int kRequestTimeoutMs = 45000;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
@@ -174,24 +169,13 @@ public:
 				tr(
 					QStringLiteral("Open the AI chat dialog."),
 					QStringLiteral("Открыть окно ИИ-чата.")),
-					QStringLiteral("/ai")
-				},
-				[this](const Plugins::CommandContext &context) {
-					openChatDialog(resolveChatWindow(), context.args);
-					auto result = Plugins::CommandResult();
-					result.action = Plugins::CommandResult::Action::Handled;
-					return result;
-				});
-		_actionId = _host->registerAction(
-			_info.id,
-			tr(
-				QStringLiteral("Open AI Chat"),
-				QStringLiteral("Открыть ИИ чат")),
-			tr(
-				QStringLiteral("Open the built-in sosiskibot.ru AI dialog."),
-				QStringLiteral("Открыть встроенный ИИ-диалог sosiskibot.ru.")),
-			[this] {
-				openChatDialog(resolveChatWindow(), QString());
+				QStringLiteral("/ai")
+			},
+			[this](const Plugins::CommandContext &context) {
+				openChatDialog(_host->activeWindowWidget(), context.args);
+				auto result = Plugins::CommandResult();
+				result.action = Plugins::CommandResult::Action::Handled;
+				return result;
 			});
 	}
 
@@ -201,10 +185,6 @@ public:
 		if (_commandId) {
 			_host->unregisterCommand(_commandId);
 			_commandId = 0;
-		}
-		if (_actionId) {
-			_host->unregisterAction(_actionId);
-			_actionId = 0;
 		}
 		if (_settingsPageId) {
 			_host->unregisterSettingsPage(_settingsPageId);
@@ -383,31 +363,10 @@ private:
 				&QObject::destroyed,
 				this,
 				[this, windowKey](QObject *) {
-					if (auto it = _windowStates.find(windowKey);
-						it != _windowStates.end()
-						&& it->second.pendingReply) {
-						it->second.pendingReply->abort();
-						it->second.pendingReply->deleteLater();
-						it->second.pendingReply = nullptr;
-					}
 					_windowStates.erase(windowKey);
 				});
 		}
 		return state;
-	}
-
-	QWidget *resolveChatWindow() const {
-		if (auto *active = _host->activeWindowWidget();
-			active && active->isWindow()) {
-			return active;
-		}
-		QWidget *fallback = nullptr;
-		_host->forEachWindowWidget([&](QWidget *widget) {
-			if (!fallback && widget && widget->isWindow() && !widget->parentWidget()) {
-				fallback = widget;
-			}
-		});
-		return fallback;
 	}
 
 	void openChatDialog(QWidget *parentWindow, const QString &prefill) {
@@ -680,7 +639,6 @@ private:
 		request.setRawHeader(
 			QByteArrayLiteral("Authorization"),
 			QByteArrayLiteral("Bearer ") + _apiKey.toUtf8());
-		request.setTransferTimeout(kRequestTimeoutMs);
 
 		auto *reply = _network->post(
 			request,
@@ -803,7 +761,6 @@ private:
 	Plugins::Host *_host = nullptr;
 	QNetworkAccessManager *_network = nullptr;
 	Plugins::CommandId _commandId = 0;
-	Plugins::ActionId _actionId = 0;
 	Plugins::SettingsPageId _settingsPageId = 0;
 	Plugins::PluginInfo _info;
 	QString _apiKey;

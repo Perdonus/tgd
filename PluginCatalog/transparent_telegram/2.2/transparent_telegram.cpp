@@ -1,35 +1,31 @@
 /*
 Astrogram transparency plugin.
-Adds separate host-managed sliders for window opacity, message opacity,
-and text/widget opacity.
+Adds separate host-managed sliders for window opacity and text/widget opacity.
 */
 #include "plugins/plugins_api.h"
 
-#include <QtCore/QByteArray>
 #include <QtCore/QHash>
-#include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtGui/QPalette>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QGraphicsOpacityEffect>
 #include <QtWidgets/QWidget>
 
 #include <algorithm>
+#include <cmath>
 #include <cmath>
 
 TGD_PLUGIN_PREVIEW(
 	"example.transparent_telegram",
 	"AstroTransparent",
-	"2.4",
+	"2.2",
 	"@etopizdesblin",
-	"Adds separate interface, message, and text transparency controls for Astrogram.",
+	"Adds separate window and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
 	"GusTheDuck/4")
 
 namespace {
 
 constexpr int kDefaultWindowOpacityPercent = 85;
-constexpr int kDefaultMessageOpacityPercent = 100;
 constexpr int kDefaultTextOpacityPercent = 100;
 constexpr int kMinOpacityPercent = 20;
 constexpr int kMaxOpacityPercent = 100;
@@ -63,37 +59,6 @@ bool IsSupportedWindowWidget(QWidget *widget) {
 		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
 }
 
-bool LooksLikeMessageSurface(QWidget *widget) {
-	if (!widget || widget->isWindow()) {
-		return false;
-	}
-	const auto objectName = widget->objectName().toLower();
-	const auto className = QByteArray(widget->metaObject()->className()).toLower();
-	const auto contains = [&](const char *needle) {
-		return objectName.contains(QString::fromLatin1(needle))
-			|| className.contains(needle);
-	};
-	if (contains("tooltip")
-		|| contains("menu")
-		|| contains("button")
-		|| contains("input")
-		|| contains("edit")
-		|| contains("lineedit")
-		|| contains("scrollbar")
-		|| contains("slider")
-		|| contains("checkbox")
-		|| contains("radiobutton")
-		|| contains("emoji")) {
-		return false;
-	}
-	return contains("history")
-		|| contains("message")
-		|| contains("media")
-		|| contains("overview")
-		|| contains("chatlist")
-		|| contains("dialogs");
-}
-
 void ApplyAlpha(QPalette &palette, QPalette::ColorRole role, int alpha) {
 	for (const auto group : {
 			QPalette::Active,
@@ -108,27 +73,22 @@ void ApplyAlpha(QPalette &palette, QPalette::ColorRole role, int alpha) {
 
 } // namespace
 
-class AstroTransparentPlugin final
-	: public QObject
-	, public Plugins::Plugin {
+class AstroTransparentPlugin final : public Plugins::Plugin {
 public:
-	explicit AstroTransparentPlugin(Plugins::Host *host)
-	: QObject(nullptr)
-	, _host(host) {
+	explicit AstroTransparentPlugin(Plugins::Host *host) : _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = PluginText(
 			_host,
 			"AstroTransparent",
 			"АстроПрозрачность");
-		_info.version = QStringLiteral("2.4");
+		_info.version = QStringLiteral("2.2");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = PluginText(
 			_host,
-			"Adds separate interface, message, and text transparency controls for Astrogram.",
-			"Добавляет отдельные настройки прозрачности интерфейса, сообщений и текста в Astrogram.");
+			"Adds separate window and text transparency controls for Astrogram.",
+			"Добавляет отдельные настройки прозрачности окна и текста в Astrogram.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_windowOpacityPercent = readWindowOpacityPercent();
-		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();
 	}
 
@@ -138,7 +98,6 @@ public:
 
 	void onLoad() override {
 		_windowOpacityPercent = readWindowOpacityPercent();
-		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();
 		_settingsPageId = _host->registerSettingsPage(
 			_info.id,
@@ -146,8 +105,6 @@ public:
 			[=](const Plugins::SettingDescriptor &setting) {
 				if (setting.id == QStringLiteral("window_opacity")) {
 					setWindowOpacityPercent(setting.intValue);
-				} else if (setting.id == QStringLiteral("message_opacity")) {
-					setMessageOpacityPercent(setting.intValue);
 				} else if (setting.id == QStringLiteral("text_opacity")) {
 					setTextOpacityPercent(setting.intValue);
 				}
@@ -187,23 +144,6 @@ private:
 		windowSlider.intStep = 1;
 		windowSlider.valueSuffix = QStringLiteral("%");
 
-		auto messageSlider = Plugins::SettingDescriptor();
-		messageSlider.id = QStringLiteral("message_opacity");
-		messageSlider.title = PluginText(
-			_host,
-			"Message opacity",
-			"Прозрачность сообщений");
-		messageSlider.description = PluginText(
-			_host,
-			"Controls message/history surfaces and attached media blocks separately from the main interface.",
-			"Отдельно управляет поверхностями сообщений, истории и медиа-блоками независимо от общего интерфейса.");
-		messageSlider.type = Plugins::SettingControl::IntSlider;
-		messageSlider.intValue = _messageOpacityPercent;
-		messageSlider.intMinimum = kMinOpacityPercent;
-		messageSlider.intMaximum = kMaxOpacityPercent;
-		messageSlider.intStep = 1;
-		messageSlider.valueSuffix = QStringLiteral("%");
-
 		auto textSlider = Plugins::SettingDescriptor();
 		textSlider.id = QStringLiteral("text_opacity");
 		textSlider.title = PluginText(
@@ -229,8 +169,8 @@ private:
 			"Как это работает");
 		info.description = PluginText(
 			_host,
-			"Interface opacity affects the whole Astrogram window. Message opacity targets history/message surfaces. Text opacity adjusts widget-based text and controls and may be partial in heavily custom-drawn areas.",
-			"Прозрачность интерфейса влияет на всё окно Astrogram. Прозрачность сообщений нацелена на поверхности истории и пузырей. Прозрачность текста меняет альфу текста виджетов и контролов и может работать частично в сильно кастомно отрисованных зонах.");
+			"Window opacity affects the whole Astrogram window. Text opacity adjusts widget-based text and controls and may be partial in heavily custom-drawn areas.",
+			"Прозрачность окна влияет на всё окно Astrogram. Прозрачность текста меняет альфу текста и контролов на виджетах и может работать частично в сильно кастомно отрисованных зонах.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -240,7 +180,6 @@ private:
 			"Appearance",
 			"Оформление");
 		section.settings.push_back(windowSlider);
-		section.settings.push_back(messageSlider);
 		section.settings.push_back(textSlider);
 		section.settings.push_back(info);
 
@@ -252,8 +191,8 @@ private:
 			"АстроПрозрачность");
 		page.description = PluginText(
 			_host,
-			"Separate transparency controls for interface, messages, and text.",
-			"Раздельные настройки прозрачности для интерфейса, сообщений и текста.");
+			"Separate transparency controls for windows and text.",
+			"Раздельные настройки прозрачности для окна и текста.");
 		page.sections.push_back(section);
 		return page;
 	}
@@ -270,18 +209,6 @@ private:
 		applyWindowOpacity();
 	}
 
-	void setMessageOpacityPercent(int value) {
-		const auto clamped = std::clamp(
-			value,
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
-		if (_messageOpacityPercent == clamped) {
-			return;
-		}
-		_messageOpacityPercent = clamped;
-		applyMessageOpacity();
-	}
-
 	void setTextOpacityPercent(int value) {
 		const auto clamped = std::clamp(
 			value,
@@ -296,7 +223,6 @@ private:
 
 	void applyCurrentAppearance() {
 		applyWindowOpacity();
-		applyMessageOpacity();
 		applyTextOpacity();
 	}
 
@@ -326,70 +252,7 @@ private:
 			return;
 		}
 		widget->setWindowOpacity(windowOpacityValue());
-		applyMessageOpacityToRoot(widget);
 		applyTextOpacityToRoot(widget);
-	}
-
-	void applyMessageOpacity() {
-		_host->forEachWindowWidget([=](QWidget *widget) {
-			applyMessageOpacityToRoot(widget);
-		});
-		if (const auto widget = _host->activeWindowWidget()) {
-			applyMessageOpacityToRoot(widget);
-		}
-	}
-
-	void applyMessageOpacityToRoot(QWidget *root) {
-		if (!IsSupportedWindowWidget(root)) {
-			return;
-		}
-		applyMessageOpacityToWidget(root);
-		for (const auto child : root->findChildren<QWidget*>()) {
-			applyMessageOpacityToWidget(child);
-		}
-	}
-
-	void applyMessageOpacityToWidget(QWidget *widget) {
-		if (!LooksLikeMessageSurface(widget)) {
-			if (_messageOpacityPercent >= kMaxOpacityPercent) {
-				restoreMessageOpacity(widget);
-			}
-			return;
-		}
-		if (_messageOpacityPercent >= kMaxOpacityPercent) {
-			restoreMessageOpacity(widget);
-			return;
-		}
-		auto effect = _messageEffects.value(widget);
-		if (!effect) {
-			if (widget->graphicsEffect() && widget->graphicsEffect() != effect) {
-				return;
-			}
-			effect = new QGraphicsOpacityEffect(widget);
-			widget->setGraphicsEffect(effect);
-			_messageEffects.insert(widget, effect);
-			QObject::connect(
-				widget,
-				&QObject::destroyed,
-				this,
-				[this, widget](QObject *) {
-					_messageEffects.remove(widget);
-				});
-		}
-		effect->setOpacity(messageOpacityValue());
-		widget->update();
-	}
-
-	void restoreMessageOpacity(QWidget *widget) {
-		if (!widget) {
-			return;
-		}
-		auto effect = _messageEffects.take(widget);
-		if (effect && widget->graphicsEffect() == effect) {
-			widget->setGraphicsEffect(nullptr);
-			effect->deleteLater();
-			widget->update();
-		}
 	}
 
 	void applyTextOpacityToRoot(QWidget *root) {
@@ -411,32 +274,19 @@ private:
 			QObject::connect(
 				widget,
 				&QObject::destroyed,
-				this,
+				qApp,
 				[this, widget](QObject *) {
 					_originalPalettes.remove(widget);
 				});
 		}
-		auto original = _originalPalettes.value(widget);
-		const auto current = widget->palette();
-		if (_textOpacityPercent < kMaxOpacityPercent) {
-			const auto adjusted = adjustedPalette(original);
-			if (current != original && current != adjusted) {
-				original = current;
-				_originalPalettes[widget] = original;
-			}
-		}
+		const auto original = _originalPalettes.value(widget);
 		if (_textOpacityPercent >= kMaxOpacityPercent) {
 			widget->setPalette(original);
 			widget->update();
 			return;
 		}
 
-		const auto adjusted = adjustedPalette(original);
-		widget->setPalette(adjusted);
-		widget->update();
-	}
-
-	QPalette adjustedPalette(QPalette palette) const {
+		auto adjusted = original;
 		const auto alpha = textOpacityAlpha();
 		for (const auto role : {
 				QPalette::WindowText,
@@ -447,9 +297,10 @@ private:
 				QPalette::PlaceholderText,
 				QPalette::ToolTipText,
 			}) {
-			ApplyAlpha(palette, role, alpha);
+			ApplyAlpha(adjusted, role, alpha);
 		}
-		return palette;
+		widget->setPalette(adjusted);
+		widget->update();
 	}
 
 	void restoreDefaults() {
@@ -462,19 +313,7 @@ private:
 			IsSupportedWindowWidget(widget)) {
 			widget->setWindowOpacity(1.0);
 		}
-		restoreMessageEffects();
 		restorePalettes();
-	}
-
-	void restoreMessageEffects() {
-		for (auto i = _messageEffects.begin(); i != _messageEffects.end(); ++i) {
-			if (i.key() && i.value() && i.key()->graphicsEffect() == i.value()) {
-				i.key()->setGraphicsEffect(nullptr);
-				i.value()->deleteLater();
-				i.key()->update();
-			}
-		}
-		_messageEffects.clear();
 	}
 
 	void restorePalettes() {
@@ -490,13 +329,6 @@ private:
 	double windowOpacityValue() const {
 		return std::clamp(
 			_windowOpacityPercent,
-			kMinOpacityPercent,
-			kMaxOpacityPercent) / 100.0;
-	}
-
-	double messageOpacityValue() const {
-		return std::clamp(
-			_messageOpacityPercent,
 			kMinOpacityPercent,
 			kMaxOpacityPercent) / 100.0;
 	}
@@ -521,16 +353,6 @@ private:
 			kMaxOpacityPercent);
 	}
 
-	int readMessageOpacityPercent() const {
-		return std::clamp(
-			_host->settingIntValue(
-				_info.id,
-				QStringLiteral("message_opacity"),
-				kDefaultMessageOpacityPercent),
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
-	}
-
 	int readTextOpacityPercent() const {
 		return std::clamp(
 			_host->settingIntValue(
@@ -545,9 +367,7 @@ private:
 	Plugins::SettingsPageId _settingsPageId = 0;
 	Plugins::PluginInfo _info;
 	int _windowOpacityPercent = kDefaultWindowOpacityPercent;
-	int _messageOpacityPercent = kDefaultMessageOpacityPercent;
 	int _textOpacityPercent = kDefaultTextOpacityPercent;
-	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _messageEffects;
 	QHash<QWidget*, QPalette> _originalPalettes;
 };
 

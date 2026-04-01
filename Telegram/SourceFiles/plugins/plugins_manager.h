@@ -110,6 +110,7 @@ public:
 	bool setSafeModeEnabled(bool enabled);
 	PackagePreviewState inspectPackage(const QString &path) const;
 	bool installPackage(const QString &sourcePath, QString *error = nullptr);
+	bool removePlugin(const QString &pluginId, QString *error = nullptr);
 
 	std::vector<CommandDescriptor> commandsFor(
 		const QString &pluginId) const;

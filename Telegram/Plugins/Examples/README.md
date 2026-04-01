@@ -8,9 +8,12 @@ Requirements
 - UI plugins should also link QtWidgets.
 
 Examples
-- ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to `sosiskibot.ru`.
-- ayu_safe.cpp: adds Ayu-inspired visuals, streamer-lite privacy and a persistent local safety archive.
-- transparent_telegram.cpp: adds a transparency slider for Telegram windows.
+- ai_chat.cpp: intercepts `/ai` and opens a built-in AI chat window backed by `sosiskibot.ru/api`.
+- accent_color.cpp: applies a custom accent tint to common Astrogram palette roles.
+- ayu_safe.cpp: adds Ayu-inspired visual tweaks and a local message-safety cache.
+- blur_telegram.cpp: applies blur effects to interface and message surfaces where Qt effects are available.
+- font_tuner.cpp: changes the app font scale and loads custom fonts from a file or URL.
+- transparent_telegram.cpp: adds separate transparency sliders for the interface, message surfaces, and widget text layers.
 
 Build (Linux)
 1) From this folder, compile a shared library:

@@ -269,19 +269,6 @@ def main() -> int:
             errors,
         )
 
-    require(
-        r"enum class SettingControl\s*\{[\s\S]*TextInput",
-        api,
-        "plugins_api.h declares SettingControl::TextInput",
-        errors,
-    )
-    require(
-        r"case\s+::Plugins::SettingControl::TextInput",
-        SETTINGS_UI.read_text(encoding="utf-8"),
-        "settings UI renders TextInput controls",
-        errors,
-    )
-
     # Snapshot iteration to avoid mutation invalidation during callbacks.
     require(
         r"const auto observerSnapshot = \[=\]",

@@ -33,10 +33,10 @@ class HistoryItem;
 
 namespace Plugins {
 
-constexpr int kApiVersion = 4;
+constexpr int kApiVersion = 5;
 constexpr int kBinaryInfoVersion = 1;
 constexpr int kPreviewInfoVersion = 1;
-constexpr int kHostInfoVersion = 1;
+constexpr int kHostInfoVersion = 2;
 constexpr int kSystemInfoVersion = 1;
 
 #if defined(_MSC_VER)
@@ -118,6 +118,7 @@ struct HostInfo {
 	int qtMinor = QT_VERSION_MINOR;
 	int compilerVersion = kCompilerVersion;
 	QString appVersion;
+	QString appUiLanguage;
 	QString compiler;
 	QString platform;
 	QString workingPath;
@@ -249,9 +250,10 @@ struct SettingDescriptor {
 	int intMinimum = 0;
 	int intMaximum = 100;
 	int intStep = 1;
+	QString valueSuffix;
 	QString textValue;
 	QString placeholderText;
-	QString valueSuffix;
+	bool secret = false;
 	QString buttonText;
 };
 

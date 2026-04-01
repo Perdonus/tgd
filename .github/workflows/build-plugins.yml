@@ -34,25 +34,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run plugin sanity checks
-        run: |
-          python3 - <<'PY'
-          import importlib.util
-          import pathlib
-          import sys
-
-          root = pathlib.Path.cwd()
-          script = root / "tools" / "plugin_sanity_check.py"
-          spec = importlib.util.spec_from_file_location("plugin_sanity_check", script)
-          if spec is None or spec.loader is None:
-            raise SystemExit(f"Unable to load {script}")
-
-          module = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(module)
-          module.EXPECTED_EXAMPLES = {path.name for path in module.EXAMPLES_DIR.glob("*.cpp")}
-          raise SystemExit(module.main())
-          PY
+        run: python3 tools/plugin_sanity_check.py
 
   windows_plugin:
     name: Windows ${{ inputs.plugin_name }}
@@ -64,6 +50,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
       - name: Setup Python
@@ -416,7 +403,7 @@ jobs:
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
           set "BUILD_DIR=out\plugin-${{ inputs.plugin_name }}"
           set "CONFIGURE_LOG=%CI_LOGS_DIR%\configure-${{ inputs.plugin_name }}.log"
-          cmake -S PluginCatalog -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -D CMAKE_PREFIX_PATH="${{ steps.normalize_paths.outputs.qt_prefix_path }}" -D TGD_CATALOG_PLUGIN="${{ inputs.plugin_name }}" > "%CONFIGURE_LOG%" 2>&1
+          cmake -S PluginCatalog -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -D CMAKE_PREFIX_PATH="${{ steps.normalize_paths.outputs.qt_prefix_path }}" -D TGD_CATALOG_PLUGIN="${{ inputs.plugin_name }}" -D TGD_PLUGIN_FILTER="${{ inputs.plugin_name }}" > "%CONFIGURE_LOG%" 2>&1
           if not errorlevel 1 exit /b 0
           powershell -NoProfile -Command "Get-Content -Path '%CONFIGURE_LOG%' -Tail 120"
           exit /b 1
@@ -450,15 +437,26 @@ jobs:
         shell: pwsh
         run: |
           $pluginDir = Join-Path $PWD "PluginCatalog/${{ inputs.plugin_name }}"
-          $matches = Get-ChildItem -Path $pluginDir -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Unique
-
-          if (-not $matches -or $matches.Count -eq 0) {
-            Write-Error "Built plugin binaries were not found in $pluginDir."
+          $versionDirs = Get-ChildItem -Path $pluginDir -Directory -ErrorAction SilentlyContinue |
+            Sort-Object @{ Expression = {
+              try { [version]$_.Name } catch { [version]'0.0' }
+            } }, Name
+          if (-not $versionDirs -or $versionDirs.Count -eq 0) {
+            Write-Error "Version directories were not found in $pluginDir."
             exit 1
           }
 
-          Write-Host "Built $($matches.Count) plugin binaries for ${{ inputs.plugin_name }}."
+          $latestDir = $versionDirs[-1].FullName
+          $matches = Get-ChildItem -Path $latestDir -File -Filter *.tgd -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Unique
+
+          if (-not $matches -or $matches.Count -eq 0) {
+            Write-Error "Built plugin binaries were not found in latest version directory $latestDir."
+            exit 1
+          }
+
+          "artifact_dir=$latestDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Built $($matches.Count) plugin binaries for ${{ inputs.plugin_name }} from $latestDir."
           $matches | ForEach-Object { Write-Host " - $($_.FullName)" }
 
       - name: Upload plugin artifact
@@ -467,7 +465,7 @@ jobs:
         with:
           name: telegram-plugin-${{ inputs.plugin_name }}-windows
           path: |
-            PluginCatalog/${{ inputs.plugin_name }}/**/*.tgd
+            ${{ steps.collect_plugins.outputs.artifact_dir }}/*.tgd
           if-no-files-found: error
 
       - name: Commit refreshed plugin binaries
@@ -475,14 +473,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          plugin_path="PluginCatalog/${{ inputs.plugin_name }}"
+          target_branch="${{ inputs.target_branch }}"
+          commit_message="ci: refresh ${{ inputs.plugin_name }} plugin binary [skip plugin-catalog]"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git status --short "PluginCatalog/${{ inputs.plugin_name }}" || true
-          git add -A "PluginCatalog/${{ inputs.plugin_name }}"
-          git status --short "PluginCatalog/${{ inputs.plugin_name }}" || true
+          git status --short "${plugin_path}" || true
+          git add -A "${plugin_path}"
+          git status --short "${plugin_path}" || true
           if git diff --cached --quiet; then
             echo "No plugin catalog changes to commit."
             exit 0
           fi
-          git commit -m "ci: refresh ${{ inputs.plugin_name }} plugin binary [skip plugin-catalog]"
-          git push origin HEAD:${{ inputs.target_branch }}
+          git checkout -B "ci/${{ inputs.plugin_name }}-artifact" "${GITHUB_SHA}"
+          git commit -m "${commit_message}"
+          artifact_commit="$(git rev-parse HEAD)"
+          echo "Artifact commit: ${artifact_commit}"
+
+          attempt=1
+          max_attempts=5
+          while [ "${attempt}" -le "${max_attempts}" ]; do
+            echo "Publish attempt ${attempt}/${max_attempts}"
+            git fetch origin "${target_branch}"
+            git checkout -B "ci/${{ inputs.plugin_name }}-publish" "origin/${target_branch}"
+            git restore --source="${artifact_commit}" --staged --worktree -- "${plugin_path}"
+            git add -A "${plugin_path}"
+            if git diff --cached --quiet; then
+              echo "Remote branch already has the latest ${plugin_path}."
+              exit 0
+            fi
+            git commit -m "${commit_message}"
+            if git push origin HEAD:${target_branch}; then
+              echo "Published refreshed ${plugin_path}."
+              exit 0
+            fi
+            git reset --hard "origin/${target_branch}"
+            sleep $((attempt * 5))
+            attempt=$((attempt + 1))
+          done
+
+          echo "Failed to publish ${plugin_path} after ${max_attempts} attempts."
+          exit 1
