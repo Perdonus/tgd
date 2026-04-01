@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/fields/password_input.h"
 #include "ui/widgets/labels.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -852,13 +853,21 @@ void AddPluginSettingsContent(
 				const auto placeholder = setting.placeholderText.trimmed().isEmpty()
 					? setting.title.trimmed()
 					: setting.placeholderText.trimmed();
-				const auto field = container->add(
-					object_ptr<Ui::InputField>(
-						container,
-						st::settingLocalPasscodeInputField,
-						rpl::single(placeholder),
-						setting.textValue),
-					style::al_top);
+				const auto field = setting.secret
+					? container->add(
+						object_ptr<Ui::PasswordInput>(
+							container,
+							st::settingLocalPasscodeInputField,
+							rpl::single(placeholder),
+							setting.textValue),
+						style::al_top)
+					: container->add(
+						object_ptr<Ui::InputField>(
+							container,
+							st::settingLocalPasscodeInputField,
+							rpl::single(placeholder),
+							setting.textValue),
+						style::al_top);
 				const auto lastValue = std::make_shared<QString>(setting.textValue);
 				QObject::connect(field, &Ui::MaskedInputField::changed, [=] {
 					const auto current = field->getLastText().trimmed();

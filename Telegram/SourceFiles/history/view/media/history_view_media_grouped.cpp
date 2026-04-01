@@ -28,9 +28,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "layout/layout_selection.h"
 #include "styles/style_chat.h"
+#include "plugins/plugins_manager.h"
 
 namespace HistoryView {
 namespace {
+
+constexpr auto kTransparentPluginId = "example.transparent_telegram";
+constexpr auto kTransparentMessagesSettingId = "message_opacity";
+
+[[nodiscard]] float64 AstrogramPluginMessageOpacity() {
+	const auto percent = std::clamp(
+		Core::App().plugins().settingIntValue(
+			QString::fromLatin1(kTransparentPluginId),
+			QString::fromLatin1(kTransparentMessagesSettingId),
+			100),
+		20,
+		100);
+	return percent / 100.;
+}
 
 std::vector<Ui::GroupMediaLayout> LayoutPlaylist(
 		const std::vector<QSize> &sizes) {
@@ -420,6 +435,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 	const auto elementDeletedOpacity = perItemDeletedOpacity
 		? _parent->deletedOpacity()
 		: 1.;
+	const auto messageOpacity = AstrogramPluginMessageOpacity();
 	for (auto i = 0, count = int(_parts.size()); i != count; ++i) {
 		const auto &part = _parts[i];
 		auto partContext = context.withSelection(fullSelection
@@ -447,6 +463,9 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 			wasCache = true;
 		}
 		const auto savedOp = p.opacity();
+		if (messageOpacity < 1.) {
+			p.setOpacity(savedOp * messageOpacity);
+		}
 		if (perItemDeletedOpacity && part.item->isDeleted()) {
 			auto adjustedOpacity = 0.7;
 			if (part.item->wasDeletedAnimated()
@@ -454,7 +473,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 				&& elementDeletedOpacity != 1.) {
 				adjustedOpacity = elementDeletedOpacity;
 			}
-			p.setOpacity(savedOp * adjustedOpacity);
+			p.setOpacity(savedOp * messageOpacity * adjustedOpacity);
 		}
 		part.content->drawGrouped(
 			p,
@@ -465,7 +484,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 			highlightOpacity,
 			&part.cacheKey,
 			&part.cache);
-		if (perItemDeletedOpacity && part.item->isDeleted()) {
+		if (messageOpacity < 1. || (perItemDeletedOpacity && part.item->isDeleted())) {
 			p.setOpacity(savedOp);
 		}
 		if (!part.cache.isNull()) {

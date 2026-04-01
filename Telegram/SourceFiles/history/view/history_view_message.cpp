@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_transcribes.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
+#include "core/application.h"
 #include "core/click_handler_types.h" // ClickHandlerContext
 #include "core/ui_integration.h"
 #include "history/view/history_view_cursor_state.h"
@@ -45,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "main/main_session.h"
+#include "plugins/plugins_manager.h"
 #include "settings/settings_premium.h"
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
@@ -61,6 +63,19 @@ namespace {
 constexpr auto kSummarizeThreshold = 512;
 constexpr auto kPlayStatusLimit = 2;
 const auto kPsaTooltipPrefix = "cloud_lng_tooltip_psa_";
+constexpr auto kTransparentPluginId = "example.transparent_telegram";
+constexpr auto kTransparentMessagesSettingId = "message_opacity";
+
+[[nodiscard]] float64 AstrogramPluginMessageOpacity() {
+	const auto percent = std::clamp(
+		Core::App().plugins().settingIntValue(
+			QString::fromLatin1(kTransparentPluginId),
+			QString::fromLatin1(kTransparentMessagesSettingId),
+			100),
+		20,
+		100);
+	return percent / 100.;
+}
 
 QString FastForwardText() {
 	return u"Forward"_q;
@@ -961,9 +976,10 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 	}
 
 	const auto deletedFade = deletedOpacity();
+	const auto messageFade = AstrogramPluginMessageOpacity();
 	const auto savedOpacityForDeleted = p.opacity();
-	if (deletedFade < 1.) {
-		p.setOpacity(savedOpacityForDeleted * deletedFade);
+	if (deletedFade < 1. || messageFade < 1.) {
+		p.setOpacity(savedOpacityForDeleted * deletedFade * messageFade);
 	}
 
 	const auto roll = media ? media->bubbleRoll() : Media::BubbleRoll();
