@@ -26,21 +26,15 @@ public:
 	Plugins(QWidget *parent, not_null<Window::SessionController*> controller);
 
 	[[nodiscard]] rpl::producer<QString> title() override;
+	void fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) override;
 
 private:
 	void setupContent();
-	void rebuildDeveloperSection();
 	void rebuildList();
-	void handleDocumentationTap();
-	void toggleDeveloperMode();
 
 	const not_null<Window::SessionController*> _controller;
 	not_null<Ui::VerticalLayout*> _content;
 	not_null<Ui::VerticalLayout*> _list;
-	Ui::VerticalLayout *_developer = nullptr;
-	QTimer *_developerTapTimer = nullptr;
-	bool _developerMode = false;
-	int _documentationTapCount = 0;
 };
 
 class PluginsDocumentation : public Section<PluginsDocumentation> {

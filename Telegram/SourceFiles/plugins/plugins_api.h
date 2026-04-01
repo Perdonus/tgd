@@ -234,6 +234,7 @@ using PanelId = uint64_t;
 enum class SettingControl {
 	Toggle,
 	IntSlider,
+	TextInput,
 	ActionButton,
 	InfoText,
 };
@@ -248,6 +249,8 @@ struct SettingDescriptor {
 	int intMinimum = 0;
 	int intMaximum = 100;
 	int intStep = 1;
+	QString textValue;
+	QString placeholderText;
 	QString valueSuffix;
 	QString buttonText;
 };
@@ -343,6 +346,10 @@ public:
 		const QString &pluginId,
 		const QString &settingId,
 		int fallback) const = 0;
+	virtual QString settingStringValue(
+		const QString &pluginId,
+		const QString &settingId,
+		const QString &fallback) const = 0;
 	virtual Main::Session *activeSession() const = 0;
 	virtual void forEachSession(
 		std::function<void(Main::Session*)> visitor) = 0;

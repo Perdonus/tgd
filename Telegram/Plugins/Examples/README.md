@@ -8,26 +8,19 @@ Requirements
 - UI plugins should also link QtWidgets.
 
 Examples
-- command_shrug.cpp: registers /shrug.
-- hello_menu.cpp: adds a context action with access to the active window.
-- panel_demo.cpp: registers a panel that opens a dialog.
-- message_observer.cpp: shows a toast on new incoming messages.
-- runtime_info.cpp: reads host/system/runtime information from the host API.
+- ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to `sosiskibot.ru`.
 - transparent_telegram.cpp: adds a transparency slider for Telegram windows.
 
 Build (Linux)
 1) From this folder, compile a shared library:
    g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
-     -o hello_menu.so hello_menu.cpp $(pkg-config --cflags --libs Qt6Core)
-   g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
-     -o panel_demo.so panel_demo.cpp \
-     $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
+     -o ai_chat.so ai_chat.cpp \
+     $(pkg-config --cflags --libs Qt6Core Qt6Widgets Qt6Network)
    g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
      -o transparent_telegram.so transparent_telegram.cpp \
      $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
 2) Rename the shared library to .tgd:
-   mv hello_menu.so hello_menu.tgd
-   mv panel_demo.so panel_demo.tgd
+   mv ai_chat.so ai_chat.tgd
    mv transparent_telegram.so transparent_telegram.tgd
 3) Copy the .tgd file into:
    <working dir>/tdata/plugins

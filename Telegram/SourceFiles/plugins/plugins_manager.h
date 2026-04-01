@@ -110,6 +110,7 @@ public:
 	bool setSafeModeEnabled(bool enabled);
 	PackagePreviewState inspectPackage(const QString &path) const;
 	bool installPackage(const QString &sourcePath, QString *error = nullptr);
+	bool removePlugin(const QString &pluginId, QString *error = nullptr);
 
 	std::vector<CommandDescriptor> commandsFor(
 		const QString &pluginId) const;
@@ -202,6 +203,10 @@ public:
 		const QString &pluginId,
 		const QString &settingId,
 		int fallback) const override;
+	QString settingStringValue(
+		const QString &pluginId,
+		const QString &settingId,
+		const QString &fallback) const override;
 	Main::Session *activeSession() const override;
 	void forEachSession(
 		std::function<void(Main::Session*)> visitor) override;

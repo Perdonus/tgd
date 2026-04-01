@@ -23,11 +23,7 @@ PLUGIN_CATALOG_DIR = ROOT / "PluginCatalog"
 SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
-    "command_shrug.cpp",
-    "hello_menu.cpp",
-    "message_observer.cpp",
-    "panel_demo.cpp",
-    "runtime_info.cpp",
+    "ai_chat.cpp",
     "transparent_telegram.cpp",
 }
 
@@ -251,6 +247,19 @@ def main() -> int:
             f"Manager::{method} implementation",
             errors,
         )
+
+    require(
+        r"enum class SettingControl\s*\{[\s\S]*TextInput",
+        api,
+        "plugins_api.h declares SettingControl::TextInput",
+        errors,
+    )
+    require(
+        r"case\s+::Plugins::SettingControl::TextInput",
+        SETTINGS_UI.read_text(encoding="utf-8"),
+        "settings UI renders TextInput controls",
+        errors,
+    )
 
     # Snapshot iteration to avoid mutation invalidation during callbacks.
     require(

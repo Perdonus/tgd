@@ -13,11 +13,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "plugins/plugins_manager.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -26,10 +28,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 
+#include <QtCore/QDir>
+#include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <utility>
 
 namespace Settings {
@@ -52,33 +58,6 @@ QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 			: PluginUiText(u"Plugin"_q, u"Плагин"_q));
 	const auto version = info.version.trimmed();
 	return version.isEmpty() ? name : (name + u" "_q + version);
-}
-
-QString FormatPluginDetails(const ::Plugins::PluginState &state) {
-	auto lines = QStringList();
-	const auto &info = state.info;
-	if (!info.author.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Author: "_q, u"Автор: "_q)
-			+ info.author.trimmed());
-	}
-	if (!info.description.trimmed().isEmpty()) {
-		lines.push_back(info.description.trimmed());
-	}
-	if (!info.version.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Version: "_q, u"Версия: "_q)
-			+ info.version.trimmed());
-	}
-	if (!state.recoveryReason.trimmed().isEmpty()) {
-		lines.push_back(state.recoveryReason.trimmed());
-	}
-	if (!state.error.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Error: "_q, u"Ошибка: "_q)
-			+ state.error.trimmed());
-	}
-	return lines.join(u"\n"_q);
 }
 
 QString PluginDocsText() {
@@ -542,6 +521,436 @@ void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
 	}));
 }
 
+QString FormatPluginSummary(const ::Plugins::PluginState &state) {
+	auto lines = QStringList();
+	const auto &info = state.info;
+	if (!info.author.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Author: "_q, u"Автор: "_q)
+			+ info.author.trimmed());
+	}
+	if (!info.version.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Version: "_q, u"Версия: "_q)
+			+ info.version.trimmed());
+	}
+	if (!info.description.trimmed().isEmpty()) {
+		lines.push_back(info.description.trimmed());
+	}
+	return lines.join(u"\n"_q);
+}
+
+QString FormatPluginStateNote(const ::Plugins::PluginState &state) {
+	auto lines = QStringList();
+	if (state.disabledByRecovery) {
+		lines.push_back(PluginUiText(
+			u"Disabled automatically after a recovery event."_q,
+			u"Автоматически выключен после recovery-события."_q));
+	}
+	if (!state.recoveryReason.trimmed().isEmpty()) {
+		lines.push_back(state.recoveryReason.trimmed());
+	}
+	if (!state.error.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Error: "_q, u"Ошибка: "_q)
+			+ state.error.trimmed());
+	}
+	if (!state.path.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Package: "_q, u"Пакет: "_q)
+			+ QDir::toNativeSeparators(state.path));
+	}
+	return lines.join(u"\n"_q);
+}
+
+std::optional<::Plugins::PluginState> LookupPluginState(
+		const QString &pluginId) {
+	for (const auto &state : Core::App().plugins().plugins()) {
+		if (state.info.id == pluginId) {
+			return state;
+		}
+	}
+	return std::nullopt;
+}
+
+void SharePluginPackage(
+		not_null<Window::SessionController*> controller,
+		const ::Plugins::PluginState &state) {
+	if (state.path.trimmed().isEmpty()) {
+		controller->window().showToast(PluginUiText(
+			u"Plugin file path is unavailable."_q,
+			u"Путь к файлу плагина недоступен."_q));
+		return;
+	}
+	if (const auto clipboard = QGuiApplication::clipboard()) {
+		clipboard->setText(QDir::toNativeSeparators(state.path));
+	}
+	File::ShowInFolder(state.path);
+	controller->window().showToast(PluginUiText(
+		u"Plugin package path copied and file revealed."_q,
+		u"Путь к пакету плагина скопирован, файл показан."_q));
+}
+
+void RequestSafeModeChange(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> context,
+		bool enabled,
+		Fn<void()> onStateChanged) {
+	const auto title = enabled
+		? PluginUiText(u"Enable plugin safe mode?"_q, u"Включить безопасный режим плагинов?"_q)
+		: PluginUiText(u"Disable plugin safe mode?"_q, u"Выключить безопасный режим плагинов?"_q);
+	const auto text = enabled
+		? PluginUiText(
+			u"Telegram will unload all plugins and reopen the plugin list in metadata-only mode."_q,
+			u"Telegram выгрузит все плагины и откроет список плагинов в режиме только-метаданных."_q)
+		: PluginUiText(
+			u"Telegram will try to load plugins again. Disable safe mode only if you trust the installed plugins."_q,
+			u"Telegram снова попробует загрузить плагины. Выключайте безопасный режим только если доверяете установленным плагинам."_q);
+	controller->show(Ui::MakeConfirmBox({
+		.text = title + u"\n\n"_q + text,
+		.confirmed = crl::guard(context, [=] {
+			QTimer::singleShot(0, context, [=] {
+				if (!Core::App().plugins().setSafeModeEnabled(enabled)) {
+					controller->window().showToast(PluginUiText(
+						u"Could not change safe mode."_q,
+						u"Не удалось переключить безопасный режим."_q));
+				}
+				if (onStateChanged) {
+					onStateChanged();
+				}
+			});
+		}),
+		.confirmText = enabled
+			? PluginUiText(u"Enable"_q, u"Включить"_q)
+			: PluginUiText(u"Disable"_q, u"Выключить"_q),
+	}));
+}
+
+void AddPluginSettingsContent(
+		not_null<Ui::VerticalLayout*> container,
+		const ::Plugins::SettingsPageState &page,
+		Fn<void()> onStateChanged) {
+	if (!page.title.trimmed().isEmpty()) {
+		Ui::AddSubsectionTitle(container, rpl::single(page.title.trimmed()));
+	}
+	if (!page.description.trimmed().isEmpty()) {
+		Ui::AddDividerText(container, rpl::single(page.description.trimmed()));
+	}
+	for (const auto &section : page.sections) {
+		if (!section.title.trimmed().isEmpty()) {
+			Ui::AddSkip(container);
+			Ui::AddSubsectionTitle(container, rpl::single(section.title.trimmed()));
+		}
+		if (!section.description.trimmed().isEmpty()) {
+			Ui::AddDividerText(container, rpl::single(section.description.trimmed()));
+		}
+		for (const auto &setting : section.settings) {
+			switch (setting.type) {
+			case ::Plugins::SettingControl::Toggle: {
+				const auto button = container->add(object_ptr<Ui::SettingsButton>(
+					container,
+					rpl::single(setting.title),
+					st::settingsButtonNoIcon
+				))->toggleOn(rpl::single(setting.boolValue));
+				button->toggledChanges(
+				) | rpl::filter([=](bool value) {
+					return value != setting.boolValue;
+				}) | rpl::on_next([=](bool value) {
+					auto updated = setting;
+					updated.boolValue = value;
+					if (!Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+						onStateChanged();
+					}
+				}, button->lifetime());
+				if (!setting.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						container,
+						rpl::single(setting.description.trimmed()));
+				}
+			} break;
+			case ::Plugins::SettingControl::IntSlider: {
+				if (!setting.title.trimmed().isEmpty()) {
+					Ui::AddSkip(container);
+					Ui::AddSubsectionTitle(
+						container,
+						rpl::single(setting.title.trimmed()));
+				}
+				const auto minValue = std::min(
+					setting.intMinimum,
+					setting.intMaximum);
+				const auto maxValue = std::max(
+					setting.intMinimum,
+					setting.intMaximum);
+				const auto step = std::max(1, setting.intStep);
+				const auto formatValue = [=](int value) {
+					return QString::number(value) + setting.valueSuffix;
+				};
+				auto sliderWithLabel = MakeSliderWithLabel(
+					container,
+					st::settingsScale,
+					st::settingsScaleLabel,
+					st::normalFont->spacew * 2,
+					std::max(
+						st::settingsScaleLabel.style.font->width(
+							formatValue(minValue)),
+						st::settingsScaleLabel.style.font->width(
+							formatValue(maxValue))),
+					true);
+				const auto slider = sliderWithLabel.slider;
+				const auto valueLabel = sliderWithLabel.label;
+				slider->setAccessibleName(setting.title);
+				const auto valueFromSlider = [=](double raw) {
+					if (maxValue <= minValue) {
+						return minValue;
+					}
+					auto candidate = minValue + int(std::lround(
+						raw * (maxValue - minValue)));
+					candidate = minValue + int(std::lround(
+						(candidate - minValue) / double(step))) * step;
+					return std::clamp(candidate, minValue, maxValue);
+				};
+				const auto sliderFromValue = [=](int value) {
+					if (maxValue <= minValue) {
+						return 0.;
+					}
+					return (value - minValue) / double(maxValue - minValue);
+				};
+				valueLabel->setText(formatValue(setting.intValue));
+				slider->setAdjustCallback([=](double raw) {
+					return sliderFromValue(valueFromSlider(raw));
+				});
+				slider->setValue(sliderFromValue(setting.intValue));
+				slider->setChangeProgressCallback([=](double raw) {
+					valueLabel->setText(formatValue(valueFromSlider(raw)));
+				});
+				slider->setChangeFinishedCallback([=](double raw) {
+					auto updated = setting;
+					updated.intValue = valueFromSlider(raw);
+					valueLabel->setText(formatValue(updated.intValue));
+					if (!Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+						onStateChanged();
+					}
+				});
+				container->add(
+					std::move(sliderWithLabel.widget),
+					st::settingsBigScalePadding);
+				if (!setting.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						container,
+						rpl::single(setting.description.trimmed()));
+				}
+			} break;
+			case ::Plugins::SettingControl::TextInput: {
+				if (!setting.title.trimmed().isEmpty()) {
+					Ui::AddSkip(container);
+					Ui::AddSubsectionTitle(
+						container,
+						rpl::single(setting.title.trimmed()));
+				}
+				const auto placeholder = setting.placeholderText.trimmed().isEmpty()
+					? setting.title.trimmed()
+					: setting.placeholderText.trimmed();
+				const auto field = container->add(
+					object_ptr<Ui::InputField>(
+						container,
+						st::settingLocalPasscodeInputField,
+						rpl::single(placeholder),
+						setting.textValue),
+					style::al_top);
+				const auto lastValue = std::make_shared<QString>(setting.textValue);
+				QObject::connect(field, &Ui::MaskedInputField::changed, [=] {
+					const auto current = field->getLastText().trimmed();
+					if (current == *lastValue) {
+						return;
+					}
+					*lastValue = current;
+					auto updated = setting;
+					updated.textValue = current;
+					if (!Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+						onStateChanged();
+					}
+				});
+				if (!setting.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						container,
+						rpl::single(setting.description.trimmed()));
+				}
+			} break;
+			case ::Plugins::SettingControl::ActionButton: {
+				const auto buttonTitle = setting.buttonText.isEmpty()
+					? setting.title
+					: setting.buttonText;
+				const auto button = container->add(object_ptr<Ui::SettingsButton>(
+					container,
+					rpl::single(buttonTitle),
+					st::settingsButtonNoIcon));
+				button->setClickedCallback([=] {
+					if (!Core::App().plugins().updateSetting(page.id, setting) && onStateChanged) {
+						onStateChanged();
+					}
+				});
+				if (!setting.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						container,
+						rpl::single(setting.description.trimmed()));
+				}
+			} break;
+			case ::Plugins::SettingControl::InfoText: {
+				const auto text = setting.description.trimmed().isEmpty()
+					? setting.title.trimmed()
+					: setting.description.trimmed();
+				if (!text.isEmpty()) {
+					Ui::AddDividerText(container, rpl::single(text));
+				}
+			} break;
+			}
+		}
+	}
+}
+
+void ShowPluginDetailsBox(
+		not_null<Window::SessionController*> controller,
+		const QString &pluginId,
+		Fn<void()> onStateChanged) {
+	const auto state = LookupPluginState(pluginId);
+	if (!state) {
+		controller->window().showToast(PluginUiText(
+			u"Plugin was not found."_q,
+			u"Плагин не найден."_q));
+		return;
+	}
+
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(FormatPluginTitle(*state)));
+		box->addLeftButton(
+			rpl::single(PluginUiText(u"Share"_q, u"Поделиться"_q)),
+			[=] { SharePluginPackage(controller, *state); });
+		box->addButton(
+			rpl::single(PluginUiText(u"Delete"_q, u"Удалить"_q)),
+			crl::guard(box, [=] {
+				controller->show(Ui::MakeConfirmBox({
+					.text = PluginUiText(
+						u"Delete plugin \"%1\"?"_q,
+						u"Удалить плагин \"%1\"?"_q).arg(FormatPluginTitle(*state)),
+					.confirmed = crl::guard(box, [=] {
+						QString error;
+						if (!Core::App().plugins().removePlugin(state->info.id, &error)) {
+							controller->window().showToast(
+								error.isEmpty()
+									? PluginUiText(
+										u"Could not delete the plugin."_q,
+										u"Не удалось удалить плагин."_q)
+									: error);
+							return;
+						}
+						if (onStateChanged) {
+							onStateChanged();
+						}
+						box->closeBox();
+					}),
+					.confirmText = PluginUiText(u"Delete"_q, u"Удалить"_q),
+				}));
+			}));
+		box->addButton(
+			rpl::single(PluginUiText(u"Close"_q, u"Закрыть"_q)),
+			[=] { box->closeBox(); });
+
+		const auto content = box->addRow(
+			object_ptr<Ui::VerticalLayout>(box),
+			style::al_top);
+		const auto summary = FormatPluginSummary(*state);
+		const auto note = FormatPluginStateNote(*state);
+
+		if (!summary.isEmpty()) {
+			Ui::AddDividerText(content, rpl::single(summary));
+		}
+		if (!note.isEmpty()) {
+			Ui::AddSkip(content);
+			Ui::AddDividerText(content, rpl::single(note));
+		}
+
+		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
+		const auto actions = Core::App().plugins().actionsFor(state->info.id);
+		const auto panels = Core::App().plugins().panelsFor(state->info.id);
+
+		if (Core::App().plugins().safeModeEnabled()) {
+			Ui::AddSkip(content);
+			Ui::AddDividerText(
+				content,
+				rpl::single(PluginUiText(
+					u"Safe mode is enabled. The plugin is shown as metadata only."_q,
+					u"Безопасный режим включён. Плагин показан только как метаданные."_q)));
+		}
+
+		if (!settingsPages.empty()) {
+			Ui::AddSkip(content);
+			Ui::AddSubsectionTitle(
+				content,
+				rpl::single(PluginUiText(u"Settings"_q, u"Настройки"_q)));
+			for (const auto &page : settingsPages) {
+				Ui::AddSkip(content);
+				AddPluginSettingsContent(content, page, onStateChanged);
+			}
+		}
+
+		if (!actions.empty()) {
+			Ui::AddSkip(content);
+			Ui::AddSubsectionTitle(
+				content,
+				rpl::single(PluginUiText(u"Actions"_q, u"Действия"_q)));
+			for (const auto &action : actions) {
+				const auto actionButton = content->add(
+					object_ptr<Ui::SettingsButton>(
+						content,
+						rpl::single(action.title),
+						st::settingsButtonNoIcon));
+				actionButton->setClickedCallback([=] {
+					Core::App().plugins().triggerAction(action.id);
+				});
+				if (!action.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						content,
+						rpl::single(action.description.trimmed()));
+				}
+			}
+		}
+
+		if (!panels.empty()) {
+			Ui::AddSkip(content);
+			Ui::AddSubsectionTitle(
+				content,
+				rpl::single(PluginUiText(
+					u"Custom UI"_q,
+					u"Пользовательский UI"_q)));
+			for (const auto &panel : panels) {
+				const auto panelButton = content->add(
+					object_ptr<Ui::SettingsButton>(
+						content,
+						rpl::single(panel.title),
+						st::settingsButtonNoIcon));
+				panelButton->setClickedCallback([=] {
+					Core::App().plugins().openPanel(panel.id);
+				});
+				if (!panel.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						content,
+						rpl::single(panel.description.trimmed()));
+				}
+			}
+		}
+
+		if (settingsPages.empty() && actions.empty() && panels.empty()) {
+			Ui::AddSkip(content);
+			Ui::AddDividerText(
+				content,
+				rpl::single(PluginUiText(
+					u"This plugin does not expose settings, actions or custom panels yet."_q,
+					u"Этот плагин пока не предоставляет настроек, действий или пользовательских панелей."_q)));
+		}
+	}));
+}
+
 } // namespace
 
 Plugins::Plugins(
@@ -558,54 +967,35 @@ rpl::producer<QString> Plugins::title() {
 	return rpl::single(PluginUiText(u"Plugins"_q, u"Плагины"_q));
 }
 
+void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
+	addAction(
+		PluginUiText(u"Documentation"_q, u"Документация"_q),
+		[=] { ShowPluginDocsBox(_controller); },
+		&st::menuIconFaq);
+	addAction(
+		PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
+		[=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
+		&st::menuIconShowInFolder);
+	const auto safeModeEnabled = Core::App().plugins().safeModeEnabled();
+	addAction(
+		safeModeEnabled
+			? PluginUiText(
+				u"Disable Safe Mode"_q,
+				u"Выключить безопасный режим"_q)
+			: PluginUiText(
+				u"Enable Safe Mode"_q,
+				u"Включить безопасный режим"_q),
+		[=] {
+			RequestSafeModeChange(
+				_controller,
+				this,
+				!safeModeEnabled,
+				crl::guard(this, [=] { rebuildList(); }));
+		},
+		&st::menuIconSettings);
+}
+
 void Plugins::setupContent() {
-	Ui::AddDivider(_content);
-	Ui::AddSkip(_content);
-
-	const auto docs = AddButtonWithIcon(
-		_content,
-		rpl::single(PluginUiText(u"Documentation"_q, u"Документация"_q)),
-		st::settingsButton,
-		{ &st::menuIconFaq });
-	docs->addClickHandler([=] {
-		ShowPluginDocsBox(_controller);
-	});
-
-	const auto openFolder = AddButtonWithIcon(
-		_content,
-		rpl::single(
-			PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q)),
-		st::settingsButton,
-		{ &st::menuIconShowInFolder });
-	openFolder->addClickHandler([=] {
-		File::ShowInFolder(Core::App().plugins().pluginsPath());
-	});
-
-	const auto safeMode = _content->add(object_ptr<Ui::SettingsButton>(
-		_content,
-		rpl::single(PluginUiText(
-			u"Plugin Safe Mode"_q,
-			u"Безопасный режим плагинов"_q)),
-		st::settingsButtonNoIcon
-	))->toggleOn(rpl::single(Core::App().plugins().safeModeEnabled()));
-	safeMode->toggledChanges(
-	) | rpl::on_next([=](bool value) {
-		if (!Core::App().plugins().setSafeModeEnabled(value)) {
-			_controller->window().showToast(PluginUiText(
-				u"Could not change safe mode."_q,
-				u"Не удалось переключить безопасный режим."_q));
-		}
-		rebuildList();
-	}, safeMode->lifetime());
-	Ui::AddDividerText(
-		_content,
-		rpl::single(
-			PluginUiText(
-				u"When enabled, Telegram skips plugin loading. "
-				u"Crash recovery may enable this mode automatically."_q,
-				u"Когда режим включён, Telegram не загружает плагины. "
-				u"После крэша плагина этот режим может включиться автоматически."_q)));
-
 	Ui::AddDivider(_content);
 	Ui::AddSkip(_content);
 
@@ -615,29 +1005,30 @@ void Plugins::setupContent() {
 
 void Plugins::rebuildList() {
 	_list->clear();
+	if (Core::App().plugins().safeModeEnabled()) {
+		Ui::AddDividerText(
+			_list,
+			rpl::single(
+				PluginUiText(
+					u"Safe mode is enabled. Plugins are shown without loading. Open the top bar menu to disable it."_q,
+					u"Безопасный режим включён. Плагины показаны без загрузки. Откройте меню в верхней панели, чтобы выключить его."_q)));
+		Ui::AddSkip(_list);
+	}
 
 	const auto plugins = Core::App().plugins().plugins();
 	if (plugins.empty()) {
-		if (Core::App().plugins().safeModeEnabled()) {
-			Ui::AddDividerText(
-				_list,
-				rpl::single(
-					PluginUiText(
-						u"Plugin safe mode is enabled. Plugins are listed without loading."_q,
-						u"Безопасный режим включён. Плагины показаны без загрузки."_q)));
-		} else {
-			Ui::AddDividerText(
-				_list,
-				rpl::single(PluginUiText(
-					u"No plugins found in tdata/plugins."_q,
-					u"В tdata/plugins плагины не найдены."_q)));
-		}
+		Ui::AddDividerText(
+			_list,
+			rpl::single(PluginUiText(
+				u"No plugins found in tdata/plugins."_q,
+				u"В tdata/plugins плагины не найдены."_q)));
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
 		return;
 	}
 
 	auto first = true;
+	const auto refresh = crl::guard(this, [=] { rebuildList(); });
 	for (const auto &state : plugins) {
 		if (!first) {
 			Ui::AddDivider(_list);
@@ -646,15 +1037,36 @@ void Plugins::rebuildList() {
 		Ui::AddSkip(_list);
 
 		const auto title = FormatPluginTitle(state);
-		const auto buttonStyle = state.recoverySuspected
-			? st::settingsAttentionButton
-			: state.error.isEmpty()
-			? st::settingsButtonNoIcon
-			: st::settingsOptionDisabled;
-		const auto toggle = _list->add(object_ptr<Ui::SettingsButton>(
+		const auto summary = FormatPluginSummary(state);
+		const auto stateNote = FormatPluginStateNote(state);
+		const auto openButton = AddButtonWithIcon(
 			_list,
 			rpl::single(title),
-			buttonStyle
+			state.recoverySuspected
+				? st::settingsAttentionButton
+				: st::settingsButton,
+			{ &st::menuIconSettings });
+		openButton->addClickHandler([=] {
+			ShowPluginDetailsBox(_controller, state.info.id, refresh);
+		});
+
+		if (!summary.isEmpty()) {
+			Ui::AddDividerText(_list, rpl::single(summary));
+		}
+		if (!stateNote.isEmpty()) {
+			Ui::AddDividerText(_list, rpl::single(stateNote));
+		}
+
+		const auto toggle = _list->add(object_ptr<Ui::SettingsButton>(
+			_list,
+			rpl::single(PluginUiText(
+				u"Enabled"_q,
+				u"Включён"_q)),
+			state.recoverySuspected
+				? st::settingsAttentionButton
+				: !state.error.isEmpty() && !state.disabledByRecovery
+				? st::settingsOptionDisabled
+				: st::settingsButtonNoIcon
 		))->toggleOn(rpl::single(state.enabled));
 		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			toggle->setToggleLocked(true);
@@ -669,220 +1081,24 @@ void Plugins::rebuildList() {
 			rebuildList();
 		}, toggle->lifetime());
 
-		const auto actions = Core::App().plugins().actionsFor(state.info.id);
-		const auto panels = Core::App().plugins().panelsFor(state.info.id);
-		const auto settingsPages = Core::App().plugins().settingsPagesFor(
-			state.info.id);
-		const auto details = FormatPluginDetails(state);
-		if (!details.isEmpty()) {
-			Ui::AddSkip(_list);
-			Ui::AddDividerText(_list, rpl::single(details));
-		}
-
-		if (!settingsPages.empty()) {
-			Ui::AddSkip(_list);
-			Ui::AddDividerText(
-				_list,
-				rpl::single(PluginUiText(u"Settings"_q, u"Настройки"_q)));
-			for (const auto &page : settingsPages) {
-				if (!page.title.trimmed().isEmpty()) {
-					Ui::AddSkip(_list);
-					Ui::AddDividerText(_list, rpl::single(page.title.trimmed()));
-				}
-				if (!page.description.trimmed().isEmpty()) {
-					Ui::AddDividerText(
-						_list,
-						rpl::single(page.description.trimmed()));
-				}
-				for (const auto &section : page.sections) {
-					if (!section.title.trimmed().isEmpty()) {
-						Ui::AddSkip(_list);
-						Ui::AddSubsectionTitle(
-							_list,
-							rpl::single(section.title.trimmed()));
-					}
-					if (!section.description.trimmed().isEmpty()) {
-						Ui::AddDividerText(
-							_list,
-							rpl::single(section.description.trimmed()));
-					}
-					for (const auto &setting : section.settings) {
-						switch (setting.type) {
-						case ::Plugins::SettingControl::Toggle: {
-							const auto button = _list->add(object_ptr<Ui::SettingsButton>(
-								_list,
-								rpl::single(setting.title),
-								st::settingsButtonNoIcon
-							))->toggleOn(rpl::single(setting.boolValue));
-							button->toggledChanges(
-							) | rpl::filter([=](bool value) {
-								return value != setting.boolValue;
-							}) | rpl::on_next([=, this](bool value) {
-								auto updated = setting;
-								updated.boolValue = value;
-								if (!Core::App().plugins().updateSetting(page.id, updated)) {
-									rebuildList();
-								}
-							}, button->lifetime());
-							if (!setting.description.trimmed().isEmpty()) {
-								Ui::AddDividerText(
-									_list,
-									rpl::single(setting.description.trimmed()));
-							}
-						} break;
-						case ::Plugins::SettingControl::IntSlider: {
-							if (!setting.title.trimmed().isEmpty()) {
-								Ui::AddSkip(_list);
-								Ui::AddSubsectionTitle(
-									_list,
-									rpl::single(setting.title.trimmed()));
-							}
-							const auto minValue = std::min(
-								setting.intMinimum,
-								setting.intMaximum);
-							const auto maxValue = std::max(
-								setting.intMinimum,
-								setting.intMaximum);
-							const auto step = std::max(1, setting.intStep);
-							const auto formatValue = [=](int value) {
-								return QString::number(value) + setting.valueSuffix;
-							};
-							auto sliderWithLabel = MakeSliderWithLabel(
-								_list,
-								st::settingsScale,
-								st::settingsScaleLabel,
-								st::normalFont->spacew * 2,
-								std::max(
-									st::settingsScaleLabel.style.font->width(
-										formatValue(minValue)),
-									st::settingsScaleLabel.style.font->width(
-										formatValue(maxValue))),
-								true);
-							const auto slider = sliderWithLabel.slider;
-							const auto valueLabel = sliderWithLabel.label;
-							slider->setAccessibleName(setting.title);
-							const auto valueFromSlider = [=](double raw) {
-								if (maxValue <= minValue) {
-									return minValue;
-								}
-								auto candidate = minValue + int(std::lround(
-									raw * (maxValue - minValue)));
-								candidate = minValue + int(std::lround(
-									(candidate - minValue) / double(step))) * step;
-								return std::clamp(candidate, minValue, maxValue);
-							};
-							const auto sliderFromValue = [=](int value) {
-								if (maxValue <= minValue) {
-									return 0.;
-								}
-								return (value - minValue)
-									/ double(maxValue - minValue);
-							};
-							valueLabel->setText(formatValue(setting.intValue));
-							slider->setAdjustCallback([=](double raw) {
-								return sliderFromValue(valueFromSlider(raw));
-							});
-							slider->setValue(sliderFromValue(setting.intValue));
-							slider->setChangeProgressCallback([=](double raw) {
-								valueLabel->setText(formatValue(valueFromSlider(raw)));
-							});
-							slider->setChangeFinishedCallback([=, this](double raw) {
-								auto updated = setting;
-								updated.intValue = valueFromSlider(raw);
-								valueLabel->setText(formatValue(updated.intValue));
-								if (!Core::App().plugins().updateSetting(page.id, updated)) {
-									rebuildList();
-								}
-							});
-							_list->add(
-								std::move(sliderWithLabel.widget),
-								st::settingsBigScalePadding);
-							if (!setting.description.trimmed().isEmpty()) {
-								Ui::AddDividerText(
-									_list,
-									rpl::single(setting.description.trimmed()));
-							}
-						} break;
-						case ::Plugins::SettingControl::ActionButton: {
-							const auto buttonTitle = setting.buttonText.isEmpty()
-								? setting.title
-								: setting.buttonText;
-							const auto button = _list->add(object_ptr<Ui::SettingsButton>(
-								_list,
-								rpl::single(buttonTitle),
-								st::settingsButtonNoIcon));
-							button->setClickedCallback([=, this] {
-								if (!Core::App().plugins().updateSetting(page.id, setting)) {
-									rebuildList();
-								}
-							});
-							if (!setting.description.trimmed().isEmpty()) {
-								Ui::AddDividerText(
-									_list,
-									rpl::single(setting.description.trimmed()));
-							}
-						} break;
-						case ::Plugins::SettingControl::InfoText: {
-							const auto text = setting.description.trimmed().isEmpty()
-								? setting.title.trimmed()
-								: setting.description.trimmed();
-							if (!text.isEmpty()) {
-								Ui::AddDividerText(_list, rpl::single(text));
-							}
-						} break;
-						}
-					}
-				}
-			}
-		}
-
-		if (!actions.empty()) {
-			Ui::AddSkip(_list);
-			Ui::AddDividerText(
-				_list,
-				rpl::single(PluginUiText(u"Actions"_q, u"Действия"_q)));
-			Ui::AddSkip(_list);
-			for (const auto &action : actions) {
-				const auto actionButton = _list->add(
-					object_ptr<Ui::SettingsButton>(
-						_list,
-						rpl::single(action.title),
-						st::settingsButtonNoIcon));
-				actionButton->setClickedCallback([=] {
-					Core::App().plugins().triggerAction(action.id);
-				});
-				if (!action.description.isEmpty()) {
-					Ui::AddDividerText(
-						_list,
-						rpl::single(action.description));
-				}
-			}
-		}
-
-		if (!panels.empty()) {
-			Ui::AddSkip(_list);
-			Ui::AddDividerText(
-				_list,
-				rpl::single(PluginUiText(u"Panels"_q, u"Панели"_q)));
-			Ui::AddSkip(_list);
-			for (const auto &panel : panels) {
-				const auto panelButton = _list->add(
-					object_ptr<Ui::SettingsButton>(
-						_list,
-						rpl::single(panel.title),
-						st::settingsButtonNoIcon));
-				panelButton->setClickedCallback([=] {
-					Core::App().plugins().openPanel(panel.id);
-				});
-				if (!panel.description.isEmpty()) {
-					Ui::AddDividerText(
-						_list,
-						rpl::single(panel.description));
-				}
-			}
-		}
-
-		Ui::AddSkip(_list);
+		const auto actionsCount = int(Core::App().plugins().actionsFor(state.info.id).size());
+		const auto panelsCount = int(Core::App().plugins().panelsFor(state.info.id).size());
+		const auto settingsCount = int(Core::App().plugins().settingsPagesFor(
+			state.info.id).size());
+		Ui::AddDividerText(
+			_list,
+			rpl::single(PluginUiText(
+				u"Open the plugin menu for settings, actions, share and delete."_q,
+				u"Откройте меню плагина для настроек, действий, удаления и экспорта."_q)
+				+ u"\n"_q
+				+ PluginUiText(u"Settings pages: "_q, u"Страниц настроек: "_q)
+				+ QString::number(settingsCount)
+				+ u" • "_q
+				+ PluginUiText(u"Actions: "_q, u"Действий: "_q)
+				+ QString::number(actionsCount)
+				+ u" • "_q
+				+ PluginUiText(u"Custom UI: "_q, u"Пользовательский UI: "_q)
+				+ QString::number(panelsCount)));
 	}
 
 	Ui::ResizeFitChild(this, _content);
