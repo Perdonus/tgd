@@ -2019,10 +2019,10 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 			finishRecoveryOperation();
 		}
 	}
-	const auto widget = window ? window->widget() : nullptr;
-	if (!widget) {
+	if (!window) {
 		return;
 	}
+	const auto widget = window->widget();
 	const auto widgetHandlers = _windowWidgetHandlers;
 	for (const auto &entry : widgetHandlers) {
 		if (!entry.handler) {
