@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_message_reactions.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
+#include "core/application.h"
 #include "ui/image/image_prepare.h"
 #include "base/unixtime.h"
 
@@ -404,7 +405,12 @@ rpl::producer<bool> PeerPremiumValue(not_null<PeerData*> peer) {
 }
 
 rpl::producer<bool> AmPremiumValue(not_null<Main::Session*> session) {
-	return PeerPremiumValue(session->user());
+	using namespace rpl::mappers;
+
+	return rpl::combine(
+		PeerPremiumValue(session->user()),
+		Core::App().settings().localPremiumValue(),
+		_1 || _2);
 }
 
 TimeId SortByOnlineValue(not_null<UserData*> user, TimeId now) {

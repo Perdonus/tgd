@@ -997,6 +997,10 @@ void RepliesList::readTill(
 }
 
 void RepliesList::sendReadTillRequest() {
+	if (Core::App().settings().ghostMode()) {
+		_readRequestTimer.cancel();
+		return;
+	}
 	if (_readRequestTimer.isActive()) {
 		_readRequestTimer.cancel();
 	}

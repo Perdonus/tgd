@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_media_types.h"
 #include "data/data_session.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "storage/storage_shared_media.h"
 #include "lang/lang_keys.h"
 #include "media/streaming/media_streaming_utility.h"
@@ -404,6 +406,20 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 	const auto tagged = lookupSpoilerTagMedia();
 	auto fullRect = QRect();
 	const auto subpartHighlight = IsSubGroupSelection(highlight);
+	auto anyDeleted = false;
+	const auto perItemOpacityEnabled = Core::App().settings().semiTransparentDeletedMessages();
+	if (perItemOpacityEnabled) {
+		for (const auto &part : _parts) {
+			if (part.item->isDeleted()) {
+				anyDeleted = true;
+				break;
+			}
+		}
+	}
+	const auto perItemDeletedOpacity = perItemOpacityEnabled && anyDeleted;
+	const auto elementDeletedOpacity = perItemDeletedOpacity
+		? _parent->deletedOpacity()
+		: 1.;
 	for (auto i = 0, count = int(_parts.size()); i != count; ++i) {
 		const auto &part = _parts[i];
 		auto partContext = context.withSelection(fullSelection
@@ -430,6 +446,16 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 		if (!part.cache.isNull()) {
 			wasCache = true;
 		}
+		const auto savedOp = p.opacity();
+		if (perItemDeletedOpacity && part.item->isDeleted()) {
+			auto adjustedOpacity = 0.7;
+			if (part.item->wasDeletedAnimated()
+				&& part.item == _parent->data()
+				&& elementDeletedOpacity != 1.) {
+				adjustedOpacity = elementDeletedOpacity;
+			}
+			p.setOpacity(savedOp * adjustedOpacity);
+		}
 		part.content->drawGrouped(
 			p,
 			partContext,
@@ -439,6 +465,9 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 			highlightOpacity,
 			&part.cacheKey,
 			&part.cache);
+		if (perItemDeletedOpacity && part.item->isDeleted()) {
+			p.setOpacity(savedOp);
+		}
 		if (!part.cache.isNull()) {
 			nowCache = true;
 		}

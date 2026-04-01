@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "main/main_session.h"
 
 namespace Api {
@@ -97,7 +99,7 @@ void ViewsManager::viewsIncrement() {
 		const auto requestId = _api.request(MTPmessages_GetMessagesViews(
 			i->first->input(),
 			MTP_vector<MTPint>(ids),
-			MTP_bool(true)
+			MTP_bool(!Core::App().settings().ghostMode())
 		)).done([=](
 				const MTPmessages_MessageViews &result,
 				mtpRequestId requestId) {

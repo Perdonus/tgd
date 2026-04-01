@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "info/profile/info_profile_icon.h"
 #include "info/stories/info_stories_widget.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -96,6 +97,12 @@ constexpr auto kPlayStatusLimit = 2;
 	const auto now = QDate::currentDate();
 	return (now.month() == 12 && now.day() >= 24)
 		|| (now.month() == 1 && now.day() == 1);
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
 }
 
 [[nodiscard]] rpl::producer<TextWithEntities> SetStatusLabel(
@@ -734,6 +741,22 @@ void MainMenu::setupMenu() {
 	)->setClickedCallback([=] {
 		controller->showSettings();
 	});
+	addAction(
+		rpl::single(RuEn("Режим призрака", "Ghost mode")),
+		{ &st::menuIconLock }
+	)->toggleOn(Core::App().settings().ghostModeValue())->toggledChanges(
+	) | rpl::on_next([=](bool enabled) {
+		Core::App().settings().setGhostMode(enabled);
+		Core::App().saveSettingsDelayed();
+	}, _menu->lifetime());
+	addAction(
+		rpl::single(RuEn("Локальный Premium", "Local Premium")),
+		{ &st::menuIconEmojiObjects }
+	)->toggleOn(Core::App().settings().localPremiumValue())->toggledChanges(
+	) | rpl::on_next([=](bool enabled) {
+		Core::App().settings().setLocalPremium(enabled);
+		Core::App().saveSettingsDelayed();
+	}, _menu->lifetime());
 
 	_nightThemeToggle = addAction(
 		tr::lng_menu_night_mode(),

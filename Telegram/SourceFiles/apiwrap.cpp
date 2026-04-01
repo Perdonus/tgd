@@ -56,6 +56,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_history_messages.h"
 #include "core/core_cloud_password.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "base/unixtime.h"
 #include "base/random.h"
 #include "base/call_delayed.h"
@@ -1335,7 +1336,12 @@ void ApiWrap::markContentsRead(
 		QVector<MTPint>>();
 	markedIds.reserve(items.size());
 	for (const auto &item : items) {
+		const auto passthrough = (item->isUnreadMention() || item->hasUnreadReaction())
+			&& !item->isUnreadMedia();
 		if (!item->markContentsRead(true) || !item->isRegular()) {
+			continue;
+		}
+		if (Core::App().settings().ghostMode() && !passthrough) {
 			continue;
 		}
 		if (const auto channel = item->history()->peer->asChannel()) {
@@ -1360,7 +1366,12 @@ void ApiWrap::markContentsRead(
 }
 
 void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
+	const auto passthrough = (item->isUnreadMention() || item->hasUnreadReaction())
+		&& !item->isUnreadMedia();
 	if (!item->markContentsRead(true) || !item->isRegular()) {
+		return;
+	}
+	if (Core::App().settings().ghostMode() && !passthrough) {
 		return;
 	}
 	const auto ids = MTP_vector<MTPint>(1, MTP_int(item->id));

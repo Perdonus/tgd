@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_todo_list.h"
+#include "ayu/data/messages_storage.h"
 #include "base/platform/base_platform_info.h"
 #include "base/unixtime.h"
 #include "base/call_delayed.h"
@@ -104,6 +105,22 @@ const auto InlineLevels = "i"_q;
 const auto SmallLevels = "sa"_q;
 const auto ThumbnailLevels = "mbsa"_q;
 const auto LargeLevels = "ydxcwmbsa"_q;
+
+[[nodiscard]] bool ShouldKeepDeletedMessage(not_null<HistoryItem*> item) {
+	if (!Core::App().settings().saveDeletedMessages()) {
+		return false;
+	}
+	return !item->isLocal();
+}
+
+void ProcessMessageDelete(not_null<HistoryItem*> item) {
+	if (!ShouldKeepDeletedMessage(item)) {
+		item->destroy();
+		return;
+	}
+	item->setDeleted();
+	AyuMessages::addDeletedMessage(item);
+}
 
 void CheckForSwitchInlineButton(not_null<HistoryItem*> item) {
 	if (item->out() || !item->hasSwitchInlineButton()) {
@@ -2657,6 +2674,18 @@ void Session::updateEditedMessage(const MTPMessage &data) {
 		Reactions::CheckUnknownForUnread(this, data);
 		return;
 	}
+	if (data.type() == mtpc_message
+		&& Core::App().settings().saveMessagesHistory()
+		&& !existing->isLocal()
+		&& !existing->author()->isSelf()) {
+		const auto edit = HistoryMessageEdition(_session, data.c_message());
+		const auto current = existing->originalText();
+		if (!edit.isEditHide
+			&& edit.textWithEntities != current
+			&& !current.empty()) {
+			AyuMessages::addEditedMessage(existing);
+		}
+	}
 	if (existing->isLocalUpdateMedia() && data.type() == mtpc_message) {
 		updateExistingMessage(data.c_message());
 	}
@@ -2796,7 +2825,9 @@ void Session::checkTTLs() {
 	_ttlCheckTimer.cancel();
 	const auto now = base::unixtime::now();
 	while (!_ttlMessages.empty() && _ttlMessages.begin()->first <= now) {
-		_ttlMessages.begin()->second.front()->destroy();
+		const auto item = _ttlMessages.begin()->second.front();
+		item->applyTTL(0);
+		ProcessMessageDelete(item);
 	}
 	scheduleNextTTLs();
 }
@@ -2815,7 +2846,7 @@ void Session::processMessagesDeleted(
 		const auto i = list ? list->find(messageId.v) : Messages::iterator();
 		if (list && i != list->end()) {
 			const auto history = i->second->history();
-			i->second->destroy();
+			ProcessMessageDelete(i->second);
 			if (!history->chatListMessageKnown()) {
 				historiesToCheck.emplace(history);
 			}
@@ -2833,7 +2864,7 @@ void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
 	for (const auto &messageId : data) {
 		if (const auto item = nonChannelMessage(messageId.v)) {
 			const auto history = item->history();
-			item->destroy();
+			ProcessMessageDelete(item);
 			if (!history->chatListMessageKnown()) {
 				historiesToCheck.emplace(history);
 			}
@@ -4838,7 +4869,9 @@ void Session::registerItemView(not_null<ViewElement*> view) {
 }
 
 void Session::unregisterItemView(not_null<ViewElement*> view) {
-	Expects(!_heavyViewParts.contains(view));
+	if (_heavyViewParts.contains(view)) {
+		view->unloadHeavyPart();
+	}
 
 	_shownSpoilers.remove(view);
 

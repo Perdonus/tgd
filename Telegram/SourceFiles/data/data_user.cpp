@@ -591,7 +591,8 @@ bool UserData::isFake() const {
 }
 
 bool UserData::isPremium() const {
-	return flags() & UserDataFlag::Premium;
+	return (flags() & UserDataFlag::Premium)
+		|| (isSelf() && Core::App().settings().localPremium());
 }
 
 bool UserData::isBotInlineGeo() const {

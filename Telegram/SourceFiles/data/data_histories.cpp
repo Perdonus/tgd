@@ -668,6 +668,10 @@ void Histories::sendReadRequests() {
 	DEBUG_LOG(("Reading: send requests with count %1.").arg(_states.size()));
 	if (_states.empty()) {
 		return;
+	} else if (Core::App().settings().ghostMode()) {
+		DEBUG_LOG(("Reading: ghost mode enabled, skipping read requests."));
+		_readRequestsTimer.cancel();
+		return;
 	}
 	const auto now = crl::now();
 	auto next = std::optional<crl::time>();

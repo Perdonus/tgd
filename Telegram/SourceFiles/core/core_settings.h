@@ -259,6 +259,71 @@ public:
 	void setIncludeMutedCounterFolders(bool value) {
 		_includeMutedCounterFolders = value;
 	}
+	[[nodiscard]] bool ghostMode() const {
+		return _ghostMode.current();
+	}
+	[[nodiscard]] rpl::producer<bool> ghostModeValue() const {
+		return _ghostMode.value();
+	}
+	void setGhostMode(bool value) {
+		if (_ghostMode.current() == value) {
+			return;
+		}
+		_ghostMode = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool localPremium() const {
+		return _localPremium.current();
+	}
+	[[nodiscard]] rpl::producer<bool> localPremiumValue() const {
+		return _localPremium.value();
+	}
+	void setLocalPremium(bool value) {
+		if (_localPremium.current() == value) {
+			return;
+		}
+		_localPremium = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool saveDeletedMessages() const {
+		return _saveDeletedMessages.current();
+	}
+	[[nodiscard]] rpl::producer<bool> saveDeletedMessagesValue() const {
+		return _saveDeletedMessages.value();
+	}
+	void setSaveDeletedMessages(bool value) {
+		if (_saveDeletedMessages.current() == value) {
+			return;
+		}
+		_saveDeletedMessages = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool saveMessagesHistory() const {
+		return _saveMessagesHistory.current();
+	}
+	[[nodiscard]] rpl::producer<bool> saveMessagesHistoryValue() const {
+		return _saveMessagesHistory.value();
+	}
+	void setSaveMessagesHistory(bool value) {
+		if (_saveMessagesHistory.current() == value) {
+			return;
+		}
+		_saveMessagesHistory = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool semiTransparentDeletedMessages() const {
+		return _semiTransparentDeletedMessages.current();
+	}
+	[[nodiscard]] rpl::producer<bool> semiTransparentDeletedMessagesValue() const {
+		return _semiTransparentDeletedMessages.value();
+	}
+	void setSemiTransparentDeletedMessages(bool value) {
+		if (_semiTransparentDeletedMessages.current() == value) {
+			return;
+		}
+		_semiTransparentDeletedMessages = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool countUnreadMessages() const {
 		return _countUnreadMessages;
 	}
@@ -997,6 +1062,11 @@ private:
 	int32 _notificationsDisplayChecksum = 0;
 	bool _includeMutedCounter = true;
 	bool _includeMutedCounterFolders = true;
+	rpl::variable<bool> _ghostMode = false;
+	rpl::variable<bool> _localPremium = false;
+	rpl::variable<bool> _saveDeletedMessages = true;
+	rpl::variable<bool> _saveMessagesHistory = true;
+	rpl::variable<bool> _semiTransparentDeletedMessages = false;
 	bool _countUnreadMessages = true;
 	rpl::variable<bool> _notifyAboutPinned = true;
 	int _autoLock = 3600;
@@ -1114,4 +1184,3 @@ private:
 };
 
 } // namespace Core
-

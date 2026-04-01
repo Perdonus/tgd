@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/painter.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "core/ui_integration.h"
 #include "lang/lang_keys.h"
 #include "history/history_item_components.h"
@@ -446,6 +448,9 @@ void BottomInfo::layout() {
 }
 
 void BottomInfo::layoutDateText() {
+	const auto deleted = (_data.flags & Data::Flag::AyuDeleted)
+		? (tr::lng_deleted_message(tr::now) + ' ')
+		: QString();
 	const auto edited = (_data.flags & Data::Flag::Edited)
 		? (tr::lng_edited(tr::now) + ' ')
 		: (_data.flags & Data::Flag::EstimateDate)
@@ -470,10 +475,10 @@ void BottomInfo::layoutDateText() {
 	const auto full = (_data.flags & Data::Flag::Sponsored)
 		? QString()
 		: (_data.flags & Data::Flag::Imported)
-		? (date + ' ' + tr::lng_imported(tr::now))
+		? (deleted + date + ' ' + tr::lng_imported(tr::now))
 		: name.isEmpty()
-		? date
-		: (name + afterAuthor);
+		? (deleted + date)
+		: (deleted + name + afterAuthor);
 	auto helper = Ui::Text::CustomEmojiHelper(
 		Core::TextContext({ .session = &_reactionsOwner->session() }));
 	auto marked = TextWithEntities();
@@ -677,6 +682,12 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	}
 	if (item->isScheduled()) {
 		result.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
+	}
+	if (item->isDeleted()) {
+		result.flags |= Flag::AyuDeleted;
+	}
+	if (item->isBurnt()) {
+		result.flags |= Flag::AyuBurnt;
 	}
 	if (!forwarded) {
 		return result;

@@ -62,7 +62,9 @@ SparseIdsList::AddResult SparseIdsList::addRangeItemsAndCountNew(
 		SparseIdsSliceUpdate &update,
 		const Range &messages,
 		MsgRange noSkipRange) {
-	Expects(noSkipRange.from <= noSkipRange.till);
+	if (!(noSkipRange.from <= noSkipRange.till)) {
+		return { 0 };
+	}
 
 	if (noSkipRange.from == noSkipRange.till
 		&& std::begin(messages) == std::end(messages)) {

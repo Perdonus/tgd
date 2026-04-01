@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "lang/lang_instance.h"
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
@@ -16,6 +17,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QApplication>
 
 namespace Core {
+namespace {
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+} // namespace
 
 Tray::Tray() {
 }
@@ -93,6 +103,38 @@ void Tray::rebuildMenu() {
 		_tray.addAction(
 			std::move(notificationsText),
 			[=] { toggleSoundNotifications(); });
+
+		auto ghostText = rpl::combine(
+			_textUpdates.events_starting_with({}),
+			Core::App().settings().ghostModeValue()
+		) | rpl::map([](auto, bool enabled) {
+			return enabled
+				? RuEn("Выключить режим призрака", "Disable Ghost mode")
+				: RuEn("Включить режим призрака", "Enable Ghost mode");
+		});
+		_tray.addAction(
+			std::move(ghostText),
+			[=] {
+				auto &settings = Core::App().settings();
+				settings.setGhostMode(!settings.ghostMode());
+				Core::App().saveSettingsDelayed();
+			});
+
+		auto localPremiumText = rpl::combine(
+			_textUpdates.events_starting_with({}),
+			Core::App().settings().localPremiumValue()
+		) | rpl::map([](auto, bool enabled) {
+			return enabled
+				? RuEn("Выключить локальный Premium", "Disable Local Premium")
+				: RuEn("Включить локальный Premium", "Enable Local Premium");
+		});
+		_tray.addAction(
+			std::move(localPremiumText),
+			[=] {
+				auto &settings = Core::App().settings();
+				settings.setLocalPremium(!settings.localPremium());
+				Core::App().saveSettingsDelayed();
+			});
 	}
 
 	_tray.addAction(tr::lng_quit_from_tray(), [] { Core::Quit(); });

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
 #include "settings/settings_advanced.h"
+#include "settings/settings_astrogram.h"
 #include "settings/settings_business.h"
 #include "settings/settings_calls.h"
 #include "settings/settings_chat.h"
@@ -88,6 +89,12 @@ namespace Settings {
 namespace {
 
 constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
+
+[[nodiscard]] QString LocalizedPluginsTitle() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8("Плагины")
+		: u"Plugins"_q;
+}
 
 class Cover final : public Ui::FixedHeightWidget {
 public:
@@ -650,7 +657,11 @@ void SetupSections(
 		Chat::Id(),
 		{ &st::menuIconChatBubble });
 	addSection(
-		rpl::single(u"Plugins"_q),
+		rpl::single(u"Astrogram"_q),
+		Astrogram::Id(),
+		{ &st::menuIconCustomize });
+	addSection(
+		rpl::single(LocalizedPluginsTitle()),
 		Plugins::Id(),
 		{ &st::menuIconCustomize });
 

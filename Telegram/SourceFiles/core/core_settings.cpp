@@ -242,7 +242,7 @@ QByteArray Settings::serialize() const {
 		+ Serialize::bytearraySize(_tonsiteStorageToken)
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
-		+ sizeof(qint32); // _notificationsDisplayChecksum
+		+ sizeof(qint32) * 3; // _notificationsDisplayChecksum + local overrides
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -406,7 +406,12 @@ QByteArray Settings::serialize() const {
 			<< qint32(_systemDarkModeEnabled.current() ? 1 : 0)
 			<< qint32(_quickDialogAction)
 			<< _notificationsVolume
-			<< _notificationsDisplayChecksum;
+			<< _notificationsDisplayChecksum
+			<< qint32(_ghostMode.current() ? 1 : 0)
+			<< qint32(_localPremium.current() ? 1 : 0)
+			<< qint32(_saveDeletedMessages.current() ? 1 : 0)
+			<< qint32(_saveMessagesHistory.current() ? 1 : 0)
+			<< qint32(_semiTransparentDeletedMessages.current() ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -538,6 +543,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	quint32 chatFiltersHorizontal = _chatFiltersHorizontal.current() ? 1 : 0;
 	quint32 quickDialogAction = quint32(_quickDialogAction);
 	ushort notificationsVolume = _notificationsVolume;
+	qint32 ghostMode = _ghostMode.current() ? 1 : 0;
+	qint32 localPremium = _localPremium.current() ? 1 : 0;
+	qint32 saveDeletedMessages = _saveDeletedMessages.current() ? 1 : 0;
+	qint32 saveMessagesHistory = _saveMessagesHistory.current() ? 1 : 0;
+	qint32 semiTransparentDeletedMessages = _semiTransparentDeletedMessages.current() ? 1 : 0;
 
 	stream >> themesAccentColors;
 	if (!stream.atEnd()) {
@@ -875,6 +885,21 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> notificationsDisplayChecksum;
 	}
+	if (!stream.atEnd()) {
+		stream >> ghostMode;
+	}
+	if (!stream.atEnd()) {
+		stream >> localPremium;
+	}
+	if (!stream.atEnd()) {
+		stream >> saveDeletedMessages;
+	}
+	if (!stream.atEnd()) {
+		stream >> saveMessagesHistory;
+	}
+	if (!stream.atEnd()) {
+		stream >> semiTransparentDeletedMessages;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1099,6 +1124,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_chatFiltersHorizontal = (chatFiltersHorizontal == 1);
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction(quickDialogAction);
 	_notificationsVolume = notificationsVolume;
+	_ghostMode = (ghostMode == 1);
+	_localPremium = (localPremium == 1);
+	_saveDeletedMessages = (saveDeletedMessages == 1);
+	_saveMessagesHistory = (saveMessagesHistory == 1);
+	_semiTransparentDeletedMessages = (semiTransparentDeletedMessages == 1);
 }
 
 QString Settings::getSoundPath(const QString &key) const {

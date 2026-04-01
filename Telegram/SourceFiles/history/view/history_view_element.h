@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/runtime_composer.h"
 #include "base/flags.h"
 #include "base/weak_ptr.h"
+#include "ui/effects/animations.h"
 #include "ui/userpic_view.h"
 
 class History;
@@ -458,6 +459,10 @@ public:
 	[[nodiscard]] bool isHiddenByGroup() const;
 	[[nodiscard]] virtual bool isHidden() const;
 
+	[[nodiscard]] float64 deletedOpacity() const;
+	void startDeletedAnimation();
+	[[nodiscard]] Ui::Animations::Simple takeDeletedAnimation();
+
 	[[nodiscard]] bool isIsolatedEmoji() const {
 		return (_flags & Flag::SpecialOnlyEmoji)
 			&& _text.isIsolatedEmoji();
@@ -764,6 +769,7 @@ private:
 
 	mutable Flags _flags = Flag(0);
 	Context _context = Context();
+	mutable Ui::Animations::Simple _deletedOpacityAnimation;
 
 };
 

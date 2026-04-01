@@ -600,6 +600,10 @@ public:
 		return _ttlDestroyAt;
 	}
 
+	[[nodiscard]] int unsupportedTTL() const {
+		return _unsupportedTTL;
+	}
+
 	[[nodiscard]] int boostsApplied() const {
 		return _boostsApplied;
 	}
@@ -729,6 +733,10 @@ private:
 	std::unique_ptr<Data::Media> _media;
 	std::unique_ptr<Data::MessageReactions> _reactions;
 	crl::time _reactionsLastRefreshed = 0;
+
+	bool _deleted = false;
+	bool _deletedAnimated = false;
+	int _unsupportedTTL = 0;
 
 	TimeId _date = 0;
 	TimeId _ttlDestroyAt = 0;

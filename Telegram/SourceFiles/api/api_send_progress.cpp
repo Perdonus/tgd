@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "data/data_peer.h"
 #include "data/data_user.h"
+#include "core/application.h"
 #include "base/unixtime.h"
 #include "data/data_peer_values.h"
 #include "apiwrap.h"
@@ -109,6 +110,9 @@ bool SendProgressManager::updated(const Key &key, bool doing) {
 }
 
 void SendProgressManager::send(const Key &key, int progress) {
+	if (Core::App().settings().ghostMode()) {
+		return;
+	}
 	if (skipRequest(key)) {
 		return;
 	}

@@ -471,14 +471,12 @@ jobs:
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%\\Telegram"
 
-          set "CFG_OK="
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "CFG_LOG_1=%CI_LOGS_DIR%\\configure-attempt1.log"
-          set "CFG_LOG_2=%CI_LOGS_DIR%\\configure-attempt2.log"
+          set "CFG_LOG=%CI_LOGS_DIR%\\configure-force.log"
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
-          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
 
           where python
           python --version
@@ -486,28 +484,20 @@ jobs:
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
 
-          call configure.bat force -G "Ninja Multi-Config" %ACCEL_ARGS% -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
-          if not defined CFG_OK (
-            echo [configure] fast Ninja configure failed, retrying Visual Studio x64 configure
-            powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_1%' -Tail 80"
-            powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_1%' -Tail 20) -join ' | '; Write-Output ('::warning title=Configure attempt1 failed::' + $tail)"
-            call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
+          call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG%" 2>&1
+          if not errorlevel 1 exit /b 0
+          echo [configure] Visual Studio x64 configure failed
+          powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG%' -Tail 120"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG%' -Tail 30) -join ' | '; Write-Output ('::error title=Force configure failed::' + $tail)"
+          if exist "%GITHUB_WORKSPACE%\\cmake" (
+            echo [configure] cmake helpers files:
+            dir /b "%GITHUB_WORKSPACE%\\cmake"
           )
-          if not defined CFG_OK (
-            echo [configure] all x64 configure attempts failed
-            powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_2%' -Tail 80"
-            powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_2%' -Tail 30) -join ' | '; Write-Output ('::error title=Configure failed::' + $tail)"
-            if exist "%GITHUB_WORKSPACE%\\cmake" (
-              echo [configure] cmake helpers files:
-              dir /b "%GITHUB_WORKSPACE%\\cmake"
-            )
-            if exist "%GITHUB_WORKSPACE%\\out" (
-              echo [configure] out directory snapshot:
-              dir /b "%GITHUB_WORKSPACE%\\out"
-            )
-            exit /b 1
+          if exist "%GITHUB_WORKSPACE%\\out" (
+            echo [configure] out directory snapshot:
+            dir /b "%GITHUB_WORKSPACE%\\out"
           )
-          exit /b 0
+          exit /b 1
 
       - name: Build Telegram target (Release)
         id: build_target
@@ -519,44 +509,19 @@ jobs:
 
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-target.log"
-          set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-release.log"
-          set "BUILD_LOG_RECFG=%CI_LOGS_DIR%\\configure-attempt3.log"
-          set "BUILD_LOG_VS_TARGET=%CI_LOGS_DIR%\\build-vs-target.log"
-          set "BUILD_LOG_VS_RELEASE=%CI_LOGS_DIR%\\build-vs-release.log"
-          set "API_ID=17349"
-          set "API_HASH=344583e45741c457fe1862106095a5eb"
-          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-force-target.log"
+          set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-force-release.log"
 
           cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok
-          echo [build] target Telegram failed, retrying default Release build on current generator
+          echo [build] target Telegram failed, retrying default Release build on Visual Studio generator
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Target build failed::' + $tail)"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Force target build failed::' + $tail)"
           cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% > "%BUILD_LOG_RELEASE%" 2>&1
           if not errorlevel 1 goto build_ok
-          echo [build] default Release build failed, reconfiguring with Visual Studio x64 fallback
+          echo [build] Visual Studio x64 Release build failed
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::warning title=Release build failed::' + $tail)"
-          if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
-          if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
-          call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%BUILD_LOG_RECFG%" 2>&1
-          if errorlevel 1 (
-            echo [build] Visual Studio fallback configure failed
-            powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RECFG%' -Tail 120"
-            powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RECFG%' -Tail 40) -join ' | '; Write-Output ('::error title=VS fallback configure failed::' + $tail)"
-            exit /b 1
-          )
-          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% --target Telegram > "%BUILD_LOG_VS_TARGET%" 2>&1
-          if not errorlevel 1 goto build_ok
-          echo [build] Visual Studio fallback target build failed, retrying default Release build
-          powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_VS_TARGET%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_VS_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=VS fallback target build failed::' + $tail)"
-          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% > "%BUILD_LOG_VS_RELEASE%" 2>&1
-          if not errorlevel 1 goto build_ok
-          echo [build] Visual Studio fallback Release build failed
-          powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_VS_RELEASE%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_VS_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::error title=VS fallback release build failed::' + $tail)"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::error title=Force release build failed::' + $tail)"
           exit /b 1
           :build_ok
           exit /b 0

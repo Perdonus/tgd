@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/settings/info_settings_widget.h"
 
 #include "info/info_memento.h"
+#include "settings/settings_astrogram.h"
 #include "settings/settings_main.h"
 #include "settings/settings_information.h"
 #include "ui/ui_utility.h"
@@ -203,6 +204,7 @@ const Ui::RoundRect *Widget::bottomSkipRounding() const {
 
 rpl::producer<bool> Widget::desiredShadowVisibility() const {
 	return (_type == ::Settings::Main::Id()
+		|| _type == ::Settings::Astrogram::Id()
 		|| _type == ::Settings::Information::Id())
 		? ContentWidget::desiredShadowVisibility()
 		: rpl::single(true);

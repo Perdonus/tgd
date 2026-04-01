@@ -339,7 +339,8 @@ rpl::producer<bool> Session::premiumPossibleValue() const {
 	return rpl::combine(
 		std::move(premium),
 		_premiumPossible.value(),
-		_1 || _2);
+		Core::App().settings().localPremiumValue(),
+		_1 || _2 || _3);
 }
 
 bool Session::premiumCanBuy() const {

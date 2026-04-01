@@ -200,6 +200,9 @@ PRIVATE
     api/api_websites.h
     api/api_who_reacted.cpp
     api/api_who_reacted.h
+    ayu/data/entities.h
+    ayu/data/messages_storage.cpp
+    ayu/data/messages_storage.h
     boxes/filters/edit_filter_box.cpp
     boxes/filters/edit_filter_box.h
     boxes/filters/edit_filter_chats_list.cpp
@@ -1556,6 +1559,8 @@ PRIVATE
     settings/settings_credits_graphics.h
     settings/settings_experimental.cpp
     settings/settings_experimental.h
+    settings/settings_astrogram.cpp
+    settings/settings_astrogram.h
     settings/settings_folders.cpp
     settings/settings_folders.h
     settings/settings_global_ttl.cpp
