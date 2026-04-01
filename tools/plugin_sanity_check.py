@@ -24,6 +24,7 @@ SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
     "ai_chat.cpp",
+    "ayu_safe.cpp",
     "transparent_telegram.cpp",
 }
 
@@ -31,6 +32,26 @@ EXPECTED_EXAMPLES = {
 def require(pattern: str, text: str, name: str, errors: list[str]) -> None:
     if re.search(pattern, text, flags=re.MULTILINE | re.DOTALL) is None:
         errors.append(name)
+
+
+def load_plugin_source(path: pathlib.Path, errors: list[str], prefix: str) -> str:
+    text = path.read_text(encoding="utf-8")
+    include_only = re.fullmatch(r'\s*#include\s+"([^"]+)"\s*', text)
+    if include_only is None:
+        return text
+
+    target = (path.parent / include_only.group(1)).resolve()
+    try:
+        target.relative_to(ROOT)
+    except ValueError:
+        errors.append(f"{prefix}: include-wrapper points outside the repository")
+        return text
+
+    if not target.exists():
+        errors.append(f"{prefix}: include-wrapper target is missing")
+        return text
+
+    return target.read_text(encoding="utf-8")
 
 
 def extract_host_method_names(api_text: str) -> list[str]:
@@ -64,7 +85,7 @@ def check_plugin_source(
     errors: list[str],
     prefix: str,
 ) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = load_plugin_source(path, errors, prefix)
     require(
         r'#include\s+"plugins/plugins_api.h"',
         text,

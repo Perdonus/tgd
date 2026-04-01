@@ -18,7 +18,7 @@ Rules
 
 CI
 - The `Plugins` branch uses one workflow per plugin.
-- `build-plugin-transparent-telegram.yml` and `build-plugin-ai-chat.yml` call the reusable `.github/workflows/build-plugins.yml`.
+- `build-plugin-transparent-telegram.yml`, `build-plugin-ai-chat.yml`, and `build-plugin-ayu-safe.yml` call the reusable `.github/workflows/build-plugins.yml`.
 - Each workflow is path-filtered to its own plugin sources plus shared plugin build files.
 - The Windows job restores the cached Qt/toolchain first and skips `prepare` when the expected toolchain is already present.
 - Successful runs build only the selected plugin, upload that plugin's `.tgd` files as artifacts, and commit refreshed binaries back into the matching version folder.

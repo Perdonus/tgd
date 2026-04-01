@@ -9,6 +9,7 @@ Requirements
 
 Examples
 - ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to `sosiskibot.ru`.
+- ayu_safe.cpp: adds Ayu-inspired visuals, streamer-lite privacy and a persistent local safety archive.
 - transparent_telegram.cpp: adds a transparency slider for Telegram windows.
 
 Build (Linux)
@@ -17,10 +18,14 @@ Build (Linux)
      -o ai_chat.so ai_chat.cpp \
      $(pkg-config --cflags --libs Qt6Core Qt6Widgets Qt6Network)
    g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
+     -o ayu_safe.so ayu_safe.cpp \
+     $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
+   g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
      -o transparent_telegram.so transparent_telegram.cpp \
      $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
 2) Rename the shared library to .tgd:
    mv ai_chat.so ai_chat.tgd
+   mv ayu_safe.so ayu_safe.tgd
    mv transparent_telegram.so transparent_telegram.tgd
 3) Copy the .tgd file into:
    <working dir>/tdata/plugins

@@ -2096,6 +2096,7 @@ function(add_tg_catalog_plugin source_file)
 endfunction()
 
 add_tg_plugin_example(TgPluginExampleAiChat ai_chat Plugins/Examples/ai_chat.cpp)
+add_tg_plugin_example(TgPluginExampleAyuSafe ayu_safe Plugins/Examples/ayu_safe.cpp)
 add_tg_plugin_example(TgPluginExampleTransparentTelegram transparent_telegram Plugins/Examples/transparent_telegram.cpp)
 add_custom_target(tgd_example_plugins DEPENDS ${tg_plugin_example_targets})
 
