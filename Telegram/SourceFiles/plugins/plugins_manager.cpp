@@ -2801,6 +2801,7 @@ HostInfo Manager::hostInfo() const {
 	info.platform = QString::fromLatin1(kPlatformId);
 	info.workingPath = cWorkingDir();
 	info.pluginsPath = _pluginsPath;
+	info.appUiLanguage = Lang::LanguageIdOrDefault(Lang::Id());
 	info.safeModeEnabled = safeModeEnabled();
 	info.runtimeApiEnabled = false;
 	info.runtimeApiPort = 0;
@@ -3159,9 +3160,11 @@ QJsonObject Manager::settingDescriptorToJson(
 		{ u"intMinimum"_q, descriptor.intMinimum },
 		{ u"intMaximum"_q, descriptor.intMaximum },
 		{ u"intStep"_q, descriptor.intStep },
-		{ u"textValue"_q, descriptor.textValue },
-		{ u"placeholderText"_q, descriptor.placeholderText },
 		{ u"valueSuffix"_q, descriptor.valueSuffix },
+		{ u"textLength"_q, descriptor.textValue.size() },
+		{ u"hasTextValue"_q, !descriptor.textValue.isEmpty() },
+		{ u"placeholderText"_q, descriptor.placeholderText },
+		{ u"secret"_q, descriptor.secret },
 		{ u"buttonText"_q, descriptor.buttonText },
 	};
 }

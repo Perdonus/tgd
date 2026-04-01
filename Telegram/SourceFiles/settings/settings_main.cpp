@@ -23,7 +23,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_notifications.h"
 #include "settings/settings_power_saving.h"
 #include "settings/settings_premium.h"
-#include "settings/settings_plugins.h"
 #include "settings/settings_privacy_security.h"
 #include "settings/settings_scale_preview.h"
 #include "boxes/language_box.h"
@@ -89,12 +88,6 @@ namespace Settings {
 namespace {
 
 constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
-
-[[nodiscard]] QString LocalizedPluginsTitle() {
-	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
-		? QString::fromUtf8("Плагины")
-		: u"Plugins"_q;
-}
 
 class Cover final : public Ui::FixedHeightWidget {
 public:
@@ -659,10 +652,6 @@ void SetupSections(
 	addSection(
 		rpl::single(u"Astrogram"_q),
 		Astrogram::Id(),
-		{ &st::menuIconCustomize });
-	addSection(
-		rpl::single(LocalizedPluginsTitle()),
-		Plugins::Id(),
 		{ &st::menuIconCustomize });
 
 	const auto preload = [=] {

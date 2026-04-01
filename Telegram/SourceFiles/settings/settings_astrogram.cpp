@@ -11,10 +11,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
 #include "lang/lang_instance.h"
+#include "settings/settings_common.h"
+#include "settings/settings_plugins.h"
+#include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
-#include "ui/wrap/vertical_layout.h"
-#include "ui/widgets/buttons.h"
 #include "ui/vertical_list.h"
+#include "ui/widgets/buttons.h"
+#include "ui/wrap/vertical_layout.h"
+#include "window/window_session_controller.h"
 
 namespace Settings {
 namespace {
@@ -27,6 +31,16 @@ namespace {
 	return IsRussianUi()
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString PluginsLabel() {
+	const auto count = int(Core::App().plugins().plugins().size());
+	if (Core::App().plugins().safeModeEnabled()) {
+		return RuEn("Безопасный режим", "Safe mode");
+	}
+	return IsRussianUi()
+		? QString::fromUtf8("%1 плагинов").arg(count)
+		: QString::fromUtf8("%1 plugins").arg(count);
 }
 
 template <typename Producer, typename Callback>
@@ -47,11 +61,55 @@ void AddToggle(
 	}, button->lifetime());
 }
 
+template <typename Callback>
+void AddActionButtonWithLabel(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		const QString &label,
+		Callback callback,
+		IconDescriptor descriptor = {}) {
+	AddButtonWithLabel(
+		container,
+		rpl::single(title),
+		rpl::single(label),
+		st::settingsButton,
+		std::move(descriptor)
+	)->addClickHandler(std::move(callback));
+}
+
 void SetupAstrogram(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Astrogram объединяет клиентские фишки, anti-recall, ghost mode и систему плагинов. Основная точка входа для расширений теперь находится здесь.",
+			"Astrogram combines client-side features, anti-recall, ghost mode and the plugin system. The main entry point for extensions now lives here.")));
+
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn("Расширения", "Extensions")));
+	AddActionButtonWithLabel(
+		container,
+		RuEn("Плагины", "Plugins"),
+		PluginsLabel(),
+		[=] { controller->showSettings(Plugins::Id()); },
+		{ &st::menuIconCustomize });
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Здесь открывается менеджер плагинов Astrogram. Системные действия плагинов, документация, runtime API, безопасный режим и папка плагинов вынесены в меню с тремя точками внутри раздела.",
+			"This opens the Astrogram plugin manager. Plugin system actions, documentation, runtime API, safe mode and the plugins folder live in the three-dots menu inside that section.")));
+
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
 	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(
 		container,
@@ -88,22 +146,18 @@ void SetupAstrogram(
 		settings.semiTransparentDeletedMessagesValue(),
 		RuEn("Полупрозрачные удалённые сообщения", "Semi-transparent deleted messages"),
 		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
-	const auto openRecallLog = container->add(object_ptr<Button>(
+	AddActionButtonWithLabel(
 		container,
-		rpl::single(RuEn("Показать лог anti-recall", "Show anti-recall log")),
-		st::settingsButtonNoIcon));
-	openRecallLog->addClickHandler([] {
-		File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q);
-	});
+		RuEn("Показать лог anti-recall", "Show anti-recall log"),
+		QString::fromUtf8("astro_recall_log.jsonl"),
+		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); });
 
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Функции ниже уже работают локально в клиенте Astrogram и не требуют отдельных плагинов.",
-			"These features already run in the Astrogram client and do not require separate plugins.")));
-
-	Q_UNUSED(controller);
+			"Часть функций Astrogram встроена прямо в клиент, а визуальные и экспериментальные расширения живут через плагины.",
+			"Some Astrogram features are built directly into the client, while visual and experimental extensions live through plugins.")));
 }
 
 } // namespace
