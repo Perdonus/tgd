@@ -13,6 +13,7 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
 #include <QtCore/QFileInfo>
+#include <QtCore/QHash>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -33,7 +34,7 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 TGD_PLUGIN_PREVIEW(
 	"astro.ayu_safe",
 	"AyuSafe",
-	"0.3",
+	"0.4",
 	"Astrogram",
 	"AyuSafe-lite: Ayu-inspired visuals, deleted-message archive, streamer-lite, and local safety tools.",
 	"https://github.com/AyuGram/AyuGramDesktop",
@@ -42,7 +43,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.ayu_safe";
-constexpr auto kPluginVersion = "0.3";
+constexpr auto kPluginVersion = "0.4";
 constexpr int kDefaultFontScale = 100;
 constexpr int kMinFontScale = 85;
 constexpr int kMaxFontScale = 130;
@@ -176,6 +177,7 @@ public:
 	}
 
 	void onUnload() override {
+		restoreWindowTitles();
 		if (_observerId) {
 			_host->unregisterMessageObserver(_observerId);
 			_observerId = 0;
@@ -195,6 +197,7 @@ public:
 		}
 		_trackedWindows.clear();
 		_retitlePending.clear();
+		_originalWindowTitles.clear();
 		restoreVisualSettings();
 	}
 
@@ -377,10 +380,8 @@ private:
 				widget->update();
 			}
 		});
-		if (genericWindowTitlesEnabled()) {
-			for (auto *widget : _trackedWindows) {
-				applyWindowTitle(widget);
-			}
+		for (auto *widget : _trackedWindows) {
+			applyWindowTitle(widget);
 		}
 	}
 
@@ -397,6 +398,7 @@ private:
 				widget->update();
 			}
 		});
+		restoreWindowTitles();
 	}
 
 	void registerWindow(QWidget *widget) {
@@ -416,6 +418,7 @@ private:
 			[this, widget](QObject *) {
 				_trackedWindows.remove(widget);
 				_retitlePending.remove(widget);
+				_originalWindowTitles.remove(widget);
 			});
 		scheduleWindowRefresh(widget);
 	}
@@ -435,12 +438,37 @@ private:
 	}
 
 	void applyWindowTitle(QWidget *widget) const {
-		if (!widget || !genericWindowTitlesEnabled()) {
+		if (!widget) {
 			return;
 		}
+		const auto currentTitle = widget->windowTitle();
+		if (!genericWindowTitlesEnabled()) {
+			if (const auto i = _originalWindowTitles.constFind(widget);
+				i != _originalWindowTitles.cend()
+				&& currentTitle == QStringLiteral("Astrogram")
+				&& !i.value().isEmpty()) {
+				widget->setWindowTitle(i.value());
+			}
+			return;
+		}
+		if (currentTitle != QStringLiteral("Astrogram")) {
+			_originalWindowTitles.insert(widget, currentTitle);
+		}
 		const auto generic = QStringLiteral("Astrogram");
-		if (widget->windowTitle() != generic) {
+		if (currentTitle != generic) {
 			widget->setWindowTitle(generic);
+		}
+	}
+
+	void restoreWindowTitles() const {
+		for (auto i = _originalWindowTitles.cbegin(), end = _originalWindowTitles.cend();
+			i != end;
+			++i) {
+			if (const auto widget = i.key();
+				widget && widget->windowTitle() == QStringLiteral("Astrogram")
+				&& !i.value().isEmpty()) {
+				widget->setWindowTitle(i.value());
+			}
 		}
 	}
 
@@ -951,6 +979,7 @@ private:
 	QVector<CacheEntry> _cache;
 	QSet<QWidget*> _trackedWindows;
 	QSet<QWidget*> _retitlePending;
+	mutable QHash<QWidget*, QString> _originalWindowTitles;
 };
 
 TGD_PLUGIN_ENTRY {
