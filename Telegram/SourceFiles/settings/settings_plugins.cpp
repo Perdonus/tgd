@@ -705,6 +705,10 @@ void ShowPluginRuntimeBox(not_null<Window::SessionController*> controller) {
 	}));
 }
 
+void OpenPluginsFolder() {
+	File::ShowInFolder(Core::App().plugins().pluginsPath());
+}
+
 QString FormatPluginSummary(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
@@ -1438,6 +1442,20 @@ void Plugins::rebuildList() {
 				PluginUiText(
 					u"Safe mode is enabled. Plugins are shown without loading. Open the top bar menu to disable it."_q,
 					u"Безопасный режим включён. Плагины показаны без загрузки. Откройте меню в верхней панели, чтобы выключить его."_q)));
+		const auto disableSafeModeButton = AddButtonWithIcon(
+			_list,
+			rpl::single(PluginUiText(
+				u"Disable Safe Mode"_q,
+				u"Выключить безопасный режим"_q)),
+			st::settingsAttentionButton,
+			{ &st::menuIconSettings });
+		disableSafeModeButton->addClickHandler([=] {
+			RequestSafeModeChange(
+				_controller,
+				this,
+				false,
+				crl::guard(this, [=] { rebuildList(); }));
+		});
 		Ui::AddSkip(_list);
 	}
 
@@ -1448,6 +1466,26 @@ void Plugins::rebuildList() {
 			rpl::single(PluginUiText(
 				u"No plugins found in tdata/plugins."_q,
 				u"В tdata/plugins плагины не найдены."_q)));
+		const auto folderButton = AddButtonWithIcon(
+			_list,
+			rpl::single(PluginUiText(
+				u"Open Plugins Folder"_q,
+				u"Открыть папку плагинов"_q)),
+			st::settingsButton,
+			{ &st::menuIconShowInFolder });
+		folderButton->addClickHandler([=] {
+			OpenPluginsFolder();
+		});
+		const auto docsButton = AddButtonWithIcon(
+			_list,
+			rpl::single(PluginUiText(
+				u"Open Documentation"_q,
+				u"Открыть документацию"_q)),
+			st::settingsButtonNoIcon,
+			{ &st::menuIconFaq });
+		docsButton->addClickHandler([=] {
+			ShowPluginDocsBox(_controller);
+		});
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
 		return;
