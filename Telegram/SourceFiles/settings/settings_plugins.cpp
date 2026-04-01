@@ -550,6 +550,99 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 )PLUGIN");
 }
 
+QString PluginRuntimeText() {
+	const auto host = Core::App().plugins().hostInfo();
+	const auto system = Core::App().plugins().systemInfo();
+
+	auto lines = QStringList();
+	lines.push_back(PluginUiText(
+		u"Plugin Runtime & Diagnostics"_q,
+		u"Рантайм плагинов и диагностика"_q));
+	lines.push_back(QString());
+	lines.push_back(PluginUiText(
+		u"Host"_q,
+		u"Хост"_q));
+	lines.push_back(
+		PluginUiText(u"App version: "_q, u"Версия приложения: "_q)
+		+ host.appVersion);
+	lines.push_back(
+		PluginUiText(u"UI language: "_q, u"Язык интерфейса: "_q)
+		+ host.appUiLanguage);
+	lines.push_back(
+		PluginUiText(u"Compiler: "_q, u"Компилятор: "_q)
+		+ host.compiler
+		+ u" "_q
+		+ QString::number(host.compilerVersion));
+	lines.push_back(
+		PluginUiText(u"Platform: "_q, u"Платформа: "_q)
+		+ host.platform
+		+ u" • Qt "_q
+		+ QString::number(host.qtMajor)
+		+ u"."_q
+		+ QString::number(host.qtMinor));
+	lines.push_back(
+		PluginUiText(u"Working dir: "_q, u"Рабочая папка: "_q)
+		+ QDir::toNativeSeparators(host.workingPath));
+	lines.push_back(
+		PluginUiText(u"Plugins dir: "_q, u"Папка плагинов: "_q)
+		+ QDir::toNativeSeparators(host.pluginsPath));
+	lines.push_back(
+		PluginUiText(u"Safe mode: "_q, u"Безопасный режим: "_q)
+		+ PluginUiText(
+			host.safeModeEnabled ? u"enabled"_q : u"disabled"_q,
+			host.safeModeEnabled ? u"включён"_q : u"выключен"_q));
+	lines.push_back(
+		PluginUiText(u"Runtime API: "_q, u"Runtime API: "_q)
+		+ PluginUiText(
+			host.runtimeApiEnabled ? u"enabled"_q : u"disabled"_q,
+			host.runtimeApiEnabled ? u"включён"_q : u"выключен"_q));
+	if (host.runtimeApiEnabled) {
+		lines.push_back(
+			PluginUiText(u"Runtime port: "_q, u"Порт runtime: "_q)
+			+ QString::number(host.runtimeApiPort));
+		lines.push_back(
+			PluginUiText(u"Runtime base URL: "_q, u"Base URL runtime: "_q)
+			+ host.runtimeApiBaseUrl);
+	}
+
+	lines.push_back(QString());
+	lines.push_back(PluginUiText(
+		u"System"_q,
+		u"Система"_q));
+	lines.push_back(
+		PluginUiText(u"OS: "_q, u"ОС: "_q)
+		+ system.prettyProductName);
+	lines.push_back(
+		PluginUiText(u"Kernel: "_q, u"Ядро: "_q)
+		+ system.kernelType
+		+ u" "_q
+		+ system.kernelVersion);
+	lines.push_back(
+		PluginUiText(u"Architecture: "_q, u"Архитектура: "_q)
+		+ system.architecture
+		+ u" • "_q
+		+ system.buildAbi);
+	lines.push_back(
+		PluginUiText(u"CPU cores: "_q, u"Ядра CPU: "_q)
+		+ QString::number(system.logicalCpuCores)
+		+ u" / "_q
+		+ QString::number(system.physicalCpuCores));
+	lines.push_back(
+		PluginUiText(u"Locale: "_q, u"Локаль: "_q)
+		+ system.locale
+		+ u" • "_q
+		+ system.uiLanguage);
+	lines.push_back(
+		PluginUiText(u"Time zone: "_q, u"Часовой пояс: "_q)
+		+ system.timeZone);
+	lines.push_back(
+		PluginUiText(u"User: "_q, u"Пользователь: "_q)
+		+ system.userName
+		+ u" @ "_q
+		+ system.hostName);
+	return lines.join(u"\n"_q);
+}
+
 void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
 	const auto text = PluginDocsText();
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
@@ -565,6 +658,37 @@ void ShowPluginDocsBox(not_null<Window::SessionController*> controller) {
 				controller->window().showToast(PluginUiText(
 					u"Documentation copied."_q,
 					u"Документация скопирована."_q));
+			});
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(text),
+			st::boxLabel),
+			style::margins(
+				st::boxPadding.left(),
+				0,
+				st::boxPadding.right(),
+				0),
+			style::al_top);
+	}));
+}
+
+void ShowPluginRuntimeBox(not_null<Window::SessionController*> controller) {
+	const auto text = PluginRuntimeText();
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(
+			PluginUiText(
+				u"Plugin Runtime"_q,
+				u"Рантайм плагинов"_q)));
+		box->addLeftButton(
+			rpl::single(PluginUiText(u"Copy"_q, u"Копировать"_q)),
+			[=] {
+				if (const auto clipboard = QGuiApplication::clipboard()) {
+					clipboard->setText(text);
+				}
+				controller->window().showToast(PluginUiText(
+					u"Runtime info copied."_q,
+					u"Информация о рантайме скопирована."_q));
 			});
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
@@ -1184,39 +1308,10 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		&st::menuIconFaq);
 	addAction(
 		PluginUiText(
-			u"Copy Runtime / Host Info"_q,
-			u"Скопировать Runtime / Host Info"_q),
-		[=] {
-			const auto host = Core::App().plugins().hostInfo();
-			const auto system = Core::App().plugins().systemInfo();
-			const auto runtimeInfo = QStringList{
-				u"runtimeApiEnabled="_q + QString(host.runtimeApiEnabled ? u"true" : u"false"),
-				u"runtimeApiPort="_q + QString::number(host.runtimeApiPort),
-				u"runtimeApiBaseUrl="_q + host.runtimeApiBaseUrl,
-				u"safeMode="_q + QString(host.safeModeEnabled ? u"true" : u"false"),
-				u"compiler="_q + host.compiler,
-				u"platform="_q + host.platform,
-				u"workingPath="_q + host.workingPath,
-				u"pluginsPath="_q + host.pluginsPath,
-				u"system="_q + system.prettyProductName,
-				u"kernel="_q + system.kernelType + u" "_q + system.kernelVersion,
-				u"architecture="_q + system.architecture,
-				u"buildAbi="_q + system.buildAbi,
-				u"locale="_q + system.locale,
-				u"uiLanguage="_q + system.uiLanguage,
-				u"timeZone="_q + system.timeZone,
-				u"hostName="_q + system.hostName,
-				u"userName="_q + system.userName,
-				u"processId="_q + QString::number(system.processId),
-			}.join(u"\n"_q);
-			if (const auto clipboard = QGuiApplication::clipboard()) {
-				clipboard->setText(runtimeInfo);
-			}
-			_controller->window().showToast(PluginUiText(
-				u"Runtime info copied."_q,
-				u"Сведения runtime скопированы."_q));
-		},
-		&st::menuIconShare);
+			u"Runtime & Diagnostics"_q,
+			u"Рантайм и диагностика"_q),
+		[=] { ShowPluginRuntimeBox(_controller); },
+		&st::menuIconIpAddress);
 	addAction(
 		PluginUiText(u"Open Plugin Log"_q, u"Открыть лог плагинов"_q),
 		[=] { File::ShowInFolder(u"./tdata/plugins.log"_q); },
