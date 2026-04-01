@@ -47,6 +47,10 @@ constexpr auto kCaptureDeletesSettingId = "capture_deletes";
 constexpr auto kExportCacheSettingId = "export_cache";
 constexpr auto kClearCacheSettingId = "clear_cache";
 
+QString Latin1(const char *value) {
+	return QString::fromLatin1(value);
+}
+
 QString Normalize(const QString &value) {
 	auto result = value;
 	result.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
@@ -157,9 +161,9 @@ private:
 	}
 
 	void refreshInfo() {
-		_info.id = QStringLiteral(kPluginId);
+		_info.id = Latin1(kPluginId);
 		_info.name = QStringLiteral("AyuSafe");
-		_info.version = QStringLiteral(kPluginVersion);
+		_info.version = Latin1(kPluginVersion);
 		_info.author = QStringLiteral("Astrogram");
 		_info.description = tr(
 			"AyuSafe-lite: Ayu-inspired visuals plus local message safety tools.",
@@ -171,7 +175,7 @@ private:
 		return std::clamp(
 			_host->settingIntValue(
 				_info.id,
-				QStringLiteral(kFontScaleSettingId),
+				Latin1(kFontScaleSettingId),
 				kDefaultFontScale),
 			kMinFontScale,
 			kMaxFontScale);
@@ -180,28 +184,28 @@ private:
 	[[nodiscard]] bool softChromeEnabled() const {
 		return _host->settingBoolValue(
 			_info.id,
-			QStringLiteral(kSoftChromeSettingId),
+			Latin1(kSoftChromeSettingId),
 			true);
 	}
 
 	[[nodiscard]] bool cacheEnabled() const {
 		return _host->settingBoolValue(
 			_info.id,
-			QStringLiteral(kCacheEnabledSettingId),
+			Latin1(kCacheEnabledSettingId),
 			true);
 	}
 
 	[[nodiscard]] bool captureEdits() const {
 		return _host->settingBoolValue(
 			_info.id,
-			QStringLiteral(kCaptureEditsSettingId),
+			Latin1(kCaptureEditsSettingId),
 			true);
 	}
 
 	[[nodiscard]] bool captureDeletes() const {
 		return _host->settingBoolValue(
 			_info.id,
-			QStringLiteral(kCaptureDeletesSettingId),
+			Latin1(kCaptureDeletesSettingId),
 			true);
 	}
 
@@ -320,7 +324,7 @@ private:
 
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto fontScale = Plugins::SettingDescriptor();
-		fontScale.id = QStringLiteral(kFontScaleSettingId);
+		fontScale.id = Latin1(kFontScaleSettingId);
 		fontScale.title = tr("Font scale", "Масштаб шрифта");
 		fontScale.description = tr(
 			"A global font scale inspired by Ayu-style readability tweaks.",
@@ -333,7 +337,7 @@ private:
 		fontScale.valueSuffix = QStringLiteral("%");
 
 		auto softChrome = Plugins::SettingDescriptor();
-		softChrome.id = QStringLiteral(kSoftChromeSettingId);
+		softChrome.id = Latin1(kSoftChromeSettingId);
 		softChrome.title = tr("Soft chrome", "Мягкий хром");
 		softChrome.description = tr(
 			"Adds softer rounded Qt controls and menu surfaces where the host allows it.",
@@ -351,7 +355,7 @@ private:
 		visuals.settings.push_back(softChrome);
 
 		auto cacheToggle = Plugins::SettingDescriptor();
-		cacheToggle.id = QStringLiteral(kCacheEnabledSettingId);
+		cacheToggle.id = Latin1(kCacheEnabledSettingId);
 		cacheToggle.title = tr("Local message safety cache", "Локальный кэш безопасности сообщений");
 		cacheToggle.description = tr(
 			"Caches new messages locally so edited and deleted events are easier to inspect later.",
@@ -360,7 +364,7 @@ private:
 		cacheToggle.boolValue = cacheEnabled();
 
 		auto edits = Plugins::SettingDescriptor();
-		edits.id = QStringLiteral(kCaptureEditsSettingId);
+		edits.id = Latin1(kCaptureEditsSettingId);
 		edits.title = tr("Track edits", "Отслеживать правки");
 		edits.description = tr(
 			"Adds edited-message events to the local AyuSafe cache.",
@@ -369,7 +373,7 @@ private:
 		edits.boolValue = captureEdits();
 
 		auto deletes = Plugins::SettingDescriptor();
-		deletes.id = QStringLiteral(kCaptureDeletesSettingId);
+		deletes.id = Latin1(kCaptureDeletesSettingId);
 		deletes.title = tr("Track deletes", "Отслеживать удаления");
 		deletes.description = tr(
 			"Adds deleted-message events to the local AyuSafe cache.",
@@ -378,7 +382,7 @@ private:
 		deletes.boolValue = captureDeletes();
 
 		auto exportCache = Plugins::SettingDescriptor();
-		exportCache.id = QStringLiteral(kExportCacheSettingId);
+		exportCache.id = Latin1(kExportCacheSettingId);
 		exportCache.title = tr("Export cache", "Экспортировать кэш");
 		exportCache.description = tr(
 			"Writes the current local cache to ayu_safe_cache.json in the plugins folder.",
@@ -387,7 +391,7 @@ private:
 		exportCache.buttonText = tr("Export", "Экспорт");
 
 		auto clearCache = Plugins::SettingDescriptor();
-		clearCache.id = QStringLiteral(kClearCacheSettingId);
+		clearCache.id = Latin1(kClearCacheSettingId);
 		clearCache.title = tr("Clear cache", "Очистить кэш");
 		clearCache.description = tr(
 			"Clears all cached AyuSafe message entries from memory.",
@@ -433,22 +437,22 @@ private:
 	}
 
 	void handleSettingChanged(const Plugins::SettingDescriptor &setting) {
-		if (setting.id == QStringLiteral(kFontScaleSettingId)
-			|| setting.id == QStringLiteral(kSoftChromeSettingId)) {
+		if (setting.id == Latin1(kFontScaleSettingId)
+			|| setting.id == Latin1(kSoftChromeSettingId)) {
 			applyVisualSettings();
 			return;
 		}
-		if (setting.id == QStringLiteral(kCacheEnabledSettingId)
-			|| setting.id == QStringLiteral(kCaptureEditsSettingId)
-			|| setting.id == QStringLiteral(kCaptureDeletesSettingId)) {
+		if (setting.id == Latin1(kCacheEnabledSettingId)
+			|| setting.id == Latin1(kCaptureEditsSettingId)
+			|| setting.id == Latin1(kCaptureDeletesSettingId)) {
 			refreshObserver();
 			return;
 		}
-		if (setting.id == QStringLiteral(kExportCacheSettingId)) {
+		if (setting.id == Latin1(kExportCacheSettingId)) {
 			exportCacheToDisk();
 			return;
 		}
-		if (setting.id == QStringLiteral(kClearCacheSettingId)) {
+		if (setting.id == Latin1(kClearCacheSettingId)) {
 			_cache.clear();
 			_host->showToast(tr(
 				"AyuSafe cache cleared.",

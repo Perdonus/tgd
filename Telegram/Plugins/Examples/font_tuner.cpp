@@ -141,7 +141,7 @@ public:
 private:
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto scale = Plugins::SettingDescriptor();
-		scale.id = QStringLiteral(kScaleSettingId);
+		scale.id = Latin1(kScaleSettingId);
 		scale.title = Tr(_host, "Font scale", "Масштаб шрифта");
 		scale.description = Tr(
 			_host,
@@ -155,7 +155,7 @@ private:
 		scale.valueSuffix = QStringLiteral("%");
 
 		auto url = Plugins::SettingDescriptor();
-		url.id = QStringLiteral(kUrlSettingId);
+		url.id = Latin1(kUrlSettingId);
 		url.title = Tr(_host, "Font URL", "Ссылка на шрифт");
 		url.description = Tr(
 			_host,
@@ -169,7 +169,7 @@ private:
 			"https://example.com/font.ttf");
 
 		auto chooseFile = Plugins::SettingDescriptor();
-		chooseFile.id = QStringLiteral(kChooseFileSettingId);
+		chooseFile.id = Latin1(kChooseFileSettingId);
 		chooseFile.title = Tr(_host, "Load font from file", "Загрузить шрифт из файла");
 		chooseFile.description = Tr(
 			_host,
@@ -179,7 +179,7 @@ private:
 		chooseFile.buttonText = Tr(_host, "Choose file", "Выбрать файл");
 
 		auto download = Plugins::SettingDescriptor();
-		download.id = QStringLiteral(kDownloadSettingId);
+		download.id = Latin1(kDownloadSettingId);
 		download.title = Tr(_host, "Download from URL", "Скачать по ссылке");
 		download.description = Tr(
 			_host,
@@ -189,7 +189,7 @@ private:
 		download.buttonText = Tr(_host, "Download", "Скачать");
 
 		auto reset = Plugins::SettingDescriptor();
-		reset.id = QStringLiteral(kResetSettingId);
+		reset.id = Latin1(kResetSettingId);
 		reset.title = Tr(_host, "Reset font", "Сбросить шрифт");
 		reset.description = Tr(
 			_host,
@@ -199,7 +199,7 @@ private:
 		reset.buttonText = Tr(_host, "Reset", "Сбросить");
 
 		auto info = Plugins::SettingDescriptor();
-		info.id = QStringLiteral(kInfoSettingId);
+		info.id = Latin1(kInfoSettingId);
 		info.title = Tr(_host, "How it works", "Как это работает");
 		info.description = Tr(
 			_host,
@@ -231,7 +231,7 @@ private:
 	}
 
 	void handleSetting(const Plugins::SettingDescriptor &setting) {
-		if (setting.id == QStringLiteral(kScaleSettingId)) {
+		if (setting.id == Latin1(kScaleSettingId)) {
 			_scalePercent = std::clamp(
 				setting.intValue,
 				kMinScalePercent,
@@ -239,19 +239,19 @@ private:
 			applyConfiguredFont();
 			return;
 		}
-		if (setting.id == QStringLiteral(kUrlSettingId)) {
+		if (setting.id == Latin1(kUrlSettingId)) {
 			_fontUrl = setting.textValue.trimmed();
 			return;
 		}
-		if (setting.id == QStringLiteral(kChooseFileSettingId)) {
+		if (setting.id == Latin1(kChooseFileSettingId)) {
 			chooseFontFile();
 			return;
 		}
-		if (setting.id == QStringLiteral(kDownloadSettingId)) {
+		if (setting.id == Latin1(kDownloadSettingId)) {
 			downloadFont();
 			return;
 		}
-		if (setting.id == QStringLiteral(kResetSettingId)) {
+		if (setting.id == Latin1(kResetSettingId)) {
 			resetFont();
 		}
 	}
@@ -260,7 +260,7 @@ private:
 		return std::clamp(
 			_host->settingIntValue(
 				_info.id,
-				QStringLiteral(kScaleSettingId),
+				Latin1(kScaleSettingId),
 				kDefaultScalePercent),
 			kMinScalePercent,
 			kMaxScalePercent);
@@ -269,7 +269,7 @@ private:
 	QString readFontUrl() const {
 		return _host->settingStringValue(
 			_info.id,
-			QStringLiteral(kUrlSettingId),
+			Latin1(kUrlSettingId),
 			QString());
 	}
 

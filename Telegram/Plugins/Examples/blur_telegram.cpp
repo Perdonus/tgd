@@ -170,18 +170,18 @@ public:
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_enabled = _host->settingBoolValue(
 			_info.id,
-			QStringLiteral(kEnabledSettingId),
+			Latin1(kEnabledSettingId),
 			true);
 		_radius = std::clamp(
 			_host->settingIntValue(
 				_info.id,
-				QStringLiteral(kRadiusSettingId),
+				Latin1(kRadiusSettingId),
 				kDefaultRadius),
 			kMinRadius,
 			kMaxRadius);
 		_expandedTargets = _host->settingBoolValue(
 			_info.id,
-			QStringLiteral(kExpandedTargetsSettingId),
+			Latin1(kExpandedTargetsSettingId),
 			false);
 	}
 
@@ -213,7 +213,7 @@ public:
 private:
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto enabled = Plugins::SettingDescriptor();
-		enabled.id = QStringLiteral(kEnabledSettingId);
+		enabled.id = Latin1(kEnabledSettingId);
 		enabled.title = Tr(_host, "Enable blur", "Включить blur");
 		enabled.description = Tr(
 			_host,
@@ -223,7 +223,7 @@ private:
 		enabled.boolValue = _enabled;
 
 		auto radius = Plugins::SettingDescriptor();
-		radius.id = QStringLiteral(kRadiusSettingId);
+		radius.id = Latin1(kRadiusSettingId);
 		radius.title = Tr(_host, "Blur radius", "Радиус blur");
 		radius.description = Tr(
 			_host,
@@ -237,7 +237,7 @@ private:
 		radius.valueSuffix = QStringLiteral(" px");
 
 		auto expanded = Plugins::SettingDescriptor();
-		expanded.id = QStringLiteral(kExpandedTargetsSettingId);
+		expanded.id = Latin1(kExpandedTargetsSettingId);
 		expanded.title = Tr(_host, "Blur more surfaces", "Размывать больше поверхностей");
 		expanded.description = Tr(
 			_host,
@@ -272,13 +272,13 @@ private:
 	}
 
 	void handleSetting(const Plugins::SettingDescriptor &setting) {
-		if (setting.id == QStringLiteral(kEnabledSettingId)) {
+		if (setting.id == Latin1(kEnabledSettingId)) {
 			_enabled = setting.boolValue;
 			applyEverywhere();
-		} else if (setting.id == QStringLiteral(kRadiusSettingId)) {
+		} else if (setting.id == Latin1(kRadiusSettingId)) {
 			_radius = std::clamp(setting.intValue, kMinRadius, kMaxRadius);
 			applyEverywhere();
-		} else if (setting.id == QStringLiteral(kExpandedTargetsSettingId)) {
+		} else if (setting.id == Latin1(kExpandedTargetsSettingId)) {
 			_expandedTargets = setting.boolValue;
 			applyEverywhere();
 		}

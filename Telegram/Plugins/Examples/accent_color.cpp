@@ -63,13 +63,13 @@ QColor Mix(const QColor &base, const QColor &accent, int accentPercent) {
 QColor ParseAccent(QString value) {
 	value = value.trimmed();
 	if (value.isEmpty()) {
-		return QColor(QStringLiteral(kDefaultAccentHex));
+		return QColor(Latin1(kDefaultAccentHex));
 	}
 	if (!value.startsWith(u'#')) {
 		value.prepend(u'#');
 	}
 	const auto color = QColor(value);
-	return color.isValid() ? color : QColor(QStringLiteral(kDefaultAccentHex));
+	return color.isValid() ? color : QColor(Latin1(kDefaultAccentHex));
 }
 
 } // namespace
@@ -93,12 +93,12 @@ public:
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_hex = _host->settingStringValue(
 			_info.id,
-			QStringLiteral(kHexSettingId),
-			QStringLiteral(kDefaultAccentHex));
+			Latin1(kHexSettingId),
+			Latin1(kDefaultAccentHex));
 		_surfaceMix = std::clamp(
 			_host->settingIntValue(
 				_info.id,
-				QStringLiteral(kSurfaceMixSettingId),
+				Latin1(kSurfaceMixSettingId),
 				kDefaultSurfaceMix),
 			kMinSurfaceMix,
 			kMaxSurfaceMix);
@@ -129,7 +129,7 @@ public:
 private:
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto hex = Plugins::SettingDescriptor();
-		hex.id = QStringLiteral(kHexSettingId);
+		hex.id = Latin1(kHexSettingId);
 		hex.title = Tr(_host, "Accent color", "Accent цвет");
 		hex.description = Tr(
 			_host,
@@ -137,10 +137,10 @@ private:
 			"Используй hex-цвет вроде #69A1FF. Палитра меняется сразу.");
 		hex.type = Plugins::SettingControl::TextInput;
 		hex.textValue = _hex;
-		hex.placeholderText = QStringLiteral(kDefaultAccentHex);
+		hex.placeholderText = Latin1(kDefaultAccentHex);
 
 		auto mix = Plugins::SettingDescriptor();
-		mix.id = QStringLiteral(kSurfaceMixSettingId);
+		mix.id = Latin1(kSurfaceMixSettingId);
 		mix.title = Tr(_host, "Surface tint", "Тонировка поверхностей");
 		mix.description = Tr(
 			_host,
@@ -154,7 +154,7 @@ private:
 		mix.valueSuffix = QStringLiteral("%");
 
 		auto reset = Plugins::SettingDescriptor();
-		reset.id = QStringLiteral(kResetSettingId);
+		reset.id = Latin1(kResetSettingId);
 		reset.title = Tr(_host, "Reset palette", "Сбросить палитру");
 		reset.description = Tr(
 			_host,
@@ -189,17 +189,17 @@ private:
 	}
 
 	void handleSetting(const Plugins::SettingDescriptor &setting) {
-		if (setting.id == QStringLiteral(kHexSettingId)) {
+		if (setting.id == Latin1(kHexSettingId)) {
 			_hex = setting.textValue.trimmed();
 			applyPalette();
-		} else if (setting.id == QStringLiteral(kSurfaceMixSettingId)) {
+		} else if (setting.id == Latin1(kSurfaceMixSettingId)) {
 			_surfaceMix = std::clamp(
 				setting.intValue,
 				kMinSurfaceMix,
 				kMaxSurfaceMix);
 			applyPalette();
-		} else if (setting.id == QStringLiteral(kResetSettingId)) {
-			_hex = QStringLiteral(kDefaultAccentHex);
+		} else if (setting.id == Latin1(kResetSettingId)) {
+			_hex = Latin1(kDefaultAccentHex);
 			_surfaceMix = kDefaultSurfaceMix;
 			restorePalette();
 		}
@@ -259,7 +259,7 @@ private:
 	Plugins::SettingsPageId _settingsPageId = 0;
 	Plugins::PluginInfo _info;
 	QPalette _basePalette;
-	QString _hex = QStringLiteral(kDefaultAccentHex);
+	QString _hex = Latin1(kDefaultAccentHex);
 	int _surfaceMix = kDefaultSurfaceMix;
 };
 

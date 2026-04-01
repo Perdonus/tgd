@@ -113,6 +113,10 @@ def check_plugin_source(
         f"{prefix}: has exact apiVersion compatibility check",
         errors,
     )
+    if re.search(r"QStringLiteral\s*\(\s*k[A-Za-z_]\w*\s*\)", text):
+        errors.append(
+            f"{prefix}: uses QStringLiteral() with a k* constant instead of a string literal"
+        )
 
     used_methods = set(re.findall(r"_host->([A-Za-z_]\w*)\s*\(", text))
     for method in sorted(used_methods):
