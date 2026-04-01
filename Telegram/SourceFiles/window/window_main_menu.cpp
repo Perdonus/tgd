@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_advanced.h"
 #include "settings/settings_calls.h"
 #include "settings/settings_information.h"
+#include "settings/settings_plugins.h"
 #include "storage/localstorage.h"
 #include "storage/storage_account.h"
 #include "support/support_templates.h"
@@ -740,6 +741,12 @@ void MainMenu::setupMenu() {
 		{ &st::menuIconSettings }
 	)->setClickedCallback([=] {
 		controller->showSettings();
+	});
+	addAction(
+		rpl::single(RuEn("Плагины", "Plugins")),
+		{ &st::menuIconCustomize }
+	)->setClickedCallback([=] {
+		controller->showSettings(Settings::Plugins::Id());
 	});
 	addAction(
 		rpl::single(RuEn("Режим призрака", "Ghost mode")),
