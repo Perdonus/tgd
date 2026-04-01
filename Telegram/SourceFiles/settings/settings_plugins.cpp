@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "plugins/plugins_manager.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/widgets/continuous_sliders.h"
@@ -28,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <utility>
 
 namespace Settings {
@@ -795,6 +797,43 @@ void Plugins::rebuildList() {
 							_list->add(
 								std::move(sliderWithLabel.widget),
 								st::settingsBigScalePadding);
+							if (!setting.description.trimmed().isEmpty()) {
+								Ui::AddDividerText(
+									_list,
+									rpl::single(setting.description.trimmed()));
+							}
+						} break;
+						case ::Plugins::SettingControl::TextInput: {
+							if (!setting.title.trimmed().isEmpty()) {
+								Ui::AddSkip(_list);
+								Ui::AddSubsectionTitle(
+									_list,
+									rpl::single(setting.title.trimmed()));
+							}
+							const auto placeholder = setting.placeholderText.trimmed().isEmpty()
+								? setting.title.trimmed()
+								: setting.placeholderText.trimmed();
+							const auto field = _list->add(
+								object_ptr<Ui::InputField>(
+									_list,
+									st::settingLocalPasscodeInputField,
+									rpl::single(placeholder),
+									setting.textValue),
+								style::al_top);
+							const auto lastValue = std::make_shared<QString>(
+								setting.textValue);
+							QObject::connect(field, &Ui::MaskedInputField::changed, [=, this] {
+								const auto current = field->getLastText().trimmed();
+								if (current == *lastValue) {
+									return;
+								}
+								*lastValue = current;
+								auto updated = setting;
+								updated.textValue = current;
+								if (!Core::App().plugins().updateSetting(page.id, updated)) {
+									rebuildList();
+								}
+							});
 							if (!setting.description.trimmed().isEmpty()) {
 								Ui::AddDividerText(
 									_list,

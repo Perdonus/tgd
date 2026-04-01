@@ -1,0 +1,31 @@
+name: Build ai_chat plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - Plugins
+    paths:
+      - ".github/workflows/build-plugin-ai-chat.yml"
+      - ".github/workflows/build-plugins.yml"
+      - "PluginCatalog/CMakeLists.txt"
+      - "PluginCatalog/ai_chat/**"
+      - "Telegram/Plugins/Examples/ai_chat.cpp"
+      - "Telegram/SourceFiles/plugins/**"
+      - "Telegram/SourceFiles/settings/settings_plugins.cpp"
+      - "Telegram/build/prepare/prepare.py"
+      - "Telegram/build/prepare/win.bat"
+      - "Telegram/build/qt_version.py"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-catalog]') }}
+    uses: ./.github/workflows/build-plugins.yml
+    with:
+      plugin_name: ai_chat
+      allow_commit: ${{ github.event_name == 'push' }}
+      target_branch: Plugins
+    secrets: inherit

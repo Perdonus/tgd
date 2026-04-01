@@ -14,8 +14,8 @@ if (MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Widgets)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Widgets Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets Network)
 
 set(TGD_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Telegram/SourceFiles")
 if (NOT EXISTS "${TGD_SOURCE_ROOT}/plugins/plugins_api.h")
@@ -40,6 +40,12 @@ set(TGD_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/../Telegram/ThirdParty/xxHash"
 )
 
+set(TGD_CATALOG_PLUGIN "" CACHE STRING "Build only the latest version of the selected plugin folder.")
+set(TGD_PLUGIN_FILTER "" CACHE STRING "Alias for TGD_CATALOG_PLUGIN.")
+if (TGD_PLUGIN_FILTER AND NOT TGD_CATALOG_PLUGIN)
+    set(TGD_CATALOG_PLUGIN "${TGD_PLUGIN_FILTER}")
+endif()
+
 set(TGD_PLUGIN_TARGETS)
 
 function(add_catalog_plugin source_path)
@@ -49,14 +55,23 @@ function(add_catalog_plugin source_path)
     file(READ "${abs_source}" source_contents)
     string(FIND "${source_contents}" "QtWidgets/" has_qtwidgets)
     string(FIND "${source_contents}" "QApplication" has_qapplication)
+    string(FIND "${source_contents}" "QtNetwork/" has_qtnetwork)
+    string(FIND "${source_contents}" "QNetworkAccessManager" has_qnetworkaccessmanager)
+    string(FIND "${source_contents}" "QNetworkRequest" has_qnetworkrequest)
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_SOURCE_DIR}" "${abs_source}")
     string(REPLACE "/" "_" target_suffix "${rel_path}")
     string(REPLACE "\\" "_" target_suffix "${target_suffix}")
     string(MAKE_C_IDENTIFIER "${target_suffix}" target_suffix)
     set(target_name "CatalogPlugin_${target_suffix}")
     set(needs_widgets FALSE)
+    set(needs_network FALSE)
     if (NOT has_qtwidgets EQUAL -1 OR NOT has_qapplication EQUAL -1)
         set(needs_widgets TRUE)
+    endif()
+    if (NOT has_qtnetwork EQUAL -1
+        OR NOT has_qnetworkaccessmanager EQUAL -1
+        OR NOT has_qnetworkrequest EQUAL -1)
+        set(needs_network TRUE)
     endif()
 
     add_library(${target_name} MODULE "${abs_source}")
@@ -74,6 +89,9 @@ function(add_catalog_plugin source_path)
                 ${target_name}
                 EXCLUDE_BY_TYPE platforms imageformats styles iconengines)
         endif()
+    endif()
+    if (needs_network)
+        target_link_libraries(${target_name} PRIVATE Qt${QT_VERSION_MAJOR}::Network)
     endif()
     set_target_properties(${target_name} PROPERTIES
         OUTPUT_NAME "${output_name}"
@@ -100,6 +118,11 @@ foreach(plugin_dir IN LISTS plugin_dirs)
         continue()
     endif()
 
+    get_filename_component(plugin_name "${plugin_dir}" NAME)
+    if (TGD_CATALOG_PLUGIN AND NOT plugin_name STREQUAL TGD_CATALOG_PLUGIN)
+        continue()
+    endif()
+
     file(GLOB version_entries RELATIVE "${plugin_dir}" CONFIGURE_DEPENDS "${plugin_dir}/*")
     set(version_dirs)
     foreach(version_entry IN LISTS version_entries)
@@ -120,6 +143,10 @@ foreach(plugin_dir IN LISTS plugin_dirs)
 endforeach()
 
 list(REMOVE_DUPLICATES catalog_sources)
+
+if (TGD_CATALOG_PLUGIN AND NOT catalog_sources)
+    message(FATAL_ERROR "Catalog plugin '${TGD_CATALOG_PLUGIN}' was not found.")
+endif()
 
 foreach(source_path IN LISTS catalog_sources)
     add_catalog_plugin("${source_path}")

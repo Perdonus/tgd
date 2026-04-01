@@ -1,16 +1,28 @@
-name: Build Plugin Catalog
+name: Build Plugin Catalog Entry
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - Plugins
+  workflow_call:
+    inputs:
+      plugin_name:
+        description: Plugin folder name under PluginCatalog.
+        required: true
+        type: string
+      allow_commit:
+        description: Push refreshed binaries back to the plugin branch.
+        required: false
+        default: false
+        type: boolean
+      target_branch:
+        description: Branch that receives refreshed binaries.
+        required: false
+        default: Plugins
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: build-plugin-catalog-${{ github.ref }}
+  group: build-plugin-${{ inputs.plugin_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -25,12 +37,26 @@ jobs:
 
       - name: Run plugin sanity checks
         run: |
-          python3 tools/plugin_sanity_check.py
+          python3 - <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
 
-  windows_plugins:
-    name: Windows plugin catalog
+          root = pathlib.Path.cwd()
+          script = root / "tools" / "plugin_sanity_check.py"
+          spec = importlib.util.spec_from_file_location("plugin_sanity_check", script)
+          if spec is None or spec.loader is None:
+            raise SystemExit(f"Unable to load {script}")
+
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.EXPECTED_EXAMPLES = {path.name for path in module.EXAMPLES_DIR.glob("*.cpp")}
+          raise SystemExit(module.main())
+          PY
+
+  windows_plugin:
+    name: Windows ${{ inputs.plugin_name }}
     needs: plugin_sanity
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-catalog]') }}
     runs-on: windows-2022
     timeout-minutes: 180
 
@@ -89,7 +115,58 @@ jobs:
             ${{ steps.prepare_paths.outputs.thirdparty_root }}/NuGet
             ${{ steps.prepare_paths.outputs.thirdparty_root }}/python
 
+      - name: Detect warm toolchain
+        id: detect_toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $requiredPaths = @(
+            "${{ steps.prepare_paths.outputs.qt_root }}",
+            (Join-Path "${{ steps.prepare_paths.outputs.win64_root }}" "libwebp"),
+            (Join-Path "${{ steps.prepare_paths.outputs.win64_root }}" "mozjpeg"),
+            (Join-Path "${{ steps.prepare_paths.outputs.win64_root }}" "openssl3"),
+            (Join-Path "${{ steps.prepare_paths.outputs.win64_root }}" "tg_angle"),
+            (Join-Path "${{ steps.prepare_paths.outputs.win64_root }}" "zlib"),
+            (Join-Path "${{ steps.prepare_paths.outputs.thirdparty_root }}" "jom"),
+            (Join-Path "${{ steps.prepare_paths.outputs.thirdparty_root }}" "msys64"),
+            (Join-Path "${{ steps.prepare_paths.outputs.thirdparty_root }}" "NuGet"),
+            (Join-Path "${{ steps.prepare_paths.outputs.thirdparty_root }}" "python")
+          )
+
+          $missing = New-Object System.Collections.Generic.List[string]
+          foreach ($path in $requiredPaths) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              $missing.Add($path)
+            }
+          }
+
+          $qtConfig = Get-ChildItem -Path "${{ steps.prepare_paths.outputs.qt_root }}" -Recurse -Depth 6 -File -Filter Qt5Config.cmake -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $qtConfig) {
+            $missing.Add("${{ steps.prepare_paths.outputs.qt_root }}\\**\\Qt5Config.cmake")
+          }
+
+          $angleLib = Get-ChildItem -Path "${{ steps.prepare_paths.outputs.win64_root }}/tg_angle" -Recurse -File -Filter tg_angle.lib -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\Release\\' } |
+            Select-Object -First 1
+          if (-not $angleLib) {
+            $missing.Add("${{ steps.prepare_paths.outputs.win64_root }}\\tg_angle\\**\\tg_angle.lib")
+          }
+
+          if ($missing.Count -eq 0) {
+            "skip_prepare=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "[toolchain] warm cache/toolchain found, skipping prepare."
+            exit 0
+          }
+
+          Write-Host "[toolchain] prepare required; missing paths:"
+          $missing | ForEach-Object { Write-Host " - $_" }
+          "skip_prepare=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Prepare minimal plugin toolchain
+        id: prepare_toolchain
+        if: ${{ steps.detect_toolchain.outputs.skip_prepare != 'true' }}
         shell: cmd
         run: |
           @echo on
@@ -105,14 +182,14 @@ jobs:
 
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "PREPARE_LOG=%CI_LOGS_DIR%\prepare-plugin-toolchain.log"
+          set "PREPARE_LOG=%CI_LOGS_DIR%\prepare-${{ inputs.plugin_name }}.log"
 
           powershell -NoProfile -Command ^
             "$ErrorActionPreference = 'Stop';" ^
             "$log = $env:PREPARE_LOG;" ^
             "if (Test-Path $log) { Remove-Item $log -Force }" ^
             "New-Item -ItemType File -Path $log -Force | Out-Null;" ^
-            "$cmd = 'call Telegram\\build\\prepare\\win.bat silent patches msys64 python NuGet jom zlib mozjpeg openssl3 libwebp tg_angle qt_5.15.18 >> \"' + $log + '\" 2>&1';" ^
+            "$cmd = 'call Telegram\\build\\prepare\\win.bat silent incremental patches msys64 python NuGet jom zlib mozjpeg openssl3 libwebp tg_angle qt_5.15.18 >> \"' + $log + '\" 2>&1';" ^
             "$proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/s','/c',$cmd -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru -NoNewWindow;" ^
             "$last = '';" ^
             "while (-not $proc.HasExited) {" ^
@@ -126,7 +203,7 @@ jobs:
             "exit $proc.ExitCode"
 
       - name: Save plugin toolchain cache
-        if: ${{ success() && steps.plugin_toolchain_cache.outputs.cache-hit != 'true' }}
+        if: ${{ success() && steps.prepare_toolchain.conclusion == 'success' && steps.plugin_toolchain_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugins.yml') }}
@@ -337,8 +414,9 @@ jobs:
           cd /d "%GITHUB_WORKSPACE%"
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "CONFIGURE_LOG=%CI_LOGS_DIR%\configure-plugin-catalog.log"
-          cmake -S PluginCatalog -B out\plugin-catalog -G "Visual Studio 17 2022" -A x64 -D CMAKE_PREFIX_PATH="${{ steps.normalize_paths.outputs.qt_prefix_path }}" > "%CONFIGURE_LOG%" 2>&1
+          set "BUILD_DIR=out\plugin-${{ inputs.plugin_name }}"
+          set "CONFIGURE_LOG=%CI_LOGS_DIR%\configure-${{ inputs.plugin_name }}.log"
+          cmake -S PluginCatalog -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -D CMAKE_PREFIX_PATH="${{ steps.normalize_paths.outputs.qt_prefix_path }}" -D TGD_CATALOG_PLUGIN="${{ inputs.plugin_name }}" > "%CONFIGURE_LOG%" 2>&1
           if not errorlevel 1 exit /b 0
           powershell -NoProfile -Command "Get-Content -Path '%CONFIGURE_LOG%' -Tail 120"
           exit /b 1
@@ -351,8 +429,9 @@ jobs:
           cd /d "%GITHUB_WORKSPACE%"
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "BUILD_LOG=%CI_LOGS_DIR%\build-plugin-catalog.log"
-          cmake --build out\plugin-catalog --config Release --target plugin_catalog > "%BUILD_LOG%" 2>&1
+          set "BUILD_DIR=out\plugin-${{ inputs.plugin_name }}"
+          set "BUILD_LOG=%CI_LOGS_DIR%\build-${{ inputs.plugin_name }}.log"
+          cmake --build "%BUILD_DIR%" --config Release --target plugin_catalog > "%BUILD_LOG%" 2>&1
           if not errorlevel 1 exit /b 0
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG%' -Tail 120"
           exit /b 1
@@ -361,7 +440,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: plugin-ci-logs
+          name: plugin-ci-logs-${{ inputs.plugin_name }}
           path: |
             ci-logs/*.log
           if-no-files-found: ignore
@@ -370,39 +449,40 @@ jobs:
         id: collect_plugins
         shell: pwsh
         run: |
-          $matches = Get-ChildItem -Path "$PWD/PluginCatalog" -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue |
+          $pluginDir = Join-Path $PWD "PluginCatalog/${{ inputs.plugin_name }}"
+          $matches = Get-ChildItem -Path $pluginDir -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue |
             Sort-Object FullName -Unique
 
           if (-not $matches -or $matches.Count -eq 0) {
-            Write-Error "Built plugin binaries were not found in PluginCatalog."
+            Write-Error "Built plugin binaries were not found in $pluginDir."
             exit 1
           }
 
-          Write-Host "Built $($matches.Count) plugin binaries."
+          Write-Host "Built $($matches.Count) plugin binaries for ${{ inputs.plugin_name }}."
           $matches | ForEach-Object { Write-Host " - $($_.FullName)" }
 
-      - name: Upload plugin catalog artifact
+      - name: Upload plugin artifact
         if: ${{ steps.collect_plugins.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-plugin-catalog-windows
+          name: telegram-plugin-${{ inputs.plugin_name }}-windows
           path: |
-            PluginCatalog/**/*.tgd
+            PluginCatalog/${{ inputs.plugin_name }}/**/*.tgd
           if-no-files-found: error
 
       - name: Commit refreshed plugin binaries
-        if: ${{ steps.collect_plugins.outcome == 'success' && github.event_name == 'push' }}
+        if: ${{ inputs.allow_commit && steps.collect_plugins.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git status --short PluginCatalog || true
-          git add -A PluginCatalog
-          git status --short PluginCatalog || true
+          git status --short "PluginCatalog/${{ inputs.plugin_name }}" || true
+          git add -A "PluginCatalog/${{ inputs.plugin_name }}"
+          git status --short "PluginCatalog/${{ inputs.plugin_name }}" || true
           if git diff --cached --quiet; then
             echo "No plugin catalog changes to commit."
             exit 0
           fi
-          git commit -m "ci: refresh plugin catalog binaries [skip plugin-catalog]"
-          git push origin HEAD:Plugins
+          git commit -m "ci: refresh ${{ inputs.plugin_name }} plugin binary [skip plugin-catalog]"
+          git push origin HEAD:${{ inputs.target_branch }}

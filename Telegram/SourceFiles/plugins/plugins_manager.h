@@ -202,6 +202,10 @@ public:
 		const QString &pluginId,
 		const QString &settingId,
 		int fallback) const override;
+	QString settingStringValue(
+		const QString &pluginId,
+		const QString &settingId,
+		const QString &fallback) const override;
 	Main::Session *activeSession() const override;
 	void forEachSession(
 		std::function<void(Main::Session*)> visitor) override;

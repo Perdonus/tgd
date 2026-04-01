@@ -2095,11 +2095,7 @@ function(add_tg_catalog_plugin source_file)
     set(tg_plugin_catalog_targets "${tg_plugin_catalog_targets}" PARENT_SCOPE)
 endfunction()
 
-add_tg_plugin_example(TgPluginExampleCommandShrug command_shrug Plugins/Examples/command_shrug.cpp)
-add_tg_plugin_example(TgPluginExampleHelloMenu hello_menu Plugins/Examples/hello_menu.cpp)
-add_tg_plugin_example(TgPluginExampleMessageObserver message_observer Plugins/Examples/message_observer.cpp)
-add_tg_plugin_example(TgPluginExamplePanelDemo panel_demo Plugins/Examples/panel_demo.cpp)
-add_tg_plugin_example(TgPluginExampleRuntimeInfo runtime_info Plugins/Examples/runtime_info.cpp)
+add_tg_plugin_example(TgPluginExampleAiChat ai_chat Plugins/Examples/ai_chat.cpp)
 add_tg_plugin_example(TgPluginExampleTransparentTelegram transparent_telegram Plugins/Examples/transparent_telegram.cpp)
 add_custom_target(tgd_example_plugins DEPENDS ${tg_plugin_example_targets})
 

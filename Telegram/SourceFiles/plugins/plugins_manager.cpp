@@ -571,6 +571,8 @@ QString SettingControlName(const Plugins::SettingControl control) {
 		return u"toggle"_q;
 	case Control::IntSlider:
 		return u"int_slider"_q;
+	case Control::TextInput:
+		return u"text_input"_q;
 	case Control::ActionButton:
 		return u"action_button"_q;
 	case Control::InfoText:
@@ -593,10 +595,13 @@ Plugins::SettingDescriptor NormalizeSettingDescriptor(
 	descriptor.id = descriptor.id.trimmed();
 	descriptor.title = descriptor.title.trimmed();
 	descriptor.description = descriptor.description.trimmed();
+	descriptor.textValue = descriptor.textValue.trimmed();
+	descriptor.placeholderText = descriptor.placeholderText.trimmed();
 	descriptor.valueSuffix = descriptor.valueSuffix.trimmed();
 	descriptor.buttonText = descriptor.buttonText.trimmed();
 	switch (descriptor.type) {
 	case Plugins::SettingControl::Toggle:
+	case Plugins::SettingControl::TextInput:
 	case Plugins::SettingControl::ActionButton:
 	case Plugins::SettingControl::InfoText:
 		break;
@@ -1676,6 +1681,9 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 			target->intMinimum,
 			target->intMaximum);
 		break;
+	case SettingControl::TextInput:
+		target->textValue = setting.textValue.trimmed();
+		break;
 	case SettingControl::ActionButton:
 	case SettingControl::InfoText:
 		break;
@@ -2633,6 +2641,14 @@ int Manager::settingIntValue(
 	return value.isDouble() ? value.toInt(fallback) : fallback;
 }
 
+QString Manager::settingStringValue(
+		const QString &pluginId,
+		const QString &settingId,
+		const QString &fallback) const {
+	const auto value = storedSettingValue(pluginId, settingId);
+	return value.isString() ? value.toString(fallback) : fallback;
+}
+
 Main::Session *Manager::activeSession() const {
 	if (const auto window = activeWindow()) {
 		if (const auto session = window->maybeSession()) {
@@ -3043,6 +3059,8 @@ QJsonObject Manager::settingDescriptorToJson(
 		{ u"intMinimum"_q, descriptor.intMinimum },
 		{ u"intMaximum"_q, descriptor.intMaximum },
 		{ u"intStep"_q, descriptor.intStep },
+		{ u"textValue"_q, descriptor.textValue },
+		{ u"placeholderText"_q, descriptor.placeholderText },
 		{ u"valueSuffix"_q, descriptor.valueSuffix },
 		{ u"buttonText"_q, descriptor.buttonText },
 	};
@@ -3221,6 +3239,11 @@ void Manager::applyStoredSettings(
 						setting.intMaximum);
 				}
 				break;
+			case SettingControl::TextInput:
+				if (value.isString()) {
+					setting.textValue = value.toString(setting.textValue).trimmed();
+				}
+				break;
 			case SettingControl::ActionButton:
 			case SettingControl::InfoText:
 				break;
@@ -3242,6 +3265,9 @@ void Manager::rememberSettingValue(
 		break;
 	case SettingControl::IntSlider:
 		values.insert(descriptor.id, descriptor.intValue);
+		break;
+	case SettingControl::TextInput:
+		values.insert(descriptor.id, descriptor.textValue);
 		break;
 	case SettingControl::ActionButton:
 	case SettingControl::InfoText:

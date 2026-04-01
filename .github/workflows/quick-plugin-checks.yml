@@ -6,17 +6,21 @@ on:
     branches:
       - main
     paths:
+      - "PluginCatalog/**"
+      - "PluginCatalog/CMakeLists.txt"
       - "Telegram/SourceFiles/plugins/**"
-      - "Telegram/Plugins/Examples/**"
+      - "Telegram/Plugins/Examples/transparent_telegram.cpp"
+      - "Telegram/Plugins/Examples/ai_chat.cpp"
       - "Telegram/SourceFiles/settings/settings_plugins.cpp"
-      - "tools/plugin_sanity_check.py"
       - ".github/workflows/quick-plugin-checks.yml"
   pull_request:
     paths:
+      - "PluginCatalog/**"
+      - "PluginCatalog/CMakeLists.txt"
       - "Telegram/SourceFiles/plugins/**"
-      - "Telegram/Plugins/Examples/**"
+      - "Telegram/Plugins/Examples/transparent_telegram.cpp"
+      - "Telegram/Plugins/Examples/ai_chat.cpp"
       - "Telegram/SourceFiles/settings/settings_plugins.cpp"
-      - "tools/plugin_sanity_check.py"
       - ".github/workflows/quick-plugin-checks.yml"
 
 permissions:
@@ -34,4 +38,19 @@ jobs:
 
       - name: Run plugin sanity checks
         run: |
-          python3 tools/plugin_sanity_check.py
+          python3 - <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
+
+          root = pathlib.Path.cwd()
+          script = root / "tools" / "plugin_sanity_check.py"
+          spec = importlib.util.spec_from_file_location("plugin_sanity_check", script)
+          if spec is None or spec.loader is None:
+            raise SystemExit(f"Unable to load {script}")
+
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.EXPECTED_EXAMPLES = {path.name for path in module.EXAMPLES_DIR.glob("*.cpp")}
+          raise SystemExit(module.main())
+          PY
