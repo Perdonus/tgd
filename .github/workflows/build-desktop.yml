@@ -1,4 +1,4 @@
-name: Build Telegram Desktop
+name: Build Astrogram Desktop
 # CI touch: rerun Windows pipeline after canceled run.
 
 on:
@@ -571,7 +571,9 @@ jobs:
           $matches = @()
           foreach ($root in $roots) {
             $matches += Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -ieq "Telegram.exe" -or $_.Name -ieq "Telegram" }
+              Where-Object {
+                $_.Name -ieq "Astrogram.exe" -or $_.Name -ieq "Astrogram" -or $_.Name -ieq "Telegram.exe" -or $_.Name -ieq "Telegram"
+              }
           }
           $matches = $matches | Sort-Object LastWriteTime -Descending -Unique
 
@@ -583,22 +585,22 @@ jobs:
               Get-ChildItem -Path "$PWD/out" -Recurse -File -Include *.exe -ErrorAction SilentlyContinue |
                 Select-Object -First 40 FullName
             }
-            Write-Error "Telegram binary was not found in known output paths."
+            Write-Error "Astrogram binary was not found in known output paths."
             exit 1
           }
 
           $picked = $matches | Select-Object -First 1
           New-Item -ItemType Directory -Path "$PWD/dist" -Force | Out-Null
-          Copy-Item -LiteralPath $picked.FullName -Destination "$PWD/dist/Telegram.exe" -Force
+          Copy-Item -LiteralPath $picked.FullName -Destination "$PWD/dist/Astrogram.exe" -Force
           Write-Host "Picked binary: $($picked.FullName)"
 
       - name: Upload Windows artifact
         if: ${{ always() && steps.locate_exe.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-windows-release
+          name: astrogram-windows-release
           path: |
-            dist/Telegram.exe
+            dist/Astrogram.exe
           if-no-files-found: error
 
   linux_deb:
@@ -652,12 +654,12 @@ jobs:
 
           mkdir -p "$pkgroot/DEBIAN" "$appdir" "$desktopdir" "$icondir"
 
-          install -m 0755 out/Release/Telegram "$appdir/telegram-desktop"
+          install -m 0755 out/Release/Astrogram "$appdir/astrogram"
           install -m 0644 lib/xdg/org.telegram.desktop.desktop "$desktopdir/org.telegram.desktop.desktop"
-          install -m 0644 Telegram/Resources/art/icon256.png "$icondir/telegram-desktop.png"
+          install -m 0644 Telegram/Resources/art/icon256.png "$icondir/astrogram.png"
 
-          sed -i 's#^Exec=.*#Exec=/opt/tgd/telegram-desktop -- %u#' "$desktopdir/org.telegram.desktop.desktop"
-          sed -i 's#^Icon=.*#Icon=telegram-desktop#' "$desktopdir/org.telegram.desktop.desktop"
+          sed -i 's#^Exec=.*#Exec=/opt/tgd/astrogram -- %u#' "$desktopdir/org.telegram.desktop.desktop"
+          sed -i 's#^Icon=.*#Icon=astrogram#' "$desktopdir/org.telegram.desktop.desktop"
 
           cat > "$pkgroot/DEBIAN/control" <<EOF
           Package: tgd
@@ -667,7 +669,7 @@ jobs:
           Architecture: amd64
           Maintainer: tgd build bot <noreply@example.com>
           Depends: libc6 (>= 2.31), libstdc++6
-          Description: Telegram Desktop build of tgd with plugin system
+          Description: Astrogram build of tgd with plugin system
           EOF
 
           dpkg-deb --build "$pkgroot" "tgd_${version}_amd64.deb"
@@ -675,7 +677,7 @@ jobs:
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-linux-deb
+          name: astrogram-linux-deb
           path: |
-            out/Release/Telegram
+            out/Release/Astrogram
             tgd_*.deb

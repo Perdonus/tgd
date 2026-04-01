@@ -3,7 +3,7 @@
     <id>org.telegram.desktop</id>
     <metadata_license>CC0-1.0</metadata_license>
     <project_license>GPL-3.0</project_license>
-    <name>Telegram</name>
+    <name>Astrogram</name>
     <summary>New era of messaging</summary>
     <description>
         <p>Pure instant messaging — simple, fast, secure, and synced across all your devices. One of the world's top 10 most downloaded apps with over 500 million active users.</p>
@@ -106,7 +106,7 @@
     </content_rating>
     <launchable type="desktop-id">org.telegram.desktop.desktop</launchable>
     <provides>
-        <binary>Telegram</binary>
+        <binary>Astrogram</binary>
         <dbus type="session">org.telegram.desktop</dbus>
         <mediatype>x-scheme-handler/tg</mediatype>
         <mediatype>x-scheme-handler/tonsite</mediatype>

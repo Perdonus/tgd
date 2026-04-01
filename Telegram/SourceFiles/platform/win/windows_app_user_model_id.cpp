@@ -26,9 +26,9 @@ const PROPERTYKEY pkey_AppUserModel_StartPinOption = { { 0x9F4C2855, 0x9F79, 0x4
 const PROPERTYKEY pkey_AppUserModel_ToastActivator = { { 0x9F4C2855, 0x9F79, 0x4B39, { 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3 } }, 26 };
 
 #ifdef OS_WIN_STORE
-const WCHAR AppUserModelIdBase[] = L"Telegram.TelegramDesktop.Store";
+const WCHAR AppUserModelIdBase[] = L"Astrogram.AstrogramDesktop.Store";
 #else // OS_WIN_STORE
-const WCHAR AppUserModelIdBase[] = L"Telegram.TelegramDesktop";
+const WCHAR AppUserModelIdBase[] = L"Astrogram.AstrogramDesktop";
 #endif // OS_WIN_STORE
 
 [[nodiscard]] QString PinnedIconsPath() {
@@ -213,32 +213,43 @@ void CleanupShortcut() {
 		return;
 	}
 
-	QString path = systemShortcutPath() + u"Telegram.lnk"_q;
-	std::wstring p = QDir::toNativeSeparators(path).toStdWString();
+	const auto paths = {
+		systemShortcutPath() + u"Astrogram.lnk"_q,
+		systemShortcutPath() + u"Telegram.lnk"_q,
+	};
+	for (const auto &path : paths) {
+		std::wstring p = QDir::toNativeSeparators(path).toStdWString();
 
-	DWORD attributes = GetFileAttributes(p.c_str());
-	if (attributes >= 0xFFFFFFF) return; // file does not exist
+		DWORD attributes = GetFileAttributes(p.c_str());
+		if (attributes >= 0xFFFFFFF) {
+			continue;
+		}
 
-	auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
-		CLSID_ShellLink);
-	if (!shellLink) {
-		return;
-	}
+		auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+			CLSID_ShellLink);
+		if (!shellLink) {
+			return;
+		}
 
-	auto persistFile = shellLink.try_as<IPersistFile>();
-	if (!persistFile) {
-		return;
-	}
+		auto persistFile = shellLink.try_as<IPersistFile>();
+		if (!persistFile) {
+			return;
+		}
 
-	auto hr = persistFile->Load(p.c_str(), STGM_READWRITE);
-	if (!SUCCEEDED(hr)) return;
+		auto hr = persistFile->Load(p.c_str(), STGM_READWRITE);
+		if (!SUCCEEDED(hr)) {
+			continue;
+		}
 
-	WCHAR szGotPath[MAX_PATH];
-	hr = shellLink->GetPath(szGotPath, MAX_PATH, nullptr, 0);
-	if (!SUCCEEDED(hr)) return;
+		WCHAR szGotPath[MAX_PATH];
+		hr = shellLink->GetPath(szGotPath, MAX_PATH, nullptr, 0);
+		if (!SUCCEEDED(hr)) {
+			continue;
+		}
 
-	if (GetUniqueFileId(szGotPath) == myid) {
-		QFile().remove(path);
+		if (GetUniqueFileId(szGotPath) == myid) {
+			QFile().remove(path);
+		}
 	}
 }
 
@@ -345,9 +356,11 @@ bool checkInstalled(QString path = {}) {
 		}
 	}
 
+	const auto branded = u"Astrogram/Astrogram.lnk"_q;
 	const auto installed = u"Telegram Desktop/Telegram.lnk"_q;
 	const auto old = u"Telegram Win (Unofficial)/Telegram.lnk"_q;
-	return validateShortcutAt(path + installed)
+	return validateShortcutAt(path + branded)
+		|| validateShortcutAt(path + installed)
 		|| validateShortcutAt(path + old);
 }
 
@@ -367,7 +380,12 @@ bool ValidateShortcut() {
 			return true;
 		}
 
-		path += u"Telegram.lnk"_q;
+		path += u"Astrogram.lnk"_q;
+		if (validateShortcutAt(path)) {
+			return true;
+		}
+
+		path = systemShortcutPath() + u"Telegram.lnk"_q;
 		if (validateShortcutAt(path)) {
 			return true;
 		}
