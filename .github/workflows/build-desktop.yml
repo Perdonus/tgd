@@ -159,7 +159,7 @@ jobs:
           cd /d "%GITHUB_WORKSPACE%"
           set "CMAKE_HELPERS_SHA=ba366ade3e70c64d1dd854382abd74f532ba41a1"
           set "CMAKE_HEAD="
-          if exist cmake\.git (
+          if exist cmake\.git if exist cmake\run_cmake.py (
             for /f %%i in ('git -C cmake rev-parse HEAD 2^>nul') do set "CMAKE_HEAD=%%i"
           )
           if /I "!CMAKE_HEAD!"=="%CMAKE_HELPERS_SHA%" goto cmake_submodule_ok
