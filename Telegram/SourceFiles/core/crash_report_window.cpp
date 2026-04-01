@@ -595,7 +595,7 @@ void LastCrashedWindow::checkingFinished() {
 
 	QHttpPart reportPart;
 	reportPart.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("application/octet-stream"));
-	reportPart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"report\"; filename=\"report.telegramcrash\""));
+	reportPart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"report\"; filename=\"report.astrogramcrash\""));
 	reportPart.setBody(getCrashReportRaw());
 	multipart->append(reportPart);
 
