@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_text_entity.h"
 #include "plugins/plugins_manager.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
@@ -51,6 +52,61 @@ namespace {
 
 [[nodiscard]] QString PluginUiText(QString en, QString ru) {
 	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
+}
+
+[[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
+	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
+}
+
+[[nodiscard]] TextWithEntities PluginAuthorText(const QString &author) {
+	const auto trimmed = author.trimmed();
+	auto result = TextWithEntities{
+		PluginUiText(u"Author: "_q, u"Автор: "_q) + trimmed
+	};
+	const auto offset = result.text.size() - trimmed.size();
+	for (auto i = 0; i < trimmed.size();) {
+		if (trimmed[i] != QChar::fromLatin1('@')) {
+			++i;
+			continue;
+		}
+		auto j = i + 1;
+		while (j < trimmed.size() && IsTelegramHandleChar(trimmed[j])) {
+			++j;
+		}
+		if (j > (i + 1)) {
+			result.entities.push_back({
+				EntityType::CustomUrl,
+				offset + i,
+				j - i,
+				u"https://t.me/"_q + trimmed.mid(i + 1, j - i - 1),
+			});
+		}
+		i = std::max(j, i + 1);
+	}
+	return result;
+}
+
+void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
+	label->setClickHandlerFilter([=](const auto &handler, auto) {
+		const auto entity = handler->getTextEntity();
+		if (entity.type != EntityType::CustomUrl) {
+			return true;
+		}
+		QDesktopServices::openUrl(QUrl(entity.data));
+		return false;
+	});
+}
+
+void AddPluginAuthorLabel(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &author) {
+	if (author.trimmed().isEmpty()) {
+		return;
+	}
+	const auto label = Ui::AddDividerText(
+		container,
+		rpl::single(PluginAuthorText(author)));
+	WireExternalLinks(label);
 }
 
 QString FormatPluginTitle(const ::Plugins::PluginState &state) {
@@ -712,11 +768,6 @@ void OpenPluginsFolder() {
 QString FormatPluginSummary(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
-	if (!info.author.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Author: "_q, u"Автор: "_q)
-			+ info.author.trimmed());
-	}
 	if (!info.version.trimmed().isEmpty()) {
 		lines.push_back(
 			PluginUiText(u"Version: "_q, u"Версия: "_q)
@@ -731,11 +782,6 @@ QString FormatPluginSummary(const ::Plugins::PluginState &state) {
 QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
-	if (!info.author.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Author: "_q, u"Автор: "_q)
-			+ info.author.trimmed());
-	}
 	if (!info.description.trimmed().isEmpty()) {
 		lines.push_back(info.description.trimmed());
 	}
@@ -1147,6 +1193,7 @@ private:
 		if (!summary.isEmpty()) {
 			Ui::AddDividerText(_content, rpl::single(summary));
 		}
+		AddPluginAuthorLabel(_content, state->info.author);
 		Ui::AddDividerText(_content, rpl::single(capabilityLine));
 		if (!note.isEmpty()) {
 			Ui::AddDividerText(_content, rpl::single(note));
@@ -1521,6 +1568,7 @@ void Plugins::rebuildList() {
 		if (!summary.isEmpty()) {
 			Ui::AddDividerText(_list, rpl::single(summary));
 		}
+		AddPluginAuthorLabel(_list, state.info.author);
 		if (!stateNote.isEmpty()) {
 			Ui::AddDividerText(_list, rpl::single(stateNote));
 		}

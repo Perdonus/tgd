@@ -49,6 +49,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFileInfo>
 #include <QtCore/QMimeType>
 #include <QtCore/QMimeDatabase>
+#include <QtCore/QUrl>
+#include <QtGui/QDesktopServices>
 
 #include <utility>
 
@@ -175,6 +177,49 @@ QString PluginPackageButtonText(const Plugins::PackagePreviewState &preview) {
 
 [[nodiscard]] QString PluginUiText(QString en, QString ru) {
 	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
+}
+
+[[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
+	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
+}
+
+[[nodiscard]] TextWithEntities PluginAuthorText(const QString &author) {
+	const auto trimmed = author.trimmed();
+	auto result = TextWithEntities{
+		PluginUiText(u"Author: "_q, u"Автор: "_q) + trimmed
+	};
+	const auto offset = result.text.size() - trimmed.size();
+	for (auto i = 0; i < trimmed.size();) {
+		if (trimmed[i] != QChar::fromLatin1('@')) {
+			++i;
+			continue;
+		}
+		auto j = i + 1;
+		while (j < trimmed.size() && IsTelegramHandleChar(trimmed[j])) {
+			++j;
+		}
+		if (j > (i + 1)) {
+			result.entities.push_back({
+				EntityType::CustomUrl,
+				offset + i,
+				j - i,
+				u"https://t.me/"_q + trimmed.mid(i + 1, j - i - 1),
+			});
+		}
+		i = std::max(j, i + 1);
+	}
+	return result;
+}
+
+void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
+	label->setClickHandlerFilter([=](const auto &handler, auto) {
+		const auto entity = handler->getTextEntity();
+		if (entity.type != EntityType::CustomUrl) {
+			return true;
+		}
+		QDesktopServices::openUrl(QUrl(entity.data));
+		return false;
+	});
 }
 
 class PluginPackageIcon final : public Ui::RpWidget {
@@ -322,14 +367,13 @@ void ShowPluginPackageBox(
 			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 			style::al_top);
 		if (!preview.info.author.trimmed().isEmpty()) {
-			box->addRow(object_ptr<Ui::FlatLabel>(
+			const auto authorLabel = box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(
-					PluginUiText(u"Author: "_q, u"Автор: "_q)
-					+ preview.info.author.trimmed()),
+				rpl::single(PluginAuthorText(preview.info.author)),
 				st::defaultFlatLabel),
 				style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 				style::al_top);
+			WireExternalLinks(authorLabel);
 		}
 		if (!preview.info.description.trimmed().isEmpty()) {
 			box->addRow(object_ptr<Ui::FlatLabel>(
