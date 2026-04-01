@@ -12,6 +12,7 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
 #include <QtCore/QJsonArray>
@@ -64,7 +65,9 @@ constexpr auto kFilterZalgoOutgoingSettingId = "filter_zalgo_outgoing";
 constexpr auto kDeletedMarkSettingId = "deleted_mark";
 constexpr auto kEditedMarkSettingId = "edited_mark";
 constexpr auto kExportCacheSettingId = "export_cache";
+constexpr auto kExportSafetyBundleSettingId = "export_safety_bundle";
 constexpr auto kOpenCacheFolderSettingId = "open_cache_folder";
+constexpr auto kOpenClientRecallLogSettingId = "open_client_recall_log";
 constexpr auto kClearCacheSettingId = "clear_cache";
 
 QString Latin1(const char *value) {
@@ -239,8 +242,8 @@ private:
 		_info.version = Latin1(kPluginVersion);
 		_info.author = QStringLiteral("Astrogram");
 		_info.description = tr(
-			"AyuSafe-lite: Ayu-inspired visuals, streamer-lite privacy, and local message safety tools.",
-			"AyuSafe-lite: визуальные фишки в стиле Ayu, лайт-стример режим и локальные инструменты безопасности сообщений.");
+			"AyuSafe-lite: Ayu-inspired visuals, streamer-lite privacy, and merged local/client message safety tools.",
+			"AyuSafe-lite: визуальные фишки в стиле Ayu, лайт-стример режим и объединённые локальные/клиентские инструменты безопасности сообщений.");
 		_info.website = QStringLiteral("https://github.com/AyuGram/AyuGramDesktop");
 	}
 
@@ -345,6 +348,29 @@ private:
 		return baseDir.isEmpty()
 			? QString()
 			: QDir(baseDir).filePath(QStringLiteral("ayu_safe_state.json"));
+	}
+
+	[[nodiscard]] QString exportedCachePath() const {
+		const auto baseDir = _host->pluginsPath();
+		return baseDir.isEmpty()
+			? QString()
+			: QDir(baseDir).filePath(QStringLiteral("ayu_safe_cache.json"));
+	}
+
+	[[nodiscard]] QString safetyBundlePath() const {
+		const auto baseDir = _host->pluginsPath();
+		return baseDir.isEmpty()
+			? QString()
+			: QDir(baseDir).filePath(QStringLiteral("ayu_safe_bundle.json"));
+	}
+
+	[[nodiscard]] QString clientRecallLogPath() const {
+		const auto workingPath = Normalize(_host->hostInfo().workingPath);
+		if (!workingPath.isEmpty()) {
+			return QDir(workingPath).filePath(
+				QStringLiteral("tdata/astro_recall_log.jsonl"));
+		}
+		return QStringLiteral("./tdata/astro_recall_log.jsonl");
 	}
 
 	void captureBaseVisualState() {
@@ -803,6 +829,17 @@ private:
 		exportCache.type = Plugins::SettingControl::ActionButton;
 		exportCache.buttonText = tr("Export", "Экспорт");
 
+		auto exportBundle = Plugins::SettingDescriptor();
+		exportBundle.id = Latin1(kExportSafetyBundleSettingId);
+		exportBundle.title = tr(
+			"Export safety bundle",
+			"Экспортировать safety bundle");
+		exportBundle.description = tr(
+			"Writes one JSON bundle with the AyuSafe cache and the client anti-recall log if it exists.",
+			"Записывает единый JSON-bundle с кэшем AyuSafe и клиентским anti-recall log, если он существует.");
+		exportBundle.type = Plugins::SettingControl::ActionButton;
+		exportBundle.buttonText = tr("Export bundle", "Экспортировать bundle");
+
 		auto openCacheFolder = Plugins::SettingDescriptor();
 		openCacheFolder.id = Latin1(kOpenCacheFolderSettingId);
 		openCacheFolder.title = tr("Open cache folder", "Открыть папку кэша");
@@ -811,6 +848,17 @@ private:
 			"Открывает папку плагинов, где лежат экспорт и state-файлы AyuSafe.");
 		openCacheFolder.type = Plugins::SettingControl::ActionButton;
 		openCacheFolder.buttonText = tr("Open folder", "Открыть папку");
+
+		auto openRecallLog = Plugins::SettingDescriptor();
+		openRecallLog.id = Latin1(kOpenClientRecallLogSettingId);
+		openRecallLog.title = tr(
+			"Open client anti-recall log",
+			"Открыть клиентский anti-recall log");
+		openRecallLog.description = tr(
+			"Opens Astrogram's built-in astro_recall_log.jsonl if the client-side anti-recall layer has written it.",
+			"Открывает встроенный astro_recall_log.jsonl Astrogram, если client-side anti-recall уже записал его.");
+		openRecallLog.type = Plugins::SettingControl::ActionButton;
+		openRecallLog.buttonText = tr("Open log", "Открыть лог");
 
 		auto clearCache = Plugins::SettingDescriptor();
 		clearCache.id = Latin1(kClearCacheSettingId);
@@ -837,7 +885,9 @@ private:
 		safety.settings.push_back(deletedMarkSetting);
 		safety.settings.push_back(editedMarkSetting);
 		safety.settings.push_back(exportCache);
+		safety.settings.push_back(exportBundle);
 		safety.settings.push_back(openCacheFolder);
+		safety.settings.push_back(openRecallLog);
 		safety.settings.push_back(clearCache);
 
 		auto info = Plugins::SettingDescriptor();
@@ -848,10 +898,21 @@ private:
 			"Этот плагин специально включает только те Ayu-фишки, которые можно безопасно поднять на текущем host API. Это не полный клон AyuGram.");
 		info.type = Plugins::SettingControl::InfoText;
 
+		auto clientIntegration = Plugins::SettingDescriptor();
+		clientIntegration.id = QStringLiteral("client_integration");
+		clientIntegration.title = tr(
+			"Astrogram integration",
+			"Интеграция с Astrogram");
+		clientIntegration.description = tr(
+			"Ghost mode, Local Premium and the built-in anti-recall toggles now live in Astrogram settings. AyuSafe complements them with local cache export and Ayu-style helpers.",
+			"Ghost mode, Local Premium и встроенные anti-recall тумблеры теперь живут в настройках Astrogram. AyuSafe дополняет их локальным кэшем, экспортом и Ayu-утилитами.");
+		clientIntegration.type = Plugins::SettingControl::InfoText;
+
 		auto notes = Plugins::SettingsSectionDescriptor();
 		notes.id = QStringLiteral("notes");
 		notes.title = tr("Notes", "Примечания");
 		notes.settings.push_back(info);
+		notes.settings.push_back(clientIntegration);
 
 		auto page = Plugins::SettingsPageDescriptor();
 		page.id = QStringLiteral("ayu_safe");
@@ -898,6 +959,10 @@ private:
 			exportCacheToDisk();
 			return;
 		}
+		if (setting.id == Latin1(kExportSafetyBundleSettingId)) {
+			exportSafetyBundle();
+			return;
+		}
 		if (setting.id == Latin1(kOpenCacheFolderSettingId)) {
 			const auto baseDir = _host->pluginsPath();
 			if (baseDir.isEmpty()
@@ -906,6 +971,10 @@ private:
 					"Could not open the plugins folder.",
 					"Не удалось открыть папку плагинов."));
 			}
+			return;
+		}
+		if (setting.id == Latin1(kOpenClientRecallLogSettingId)) {
+			openClientRecallLog();
 			return;
 		}
 		if (setting.id == Latin1(kClearCacheSettingId)) {
@@ -933,7 +1002,7 @@ private:
 			return;
 		}
 		QDir().mkpath(baseDir);
-		const auto path = QDir(baseDir).filePath(QStringLiteral("ayu_safe_cache.json"));
+		const auto path = exportedCachePath();
 		auto items = QJsonArray();
 		for (const auto &entry : _cache) {
 			items.push_back(QJsonObject{
@@ -966,6 +1035,92 @@ private:
 		_host->showToast(tr(
 			"AyuSafe cache exported.",
 			"Кэш AyuSafe экспортирован."));
+	}
+
+	[[nodiscard]] QJsonArray cacheEntriesJson() const {
+		auto items = QJsonArray();
+		for (const auto &entry : _cache) {
+			items.push_back(QJsonObject{
+				{ QStringLiteral("timestampUtc"), entry.timestampUtc },
+				{ QStringLiteral("event"), entry.event },
+				{ QStringLiteral("peerName"), entry.peerName },
+				{ QStringLiteral("text"), entry.text },
+				{ QStringLiteral("messageId"), QString::number(entry.messageId) },
+				{ QStringLiteral("sessionUniqueId"), QString::number(entry.sessionUniqueId) },
+				{ QStringLiteral("outgoing"), entry.outgoing },
+			});
+		}
+		return items;
+	}
+
+	[[nodiscard]] QJsonArray clientRecallEntriesJson() const {
+		auto items = QJsonArray();
+		QFile file(clientRecallLogPath());
+		if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			return items;
+		}
+		while (!file.atEnd()) {
+			const auto line = file.readLine().trimmed();
+			if (line.isEmpty()) {
+				continue;
+			}
+			QJsonParseError error;
+			const auto document = QJsonDocument::fromJson(line, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				items.push_back(document.object());
+			} else {
+				items.push_back(QJsonObject{
+					{ QStringLiteral("raw"), QString::fromUtf8(line) },
+				});
+			}
+		}
+		return items;
+	}
+
+	void exportSafetyBundle() const {
+		const auto path = safetyBundlePath();
+		if (path.isEmpty()) {
+			_host->showToast(tr(
+				"Plugins path is unavailable.",
+				"Путь к плагинам недоступен."));
+			return;
+		}
+		QDir().mkpath(QFileInfo(path).absolutePath());
+		QSaveFile file(path);
+		if (!file.open(QIODevice::WriteOnly)) {
+			_host->showToast(tr(
+				"Could not write AyuSafe safety bundle.",
+				"Не удалось записать AyuSafe safety bundle."));
+			return;
+		}
+		const auto payload = QJsonObject{
+			{ QStringLiteral("version"), QStringLiteral("1") },
+			{ QStringLiteral("generatedAtUtc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) },
+			{ QStringLiteral("ayuSafeCachePath"), exportedCachePath() },
+			{ QStringLiteral("clientRecallLogPath"), clientRecallLogPath() },
+			{ QStringLiteral("ayuSafeCache"), cacheEntriesJson() },
+			{ QStringLiteral("clientRecallEntries"), clientRecallEntriesJson() },
+		};
+		file.write(QJsonDocument(payload).toJson(QJsonDocument::Indented));
+		if (!file.commit()) {
+			_host->showToast(tr(
+				"Could not save AyuSafe safety bundle.",
+				"Не удалось сохранить AyuSafe safety bundle."));
+			return;
+		}
+		_host->showToast(tr(
+			"AyuSafe safety bundle exported.",
+			"AyuSafe safety bundle экспортирован."));
+	}
+
+	void openClientRecallLog() const {
+		const auto path = clientRecallLogPath();
+		if (!QFileInfo::exists(path)
+			|| !QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+			_host->showToast(tr(
+				"Client anti-recall log was not found yet.",
+				"Клиентский anti-recall log пока не найден."));
+		}
 	}
 
 	Plugins::Host *_host = nullptr;
