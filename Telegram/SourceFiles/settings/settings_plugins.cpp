@@ -31,7 +31,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QUrl>
 #include <QtCore/QTimer>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 
 #include <algorithm>
@@ -79,7 +81,7 @@ QString FormatPluginStatusBadge(const ::Plugins::PluginState &state) {
 	if (version.isEmpty()) {
 		return status;
 	}
-	return status + u" • "_q + version;
+	return version + u" • "_q + status;
 }
 
 QString FormatPluginFeatureList(const ::Plugins::PluginState &state) {
@@ -722,6 +724,20 @@ QString FormatPluginSummary(const ::Plugins::PluginState &state) {
 	return lines.join(u"\n"_q);
 }
 
+QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
+	auto lines = QStringList();
+	const auto &info = state.info;
+	if (!info.author.trimmed().isEmpty()) {
+		lines.push_back(
+			PluginUiText(u"Author: "_q, u"Автор: "_q)
+			+ info.author.trimmed());
+	}
+	if (!info.description.trimmed().isEmpty()) {
+		lines.push_back(info.description.trimmed());
+	}
+	return lines.join(u"\n"_q);
+}
+
 QString FormatPluginCapabilityLine(const ::Plugins::PluginState &state) {
 	const auto features = FormatPluginFeatureList(state);
 	const auto settingsCount = int(Core::App().plugins().settingsPagesFor(
@@ -745,6 +761,31 @@ QString FormatPluginCapabilityLine(const ::Plugins::PluginState &state) {
 		+ u"  •  "_q
 		+ PluginUiText(u"Panels: "_q, u"Панели: "_q)
 		+ QString::number(panelsCount);
+}
+
+QString PluginOverviewText(const std::vector<::Plugins::PluginState> &plugins) {
+	auto enabled = 0;
+	auto loaded = 0;
+	auto recovery = 0;
+	auto failed = 0;
+	for (const auto &state : plugins) {
+		if (state.enabled) {
+			++enabled;
+		}
+		if (state.loaded) {
+			++loaded;
+		}
+		if (state.disabledByRecovery || state.recoverySuspected) {
+			++recovery;
+		}
+		if (!state.error.trimmed().isEmpty()) {
+			++failed;
+		}
+	}
+	return PluginUiText(
+		u"Installed: %1  •  Enabled: %2  •  Loaded: %3  •  Recovery: %4  •  Errors: %5"_q,
+		u"Установлено: %1  •  Включено: %2  •  Загружено: %3  •  Recovery: %4  •  Ошибки: %5"_q
+	).arg(plugins.size()).arg(enabled).arg(loaded).arg(recovery).arg(failed);
 }
 
 QString FormatPluginCardNote(const ::Plugins::PluginState &state) {
@@ -1138,6 +1179,17 @@ private:
 			SharePluginPackage(_controller, *state);
 		});
 
+		if (!state->info.website.trimmed().isEmpty()) {
+			const auto websiteButton = AddButtonWithIcon(
+				_content,
+				rpl::single(PluginUiText(u"Open Website"_q, u"Открыть сайт"_q)),
+				st::settingsButtonNoIcon,
+				{ &st::menuIconShowInFolder });
+			websiteButton->addClickHandler([=] {
+				QDesktopServices::openUrl(QUrl(state->info.website));
+			});
+		}
+
 		const auto deleteButton = AddButtonWithIcon(
 			_content,
 			rpl::single(PluginUiText(u"Delete Plugin"_q, u"Удалить плагин"_q)),
@@ -1287,6 +1339,10 @@ struct PluginDetailsFactory final
 
 } // namespace
 
+Type PluginDetailsId(const QString &pluginId) {
+	return MakePluginDetailsType(pluginId);
+}
+
 Plugins::Plugins(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
@@ -1312,10 +1368,6 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 			u"Рантайм и диагностика"_q),
 		[=] { ShowPluginRuntimeBox(_controller); },
 		&st::menuIconIpAddress);
-	addAction(
-		PluginUiText(u"Open Plugin Log"_q, u"Открыть лог плагинов"_q),
-		[=] { File::ShowInFolder(u"./tdata/plugins.log"_q); },
-		&st::menuIconSettings);
 	addAction(
 		PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
 		[=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
@@ -1369,8 +1421,8 @@ void Plugins::setupContent() {
 	Ui::AddDividerText(
 		_content,
 		rpl::single(PluginUiText(
-			u"Use the top menu for documentation, plugin folder and safe mode. Tap a plugin card to open its own settings, actions, sharing and delete controls."_q,
-			u"Используйте верхнее меню для документации, папки плагинов и безопасного режима. Нажмите на карточку плагина, чтобы открыть его настройки, действия, экспорт и удаление."_q)));
+			u"Use the top menu for documentation, runtime diagnostics, logs, the plugins folder and safe mode. Tap a plugin card to open its own page with settings, actions, sharing and delete controls."_q,
+			u"Используйте верхнее меню для документации, runtime-диагностики, логов, папки плагинов и безопасного режима. Нажмите на карточку плагина, чтобы открыть его отдельную страницу с настройками, действиями, экспортом и удалением."_q)));
 	Ui::AddSkip(_content);
 
 	rebuildList();
@@ -1402,10 +1454,7 @@ void Plugins::rebuildList() {
 	}
 	Ui::AddDividerText(
 		_list,
-		rpl::single(PluginUiText(
-			u"Installed plugins: "_q,
-			u"Установлено плагинов: "_q)
-			+ QString::number(int(plugins.size()))));
+		rpl::single(PluginOverviewText(plugins)));
 	Ui::AddSkip(_list);
 
 	auto first = true;
@@ -1417,9 +1466,8 @@ void Plugins::rebuildList() {
 		Ui::AddSkip(_list);
 
 		const auto title = FormatPluginTitle(state);
-		const auto summary = FormatPluginSummary(state);
+		const auto summary = FormatPluginCardSummary(state);
 		const auto stateNote = FormatPluginCardNote(state);
-		const auto capabilityLine = FormatPluginCapabilityLine(state);
 		const auto openButton = AddButtonWithLabel(
 			_list,
 			rpl::single(title),
@@ -1435,7 +1483,6 @@ void Plugins::rebuildList() {
 		if (!summary.isEmpty()) {
 			Ui::AddDividerText(_list, rpl::single(summary));
 		}
-		Ui::AddDividerText(_list, rpl::single(capabilityLine));
 		if (!stateNote.isEmpty()) {
 			Ui::AddDividerText(_list, rpl::single(stateNote));
 		}

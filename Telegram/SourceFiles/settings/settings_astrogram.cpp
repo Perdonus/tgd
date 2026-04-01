@@ -20,8 +20,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 
+#include <optional>
+
 namespace Settings {
 namespace {
+
+struct PluginShortcutSpec {
+	QString id;
+	const char *titleRu = nullptr;
+	const char *titleEn = nullptr;
+	const char *descriptionRu = nullptr;
+	const char *descriptionEn = nullptr;
+};
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -41,6 +51,16 @@ namespace {
 	return IsRussianUi()
 		? QString::fromUtf8("%1 плагинов").arg(count)
 		: QString::fromUtf8("%1 plugins").arg(count);
+}
+
+[[nodiscard]] std::optional<::Plugins::PluginState> LookupPlugin(
+		const QString &pluginId) {
+	for (const auto &state : Core::App().plugins().plugins()) {
+		if (state.info.id == pluginId) {
+			return state;
+		}
+	}
+	return std::nullopt;
 }
 
 template <typename Producer, typename Callback>
@@ -77,6 +97,45 @@ void AddActionButtonWithLabel(
 	)->addClickHandler(std::move(callback));
 }
 
+void AddPluginShortcut(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container,
+		const PluginShortcutSpec &spec) {
+	const auto state = LookupPlugin(spec.id);
+	const auto title = IsRussianUi()
+		? QString::fromUtf8(spec.titleRu)
+		: QString::fromUtf8(spec.titleEn);
+	const auto label = [&] {
+		if (state) {
+			auto version = state->info.version.trimmed();
+			if (version.isEmpty()) {
+				version = RuEn("Установлен", "Installed");
+			}
+			return state->loaded
+				? version
+				: version + u" • "_q + RuEn("метаданные", "metadata");
+		}
+		return RuEn("Открыть менеджер", "Open manager");
+	}();
+	AddActionButtonWithLabel(
+		container,
+		title,
+		label,
+		[=] {
+			if (state) {
+				controller->showSettings(PluginDetailsId(state->info.id));
+			} else {
+				controller->showSettings(Plugins::Id());
+			}
+		},
+		{ &st::menuIconCustomize });
+	Ui::AddDividerText(
+		container,
+		rpl::single(IsRussianUi()
+			? QString::fromUtf8(spec.descriptionRu)
+			: QString::fromUtf8(spec.descriptionEn)));
+}
+
 void SetupAstrogram(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -105,8 +164,75 @@ void SetupAstrogram(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Здесь открывается менеджер плагинов Astrogram. Системные действия плагинов, документация, runtime API, безопасный режим и папка плагинов вынесены в меню с тремя точками внутри раздела.",
-			"This opens the Astrogram plugin manager. Plugin system actions, documentation, runtime API, safe mode and the plugins folder live in the three-dots menu inside that section.")));
+			"Здесь открывается менеджер плагинов Astrogram. Системные действия плагинов, документация, runtime API, безопасный режим, логи и папка плагинов вынесены в меню с тремя точками внутри раздела.",
+			"This opens the Astrogram plugin manager. Plugin system actions, documentation, runtime API, safe mode, logs and the plugins folder live in the three-dots menu inside that section.")));
+
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn("Быстрые входы", "Quick Access")));
+	AddPluginShortcut(
+		controller,
+		container,
+		{
+			.id = u"example.transparent_telegram"_q,
+			.titleRu = "AstroTransparent",
+			.titleEn = "AstroTransparent",
+			.descriptionRu = "Прозрачность интерфейса, сообщений и текста в отдельной странице плагина.",
+			.descriptionEn = "Interface, message and text transparency in a dedicated plugin page.",
+		});
+	AddPluginShortcut(
+		controller,
+		container,
+		{
+			.id = u"astro.blur_telegram"_q,
+			.titleRu = "Blur Telegram",
+			.titleEn = "Blur Telegram",
+			.descriptionRu = "Живой blur крупных поверхностей Astrogram с настройкой силы эффекта.",
+			.descriptionEn = "Live blur for major Astrogram surfaces with strength controls.",
+		});
+	AddPluginShortcut(
+		controller,
+		container,
+		{
+			.id = u"astro.accent_color"_q,
+			.titleRu = "Accent Color",
+			.titleEn = "Accent Color",
+			.descriptionRu = "Accent-палитра и тонировка поверхностей для более выразительного оформления.",
+			.descriptionEn = "Accent palette and surface tinting for a more expressive appearance.",
+		});
+	AddPluginShortcut(
+		controller,
+		container,
+		{
+			.id = u"astro.font_tuner"_q,
+			.titleRu = "Font Tuner",
+			.titleEn = "Font Tuner",
+			.descriptionRu = "Масштаб шрифта и загрузка кастомных шрифтов по ссылке или из файла.",
+			.descriptionEn = "Font scaling and custom font loading from a URL or a local file.",
+		});
+	AddPluginShortcut(
+		controller,
+		container,
+		{
+			.id = u"sosiskibot.ai_chat"_q,
+			.titleRu = "AI Chat",
+			.titleEn = "AI Chat",
+			.descriptionRu = "Перехватывает /ai и открывает встроенный чат с ИИ на sosiskibot.ru/api.",
+			.descriptionEn = "Intercepts /ai and opens the built-in AI chat backed by sosiskibot.ru/api.",
+		});
+	AddPluginShortcut(
+		controller,
+		container,
+		{
+			.id = u"astro.ayu_safe"_q,
+			.titleRu = "AyuSafe",
+			.titleEn = "AyuSafe",
+			.descriptionRu = "Приватность, anti-recall и утилиты в стиле AyuGram внутри Astrogram.",
+			.descriptionEn = "Privacy, anti-recall and utility controls in an AyuGram-style package.",
+		});
 
 	Ui::AddSkip(container);
 	Ui::AddDivider(container);

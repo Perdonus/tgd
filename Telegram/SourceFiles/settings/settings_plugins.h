@@ -51,4 +51,6 @@ private:
 	const not_null<Window::SessionController*> _controller;
 };
 
+[[nodiscard]] Type PluginDetailsId(const QString &pluginId);
+
 } // namespace Settings
