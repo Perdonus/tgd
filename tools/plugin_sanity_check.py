@@ -117,6 +117,10 @@ def check_plugin_source(
         errors.append(
             f"{prefix}: uses QStringLiteral() with a k* constant instead of a string literal"
         )
+    if re.search(r"\.pop_front\s*\(", text):
+        errors.append(
+            f"{prefix}: uses pop_front(), which is not portable for the Qt containers we build against"
+        )
 
     used_methods = set(re.findall(r"_host->([A-Za-z_]\w*)\s*\(", text))
     for method in sorted(used_methods):

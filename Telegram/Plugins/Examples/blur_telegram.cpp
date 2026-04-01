@@ -160,7 +160,7 @@ public:
 	: QObject(nullptr)
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
-		_info.name = Tr(_host, "Blur Telegram", "Blur Telegram");
+		_info.name = Tr(_host, "Blur Telegram", "Размытие Telegram");
 		_info.version = QStringLiteral("1.0");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(

@@ -83,7 +83,7 @@ public:
 	, _host(host)
 	, _basePalette(QApplication::palette()) {
 		_info.id = Latin1(kPluginId);
-		_info.name = Tr(_host, "Accent Color", "Accent Color");
+		_info.name = Tr(_host, "Accent Color", "Акцентный цвет");
 		_info.version = QStringLiteral("1.0");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(

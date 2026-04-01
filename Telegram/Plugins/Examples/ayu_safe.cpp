@@ -540,7 +540,7 @@ private:
 	void trimCache() {
 		const auto limit = maxCacheEntries();
 		while (_cache.size() > limit) {
-			_cache.pop_front();
+			_cache.remove(0);
 		}
 	}
 
