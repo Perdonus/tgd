@@ -32,7 +32,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          fetch-depth: 1
+          filter: blob:none
+          submodules: false
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -59,6 +62,19 @@ jobs:
           "win64_root=$win64Root" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "thirdparty_root=$thirdPartyRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Restore desktop source mirrors cache
+        id: desktop_sources_cache
+        uses: actions/cache/restore@v4
+        with:
+          key: desktop-source-mirrors-win64-v1-${{ hashFiles('.gitmodules', '.github/workflows/build-desktop.yml', '.github/workflows/build-desktop-force.yml') }}
+          restore-keys: |
+            desktop-source-mirrors-win64-v1-
+          path: |
+            cmake
+            Telegram/codegen
+            Telegram/lib_*
+            Telegram/ThirdParty
+
       - name: Restore desktop toolchain cache
         id: desktop_toolchain_cache
         uses: actions/cache/restore@v4
@@ -71,8 +87,30 @@ jobs:
             ${{ steps.prepare_paths.outputs.libs_root }}/cache_keys
             ${{ steps.prepare_paths.outputs.thirdparty_root }}
 
+      - name: Check restored toolchain cache
+        id: toolchain_state
+        shell: pwsh
+        run: |
+          $qtCore = Join-Path '${{ steps.prepare_paths.outputs.win64_root }}' 'Qt-5.15.18/lib/Qt5Core.lib'
+          $thirdPartyPython = Join-Path '${{ steps.prepare_paths.outputs.thirdparty_root }}' 'python/Scripts/python.exe'
+          $ready = ('${{ steps.desktop_toolchain_cache.outputs.cache-hit }}' -eq 'true') -and (Test-Path -LiteralPath $qtCore) -and (Test-Path -LiteralPath $thirdPartyPython)
+          "ready=$($ready.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "[toolchain] cache-hit=${{ steps.desktop_toolchain_cache.outputs.cache-hit }} ready=$ready"
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure build acceleration
+        shell: pwsh
+        run: |
+          "SCCACHE_GHA_ENABLED=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_CACHE_SIZE=10G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_IGNORE_SERVER_IO_ERROR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_BUILD_PARALLEL_LEVEL=$env:NUMBER_OF_PROCESSORS" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Prepare dependencies (Windows)
         id: prepare
+        if: ${{ steps.toolchain_state.outputs.ready != 'true' }}
         shell: cmd
         run: |
           @echo on
@@ -120,17 +158,16 @@ jobs:
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%"
           set "CMAKE_HELPERS_SHA=ba366ade3e70c64d1dd854382abd74f532ba41a1"
+          set "CMAKE_HEAD="
+          if exist cmake\.git (
+            for /f %%i in ('git -C cmake rev-parse HEAD 2^>nul') do set "CMAKE_HEAD=%%i"
+          )
+          if /I "!CMAKE_HEAD!"=="%CMAKE_HELPERS_SHA%" goto cmake_submodule_ok
 
           set "CMAKE_SUBMODULE_MAX_TRIES=3"
           set "CMAKE_SUBMODULE_TRY=1"
           :cmake_submodule_retry
-          if exist cmake\run_cmake.py goto cmake_submodule_ok
           echo [cmake-submodule] attempt !CMAKE_SUBMODULE_TRY! of !CMAKE_SUBMODULE_MAX_TRIES!
-          git submodule sync --recursive
-          git submodule update --init --recursive cmake
-          if exist cmake\run_cmake.py goto cmake_submodule_ok
-
-          echo [cmake-submodule] submodule update did not produce run_cmake.py, trying pinned checkout fallback
           if exist cmake rmdir /Q /S cmake
           git -c init.defaultBranch=__codex__ init cmake
           if errorlevel 1 exit /b 1
@@ -140,7 +177,10 @@ jobs:
           if errorlevel 1 exit /b 1
           git -C cmake checkout --detach FETCH_HEAD
           if errorlevel 1 exit /b 1
-          if exist cmake\run_cmake.py goto cmake_submodule_ok
+          if exist cmake\run_cmake.py (
+            for /f %%i in ('git -C cmake rev-parse HEAD 2^>nul') do set "CMAKE_HEAD=%%i"
+          )
+          if /I "!CMAKE_HEAD!"=="%CMAKE_HELPERS_SHA%" goto cmake_submodule_ok
           if !CMAKE_SUBMODULE_TRY! GEQ !CMAKE_SUBMODULE_MAX_TRIES! (
             echo [cmake-submodule] cmake\\run_cmake.py is still missing
             if exist cmake (
@@ -223,18 +263,29 @@ jobs:
             $moduleSha = $moduleShas[$modulePath]
 
             $target = Join-Path $env:GITHUB_WORKSPACE $modulePath
-            $needsClone = $true
             if (Test-Path -LiteralPath $target) {
-              $entries = @(Get-ChildItem -LiteralPath $target -Force -ErrorAction SilentlyContinue)
-              if ($entries.Count -gt 0) {
-                $needsClone = $false
+              if (Test-Path -LiteralPath (Join-Path $target ".git")) {
+                & git -C $target remote set-url origin $moduleUrl *> $null
+                if ($LASTEXITCODE -eq 0) {
+                  if ([string]::IsNullOrWhiteSpace($moduleSha)) {
+                    Write-Host "[sources] ok: $modulePath"
+                    continue
+                  }
+                  $head = (& git -C $target rev-parse HEAD 2>$null).Trim()
+                  if ($LASTEXITCODE -eq 0 -and $head -eq $moduleSha) {
+                    Write-Host "[sources] ok: $modulePath @ $head"
+                    continue
+                  }
+                  Write-Host "[sources] update pinned: $modulePath @ $moduleSha"
+                  & git -C $target fetch --depth 1 origin $moduleSha
+                  if ($LASTEXITCODE -eq 0) {
+                    & git -C $target checkout --detach FETCH_HEAD
+                    if ($LASTEXITCODE -eq 0) {
+                      continue
+                    }
+                  }
+                }
               }
-            }
-            if (-not $needsClone) {
-              Write-Host "[sources] ok: $modulePath"
-              continue
-            }
-            if (Test-Path -LiteralPath $target) {
               Remove-Item -LiteralPath $target -Recurse -Force
             }
             if ([string]::IsNullOrWhiteSpace($moduleSha)) {
@@ -264,6 +315,17 @@ jobs:
               throw "[sources] failed to checkout $moduleSha for $modulePath"
             }
           }
+
+      - name: Save desktop source mirrors cache
+        if: ${{ success() && steps.desktop_sources_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          key: desktop-source-mirrors-win64-v1-${{ hashFiles('.gitmodules', '.github/workflows/build-desktop.yml', '.github/workflows/build-desktop-force.yml') }}
+          path: |
+            cmake
+            Telegram/codegen
+            Telegram/lib_*
+            Telegram/ThirdParty
 
       - name: Normalize Qt and Libraries paths
         id: normalize_paths
@@ -425,6 +487,7 @@ jobs:
           set "CFG_LOG_2=%CI_LOGS_DIR%\\configure-attempt2.log"
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
+          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
 
           where python
           python --version
@@ -432,12 +495,12 @@ jobs:
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
 
-          call configure.bat x64 force -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
+          call configure.bat force -G "Ninja Multi-Config" %ACCEL_ARGS% -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
           if not defined CFG_OK (
-            echo [configure] primary x64 flags failed, retrying: configure.bat x64 force
+            echo [configure] fast Ninja configure failed, retrying Visual Studio x64 configure
             powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_1%' -Tail 80"
             powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_1%' -Tail 20) -join ' | '; Write-Output ('::warning title=Configure attempt1 failed::' + $tail)"
-            call configure.bat x64 force -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
+            call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
           )
           if not defined CFG_OK (
             echo [configure] all x64 configure attempts failed
@@ -468,12 +531,12 @@ jobs:
           set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-target.log"
           set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-release.log"
 
-          cmake --build ..\out --config Release --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
+          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok
           echo [build] target Telegram failed, retrying default Release build
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 120"
           powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Target build failed::' + $tail)"
-          cmake --build ..\out --config Release > "%BUILD_LOG_RELEASE%" 2>&1
+          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% > "%BUILD_LOG_RELEASE%" 2>&1
           if not errorlevel 1 goto build_ok
           echo [build] default Release build failed
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 120"
@@ -482,75 +545,24 @@ jobs:
           :build_ok
           exit /b 0
 
+      - name: Show sccache stats
+        if: ${{ always() && steps.build_target.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          if ($env:SCCACHE_PATH) {
+            & $env:SCCACHE_PATH --show-stats
+          } else {
+            sccache --show-stats
+          }
+
       - name: Upload diagnostics logs
-        if: ${{ always() }}
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-ci-logs
           path: |
             ci-logs/*.log
           if-no-files-found: ignore
-
-      - name: Build example plugins
-        if: ${{ steps.build_target.outcome == 'success' }}
-        id: build_plugins
-        continue-on-error: true
-        shell: cmd
-        run: |
-          @echo on
-          setlocal EnableExtensions EnableDelayedExpansion
-          cd /d "%GITHUB_WORKSPACE%\\Telegram"
-
-          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
-          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "PLUGIN_BUILD_LOG=%CI_LOGS_DIR%\\build-plugins.log"
-
-          cmake --build ..\out --config Release --target tgd_example_plugins > "%PLUGIN_BUILD_LOG%" 2>&1
-          if not errorlevel 1 exit /b 0
-
-          echo [plugins] example plugin build failed
-          powershell -NoProfile -Command "Get-Content -Path '%PLUGIN_BUILD_LOG%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%PLUGIN_BUILD_LOG%' -Tail 40) -join ' | '; Write-Output ('::error title=Plugin example build failed::' + $tail)"
-          exit /b 1
-
-      - name: Collect example plugins
-        if: ${{ steps.build_plugins.outcome == 'success' }}
-        id: collect_plugins
-        shell: pwsh
-        run: |
-          $roots = @(
-            "$PWD/out/plugin_examples",
-            "$PWD/Telegram/out/plugin_examples",
-            "$PWD/out/Release/plugin_examples",
-            "$PWD/Telegram/out/Release/plugin_examples"
-          ) | Where-Object { Test-Path $_ }
-
-          $matches = @()
-          foreach ($root in $roots) {
-            $matches += Get-ChildItem -Path $root -Recurse -File -Filter *.tgd -ErrorAction SilentlyContinue
-          }
-          $matches = $matches | Sort-Object FullName -Unique
-
-          if (-not $matches -or $matches.Count -eq 0) {
-            Write-Host "Searched plugin roots:"
-            $roots | ForEach-Object { Write-Host " - $_" }
-            Write-Error "Built example plugins were not found."
-            exit 1
-          }
-
-          New-Item -ItemType Directory -Path "$PWD/dist/plugins" -Force | Out-Null
-          foreach ($match in $matches) {
-            Copy-Item -LiteralPath $match.FullName -Destination (Join-Path "$PWD/dist/plugins" $match.Name) -Force
-          }
-
-      - name: Upload example plugins artifact
-        if: ${{ steps.collect_plugins.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: telegram-plugin-examples-windows
-          path: |
-            dist/plugins/*.tgd
-          if-no-files-found: error
 
       - name: Locate built EXE
         if: ${{ always() && steps.build_target.outcome == 'success' }}
