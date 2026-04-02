@@ -242,7 +242,7 @@ QByteArray Settings::serialize() const {
 		+ Serialize::bytearraySize(_tonsiteStorageToken)
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
-		+ sizeof(qint32) * 3; // _notificationsDisplayChecksum + local overrides
+		+ sizeof(qint32) * 15; // _notificationsDisplayChecksum + 14 Astrogram overrides
 
 	auto result = QByteArray();
 	result.reserve(size);
