@@ -415,7 +415,12 @@ QByteArray Settings::serialize() const {
 			<< qint32(_disableAds.current() ? 1 : 0)
 			<< qint32(_ghostHideReadMessages.current() ? 1 : 0)
 			<< qint32(_ghostHideOnlineStatus.current() ? 1 : 0)
-			<< qint32(_ghostHideTypingProgress.current() ? 1 : 0);
+			<< qint32(_ghostHideTypingProgress.current() ? 1 : 0)
+			<< qint32(_disableStories.current() ? 1 : 0)
+			<< qint32(_disableOpenLinkWarning.current() ? 1 : 0)
+			<< qint32(_showMessageSeconds.current() ? 1 : 0)
+			<< qint32(_collapseSimilarChannels.current() ? 1 : 0)
+			<< qint32(_hideSimilarChannels.current() ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -553,6 +558,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 saveMessagesHistory = _saveMessagesHistory.current() ? 1 : 0;
 	qint32 semiTransparentDeletedMessages = _semiTransparentDeletedMessages.current() ? 1 : 0;
 	qint32 disableAds = _disableAds.current() ? 1 : 0;
+	qint32 disableStories = _disableStories.current() ? 1 : 0;
+	qint32 disableOpenLinkWarning = _disableOpenLinkWarning.current() ? 1 : 0;
+	qint32 showMessageSeconds = _showMessageSeconds.current() ? 1 : 0;
+	qint32 collapseSimilarChannels = _collapseSimilarChannels.current() ? 1 : 0;
+	qint32 hideSimilarChannels = _hideSimilarChannels.current() ? 1 : 0;
 	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
 	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
 	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
@@ -920,6 +930,21 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> ghostHideTypingProgress;
 	}
+	if (!stream.atEnd()) {
+		stream >> disableStories;
+	}
+	if (!stream.atEnd()) {
+		stream >> disableOpenLinkWarning;
+	}
+	if (!stream.atEnd()) {
+		stream >> showMessageSeconds;
+	}
+	if (!stream.atEnd()) {
+		stream >> collapseSimilarChannels;
+	}
+	if (!stream.atEnd()) {
+		stream >> hideSimilarChannels;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1150,6 +1175,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_saveMessagesHistory = (saveMessagesHistory == 1);
 	_semiTransparentDeletedMessages = (semiTransparentDeletedMessages == 1);
 	_disableAds = (disableAds == 1);
+	_disableStories = (disableStories == 1);
+	_disableOpenLinkWarning = (disableOpenLinkWarning == 1);
+	_showMessageSeconds = (showMessageSeconds == 1);
+	_collapseSimilarChannels = (collapseSimilarChannels == 1);
+	_hideSimilarChannels = (hideSimilarChannels == 1);
 	_ghostHideReadMessages = (ghostHideReadMessages == 1);
 	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
 	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);

@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_media_types.h"
 #include "data/data_message_reaction_id.h"
 #include "data/data_peer_values.h"
+#include "core/application.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
@@ -83,6 +84,14 @@ struct CachedReacted {
 	rpl::variable<PeersWithReactions> data;
 	mtpRequestId requestId = 0;
 };
+
+QString AstrogramReadTimeString(const QTime &time) {
+	return QLocale().toString(
+		time,
+		Core::App().settings().showMessageSeconds()
+			? QStringLiteral("HH:mm:ss")
+			: QLocale::system().timeFormat(QLocale::ShortFormat));
+}
 
 struct Context {
 	base::flat_map<not_null<HistoryItem*>, CachedRead> cachedRead;
@@ -656,12 +665,12 @@ QString FormatReadDate(TimeId date, const QDateTime &now) {
 		return tr::lng_mediaview_today(
 			tr::now,
 			lt_time,
-			QLocale().toString(parsed.time(), QLocale::ShortFormat));
+			AstrogramReadTimeString(parsed.time()));
 	} else if (readDate.addDays(1) == nowDate) {
 		return tr::lng_mediaview_yesterday(
 			tr::now,
 			lt_time,
-			QLocale().toString(parsed.time(), QLocale::ShortFormat));
+			AstrogramReadTimeString(parsed.time()));
 	}
 	return tr::lng_mediaview_date_time(
 		tr::now,
@@ -673,7 +682,7 @@ QString FormatReadDate(TimeId date, const QDateTime &now) {
 			lt_day,
 			QString::number(readDate.day())),
 		lt_time,
-		QLocale().toString(parsed.time(), QLocale::ShortFormat));
+		AstrogramReadTimeString(parsed.time()));
 }
 
 bool WhoReadExists(not_null<HistoryItem*> item) {

@@ -298,6 +298,71 @@ public:
 		_disableAds = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool disableStories() const {
+		return _disableStories.current();
+	}
+	[[nodiscard]] rpl::producer<bool> disableStoriesValue() const {
+		return _disableStories.value();
+	}
+	void setDisableStories(bool value) {
+		if (_disableStories.current() == value) {
+			return;
+		}
+		_disableStories = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool disableOpenLinkWarning() const {
+		return _disableOpenLinkWarning.current();
+	}
+	[[nodiscard]] rpl::producer<bool> disableOpenLinkWarningValue() const {
+		return _disableOpenLinkWarning.value();
+	}
+	void setDisableOpenLinkWarning(bool value) {
+		if (_disableOpenLinkWarning.current() == value) {
+			return;
+		}
+		_disableOpenLinkWarning = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool showMessageSeconds() const {
+		return _showMessageSeconds.current();
+	}
+	[[nodiscard]] rpl::producer<bool> showMessageSecondsValue() const {
+		return _showMessageSeconds.value();
+	}
+	void setShowMessageSeconds(bool value) {
+		if (_showMessageSeconds.current() == value) {
+			return;
+		}
+		_showMessageSeconds = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool collapseSimilarChannels() const {
+		return _collapseSimilarChannels.current();
+	}
+	[[nodiscard]] rpl::producer<bool> collapseSimilarChannelsValue() const {
+		return _collapseSimilarChannels.value();
+	}
+	void setCollapseSimilarChannels(bool value) {
+		if (_collapseSimilarChannels.current() == value) {
+			return;
+		}
+		_collapseSimilarChannels = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool hideSimilarChannels() const {
+		return _hideSimilarChannels.current();
+	}
+	[[nodiscard]] rpl::producer<bool> hideSimilarChannelsValue() const {
+		return _hideSimilarChannels.value();
+	}
+	void setHideSimilarChannels(bool value) {
+		if (_hideSimilarChannels.current() == value) {
+			return;
+		}
+		_hideSimilarChannels = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool ghostHideReadMessages() const {
 		return _ghostHideReadMessages.current();
 	}
@@ -1117,6 +1182,11 @@ private:
 	rpl::variable<bool> _ghostMode = false;
 	rpl::variable<bool> _localPremium = false;
 	rpl::variable<bool> _disableAds = true;
+	rpl::variable<bool> _disableStories = false;
+	rpl::variable<bool> _disableOpenLinkWarning = false;
+	rpl::variable<bool> _showMessageSeconds = false;
+	rpl::variable<bool> _collapseSimilarChannels = true;
+	rpl::variable<bool> _hideSimilarChannels = false;
 	rpl::variable<bool> _ghostHideReadMessages = true;
 	rpl::variable<bool> _ghostHideOnlineStatus = true;
 	rpl::variable<bool> _ghostHideTypingProgress = true;

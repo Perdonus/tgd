@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_transcribes.h"
 #include "api/api_who_reacted.h"
 #include "api/api_toggling_media.h" // Api::ToggleFavedSticker
+#include "ayu/data/messages_storage.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "history/view/history_view_list_widget.h"
@@ -83,16 +84,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "core/application.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "spellcheck/spellcheck_types.h"
 #include "apiwrap.h"
+#include "ui/widgets/labels.h"
+#include "ui/layers/generic_box.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_settings.h"
 
+#include <QtCore/QDateTime>
+#include <QtCore/QLocale>
+#include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -102,6 +111,101 @@ namespace {
 constexpr auto kRescheduleLimit = 20;
 constexpr auto kTagNameLimit = 12;
 constexpr auto kPublicPostLinkToastDuration = 4 * crl::time(1000);
+
+[[nodiscard]] bool AstrogramRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString AstrogramUiText(const char *en, const char *ru) {
+	return AstrogramRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString FormatRevisionTime(int timestamp) {
+	const auto dt = QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime();
+	return AstrogramRussianUi()
+		? dt.toString(u"dd.MM.yyyy HH:mm:ss"_q)
+		: QLocale().toString(dt, QLocale::LongFormat);
+}
+
+[[nodiscard]] QString BuildRevisionsClipboardText(
+		const std::vector<AyuMessages::MessageSnapshot> &revisions) {
+	auto lines = QStringList();
+	lines.reserve(int(revisions.size()) * 3);
+	auto index = 1;
+	for (const auto &revision : revisions) {
+		lines.push_back(AstrogramUiText("Revision %1", "Правка %1").arg(index++));
+		lines.push_back(FormatRevisionTime(revision.editDate ? revision.editDate : revision.date));
+		lines.push_back(revision.text);
+		lines.push_back(QString());
+	}
+	return lines.join(u"\n"_q).trimmed();
+}
+
+void ShowEditHistoryBox(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item) {
+	const auto revisions = AyuMessages::getEditedMessages(item, 50);
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(
+			AstrogramUiText("Edit History", "История правок")));
+		box->addLeftButton(
+			rpl::single(AstrogramUiText("Copy", "Копировать")),
+			[=] {
+				if (const auto clipboard = QGuiApplication::clipboard()) {
+					clipboard->setText(BuildRevisionsClipboardText(revisions));
+				}
+				controller->window().showToast(AstrogramUiText(
+					"Edit history copied.",
+					"История правок скопирована."));
+			});
+		if (revisions.empty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(AstrogramUiText(
+					"No saved revisions.",
+					"Сохранённых правок нет.")),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					0,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+			return;
+		}
+		for (auto i = 0, count = int(revisions.size()); i != count; ++i) {
+			const auto &revision = revisions[i];
+			const auto title = AstrogramUiText(
+				"Revision %1 • %2",
+				"Правка %1 • %2"
+			).arg(i + 1).arg(FormatRevisionTime(
+				revision.editDate ? revision.editDate : revision.date));
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(title),
+				st::sessionDateLabel),
+				style::margins(
+					st::boxPadding.left(),
+					i ? (st::boxPadding.bottom() / 2) : 0,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(revision.text),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					0,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+		}
+	}));
+}
 
 bool HasEditMessageAction(
 		const ContextMenuRequest &request,
@@ -740,6 +844,29 @@ bool AddEditMessageAction(
 	return true;
 }
 
+bool AddEditHistoryAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	if (request.overSelection || !request.selectedItems.empty()) {
+		return false;
+	}
+	const auto item = request.item;
+	if (!item || item->isService() || !AyuMessages::hasRevisions(item)) {
+		return false;
+	}
+	const auto owner = &item->history()->owner();
+	const auto itemId = item->fullId();
+	menu->addAction(AstrogramUiText(
+		"Edit history",
+		"История правок"), [=] {
+		if (const auto current = owner->message(itemId)) {
+			ShowEditHistoryBox(list->controller(), current);
+		}
+	}, &st::menuIconEdit);
+	return true;
+}
+
 void AddFactcheckAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request,
@@ -1032,6 +1159,7 @@ void AddTopMessageActions(
 	AddGoToMessageAction(menu, request, list);
 	AddViewRepliesAction(menu, request, list);
 	AddEditMessageAction(menu, request, list);
+	AddEditHistoryAction(menu, request, list);
 	AddFactcheckAction(menu, request, list);
 	AddPinMessageAction(menu, request, list);
 }

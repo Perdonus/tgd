@@ -71,6 +71,18 @@ namespace {
 	return map.back().text;
 }
 
+QString AstrogramMessageTime(const QTime &time) {
+	if (!Core::App().settings().showMessageSeconds()) {
+		return QLocale().toString(time, QLocale::ShortFormat);
+	}
+	const auto format = QLocale().timeFormat(QLocale::ShortFormat);
+	return QLocale().toString(
+		time,
+		format.contains(QStringLiteral("AP"))
+			? QStringLiteral("h:mm:ss AP")
+			: QStringLiteral("HH:mm:ss"));
+}
+
 } // namespace
 
 struct BottomInfo::Effect {
@@ -462,7 +474,7 @@ void BottomInfo::layoutDateText() {
 	const auto prefix = !author.isEmpty() ? u", "_q : QString();
 	const auto date = edited + ((_data.flags & Data::Flag::ForwardedDate)
 		? Ui::FormatDateTimeSavedFrom(_data.date)
-		: QLocale().toString(_data.date.time(), QLocale::ShortFormat));
+		: AstrogramMessageTime(_data.date.time()));
 	const auto afterAuthor = prefix + date;
 	const auto afterAuthorWidth = st::msgDateFont->width(afterAuthor);
 	const auto authorWidth = st::msgDateFont->width(author);

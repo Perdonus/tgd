@@ -1348,6 +1348,9 @@ void Widget::setupMainMenuToggle() {
 }
 
 void Widget::setupStories() {
+	if (Core::App().settings().disableStories()) {
+		return;
+	}
 	_stories->verticalScrollEvents(
 	) | rpl::on_next([=](not_null<QWheelEvent*> e) {
 		_scroll->viewportEvent(e);
@@ -2337,6 +2340,10 @@ void Widget::stopWidthAnimation() {
 void Widget::updateStoriesVisibility() {
 	updateLockUnlockVisibility();
 	if (!_stories) {
+		return;
+	}
+	if (Core::App().settings().disableStories()) {
+		_stories->setVisible(false);
 		return;
 	}
 	const auto hidden = (_showAnimation != nullptr)

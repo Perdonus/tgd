@@ -10,17 +10,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
+#include "core/version.h"
 #include "lang/lang_instance.h"
 #include "settings/settings_common.h"
 #include "settings/settings_plugins.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+#include "ui/painter.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 
 #include <optional>
+#include <QImage>
+#include <QPainterPath>
+#include <QTextOption>
 
 namespace Settings {
 namespace {
@@ -61,6 +66,101 @@ struct PluginShortcutSpec {
 		}
 	}
 	return std::nullopt;
+}
+
+[[nodiscard]] QImage AstrogramHeaderImage() {
+	static const auto image = [] {
+		auto result = QImage(u":/gui/art/astrogram/settings_avatar.jpg"_q);
+		if (result.isNull()) {
+			result = QImage(u":/gui/art/logo_256_no_margin.png"_q);
+		}
+		return result;
+	}();
+	return image;
+}
+
+[[nodiscard]] QRectF CenterCropSourceRect(const QImage &image) {
+	if (image.isNull()) {
+		return {};
+	}
+	if (image.width() == image.height()) {
+		return QRectF(0, 0, image.width(), image.height());
+	}
+	if (image.width() > image.height()) {
+		const auto side = image.height();
+		const auto left = (image.width() - side) / 2.0;
+		return QRectF(left, 0, side, side);
+	}
+	const auto side = image.width();
+	const auto top = (image.height() - side) / 2.0;
+	return QRectF(0, top, side, side);
+}
+
+[[nodiscard]] QString AstrogramVersionText() {
+	return RuEn("Версия %1", "Version %1").arg(QString::fromLatin1(AppVersionStr));
+}
+
+[[nodiscard]] QString AstrogramHeaderDescription() {
+	return RuEn(
+		"Здесь собраны основные возможности Astrogram: приватность, защита от удаления, оформление и вся система плагинов.",
+		"Astrogram keeps its core client features, privacy tools, anti-recall options, appearance controls and the plugin system here.");
+}
+
+void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
+	const auto header = container->add(object_ptr<Ui::RpWidget>(container));
+	const auto raw = header.data();
+	raw->setMinimumHeight(248);
+	raw->setMaximumHeight(248);
+
+	raw->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = Painter(raw);
+		const auto avatar = AstrogramHeaderImage();
+		const auto width = raw->width();
+		const auto avatarSize = st::settingsCloudPasswordIconSize;
+		const auto avatarRect = QRect(
+			(width - avatarSize) / 2,
+			12,
+			avatarSize,
+			avatarSize);
+
+		if (!avatar.isNull()) {
+			auto hq = PainterHighQualityEnabler(p);
+			QPainterPath path;
+			path.addRoundedRect(
+				QRectF(avatarRect),
+				avatarRect.width() / 2.0,
+				avatarRect.height() / 2.0);
+			p.save();
+			p.setClipPath(path);
+			p.drawImage(avatarRect, avatar, CenterCropSourceRect(avatar));
+			p.restore();
+		}
+
+		const auto titleTop = avatarRect.bottom() + 24;
+		p.setPen(st::boxTitleFg);
+		p.setFont(st::boxTitle.style.font);
+		p.drawText(
+			QRect(24, titleTop, width - 48, st::boxTitle.style.font->height + 8),
+			Qt::AlignHCenter | Qt::TextSingleLine,
+			u"Astrogram"_q);
+
+		const auto versionTop = titleTop + st::boxTitle.style.font->height + 8;
+		p.setPen(st::windowSubTextFg);
+		p.setFont(st::defaultFlatLabel.style.font);
+		p.drawText(
+			QRect(24, versionTop, width - 48, st::defaultFlatLabel.style.font->height + 6),
+			Qt::AlignHCenter | Qt::TextSingleLine,
+			AstrogramVersionText());
+
+		const auto descriptionTop = versionTop
+			+ st::defaultFlatLabel.style.font->height
+			+ 12;
+		p.drawText(
+			QRect(36, descriptionTop, width - 72, 64),
+			AstrogramHeaderDescription(),
+			QTextOption(Qt::AlignHCenter | Qt::AlignTop));
+	}, raw->lifetime());
 }
 
 template <typename Producer, typename Callback>
@@ -129,11 +229,12 @@ void AddPluginShortcut(
 			}
 		},
 		{ &st::menuIconCustomize });
-	Ui::AddDividerText(
-		container,
-		rpl::single(IsRussianUi()
-			? QString::fromUtf8(spec.descriptionRu)
-			: QString::fromUtf8(spec.descriptionEn)));
+	const auto description = IsRussianUi()
+		? QString::fromUtf8(spec.descriptionRu)
+		: QString::fromUtf8(spec.descriptionEn);
+	if (!description.trimmed().isEmpty()) {
+		Ui::AddDividerText(container, rpl::single(description));
+	}
 }
 
 void SetupAstrogram(
@@ -141,20 +242,13 @@ void SetupAstrogram(
 		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Astrogram объединяет клиентские фишки, anti-recall, ghost mode и систему плагинов. Основная точка входа для расширений теперь находится здесь.",
-			"Astrogram combines client-side features, anti-recall, ghost mode and the plugin system. The main entry point for extensions now lives here.")));
-
+	AddAstrogramHeader(container);
 	Ui::AddSkip(container);
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(
 		container,
-		rpl::single(RuEn("Расширения", "Extensions")));
+		rpl::single(RuEn("Плагины", "Extensions")));
 	AddActionButtonWithLabel(
 		container,
 		RuEn("Плагины", "Plugins"),
@@ -164,7 +258,7 @@ void SetupAstrogram(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Здесь открывается менеджер плагинов Astrogram. Системные действия плагинов, документация, runtime API, безопасный режим, логи и папка плагинов вынесены в меню с тремя точками внутри раздела.",
+			"Здесь открывается менеджер плагинов Astrogram. Документация, встроенный API плагинов, безопасный режим, журнал и папка плагинов вынесены в меню с тремя точками внутри раздела.",
 			"This opens the Astrogram plugin manager. Plugin system actions, documentation, runtime API, safe mode, logs and the plugins folder live in the three-dots menu inside that section.")));
 
 	Ui::AddSkip(container);
@@ -172,7 +266,7 @@ void SetupAstrogram(
 	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(
 		container,
-		rpl::single(RuEn("Быстрые входы", "Quick Access")));
+		rpl::single(RuEn("Быстрый доступ", "Quick Access")));
 	AddPluginShortcut(
 		controller,
 		container,
@@ -190,7 +284,7 @@ void SetupAstrogram(
 			.id = u"astro.blur_telegram"_q,
 			.titleRu = "Blur Telegram",
 			.titleEn = "Blur Telegram",
-			.descriptionRu = "Живой blur крупных поверхностей Astrogram с настройкой силы эффекта.",
+			.descriptionRu = "Живое размытие крупных элементов Astrogram с настройкой силы эффекта.",
 			.descriptionEn = "Live blur for major Astrogram surfaces with strength controls.",
 		});
 	AddPluginShortcut(
@@ -200,7 +294,7 @@ void SetupAstrogram(
 			.id = u"astro.accent_color"_q,
 			.titleRu = "Accent Color",
 			.titleEn = "Accent Color",
-			.descriptionRu = "Accent-палитра и тонировка поверхностей для более выразительного оформления.",
+			.descriptionRu = "Акцентные цвета и тонировка поверхностей для более выразительного оформления.",
 			.descriptionEn = "Accent palette and surface tinting for a more expressive appearance.",
 		});
 	AddPluginShortcut(
@@ -230,8 +324,8 @@ void SetupAstrogram(
 			.id = u"astro.ayu_safe"_q,
 			.titleRu = "AyuSafe",
 			.titleEn = "AyuSafe",
-			.descriptionRu = "Приватность, anti-recall и утилиты в стиле AyuGram внутри Astrogram.",
-			.descriptionEn = "Privacy, anti-recall and utility controls in an AyuGram-style package.",
+			.descriptionRu = "",
+			.descriptionEn = "",
 		});
 
 	Ui::AddSkip(container);
@@ -243,7 +337,7 @@ void SetupAstrogram(
 	AddToggle(
 		container,
 		settings.ghostModeValue(),
-		RuEn("Режим призрака", "Ghost mode"),
+		RuEn("Режим невидимки", "Ghost mode"),
 		[&](bool toggled) { settings.setGhostMode(toggled); });
 	AddToggle(
 		container,
@@ -253,22 +347,22 @@ void SetupAstrogram(
 	AddToggle(
 		container,
 		settings.ghostHideOnlineStatusValue(),
-		RuEn("Не слать online-пакеты", "Don't send online packets"),
+		RuEn("Не отправлять статус «в сети»", "Don't send online packets"),
 		[&](bool toggled) { settings.setGhostHideOnlineStatus(toggled); });
 	AddToggle(
 		container,
 		settings.ghostHideTypingProgressValue(),
-		RuEn("Не слать typing/upload progress", "Don't send typing/upload progress"),
+		RuEn("Не отправлять набор текста и ход загрузки", "Don't send typing/upload progress"),
 		[&](bool toggled) { settings.setGhostHideTypingProgress(toggled); });
 	AddToggle(
 		container,
 		settings.localPremiumValue(),
-		RuEn("Локальный Premium", "Local Premium"),
+		RuEn("Локальный премиум", "Local Premium"),
 		[&](bool toggled) { settings.setLocalPremium(toggled); });
 	AddToggle(
 		container,
 		settings.disableAdsValue(),
-		RuEn("Скрывать рекламу и sponsored", "Hide ads and sponsored"),
+		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
 		[&](bool toggled) { settings.setDisableAds(toggled); });
 
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
@@ -276,7 +370,38 @@ void SetupAstrogram(
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 	Ui::AddSubsectionTitle(
 		container,
-		rpl::single(RuEn("Антиудаление", "Anti-recall")));
+		rpl::single(RuEn("Интерфейс", "Interface")));
+	AddToggle(
+		container,
+		settings.disableStoriesValue(),
+		RuEn("Скрыть истории", "Disable Stories"),
+		[&](bool toggled) { settings.setDisableStories(toggled); });
+	AddToggle(
+		container,
+		settings.disableOpenLinkWarningValue(),
+		RuEn("Не спрашивать перед открытием ссылок", "Disable open-link warning"),
+		[&](bool toggled) { settings.setDisableOpenLinkWarning(toggled); });
+	AddToggle(
+		container,
+		settings.showMessageSecondsValue(),
+		RuEn("Показывать секунды во времени", "Show message seconds"),
+		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
+	AddToggle(
+		container,
+		settings.collapseSimilarChannelsValue(),
+		RuEn("Сворачивать похожие каналы", "Collapse Similar Channels"),
+		[&](bool toggled) { settings.setCollapseSimilarChannels(toggled); });
+	AddToggle(
+		container,
+		settings.hideSimilarChannelsValue(),
+		RuEn("Скрыть похожие каналы", "Hide Similar Channels"),
+		[&](bool toggled) { settings.setHideSimilarChannels(toggled); });
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn("Защита от удаления", "Anti-recall")));
 	AddToggle(
 		container,
 		settings.saveDeletedMessagesValue(),
@@ -294,16 +419,11 @@ void SetupAstrogram(
 		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
 	AddActionButtonWithLabel(
 		container,
-		RuEn("Показать лог anti-recall", "Show anti-recall log"),
+		RuEn("Показать журнал защиты от удаления", "Show anti-recall log"),
 		QString::fromUtf8("astro_recall_log.jsonl"),
 		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); });
 
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Часть функций Astrogram встроена прямо в клиент, а визуальные и экспериментальные расширения живут через плагины.",
-			"Some Astrogram features are built directly into the client, while visual and experimental extensions live through plugins.")));
 }
 
 } // namespace
@@ -316,7 +436,7 @@ Astrogram::Astrogram(
 }
 
 rpl::producer<QString> Astrogram::title() {
-	return rpl::single(u"Astrogram"_q);
+	return rpl::single(QString());
 }
 
 void Astrogram::setupContent(

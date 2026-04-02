@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_sublist.h"
 #include "info/saved/info_saved_music_common.h"
 #include "info_profile_actions.h"
+#include "core/application.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "api/api_peer_photo.h"
@@ -290,6 +291,9 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 	const auto addSimilarPeersButton = [&](
 			not_null<PeerData*> peer,
 			const style::icon &icon) {
+		if (Core::App().settings().hideSimilarChannels()) {
+			return;
+		}
 		auto result = Media::AddSimilarPeersButton(
 			content,
 			_controller,
@@ -303,7 +307,7 @@ object_ptr<Ui::RpWidget> InnerWidget::setupSharedMedia(
 	auto addStoriesButton = [&](
 			not_null<PeerData*> peer,
 			const style::icon &icon) {
-		if (peer->isChat()) {
+		if (peer->isChat() || Core::App().settings().disableStories()) {
 			return;
 		}
 		auto result = Media::AddStoriesButton(

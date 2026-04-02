@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_inner_widget.h"
 
 #include "chat_helpers/stickers_emoji_pack.h"
+#include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/click_handler_types.h"
 #include "core/phone_click_handler.h"
@@ -3429,10 +3430,13 @@ TextForMimeData HistoryInner::getSelectedText() const {
 	const auto wrapItem = [&](
 			not_null<HistoryItem*> item,
 			TextForMimeData &&unwrapped) {
+		const auto format = Core::App().settings().showMessageSeconds()
+			? QLocale::LongFormat
+			: QLocale::ShortFormat;
 		const auto i = texts.emplace(item->position(), Part{
 			.name = item->author()->name(),
 			.time = QString(", [%1]\n").arg(
-				QLocale().toString(ItemDateTime(item), QLocale::ShortFormat)),
+				QLocale().toString(ItemDateTime(item), format)),
 			.unwrapped = std::move(unwrapped),
 		}).first;
 		fullSize += i->second.name.size()

@@ -12,10 +12,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 
+#include <algorithm>
+#include <optional>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 
 namespace AyuMessages {
 namespace {
@@ -73,10 +76,96 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	file.close();
 }
 
+[[nodiscard]] bool MatchesItem(
+		not_null<HistoryItem*> item,
+		const MessageSnapshot &snapshot) {
+	const auto userId = item->history()->owner().session().userId().bare
+		& PeerId::kChatTypeMask;
+	const auto dialogId = item->history()->peer->id.value & PeerId::kChatTypeMask;
+	const auto topicId = item->topic() ? item->topicRootId().bare : 0;
+	return (snapshot.kind == u"edited"_q)
+		&& (snapshot.userId == userId)
+		&& (snapshot.dialogId == dialogId)
+		&& (snapshot.topicId == topicId)
+		&& (snapshot.messageId == item->id.bare);
+}
+
+[[nodiscard]] std::optional<MessageSnapshot> ParseSnapshotLine(
+		const QByteArray &line) {
+	if (line.trimmed().isEmpty()) {
+		return std::nullopt;
+	}
+	QJsonParseError error;
+	const auto document = QJsonDocument::fromJson(line, &error);
+	if (error.error != QJsonParseError::NoError || !document.isObject()) {
+		return std::nullopt;
+	}
+	const auto object = document.object();
+	auto snapshot = MessageSnapshot();
+	snapshot.kind = object.value(u"kind"_q).toString();
+	snapshot.userId = object.value(u"userId"_q).toString().toLongLong();
+	snapshot.dialogId = object.value(u"dialogId"_q).toString().toLongLong();
+	snapshot.peerId = object.value(u"peerId"_q).toString().toLongLong();
+	snapshot.fromId = object.value(u"fromId"_q).toString().toLongLong();
+	snapshot.topicId = object.value(u"topicId"_q).toString().toLongLong();
+	snapshot.messageId = object.value(u"messageId"_q).toInt();
+	snapshot.date = object.value(u"date"_q).toInt();
+	snapshot.editDate = object.value(u"editDate"_q).toInt();
+	snapshot.text = object.value(u"text"_q).toString();
+	return snapshot;
+}
+
 } // namespace
 
 void addEditedMessage(not_null<HistoryItem*> item) {
 	AppendSnapshot(MapSnapshot(item, u"edited"_q));
+}
+
+std::vector<MessageSnapshot> getEditedMessages(
+		not_null<HistoryItem*> item,
+		int totalLimit) {
+	auto result = std::vector<MessageSnapshot>();
+	auto file = QFile(StoragePath());
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return result;
+	}
+	while (!file.atEnd()) {
+		const auto parsed = ParseSnapshotLine(file.readLine());
+		if (!parsed || !MatchesItem(item, *parsed) || parsed->text.isEmpty()) {
+			continue;
+		}
+		result.push_back(*parsed);
+	}
+	file.close();
+	std::sort(
+		result.begin(),
+		result.end(),
+		[](const MessageSnapshot &a, const MessageSnapshot &b) {
+			if (a.editDate != b.editDate) {
+				return a.editDate > b.editDate;
+			}
+			return a.date > b.date;
+		});
+	if (totalLimit > 0 && int(result.size()) > totalLimit) {
+		result.resize(totalLimit);
+	}
+	return result;
+}
+
+bool hasRevisions(not_null<HistoryItem*> item) {
+	auto file = QFile(StoragePath());
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return false;
+	}
+	while (!file.atEnd()) {
+		const auto parsed = ParseSnapshotLine(file.readLine());
+		if (parsed && MatchesItem(item, *parsed) && !parsed->text.isEmpty()) {
+			file.close();
+			return true;
+		}
+	}
+	file.close();
+	return false;
 }
 
 void addDeletedMessage(not_null<HistoryItem*> item) {
