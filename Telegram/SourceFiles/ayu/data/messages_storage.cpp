@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/data/messages_storage.h"
 
 #include "base/unixtime.h"
+#include "data/data_peer.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -115,6 +116,30 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	return snapshot;
 }
 
+[[nodiscard]] bool MatchesPeer(
+		not_null<PeerData*> peer,
+		ID topicId,
+		const MessageSnapshot &snapshot) {
+	const auto userId = peer->session().userId().bare & PeerId::kChatTypeMask;
+	const auto dialogId = peer->id.value & PeerId::kChatTypeMask;
+	return (snapshot.kind == u"deleted"_q)
+		&& (snapshot.userId == userId)
+		&& (snapshot.dialogId == dialogId)
+		&& (snapshot.topicId == topicId);
+}
+
+void SortSnapshots(std::vector<MessageSnapshot> *snapshots) {
+	std::sort(
+		snapshots->begin(),
+		snapshots->end(),
+		[](const MessageSnapshot &a, const MessageSnapshot &b) {
+			if (a.editDate != b.editDate) {
+				return a.editDate > b.editDate;
+			}
+			return a.date > b.date;
+		});
+}
+
 } // namespace
 
 void addEditedMessage(not_null<HistoryItem*> item) {
@@ -137,15 +162,7 @@ std::vector<MessageSnapshot> getEditedMessages(
 		result.push_back(*parsed);
 	}
 	file.close();
-	std::sort(
-		result.begin(),
-		result.end(),
-		[](const MessageSnapshot &a, const MessageSnapshot &b) {
-			if (a.editDate != b.editDate) {
-				return a.editDate > b.editDate;
-			}
-			return a.date > b.date;
-		});
+	SortSnapshots(&result);
 	if (totalLimit > 0 && int(result.size()) > totalLimit) {
 		result.resize(totalLimit);
 	}
@@ -170,6 +187,48 @@ bool hasRevisions(not_null<HistoryItem*> item) {
 
 void addDeletedMessage(not_null<HistoryItem*> item) {
 	AppendSnapshot(MapSnapshot(item, u"deleted"_q));
+}
+
+std::vector<MessageSnapshot> getDeletedMessages(
+		not_null<PeerData*> peer,
+		ID topicId,
+		int totalLimit) {
+	auto result = std::vector<MessageSnapshot>();
+	auto file = QFile(StoragePath());
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return result;
+	}
+	while (!file.atEnd()) {
+		const auto parsed = ParseSnapshotLine(file.readLine());
+		if (!parsed || !MatchesPeer(peer, topicId, *parsed) || parsed->text.isEmpty()) {
+			continue;
+		}
+		result.push_back(*parsed);
+	}
+	file.close();
+	SortSnapshots(&result);
+	if (totalLimit > 0 && int(result.size()) > totalLimit) {
+		result.resize(totalLimit);
+	}
+	return result;
+}
+
+bool hasDeletedMessages(
+		not_null<PeerData*> peer,
+		ID topicId) {
+	auto file = QFile(StoragePath());
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return false;
+	}
+	while (!file.atEnd()) {
+		const auto parsed = ParseSnapshotLine(file.readLine());
+		if (parsed && MatchesPeer(peer, topicId, *parsed) && !parsed->text.isEmpty()) {
+			file.close();
+			return true;
+		}
+	}
+	file.close();
+	return false;
 }
 
 } // namespace AyuMessages

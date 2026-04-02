@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 class HistoryItem;
+class PeerData;
 
 namespace AyuMessages {
 
@@ -21,5 +22,12 @@ std::vector<MessageSnapshot> getEditedMessages(
 	int totalLimit = 50);
 bool hasRevisions(not_null<HistoryItem*> item);
 void addDeletedMessage(not_null<HistoryItem*> item);
+std::vector<MessageSnapshot> getDeletedMessages(
+	not_null<PeerData*> peer,
+	ID topicId = 0,
+	int totalLimit = 100);
+bool hasDeletedMessages(
+	not_null<PeerData*> peer,
+	ID topicId = 0);
 
 } // namespace AyuMessages

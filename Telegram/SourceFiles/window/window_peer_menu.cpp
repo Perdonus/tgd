@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "ayu/data/messages_storage.h"
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
 #include "boxes/about_box.h"
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/input_field.h"
 #include "api/api_chat_participants.h"
 #include "api/api_global_privacy.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
 #include "base/random.h"
@@ -114,16 +116,113 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_credits.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "styles/style_settings.h"
 #include "styles/style_window.h" // st::windowMinWidth
 #include "styles/style_menu_icons.h"
 
 #include <QAction>
+#include <QDateTime>
+#include <QLocale>
+#include <QStringList>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include <QtWidgets/QApplication>
 
 namespace Window {
 namespace {
 
 constexpr auto kTopicsSearchMinCount = 1;
+
+[[nodiscard]] bool AstrogramRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString AstrogramUiText(const char *en, const char *ru) {
+	return AstrogramRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString FormatRecallTimestamp(int timestamp) {
+	const auto dt = QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime();
+	return AstrogramRussianUi()
+		? dt.toString(u"dd.MM.yyyy HH:mm:ss"_q)
+		: QLocale().toString(dt, QLocale::LongFormat);
+}
+
+void ShowDeletedMessagesBox(
+		not_null<SessionController*> controller,
+		not_null<PeerData*> peer,
+		Data::Thread *thread) {
+	const auto topic = peer->isForum() && thread ? thread->asTopic() : nullptr;
+	const auto topicId = topic ? topic->rootId().bare : 0;
+	const auto messages = AyuMessages::getDeletedMessages(peer, topicId, 150);
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(AstrogramUiText(
+			"Deleted Messages",
+			"Удалённые сообщения")));
+		box->addLeftButton(
+			rpl::single(AstrogramUiText("Copy", "Копировать")),
+			[=] {
+				auto lines = QStringList();
+				for (const auto &message : messages) {
+					lines.push_back(FormatRecallTimestamp(
+						message.editDate ? message.editDate : message.date));
+					lines.push_back(message.text);
+					lines.push_back(QString());
+				}
+				if (const auto clipboard = QGuiApplication::clipboard()) {
+					clipboard->setText(lines.join(u"\n"_q).trimmed());
+				}
+				controller->window().showToast(AstrogramUiText(
+					"Deleted messages copied.",
+					"Удалённые сообщения скопированы."));
+			});
+		if (messages.empty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(AstrogramUiText(
+					"No saved deleted messages.",
+					"Сохранённых удалённых сообщений нет.")),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					0,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+			return;
+		}
+		for (auto i = 0, count = int(messages.size()); i != count; ++i) {
+			const auto &message = messages[i];
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(AstrogramUiText(
+					"Message %1 • %2",
+					"Сообщение %1 • %2"
+				).arg(i + 1).arg(FormatRecallTimestamp(
+					message.editDate ? message.editDate : message.date))),
+				st::sessionDateLabel),
+				style::margins(
+					st::boxPadding.left(),
+					i ? (st::boxPadding.bottom() / 2) : 0,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(message.text),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					0,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+		}
+	}));
+}
 
 void ShareBotGame(
 		not_null<UserData*> bot,
@@ -290,6 +389,7 @@ private:
 	void addToggleTopicClosed();
 	void addExportChat();
 	void addTranslate();
+	void addDeletedMessages();
 	void addReport();
 	void addNewContact();
 	void addShareContact();
@@ -944,6 +1044,20 @@ void Filler::addTranslate() {
 	}, &st::menuIconTranslate);
 }
 
+void Filler::addDeletedMessages() {
+	if (!_peer || !AyuMessages::hasDeletedMessages(_peer, _topic ? _topic->rootId().bare : 0)) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	const auto thread = _thread;
+	_addAction(AstrogramUiText(
+		"Deleted messages",
+		"Удалённые сообщения"), [=] {
+		ShowDeletedMessagesBox(controller, peer, thread);
+	}, &st::menuIconArchive);
+}
+
 void Filler::addReport() {
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();
@@ -1580,6 +1694,7 @@ void Filler::fillHistoryActions() {
 	addDirectMessages();
 	addExportChat();
 	addTranslate();
+	addDeletedMessages();
 	addReport();
 	addClearHistory();
 	addDeleteChat();
@@ -1606,6 +1721,7 @@ void Filler::fillProfileActions() {
 	addDirectMessages();
 	addExportChat();
 	addToggleFolder();
+	addDeletedMessages();
 	addBlockUser();
 	addReport();
 	addLeaveChat();
@@ -1621,6 +1737,7 @@ void Filler::fillRepliesActions() {
 	addBoostChat();
 	addCreatePoll();
 	addCreateTodoList();
+	addDeletedMessages();
 	addToggleTopicClosed();
 	addDeleteTopic();
 }
