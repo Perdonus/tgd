@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "window/notifications_manager.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
 

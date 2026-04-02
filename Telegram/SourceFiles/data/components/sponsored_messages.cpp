@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_peer_search.h" // SponsoredSearchResult
 #include "apiwrap.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "core/click_handler_types.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"

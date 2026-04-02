@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_single_message_search.h"
 #include "apiwrap.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_session.h"
 #include "dialogs/ui/chat_search_in.h" // IsHashOrCashtagSearchQuery
 #include "main/main_session.h"

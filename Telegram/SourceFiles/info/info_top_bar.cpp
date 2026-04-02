@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/delete_messages_box.h"
 #include "boxes/peer_list_controllers.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "main/main_session.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"

@@ -433,6 +433,14 @@ public:
 		MsgId replyToTop,
 		bool isForumPost);
 	void setPostAuthor(const QString &author);
+	void setDeleted();
+	[[nodiscard]] bool isDeleted() const;
+	[[nodiscard]] bool isBurnt() const;
+	[[nodiscard]] bool wasDeletedAnimated() const;
+	void markDeletedAnimated();
+	void clearTTL() {
+		applyTTL(0);
+	}
 	void setRealId(MsgId newId);
 	void incrementReplyToTopCounter();
 	void applyEffectWatchedOnUnreadKnown();
@@ -616,7 +624,6 @@ private:
 	HistoryItem(
 		not_null<History*> history,
 		const HistoryItemCommonFields &fields);
-
 	void createComponentsHelper(HistoryItemCommonFields &&fields);
 	void createComponents(CreateConfig &&config);
 	void setupForwardedComponent(const CreateConfig &config);
@@ -692,8 +699,8 @@ private:
 	void createServiceFromMtp(const MTPDmessageService &message);
 	void applyTTL(const MTPDmessage &data);
 	void applyTTL(const MTPDmessageService &data);
-
 	void applyTTL(TimeId destroyAt);
+	void setAyuHint(const QString &hint);
 
 	// For an invoice button we replace the button text with a "Receipt" key.
 	// It should show the receipt for the payed invoice. Still let mobile apps do that.

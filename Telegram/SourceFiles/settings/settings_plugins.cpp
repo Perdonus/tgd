@@ -22,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/fields/password_input.h"
+#include "ui/widgets/menu/menu_add_action_callback.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/labels.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -1068,21 +1070,24 @@ void AddPluginSettingsContent(
 				const auto placeholder = setting.placeholderText.trimmed().isEmpty()
 					? setting.title.trimmed()
 					: setting.placeholderText.trimmed();
-				const auto field = setting.secret
-					? container->add(
+				Ui::MaskedInputField *field = nullptr;
+				if (setting.secret) {
+					field = container->add(
 						object_ptr<Ui::PasswordInput>(
 							container,
 							st::settingLocalPasscodeInputField,
 							rpl::single(placeholder),
 							setting.textValue),
-						style::al_top)
-					: container->add(
+						style::al_top);
+				} else {
+					field = container->add(
 						object_ptr<Ui::InputField>(
 							container,
 							st::settingLocalPasscodeInputField,
 							rpl::single(placeholder),
 							setting.textValue),
 						style::al_top);
+				}
 				const auto lastValue = std::make_shared<QString>(setting.textValue);
 				QObject::connect(field, &Ui::MaskedInputField::changed, [=] {
 					const auto current = field->getLastText().trimmed();
@@ -1409,23 +1414,26 @@ rpl::producer<QString> Plugins::title() {
 }
 
 void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
-	addAction(
-		PluginUiText(u"Documentation"_q, u"Документация"_q),
-		[=] { ShowPluginDocsBox(_controller); },
-		&st::menuIconFaq);
-	addAction(
-		PluginUiText(
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Documentation"_q, u"Документация"_q),
+		.handler = [=] { ShowPluginDocsBox(_controller); },
+		.icon = &st::menuIconFaq,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(
 			u"Runtime & Diagnostics"_q,
 			u"Рантайм и диагностика"_q),
-		[=] { ShowPluginRuntimeBox(_controller); },
-		&st::menuIconIpAddress);
-	addAction(
-		PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
-		[=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
-		&st::menuIconShowInFolder);
-	addAction(
-		PluginUiText(u"Open plugins.log"_q, u"Открыть plugins.log"_q),
-		[=] {
+		.handler = [=] { ShowPluginRuntimeBox(_controller); },
+		.icon = &st::menuIconIpAddress,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
+		.handler = [=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
+		.icon = &st::menuIconShowInFolder,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Open plugins.log"_q, u"Открыть plugins.log"_q),
+		.handler = [=] {
 			RevealPluginAuxFile(
 				_controller,
 				u"./tdata/plugins.log"_q,
@@ -1433,12 +1441,13 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 					u"plugins.log was not found."_q,
 					u"Файл plugins.log не найден."_q));
 		},
-		&st::menuIconSettings);
-	addAction(
-		PluginUiText(
+		.icon = &st::menuIconSettings,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(
 			u"Open plugins.trace.jsonl"_q,
 			u"Открыть plugins.trace.jsonl"_q),
-		[=] {
+		.handler = [=] {
 			RevealPluginAuxFile(
 				_controller,
 				u"./tdata/plugins.trace.jsonl"_q,
@@ -1446,24 +1455,26 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 					u"plugins.trace.jsonl was not found."_q,
 					u"Файл plugins.trace.jsonl не найден."_q));
 		},
-		&st::menuIconSettings);
+		.icon = &st::menuIconSettings,
+	});
 	const auto safeModeEnabled = Core::App().plugins().safeModeEnabled();
-	addAction(
-		safeModeEnabled
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = safeModeEnabled
 			? PluginUiText(
 				u"Disable Safe Mode"_q,
 				u"Выключить безопасный режим"_q)
 			: PluginUiText(
 				u"Enable Safe Mode"_q,
 				u"Включить безопасный режим"_q),
-		[=] {
+		.handler = [=] {
 			RequestSafeModeChange(
 				_controller,
 				this,
 				!safeModeEnabled,
 				crl::guard(this, [=] { rebuildList(); }));
 		},
-		&st::menuIconSettings);
+		.icon = &st::menuIconSettings,
+	});
 }
 
 void Plugins::setupContent() {

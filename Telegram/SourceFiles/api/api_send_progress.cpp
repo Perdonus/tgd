@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_user.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "base/unixtime.h"
 #include "data/data_peer_values.h"
 #include "apiwrap.h"

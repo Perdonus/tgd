@@ -12,8 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/version.h"
 #include "lang/lang_instance.h"
+#include "plugins/plugins_manager.h"
 #include "settings/settings_common.h"
 #include "settings/settings_plugins.h"
+#include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 #include "ui/painter.h"
@@ -108,7 +110,7 @@ struct PluginShortcutSpec {
 
 void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 	const auto header = container->add(object_ptr<Ui::RpWidget>(container));
-	const auto raw = header.data();
+	const auto raw = header;
 	raw->setMinimumHeight(248);
 	raw->setMaximumHeight(248);
 
@@ -138,14 +140,14 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		}
 
 		const auto titleTop = avatarRect.bottom() + 24;
-		p.setPen(st::boxTitleFg);
-		p.setFont(st::boxTitle.style.font);
+		p.setPen(st::windowFg);
+		p.setFont(st::semiboldFont);
 		p.drawText(
-			QRect(24, titleTop, width - 48, st::boxTitle.style.font->height + 8),
+			QRect(24, titleTop, width - 48, st::semiboldFont->height + 8),
 			Qt::AlignHCenter | Qt::TextSingleLine,
 			u"Astrogram"_q);
 
-		const auto versionTop = titleTop + st::boxTitle.style.font->height + 8;
+		const auto versionTop = titleTop + st::semiboldFont->height + 8;
 		p.setPen(st::windowSubTextFg);
 		p.setFont(st::defaultFlatLabel.style.font);
 		p.drawText(

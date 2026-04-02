@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "ui/image/image_prepare.h"
 #include "base/unixtime.h"
 

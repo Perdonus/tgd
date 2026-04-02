@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/saved/info_saved_music_common.h"
 #include "info_profile_actions.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "api/api_peer_photo.h"

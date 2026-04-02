@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "styles/style_calls.h"
 #include "styles/style_dialogs.h"
 

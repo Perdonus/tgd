@@ -2828,7 +2828,7 @@ void Session::checkTTLs() {
 	const auto now = base::unixtime::now();
 	while (!_ttlMessages.empty() && _ttlMessages.begin()->first <= now) {
 		const auto item = _ttlMessages.begin()->second.front();
-		item->applyTTL(0);
+		item->clearTTL();
 		ProcessMessageDelete(item);
 	}
 	scheduleNextTTLs();

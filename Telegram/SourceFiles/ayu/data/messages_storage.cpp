@@ -8,10 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/data/messages_storage.h"
 
 #include "base/unixtime.h"
+#include "data/data_session.h"
 #include "data/data_peer.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "main/main_session.h"
 
 #include <algorithm>
 #include <optional>
