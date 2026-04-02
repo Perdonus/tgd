@@ -1341,7 +1341,9 @@ void ApiWrap::markContentsRead(
 		if (!item->markContentsRead(true) || !item->isRegular()) {
 			continue;
 		}
-		if (Core::App().settings().ghostMode() && !passthrough) {
+		if (Core::App().settings().ghostMode()
+			&& Core::App().settings().ghostHideReadMessages()
+			&& !passthrough) {
 			continue;
 		}
 		if (const auto channel = item->history()->peer->asChannel()) {
@@ -1371,7 +1373,9 @@ void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
 	if (!item->markContentsRead(true) || !item->isRegular()) {
 		return;
 	}
-	if (Core::App().settings().ghostMode() && !passthrough) {
+	if (Core::App().settings().ghostMode()
+		&& Core::App().settings().ghostHideReadMessages()
+		&& !passthrough) {
 		return;
 	}
 	const auto ids = MTP_vector<MTPint>(1, MTP_int(item->id));

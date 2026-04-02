@@ -668,7 +668,8 @@ void Histories::sendReadRequests() {
 	DEBUG_LOG(("Reading: send requests with count %1.").arg(_states.size()));
 	if (_states.empty()) {
 		return;
-	} else if (Core::App().settings().ghostMode()) {
+	} else if (Core::App().settings().ghostMode()
+		&& Core::App().settings().ghostHideReadMessages()) {
 		DEBUG_LOG(("Reading: ghost mode enabled, skipping read requests."));
 		_readRequestsTimer.cancel();
 		return;

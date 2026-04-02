@@ -997,7 +997,8 @@ void RepliesList::readTill(
 }
 
 void RepliesList::sendReadTillRequest() {
-	if (Core::App().settings().ghostMode()) {
+	if (Core::App().settings().ghostMode()
+		&& Core::App().settings().ghostHideReadMessages()) {
 		_readRequestTimer.cancel();
 		return;
 	}

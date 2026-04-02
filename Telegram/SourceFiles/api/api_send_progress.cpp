@@ -110,7 +110,8 @@ bool SendProgressManager::updated(const Key &key, bool doing) {
 }
 
 void SendProgressManager::send(const Key &key, int progress) {
-	if (Core::App().settings().ghostMode()) {
+	if (Core::App().settings().ghostMode()
+		&& Core::App().settings().ghostHideTypingProgress()) {
 		return;
 	}
 	if (skipRequest(key)) {

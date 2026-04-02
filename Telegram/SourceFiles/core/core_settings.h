@@ -298,6 +298,45 @@ public:
 		_disableAds = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool ghostHideReadMessages() const {
+		return _ghostHideReadMessages.current();
+	}
+	[[nodiscard]] rpl::producer<bool> ghostHideReadMessagesValue() const {
+		return _ghostHideReadMessages.value();
+	}
+	void setGhostHideReadMessages(bool value) {
+		if (_ghostHideReadMessages.current() == value) {
+			return;
+		}
+		_ghostHideReadMessages = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool ghostHideOnlineStatus() const {
+		return _ghostHideOnlineStatus.current();
+	}
+	[[nodiscard]] rpl::producer<bool> ghostHideOnlineStatusValue() const {
+		return _ghostHideOnlineStatus.value();
+	}
+	void setGhostHideOnlineStatus(bool value) {
+		if (_ghostHideOnlineStatus.current() == value) {
+			return;
+		}
+		_ghostHideOnlineStatus = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool ghostHideTypingProgress() const {
+		return _ghostHideTypingProgress.current();
+	}
+	[[nodiscard]] rpl::producer<bool> ghostHideTypingProgressValue() const {
+		return _ghostHideTypingProgress.value();
+	}
+	void setGhostHideTypingProgress(bool value) {
+		if (_ghostHideTypingProgress.current() == value) {
+			return;
+		}
+		_ghostHideTypingProgress = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool saveDeletedMessages() const {
 		return _saveDeletedMessages.current();
 	}
@@ -1078,6 +1117,9 @@ private:
 	rpl::variable<bool> _ghostMode = false;
 	rpl::variable<bool> _localPremium = false;
 	rpl::variable<bool> _disableAds = true;
+	rpl::variable<bool> _ghostHideReadMessages = true;
+	rpl::variable<bool> _ghostHideOnlineStatus = true;
+	rpl::variable<bool> _ghostHideTypingProgress = true;
 	rpl::variable<bool> _saveDeletedMessages = true;
 	rpl::variable<bool> _saveMessagesHistory = true;
 	rpl::variable<bool> _semiTransparentDeletedMessages = false;

@@ -412,7 +412,10 @@ QByteArray Settings::serialize() const {
 			<< qint32(_saveDeletedMessages.current() ? 1 : 0)
 			<< qint32(_saveMessagesHistory.current() ? 1 : 0)
 			<< qint32(_semiTransparentDeletedMessages.current() ? 1 : 0)
-			<< qint32(_disableAds.current() ? 1 : 0);
+			<< qint32(_disableAds.current() ? 1 : 0)
+			<< qint32(_ghostHideReadMessages.current() ? 1 : 0)
+			<< qint32(_ghostHideOnlineStatus.current() ? 1 : 0)
+			<< qint32(_ghostHideTypingProgress.current() ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -550,6 +553,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 saveMessagesHistory = _saveMessagesHistory.current() ? 1 : 0;
 	qint32 semiTransparentDeletedMessages = _semiTransparentDeletedMessages.current() ? 1 : 0;
 	qint32 disableAds = _disableAds.current() ? 1 : 0;
+	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
+	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
+	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
 
 	stream >> themesAccentColors;
 	if (!stream.atEnd()) {
@@ -905,6 +911,15 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> disableAds;
 	}
+	if (!stream.atEnd()) {
+		stream >> ghostHideReadMessages;
+	}
+	if (!stream.atEnd()) {
+		stream >> ghostHideOnlineStatus;
+	}
+	if (!stream.atEnd()) {
+		stream >> ghostHideTypingProgress;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1135,6 +1150,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_saveMessagesHistory = (saveMessagesHistory == 1);
 	_semiTransparentDeletedMessages = (semiTransparentDeletedMessages == 1);
 	_disableAds = (disableAds == 1);
+	_ghostHideReadMessages = (ghostHideReadMessages == 1);
+	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
+	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);
 }
 
 QString Settings::getSoundPath(const QString &key) const {

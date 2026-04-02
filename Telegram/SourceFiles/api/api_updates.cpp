@@ -907,7 +907,9 @@ void Updates::updateOnline(crl::time lastNonIdleTime, bool gotOtherOffline) {
 
 	const auto &config = _session->serverConfig();
 	const auto isOnlineOrig = Core::App().hasActiveWindow(&session());
-	bool isOnline = !Core::App().settings().ghostMode() && isOnlineOrig;
+	const auto &settings = Core::App().settings();
+	bool isOnline = !(settings.ghostMode() && settings.ghostHideOnlineStatus())
+		&& isOnlineOrig;
 	int updateIn = config.onlineUpdatePeriod;
 	Assert(updateIn >= 0);
 	if (isOnline) {

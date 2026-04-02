@@ -247,6 +247,21 @@ void SetupAstrogram(
 		[&](bool toggled) { settings.setGhostMode(toggled); });
 	AddToggle(
 		container,
+		settings.ghostHideReadMessagesValue(),
+		RuEn("Не читать сообщения", "Don't read messages"),
+		[&](bool toggled) { settings.setGhostHideReadMessages(toggled); });
+	AddToggle(
+		container,
+		settings.ghostHideOnlineStatusValue(),
+		RuEn("Не слать online-пакеты", "Don't send online packets"),
+		[&](bool toggled) { settings.setGhostHideOnlineStatus(toggled); });
+	AddToggle(
+		container,
+		settings.ghostHideTypingProgressValue(),
+		RuEn("Не слать typing/upload progress", "Don't send typing/upload progress"),
+		[&](bool toggled) { settings.setGhostHideTypingProgress(toggled); });
+	AddToggle(
+		container,
 		settings.localPremiumValue(),
 		RuEn("Локальный Premium", "Local Premium"),
 		[&](bool toggled) { settings.setLocalPremium(toggled); });

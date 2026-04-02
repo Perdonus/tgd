@@ -668,7 +668,8 @@ void SavedSublist::sendReadTillRequest() {
 	const auto parentChat = _parent->parentChat();
 	if (!parentChat) {
 		return;
-	} else if (Core::App().settings().ghostMode()) {
+	} else if (Core::App().settings().ghostMode()
+		&& Core::App().settings().ghostHideReadMessages()) {
 		_readRequestTimer.cancel();
 		return;
 	}

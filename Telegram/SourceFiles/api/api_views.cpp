@@ -99,7 +99,8 @@ void ViewsManager::viewsIncrement() {
 		const auto requestId = _api.request(MTPmessages_GetMessagesViews(
 			i->first->input(),
 			MTP_vector<MTPint>(ids),
-			MTP_bool(!Core::App().settings().ghostMode())
+			MTP_bool(!(Core::App().settings().ghostMode()
+				&& Core::App().settings().ghostHideReadMessages()))
 		)).done([=](
 				const MTPmessages_MessageViews &result,
 				mtpRequestId requestId) {
