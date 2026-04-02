@@ -5,8 +5,6 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 */
 #include "plugins/plugins_api.h"
 
-#include "data/data_peer.h"
-#include "history/history.h"
 #include "history/history_item.h"
 
 #include <QtCore/QDateTime>
@@ -31,11 +29,12 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 TGD_PLUGIN_PREVIEW(
 	"astro.ayu_safe",
 	"AyuSafe",
-	"0.4",
+	"0.5",
 	"Astrogram",
 	"AyuSafe-lite: Ayu-inspired visuals, deleted-message archive, streamer-lite, and local safety tools.",
 	"https://github.com/AyuGram/AyuGramDesktop",
@@ -44,7 +43,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.ayu_safe";
-constexpr auto kPluginVersion = "0.4";
+constexpr auto kPluginVersion = "0.5";
 constexpr int kDefaultFontScale = 100;
 constexpr int kMinFontScale = 85;
 constexpr int kMaxFontScale = 130;
@@ -95,6 +94,12 @@ QString EventName(const Plugins::MessageEvent event) {
 		return QStringLiteral("deleted");
 	}
 	return QStringLiteral("unknown");
+}
+
+qint64 OpaquePointerId(const void *value) {
+	return value
+		? static_cast<qint64>(reinterpret_cast<std::uintptr_t>(value))
+		: 0;
 }
 
 QString StripZalgo(const QString &value) {
@@ -531,7 +536,6 @@ private:
 		_outgoingInterceptorId = _host->registerOutgoingTextInterceptor(
 			_info.id,
 			[this](const Plugins::OutgoingTextContext &context) {
-				Q_UNUSED(context);
 				auto result = Plugins::CommandResult();
 				const auto cleaned = StripZalgo(context.text);
 				if (cleaned == context.text) {
@@ -550,16 +554,11 @@ private:
 		entry.timestampUtc = QDateTime::currentDateTimeUtc().toString(
 			Qt::ISODateWithMs);
 		entry.event = EventName(context.event);
-		entry.sessionUniqueId = context.session
-			? qint64(context.session->uniqueId())
-			: 0;
-		if (context.history) {
-			entry.peerName = context.history->peer->name();
-		}
+		// Portable plugin catalog builds only get opaque host pointers here.
+		entry.sessionUniqueId = OpaquePointerId(context.session);
 		if (context.item) {
 			entry.messageId = qint64(context.item->id);
 			entry.outgoing = context.item->out();
-			entry.text = extractItemText(context.item);
 		}
 		if (entry.text.isEmpty()) {
 			entry.text = findCachedText(entry.sessionUniqueId, entry.messageId);
@@ -670,25 +669,6 @@ private:
 			_cache.push_back(std::move(entry));
 		}
 		trimCache();
-	}
-
-	[[nodiscard]] QString extractItemText(HistoryItem *item) const {
-		if (!item) {
-			return QString();
-		}
-		if (const auto text = Normalize(item->originalText().text);
-			!text.isEmpty()) {
-			return text;
-		}
-		if (const auto text = Normalize(item->notificationText().text);
-			!text.isEmpty()) {
-			return text;
-		}
-		if (const auto text = Normalize(item->inReplyText().text);
-			!text.isEmpty()) {
-			return text;
-		}
-		return QString();
 	}
 
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
