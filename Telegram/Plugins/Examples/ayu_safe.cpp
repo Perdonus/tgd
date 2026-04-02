@@ -5,8 +5,6 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 */
 #include "plugins/plugins_api.h"
 
-#include "history/history_item.h"
-
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
@@ -24,6 +22,7 @@ widget chrome, and a local message-safety cache for edited/deleted events.
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QFont>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
 
@@ -135,16 +134,6 @@ QMenu {
 )CSS");
 }
 
-struct CacheEntry {
-	QString timestampUtc;
-	QString event;
-	QString peerName;
-	QString text;
-	qint64 messageId = 0;
-	qint64 sessionUniqueId = 0;
-	bool outgoing = false;
-};
-
 } // namespace
 
 class AyuSafePlugin final
@@ -226,6 +215,16 @@ public:
 	}
 
 private:
+	struct CacheEntry {
+		QString timestampUtc;
+		QString event;
+		QString peerName;
+		QString text;
+		qint64 messageId = 0;
+		qint64 sessionUniqueId = 0;
+		bool outgoing = false;
+	};
+
 	[[nodiscard]] bool useRussian() const {
 		const auto hostInfo = _host->hostInfo();
 		auto language = Normalize(HostUiLanguage(hostInfo));
@@ -346,6 +345,27 @@ private:
 		return value.isEmpty()
 			? tr("edited", "изменено")
 			: value;
+	}
+
+	[[nodiscard]] QString portableEventText(
+			const Plugins::MessageEvent event) const {
+		switch (event) {
+		case Plugins::MessageEvent::New:
+			return tr(
+				"[message observed; text unavailable in portable plugin build]",
+				"[сообщение замечено; текст недоступен в portable-сборке плагина]");
+		case Plugins::MessageEvent::Edited:
+			return tr(
+				"[message edited; text unavailable in portable plugin build]",
+				"[сообщение изменено; текст недоступен в portable-сборке плагина]");
+		case Plugins::MessageEvent::Deleted:
+			return tr(
+				"[message deleted; text unavailable in portable plugin build]",
+				"[сообщение удалено; текст недоступен в portable-сборке плагина]");
+		}
+		return tr(
+			"[message text unavailable in portable plugin build]",
+			"[текст сообщения недоступен в portable-сборке плагина]");
 	}
 
 	[[nodiscard]] QString cacheStatePath() const {
@@ -556,12 +576,17 @@ private:
 		entry.event = EventName(context.event);
 		// Portable plugin catalog builds only get opaque host pointers here.
 		entry.sessionUniqueId = OpaquePointerId(context.session);
+		if (context.history) {
+			entry.peerName = tr("Current chat", "Текущий чат");
+		}
 		if (context.item) {
-			entry.messageId = qint64(context.item->id);
-			entry.outgoing = context.item->out();
+			entry.messageId = OpaquePointerId(context.item);
 		}
 		if (entry.text.isEmpty()) {
 			entry.text = findCachedText(entry.sessionUniqueId, entry.messageId);
+		}
+		if (entry.text.isEmpty()) {
+			entry.text = portableEventText(context.event);
 		}
 		if (context.event == Plugins::MessageEvent::Deleted && !entry.text.isEmpty()) {
 			entry.text = QStringLiteral("[%1] %2").arg(deletedMark(), entry.text);
