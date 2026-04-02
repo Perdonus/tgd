@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_plugins.h"
 #include "settings/settings_common.h"
+#include "settings/cloud_password/settings_cloud_password_common.h"
 
 #include "boxes/abstract_box.h"
 #include "core/application.h"
@@ -1070,27 +1071,8 @@ void AddPluginSettingsContent(
 				const auto placeholder = setting.placeholderText.trimmed().isEmpty()
 					? setting.title.trimmed()
 					: setting.placeholderText.trimmed();
-				Ui::MaskedInputField *field = nullptr;
-				if (setting.secret) {
-					field = container->add(
-						object_ptr<Ui::PasswordInput>(
-							container,
-							st::settingLocalPasscodeInputField,
-							rpl::single(placeholder),
-							setting.textValue),
-						style::al_top);
-				} else {
-					field = container->add(
-						object_ptr<Ui::InputField>(
-							container,
-							st::settingLocalPasscodeInputField,
-							rpl::single(placeholder),
-							setting.textValue),
-						style::al_top);
-				}
 				const auto lastValue = std::make_shared<QString>(setting.textValue);
-				QObject::connect(field, &Ui::MaskedInputField::changed, [=] {
-					const auto current = field->getLastText().trimmed();
+				const auto handleTextChange = [=](const QString &current) {
 					if (current == *lastValue) {
 						return;
 					}
@@ -1100,7 +1082,24 @@ void AddPluginSettingsContent(
 					if (!Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
 						onStateChanged();
 					}
-				});
+				};
+				if (setting.secret) {
+					const auto field = CloudPassword::AddPasswordField(
+						container,
+						rpl::single(placeholder),
+						setting.textValue);
+					QObject::connect(field, &Ui::MaskedInputField::changed, [=] {
+						handleTextChange(field->getLastText().trimmed());
+					});
+				} else {
+					const auto field = CloudPassword::AddWrappedField(
+						container,
+						rpl::single(placeholder),
+						setting.textValue);
+					field->changes() | rpl::on_next([=] {
+						handleTextChange(field->getLastText().trimmed());
+					}, field->lifetime());
+				}
 				if (!setting.description.trimmed().isEmpty()) {
 					Ui::AddDividerText(
 						container,
