@@ -49,6 +49,11 @@ constexpr auto kPollingViewsPerPage = Story::kRecentViewersMax;
 
 using UpdateFlag = StoryUpdate::Flag;
 
+[[nodiscard]] bool GhostBlocksStoryReads() {
+	const auto &settings = Core::App().settings();
+	return settings.ghostMode() && settings.ghostHideReadMessages();
+}
+
 [[nodiscard]] std::optional<StoryMedia> ParseMedia(
 		not_null<PeerData*> peer,
 		const MTPMessageMedia &media,
@@ -1233,6 +1238,9 @@ void Stories::markAsRead(FullStoryId id, bool viewed) {
 	if (!maybeStory) {
 		return;
 	}
+	if (GhostBlocksStoryReads()) {
+		return;
+	}
 	const auto story = *maybeStory;
 	if (story->expired() && story->inProfile()) {
 		_incrementViewsPending[id.peer].emplace(id.story);
@@ -1387,6 +1395,9 @@ void Stories::toggleHidden(
 void Stories::sendMarkAsReadRequest(
 		not_null<PeerData*> peer,
 		StoryId tillId) {
+	if (GhostBlocksStoryReads()) {
+		return;
+	}
 	const auto peerId = peer->id;
 	_markReadRequests.emplace(peerId);
 	const auto finish = [=] {
@@ -1416,6 +1427,9 @@ void Stories::checkQuitPreventFinished() {
 
 void Stories::sendMarkAsReadRequests() {
 	_markReadTimer.cancel();
+	if (GhostBlocksStoryReads()) {
+		return;
+	}
 	for (auto i = begin(_markReadPending); i != end(_markReadPending);) {
 		const auto peerId = *i;
 		if (_markReadRequests.contains(peerId)) {
@@ -1432,6 +1446,9 @@ void Stories::sendMarkAsReadRequests() {
 
 void Stories::sendIncrementViewsRequests() {
 	if (_incrementViewsPending.empty()) {
+		return;
+	}
+	if (GhostBlocksStoryReads()) {
 		return;
 	}
 	struct Prepared {
@@ -2283,7 +2300,8 @@ bool Stories::isQuitPrevent() {
 	if (!_incrementViewsPending.empty()) {
 		sendIncrementViewsRequests();
 	}
-	if (_markReadRequests.empty() && _incrementViewsRequests.empty()) {
+	if (GhostBlocksStoryReads()
+		|| (_markReadRequests.empty() && _incrementViewsRequests.empty())) {
 		return false;
 	}
 	LOG(("Stories prevents quit, marking as read..."));
