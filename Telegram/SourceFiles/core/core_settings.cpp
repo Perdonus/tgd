@@ -411,7 +411,8 @@ QByteArray Settings::serialize() const {
 			<< qint32(_localPremium.current() ? 1 : 0)
 			<< qint32(_saveDeletedMessages.current() ? 1 : 0)
 			<< qint32(_saveMessagesHistory.current() ? 1 : 0)
-			<< qint32(_semiTransparentDeletedMessages.current() ? 1 : 0);
+			<< qint32(_semiTransparentDeletedMessages.current() ? 1 : 0)
+			<< qint32(_disableAds.current() ? 1 : 0);
 	}
 
 	Ensures(result.size() == size);
@@ -548,6 +549,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 saveDeletedMessages = _saveDeletedMessages.current() ? 1 : 0;
 	qint32 saveMessagesHistory = _saveMessagesHistory.current() ? 1 : 0;
 	qint32 semiTransparentDeletedMessages = _semiTransparentDeletedMessages.current() ? 1 : 0;
+	qint32 disableAds = _disableAds.current() ? 1 : 0;
 
 	stream >> themesAccentColors;
 	if (!stream.atEnd()) {
@@ -900,6 +902,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> semiTransparentDeletedMessages;
 	}
+	if (!stream.atEnd()) {
+		stream >> disableAds;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1129,6 +1134,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_saveDeletedMessages = (saveDeletedMessages == 1);
 	_saveMessagesHistory = (saveMessagesHistory == 1);
 	_semiTransparentDeletedMessages = (semiTransparentDeletedMessages == 1);
+	_disableAds = (disableAds == 1);
 }
 
 QString Settings::getSoundPath(const QString &key) const {

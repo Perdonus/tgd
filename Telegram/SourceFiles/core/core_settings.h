@@ -285,6 +285,19 @@ public:
 		_localPremium = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool disableAds() const {
+		return _disableAds.current();
+	}
+	[[nodiscard]] rpl::producer<bool> disableAdsValue() const {
+		return _disableAds.value();
+	}
+	void setDisableAds(bool value) {
+		if (_disableAds.current() == value) {
+			return;
+		}
+		_disableAds = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool saveDeletedMessages() const {
 		return _saveDeletedMessages.current();
 	}
@@ -1064,6 +1077,7 @@ private:
 	bool _includeMutedCounterFolders = true;
 	rpl::variable<bool> _ghostMode = false;
 	rpl::variable<bool> _localPremium = false;
+	rpl::variable<bool> _disableAds = true;
 	rpl::variable<bool> _saveDeletedMessages = true;
 	rpl::variable<bool> _saveMessagesHistory = true;
 	rpl::variable<bool> _semiTransparentDeletedMessages = false;

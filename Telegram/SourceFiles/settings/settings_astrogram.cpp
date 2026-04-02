@@ -250,6 +250,11 @@ void SetupAstrogram(
 		settings.localPremiumValue(),
 		RuEn("Локальный Premium", "Local Premium"),
 		[&](bool toggled) { settings.setLocalPremium(toggled); });
+	AddToggle(
+		container,
+		settings.disableAdsValue(),
+		RuEn("Скрывать рекламу и sponsored", "Hide ads and sponsored"),
+		[&](bool toggled) { settings.setDisableAds(toggled); });
 
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 	Ui::AddDivider(container);

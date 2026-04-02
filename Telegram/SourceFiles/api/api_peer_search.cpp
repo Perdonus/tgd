@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_single_message_search.h"
 #include "apiwrap.h"
+#include "core/application.h"
 #include "data/data_session.h"
 #include "dialogs/ui/chat_search_in.h" // IsHashOrCashtagSearchQuery
 #include "main/main_session.h"
@@ -93,6 +94,10 @@ void PeerSearch::requestSponsored() {
 	).done([=](
 			const MTPcontacts_SponsoredPeers &result,
 			mtpRequestId requestId) {
+		if (Core::App().settings().disableAds()) {
+			finishSponsored(requestId, PeerSearchResult{});
+			return;
+		}
 		result.match([&](const MTPDcontacts_sponsoredPeersEmpty &) {
 			finishSponsored(requestId, PeerSearchResult{});
 		}, [&](const MTPDcontacts_sponsoredPeers &data) {

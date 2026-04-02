@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_text_entities.h"
 #include "api/api_peer_search.h" // SponsoredSearchResult
 #include "apiwrap.h"
+#include "core/application.h"
 #include "core/click_handler_types.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
@@ -239,6 +240,9 @@ void SponsoredMessages::inject(
 }
 
 bool SponsoredMessages::canHaveFor(not_null<History*> history) const {
+	if (Core::App().settings().disableAds()) {
+		return false;
+	}
 	if (history->peer->isChannel()) {
 		return true;
 	} else if (const auto user = history->peer->asUser()) {
@@ -248,11 +252,17 @@ bool SponsoredMessages::canHaveFor(not_null<History*> history) const {
 }
 
 bool SponsoredMessages::canHaveFor(not_null<HistoryItem*> item) const {
+	if (Core::App().settings().disableAds()) {
+		return false;
+	}
 	return item->history()->peer->isBroadcast()
 		&& item->isRegular();
 }
 
 bool SponsoredMessages::isTopBarFor(not_null<History*> history) const {
+	if (Core::App().settings().disableAds()) {
+		return false;
+	}
 	if (peerIsUser(history->peer->id)) {
 		if (const auto user = history->peer->asUser()) {
 			return user->isBot();
@@ -436,6 +446,9 @@ void SponsoredMessages::parseForVideo(
 
 SponsoredForVideo SponsoredMessages::prepareForVideo(
 		not_null<PeerData*> peer) {
+	if (Core::App().settings().disableAds()) {
+		return {};
+	}
 	const auto i = _dataForVideo.find(peer);
 	if (i == end(_dataForVideo) || i->second.entries.empty()) {
 		return {};
