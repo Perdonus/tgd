@@ -23,22 +23,16 @@ export default defineConfig({
   themeConfig: {
     logo: '/logo.png',
     siteTitle: 'Astrogram Docs',
-    nav: [
-      { text: 'Documentation', link: '/' },
-      { text: 'Changelog', link: '/changelog' },
-      { text: 'Links', link: '/links' },
-      { text: 'Channel', link: 'https://t.me/astrogramchannel' },
-      { text: 'Community Chat', link: 'https://t.me/astrogram_chat' }
-    ],
-    search: {
-      provider: 'local'
-    },
+    nav: [],
     socialLinks: [
       { icon: 'github', link: 'https://github.com/Perdonus/tgd' }
     ],
     outline: {
       level: [2, 3]
     },
+    outlineTitle: 'On this page',
+    sidebarMenuLabel: 'Menu',
+    returnToTopLabel: 'Back to top',
     footer: {
       message: 'Astrogram Desktop plugin documentation and runtime notes.',
       copyright: 'Copyright © 2026 Astrogram'
