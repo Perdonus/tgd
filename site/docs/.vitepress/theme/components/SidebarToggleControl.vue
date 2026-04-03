@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 const collapsed = ref(false)
 const storageKey = 'astrogram-docs-sidebar-collapsed'
-
-const label = computed(() => (collapsed.value ? 'Show menu' : 'Hide menu'))
 
 const applyCollapsed = (value: boolean) => {
   collapsed.value = value
@@ -25,17 +23,26 @@ onMounted(() => {
 <template>
   <div class="docs-sidebar-control-wrap">
     <div class="docs-sidebar-control">
-      <span class="docs-sidebar-control__label">Menu</span>
-      <button class="docs-sidebar-control__button" type="button" @click="toggleSidebar">
+      <button
+        class="docs-sidebar-control__button"
+        type="button"
+        :aria-label="collapsed ? 'Open sidebar' : 'Collapse sidebar'"
+        :title="collapsed ? 'Open sidebar' : 'Collapse sidebar'"
+        @click="toggleSidebar"
+      >
         <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.5" y="3" width="15" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path d="M7 4v12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
           <path
             :d="collapsed
-              ? 'M7.2 15.6a.75.75 0 0 1 0-1.06L11.74 10 7.2 5.46A.75.75 0 0 1 8.26 4.4l5.07 5.07a.75.75 0 0 1 0 1.06l-5.07 5.07a.75.75 0 0 1-1.06 0Z'
-              : 'M12.8 4.4a.75.75 0 0 1 0 1.06L8.26 10l4.54 4.54a.75.75 0 1 1-1.06 1.06l-5.07-5.07a.75.75 0 0 1 0-1.06l5.07-5.07a.75.75 0 0 1 1.06 0Z'"
+              ? 'M10.65 13.95a.7.7 0 0 1 0-.99L13.62 10l-2.97-2.96a.7.7 0 1 1 .99-.99l3.46 3.45a.7.7 0 0 1 0 .99l-3.46 3.45a.7.7 0 0 1-.99 0Z'
+              : 'M14.35 6.05a.7.7 0 0 1 0 .99L11.38 10l2.97 2.96a.7.7 0 0 1-.99.99L9.9 10.5a.7.7 0 0 1 0-.99l3.46-3.45a.7.7 0 0 1 .99 0Z'"
             fill="currentColor"
           />
         </svg>
-        <span>{{ label }}</span>
+        <span class="docs-visually-hidden">
+          {{ collapsed ? 'Open sidebar' : 'Collapse sidebar' }}
+        </span>
       </button>
     </div>
 
@@ -43,16 +50,19 @@ onMounted(() => {
       v-if="collapsed"
       class="docs-sidebar-reopen"
       type="button"
-      aria-label="Show menu"
+      aria-label="Open sidebar"
+      title="Open sidebar"
       @click="toggleSidebar"
     >
       <svg viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="2.5" y="3" width="15" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M7 4v12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         <path
-          d="M7.2 15.6a.75.75 0 0 1 0-1.06L11.74 10 7.2 5.46A.75.75 0 0 1 8.26 4.4l5.07 5.07a.75.75 0 0 1 0 1.06l-5.07 5.07a.75.75 0 0 1-1.06 0Z"
+          d="M10.65 13.95a.7.7 0 0 1 0-.99L13.62 10l-2.97-2.96a.7.7 0 1 1 .99-.99l3.46 3.45a.7.7 0 0 1 0 .99l-3.46 3.45a.7.7 0 0 1-.99 0Z"
           fill="currentColor"
         />
       </svg>
-      <span>Show menu</span>
+      <span class="docs-visually-hidden">Open sidebar</span>
     </button>
   </div>
 </template>

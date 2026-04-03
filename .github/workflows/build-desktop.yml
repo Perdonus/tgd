@@ -19,6 +19,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -689,22 +692,30 @@ jobs:
           publish="$(mktemp -d)"
           git init "$publish"
           cd "$publish"
-          git checkout --orphan builds
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth 1 origin builds; then
+            git checkout -B builds FETCH_HEAD
+          else
+            git checkout --orphan builds
+          fi
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name .git \
+            -exec rm -rf {} +
           cp "$stage/Astrogram.exe" .
           cp "$stage/metadata.json" .
           cp "$stage/README.md" .
           git add Astrogram.exe metadata.json README.md
           git commit -m "publish Astrogram build ${GITHUB_RUN_NUMBER}"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin HEAD:builds
+          git push origin HEAD:builds
 
   publish_pages:
     name: Publish GitHub Pages
     runs-on: ubuntu-22.04
     needs: windows
     if: ${{ needs.windows.outputs.build_ok == 'true' }}
+    continue-on-error: true
     permissions:
       contents: read
       pages: write
