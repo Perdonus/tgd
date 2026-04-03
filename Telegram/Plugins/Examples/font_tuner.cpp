@@ -48,6 +48,7 @@ constexpr auto kInfoSettingId = "usage_info";
 constexpr int kDefaultScalePercent = 100;
 constexpr int kMinScalePercent = 70;
 constexpr int kMaxScalePercent = 160;
+constexpr int kDownloadTimeoutMs = 30000;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
@@ -87,6 +88,27 @@ QString SafeFileStem(QString value) {
 	return value.isEmpty() ? QStringLiteral("font") : value;
 }
 
+QString StorageRoot(const Plugins::Host *host) {
+	const auto workingPath = host->hostInfo().workingPath.trimmed();
+	return workingPath.isEmpty()
+		? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+		: workingPath;
+}
+
+bool IsSupportedFontSuffix(QString suffix) {
+	suffix = suffix.trimmed().toLower();
+	return suffix == QStringLiteral("ttf")
+		|| suffix == QStringLiteral("otf");
+}
+
+bool IsSupportedFontUrl(const QUrl &url) {
+	const auto scheme = url.scheme().trimmed().toLower();
+	return url.isValid()
+		&& !url.host().trimmed().isEmpty()
+		&& (scheme == QStringLiteral("http")
+			|| scheme == QStringLiteral("https"));
+}
+
 } // namespace
 
 class FontTunerPlugin final
@@ -112,9 +134,10 @@ public:
 		_baseFont = QApplication::font();
 		_scalePercent = readScalePercent();
 		_fontUrl = readFontUrl();
-		_statePath = QDir(_host->hostInfo().workingPath).filePath(
+		const auto storageRoot = StorageRoot(_host);
+		_statePath = QDir(storageRoot).filePath(
 			QStringLiteral("tdata/font_tuner_state.json"));
-		_fontsDir = QDir(_host->hostInfo().workingPath).filePath(
+		_fontsDir = QDir(storageRoot).filePath(
 			QStringLiteral("tdata/plugin-fonts/font_tuner"));
 	}
 
@@ -238,7 +261,7 @@ private:
 		page.description = Tr(
 			_host,
 			"Custom fonts and scale for Astrogram without rebuilding the client.",
-			u8"Пользовательские шрифты и масштаб для Astrogram без перебилда клиента.");
+			u8"Пользовательские шрифты и масштаб для Astrogram без пересборки клиента.");
 		page.sections.push_back(section);
 		return page;
 	}
@@ -316,11 +339,11 @@ private:
 	void downloadFont() {
 		const auto trimmed = _fontUrl.trimmed();
 		const auto url = QUrl(trimmed);
-		if (trimmed.isEmpty() || !url.isValid() || url.scheme().isEmpty()) {
+		if (trimmed.isEmpty() || !IsSupportedFontUrl(url)) {
 			_host->showToast(Tr(
 				_host,
-				"Paste a valid font URL first.",
-				u8"Сначала вставь корректную ссылку на шрифт."));
+				"Paste a direct http(s) URL to a .ttf or .otf font first.",
+				u8"Сначала вставь прямую http(s)-ссылку на шрифт .ttf или .otf."));
 			return;
 		}
 		if (_pendingReply) {
@@ -330,6 +353,7 @@ private:
 		}
 		auto request = QNetworkRequest(url);
 		request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+		request.setTransferTimeout(kDownloadTimeoutMs);
 		_pendingReply = _network->get(request);
 		QObject::connect(
 			_pendingReply,
@@ -342,7 +366,9 @@ private:
 					return;
 				}
 				reply->deleteLater();
-				if (reply->error() != QNetworkReply::NoError) {
+				const auto statusCode = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute).toInt();
+				if (reply->error() != QNetworkReply::NoError || statusCode >= 400) {
 					_host->showToast(Tr(
 						_host,
 						"Could not download the font.",
@@ -385,12 +411,34 @@ private:
 	}
 
 	void importFontFile(const QString &path) {
+		const auto sourceInfo = QFileInfo(path);
+		if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+			_host->showToast(Tr(
+				_host,
+				"The selected font file could not be found.",
+				u8"Не удалось найти выбранный файл шрифта."));
+			return;
+		}
+		if (!IsSupportedFontSuffix(sourceInfo.suffix())) {
+			_host->showToast(Tr(
+				_host,
+				"Choose a .ttf or .otf font file.",
+				u8"Выбери файл шрифта в формате .ttf или .otf."));
+			return;
+		}
 		QDir().mkpath(_fontsDir);
-		const auto fileInfo = QFileInfo(path);
 		const auto target = QDir(_fontsDir).filePath(
-			SafeFileStem(fileInfo.fileName()));
-		if (QFile::exists(target)) {
-			QFile::remove(target);
+			SafeFileStem(sourceInfo.fileName()));
+		if (sourceInfo.absoluteFilePath() == QFileInfo(target).absoluteFilePath()) {
+			loadFontFromPath(target);
+			return;
+		}
+		if (QFile::exists(target) && !QFile::remove(target)) {
+			_host->showToast(Tr(
+				_host,
+				"Could not replace the previous imported font file.",
+				u8"Не удалось заменить ранее импортированный файл шрифта."));
+			return;
 		}
 		if (!QFile::copy(path, target)) {
 			_host->showToast(Tr(
@@ -403,8 +451,17 @@ private:
 	}
 
 	void loadFontFromPath(const QString &path) {
+		const auto fileInfo = QFileInfo(path);
+		if (!fileInfo.exists() || !fileInfo.isFile()) {
+			_host->showToast(Tr(
+				_host,
+				"The selected font file no longer exists.",
+				u8"Выбранный файл шрифта больше не существует."));
+			return;
+		}
 		unloadApplicationFont();
-		const auto fontId = QFontDatabase::addApplicationFont(path);
+		const auto fontId = QFontDatabase::addApplicationFont(
+			fileInfo.absoluteFilePath());
 		if (fontId < 0) {
 			_host->showToast(Tr(
 				_host,
@@ -422,7 +479,7 @@ private:
 			return;
 		}
 		_applicationFontId = fontId;
-		_loadedFontPath = path;
+		_loadedFontPath = fileInfo.absoluteFilePath();
 		_loadedFamily = families.front();
 		saveLocalState();
 		applyConfiguredFont();
