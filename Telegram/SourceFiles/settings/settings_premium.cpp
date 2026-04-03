@@ -1202,16 +1202,9 @@ base::weak_qptr<Ui::RpWidget> Premium::createPinnedToTop(
 			}
 		}
 		return rpl::conditional(
-			Core::App().settings().localPremiumValue(),
-			rpl::single(TextWithEntities{ Lang::GetInstance().id().startsWith(
-				u"ru"_q,
-				Qt::CaseInsensitive)
-					? QString::fromUtf8("Локальный Premium включён. Эта функция работает только на стороне клиента Astrogram.")
-					: u"Local Premium is enabled. This mode only affects the Astrogram client."_q }),
-			rpl::conditional(
-				Data::AmPremiumValue(&_controller->session()),
-				_controller->session().api().premium().statusTextValue(),
-				tr::lng_premium_summary_top_about(tr::rich)));
+			Data::AmPremiumValue(&_controller->session()),
+			_controller->session().api().premium().statusTextValue(),
+			tr::lng_premium_summary_top_about(tr::rich));
 	}();
 
 	const auto emojiStatusData = Ref::EmojiStatus::Parse(_ref);
