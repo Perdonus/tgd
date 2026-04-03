@@ -6,6 +6,7 @@ Applies a custom accent palette to the client.
 
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
+#include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtGui/QPalette>
 #include <QtWidgets/QApplication>
@@ -16,7 +17,7 @@ Applies a custom accent palette to the client.
 TGD_PLUGIN_PREVIEW(
 	"astro.accent_color",
 	"Accent Color",
-	"1.0",
+	"1.1",
 	"@etopizdesblin",
 	"Applies a custom accent palette to Astrogram windows and controls.",
 	"https://sosiskibot.ru",
@@ -38,6 +39,10 @@ QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
 }
 
+QString Utf8(const char *value) {
+	return QString::fromUtf8(value);
+}
+
 bool UseRussian(const Plugins::Host *host) {
 	auto language = host->hostInfo().appUiLanguage.trimmed();
 	if (language.isEmpty()) {
@@ -47,7 +52,7 @@ bool UseRussian(const Plugins::Host *host) {
 }
 
 QString Tr(const Plugins::Host *host, const char *en, const char *ru) {
-	return UseRussian(host) ? Latin1(ru) : Latin1(en);
+	return UseRussian(host) ? Utf8(ru) : Utf8(en);
 }
 
 QColor Mix(const QColor &base, const QColor &accent, int accentPercent) {
@@ -84,7 +89,7 @@ public:
 	, _basePalette(QApplication::palette()) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(_host, "Accent Color", "Акцентный цвет");
-		_info.version = QStringLiteral("1.0");
+		_info.version = QStringLiteral("1.1");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -115,7 +120,7 @@ public:
 			[this](const Plugins::SettingDescriptor &setting) {
 				handleSetting(setting);
 			});
-		applyPalette();
+		schedulePaletteApply();
 	}
 
 	void onUnload() override {
@@ -191,21 +196,39 @@ private:
 	void handleSetting(const Plugins::SettingDescriptor &setting) {
 		if (setting.id == Latin1(kHexSettingId)) {
 			_hex = setting.textValue.trimmed();
-			applyPalette();
+			_restoreRequested = false;
+			schedulePaletteApply();
 		} else if (setting.id == Latin1(kSurfaceMixSettingId)) {
 			_surfaceMix = std::clamp(
 				setting.intValue,
 				kMinSurfaceMix,
 				kMaxSurfaceMix);
-			applyPalette();
+			_restoreRequested = false;
+			schedulePaletteApply();
 		} else if (setting.id == Latin1(kResetSettingId)) {
 			_hex = Latin1(kDefaultAccentHex);
 			_surfaceMix = kDefaultSurfaceMix;
-			restorePalette();
+			_restoreRequested = true;
+			schedulePaletteApply();
 		}
 	}
 
-	void applyPalette() {
+	void schedulePaletteApply() {
+		if (_applyScheduled) {
+			return;
+		}
+		_applyScheduled = true;
+		QTimer::singleShot(0, this, [this] {
+			_applyScheduled = false;
+			if (_restoreRequested) {
+				restorePalette();
+				return;
+			}
+			applyPaletteNow();
+		});
+	}
+
+	void applyPaletteNow() {
 		auto accent = ParseAccent(_hex);
 		auto palette = _basePalette;
 
@@ -237,19 +260,18 @@ private:
 		palette.setColor(QPalette::BrightText, highlightText);
 
 		QApplication::setPalette(palette);
-		_host->forEachWindowWidget([&](QWidget *widget) {
+		_host->forEachWindowWidget([](QWidget *widget) {
 			if (widget && widget->isWindow()) {
-				widget->setPalette(palette);
 				widget->update();
 			}
 		});
 	}
 
 	void restorePalette() {
+		_restoreRequested = false;
 		QApplication::setPalette(_basePalette);
-		_host->forEachWindowWidget([&](QWidget *widget) {
+		_host->forEachWindowWidget([](QWidget *widget) {
 			if (widget && widget->isWindow()) {
-				widget->setPalette(_basePalette);
 				widget->update();
 			}
 		});
@@ -261,6 +283,8 @@ private:
 	QPalette _basePalette;
 	QString _hex = Latin1(kDefaultAccentHex);
 	int _surfaceMix = kDefaultSurfaceMix;
+	bool _applyScheduled = false;
+	bool _restoreRequested = false;
 };
 
 TGD_PLUGIN_ENTRY {

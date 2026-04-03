@@ -9,9 +9,9 @@ and text/widget opacity.
 #include <QtCore/QHash>
 #include <QtCore/QPointer>
 #include <QtCore/QString>
+#include <QtCore/QTimer>
 #include <QtGui/QPalette>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QGraphicsOpacityEffect>
 #include <QtWidgets/QWidget>
 
 #include <algorithm>
@@ -20,7 +20,7 @@ and text/widget opacity.
 TGD_PLUGIN_PREVIEW(
 	"example.transparent_telegram",
 	"AstroTransparent",
-	"2.4",
+	"2.5",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
@@ -39,6 +39,10 @@ QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
 }
 
+QString Utf8(const char *value) {
+	return QString::fromUtf8(value);
+}
+
 bool UseRussian(const Plugins::Host *host) {
 	const auto hostInfo = host->hostInfo();
 	const auto fallback = host->systemInfo().uiLanguage;
@@ -52,7 +56,7 @@ QString PluginText(
 		const Plugins::Host *host,
 		const char *en,
 		const char *ru) {
-	return UseRussian(host) ? Latin1(ru) : Latin1(en);
+	return UseRussian(host) ? Utf8(ru) : Utf8(en);
 }
 
 bool IsSupportedWindowWidget(QWidget *widget) {
@@ -60,6 +64,12 @@ bool IsSupportedWindowWidget(QWidget *widget) {
 		return false;
 	}
 	return widget->windowType() == Qt::Window
+		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
+}
+
+bool IsReadyWidget(QWidget *widget) {
+	return widget
+		&& widget->testAttribute(Qt::WA_WState_Created)
 		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
 }
 
@@ -94,6 +104,29 @@ bool LooksLikeMessageSurface(QWidget *widget) {
 		|| contains("dialogs");
 }
 
+bool LooksLikeTextWidget(QWidget *widget) {
+	if (!widget || widget->isWindow()) {
+		return false;
+	}
+	const auto objectName = widget->objectName().toLower();
+	const auto className = QByteArray(widget->metaObject()->className()).toLower();
+	const auto contains = [&](const char *needle) {
+		return objectName.contains(QString::fromLatin1(needle))
+			|| className.contains(needle);
+	};
+	return contains("label")
+		|| contains("text")
+		|| contains("button")
+		|| contains("input")
+		|| contains("edit")
+		|| contains("lineedit")
+		|| contains("checkbox")
+		|| contains("radio")
+		|| contains("switch")
+		|| contains("title")
+		|| contains("subtitle");
+}
+
 void ApplyAlpha(QPalette &palette, QPalette::ColorRole role, int alpha) {
 	for (const auto group : {
 			QPalette::Active,
@@ -120,7 +153,7 @@ public:
 			_host,
 			"AstroTransparent",
 			"АстроПрозрачность");
-		_info.version = QStringLiteral("2.4");
+		_info.version = QStringLiteral("2.5");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = PluginText(
 			_host,
@@ -143,7 +176,7 @@ public:
 		_settingsPageId = _host->registerSettingsPage(
 			_info.id,
 			makeSettingsPage(),
-			[=](const Plugins::SettingDescriptor &setting) {
+			[this](const Plugins::SettingDescriptor &setting) {
 				if (setting.id == QStringLiteral("window_opacity")) {
 					setWindowOpacityPercent(setting.intValue);
 				} else if (setting.id == QStringLiteral("message_opacity")) {
@@ -153,11 +186,16 @@ public:
 				}
 			});
 
-		_host->onWindowWidgetCreated([=](QWidget *widget) {
-			applyToWindow(widget);
+		_host->onWindowWidgetCreated([this](QWidget *widget) {
+			const auto guard = QPointer<QWidget>(widget);
+			QTimer::singleShot(0, this, [this, guard] {
+				if (guard) {
+					applyToWindow(guard.data());
+				}
+			});
 		});
 
-		applyCurrentAppearance();
+		scheduleAppearanceApply();
 	}
 
 	void onUnload() override {
@@ -267,7 +305,7 @@ private:
 			return;
 		}
 		_windowOpacityPercent = clamped;
-		applyWindowOpacity();
+		scheduleAppearanceApply();
 	}
 
 	void setMessageOpacityPercent(int value) {
@@ -279,7 +317,7 @@ private:
 			return;
 		}
 		_messageOpacityPercent = clamped;
-		applyMessageOpacity();
+		scheduleAppearanceApply();
 	}
 
 	void setTextOpacityPercent(int value) {
@@ -291,17 +329,27 @@ private:
 			return;
 		}
 		_textOpacityPercent = clamped;
-		applyTextOpacity();
+		scheduleAppearanceApply();
+	}
+
+	void scheduleAppearanceApply() {
+		if (_appearanceApplyScheduled) {
+			return;
+		}
+		_appearanceApplyScheduled = true;
+		QTimer::singleShot(0, this, [this] {
+			_appearanceApplyScheduled = false;
+			applyCurrentAppearance();
+		});
 	}
 
 	void applyCurrentAppearance() {
 		applyWindowOpacity();
-		applyMessageOpacity();
-		applyTextOpacity();
+		applyWidgetPalettes();
 	}
 
 	void applyWindowOpacity() const {
-		_host->forEachWindowWidget([=](QWidget *widget) {
+		_host->forEachWindowWidget([this](QWidget *widget) {
 			if (IsSupportedWindowWidget(widget)) {
 				widget->setWindowOpacity(windowOpacityValue());
 			}
@@ -312,98 +360,34 @@ private:
 		}
 	}
 
-	void applyTextOpacity() {
-		_host->forEachWindowWidget([=](QWidget *widget) {
-			applyTextOpacityToRoot(widget);
-		});
-		if (const auto widget = _host->activeWindowWidget()) {
-			applyTextOpacityToRoot(widget);
-		}
-	}
-
 	void applyToWindow(QWidget *widget) {
 		if (!IsSupportedWindowWidget(widget)) {
 			return;
 		}
 		widget->setWindowOpacity(windowOpacityValue());
-		applyMessageOpacityToRoot(widget);
-		applyTextOpacityToRoot(widget);
+		applyPalettePassToRoot(widget);
 	}
 
-	void applyMessageOpacity() {
-		_host->forEachWindowWidget([=](QWidget *widget) {
-			applyMessageOpacityToRoot(widget);
+	void applyWidgetPalettes() {
+		_host->forEachWindowWidget([this](QWidget *widget) {
+			applyPalettePassToRoot(widget);
 		});
 		if (const auto widget = _host->activeWindowWidget()) {
-			applyMessageOpacityToRoot(widget);
+			applyPalettePassToRoot(widget);
 		}
 	}
 
-	void applyMessageOpacityToRoot(QWidget *root) {
-		if (!IsSupportedWindowWidget(root)) {
+	void applyPalettePassToRoot(QWidget *root) {
+		if (!IsSupportedWindowWidget(root) || !IsReadyWidget(root)) {
 			return;
 		}
-		applyMessageOpacityToWidget(root);
 		for (const auto child : root->findChildren<QWidget*>()) {
-			applyMessageOpacityToWidget(child);
+			applyPaletteToWidget(child);
 		}
 	}
 
-	void applyMessageOpacityToWidget(QWidget *widget) {
-		if (!LooksLikeMessageSurface(widget)) {
-			if (_messageOpacityPercent >= kMaxOpacityPercent) {
-				restoreMessageOpacity(widget);
-			}
-			return;
-		}
-		if (_messageOpacityPercent >= kMaxOpacityPercent) {
-			restoreMessageOpacity(widget);
-			return;
-		}
-		auto effect = _messageEffects.value(widget);
-		if (!effect) {
-			if (widget->graphicsEffect() && widget->graphicsEffect() != effect) {
-				return;
-			}
-			effect = new QGraphicsOpacityEffect(widget);
-			widget->setGraphicsEffect(effect);
-			_messageEffects.insert(widget, effect);
-			QObject::connect(
-				widget,
-				&QObject::destroyed,
-				this,
-				[this, widget](QObject *) {
-					_messageEffects.remove(widget);
-				});
-		}
-		effect->setOpacity(messageOpacityValue());
-		widget->update();
-	}
-
-	void restoreMessageOpacity(QWidget *widget) {
-		if (!widget) {
-			return;
-		}
-		auto effect = _messageEffects.take(widget);
-		if (effect && widget->graphicsEffect() == effect) {
-			widget->setGraphicsEffect(nullptr);
-			effect->deleteLater();
-			widget->update();
-		}
-	}
-
-	void applyTextOpacityToRoot(QWidget *root) {
-		if (!IsSupportedWindowWidget(root)) {
-			return;
-		}
-		applyTextOpacityToWidget(root);
-		for (const auto child : root->findChildren<QWidget*>()) {
-			applyTextOpacityToWidget(child);
-		}
-	}
-
-	void applyTextOpacityToWidget(QWidget *widget) {
-		if (!widget) {
+	void applyPaletteToWidget(QWidget *widget) {
+		if (!widget || !IsReadyWidget(widget)) {
 			return;
 		}
 		if (!_originalPalettes.contains(widget)) {
@@ -416,27 +400,36 @@ private:
 					_originalPalettes.remove(widget);
 				});
 		}
-		auto original = _originalPalettes.value(widget);
-		const auto current = widget->palette();
-		if (_textOpacityPercent < kMaxOpacityPercent) {
-			const auto adjusted = adjustedPalette(original);
-			if (current != original && current != adjusted) {
-				original = current;
-				_originalPalettes[widget] = original;
-			}
+		const auto original = _originalPalettes.value(widget);
+		auto adjusted = original;
+		auto changed = false;
+		if (LooksLikeMessageSurface(widget) && _messageOpacityPercent < kMaxOpacityPercent) {
+			adjusted = adjustedMessagePalette(adjusted);
+			changed = true;
 		}
-		if (_textOpacityPercent >= kMaxOpacityPercent) {
-			widget->setPalette(original);
-			widget->update();
-			return;
+		if (LooksLikeTextWidget(widget) && _textOpacityPercent < kMaxOpacityPercent) {
+			adjusted = adjustedTextPalette(adjusted);
+			changed = true;
 		}
-
-		const auto adjusted = adjustedPalette(original);
-		widget->setPalette(adjusted);
+		widget->setPalette(changed ? adjusted : original);
 		widget->update();
 	}
 
-	QPalette adjustedPalette(QPalette palette) const {
+	QPalette adjustedMessagePalette(QPalette palette) const {
+		const auto alpha = messageOpacityAlpha();
+		for (const auto role : {
+				QPalette::Window,
+				QPalette::Base,
+				QPalette::AlternateBase,
+				QPalette::Button,
+				QPalette::ToolTipBase,
+			}) {
+			ApplyAlpha(palette, role, alpha);
+		}
+		return palette;
+	}
+
+	QPalette adjustedTextPalette(QPalette palette) const {
 		const auto alpha = textOpacityAlpha();
 		for (const auto role : {
 				QPalette::WindowText,
@@ -462,19 +455,7 @@ private:
 			IsSupportedWindowWidget(widget)) {
 			widget->setWindowOpacity(1.0);
 		}
-		restoreMessageEffects();
 		restorePalettes();
-	}
-
-	void restoreMessageEffects() {
-		for (auto i = _messageEffects.begin(); i != _messageEffects.end(); ++i) {
-			if (i.key() && i.value() && i.key()->graphicsEffect() == i.value()) {
-				i.key()->setGraphicsEffect(nullptr);
-				i.value()->deleteLater();
-				i.key()->update();
-			}
-		}
-		_messageEffects.clear();
 	}
 
 	void restorePalettes() {
@@ -499,6 +480,16 @@ private:
 			_messageOpacityPercent,
 			kMinOpacityPercent,
 			kMaxOpacityPercent) / 100.0;
+	}
+
+	int messageOpacityAlpha() const {
+		return std::clamp(
+			int(std::lround(std::clamp(
+				_messageOpacityPercent,
+				kMinOpacityPercent,
+				kMaxOpacityPercent) * 2.55)),
+			51,
+			255);
 	}
 
 	int textOpacityAlpha() const {
@@ -547,8 +538,8 @@ private:
 	int _windowOpacityPercent = kDefaultWindowOpacityPercent;
 	int _messageOpacityPercent = kDefaultMessageOpacityPercent;
 	int _textOpacityPercent = kDefaultTextOpacityPercent;
-	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _messageEffects;
 	QHash<QWidget*, QPalette> _originalPalettes;
+	bool _appearanceApplyScheduled = false;
 };
 
 TGD_PLUGIN_ENTRY {

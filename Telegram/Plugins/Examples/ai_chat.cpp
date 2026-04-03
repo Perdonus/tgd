@@ -9,6 +9,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QObject>
+#include <QtCore/QPoint>
 #include <QtCore/QPointer>
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
@@ -35,7 +36,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.2",
+	"1.3",
 	"Codex",
 	"Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -44,12 +45,11 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.2";
+constexpr auto kPluginVersion = "1.3";
 constexpr auto kPluginAuthor = "Codex";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
 constexpr auto kModelName = "gpt-4o-mini";
-constexpr auto kOpenChatActionId = "open_ai_chat";
 
 constexpr auto kApiKeySettingId = "api_key";
 constexpr auto kOpenSiteSettingId = "open_site";
@@ -63,6 +63,14 @@ constexpr int kRequestTimeoutMs = 45000;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
+}
+
+QString Utf8(const char *value) {
+	return QString::fromUtf8(value);
+}
+
+QString Utf8(const char8_t *value) {
+	return QString::fromUtf8(reinterpret_cast<const char*>(value));
 }
 
 QString NormalizeText(const QString &text) {
@@ -167,31 +175,48 @@ public:
 				handleSettingChanged(setting);
 			});
 
+		_outgoingInterceptorId = _host->registerOutgoingTextInterceptor(
+			_info.id,
+			[this](const Plugins::OutgoingTextContext &context) {
+				QString args;
+				if (!extractAiCommandArgs(context.text, &args)) {
+					return Plugins::CommandResult{
+						.action = Plugins::CommandResult::Action::Continue
+					};
+				}
+				scheduleOpenChat(args);
+				return Plugins::CommandResult{
+					.action = Plugins::CommandResult::Action::Handled
+				};
+			},
+			-1000);
+
 		_commandId = _host->registerCommand(
 			_info.id,
 			{
 				QStringLiteral("ai"),
 				tr(
 					QStringLiteral("Open the AI chat dialog."),
-					QStringLiteral("Открыть окно ИИ-чата.")),
+					u8"Открыть окно ИИ-чата."),
 					QStringLiteral("/ai")
 				},
 				[this](const Plugins::CommandContext &context) {
-					openChatDialog(resolveChatWindow(), context.args);
+					scheduleOpenChat(context.args);
 					auto result = Plugins::CommandResult();
 					result.action = Plugins::CommandResult::Action::Handled;
 					return result;
 				});
-		_actionId = _host->registerAction(
+		_actionId = _host->registerActionWithContext(
 			_info.id,
 			tr(
 				QStringLiteral("Open AI Chat"),
-				QStringLiteral("Открыть ИИ чат")),
+				u8"Открыть ИИ-чат"),
 			tr(
 				QStringLiteral("Open the built-in sosiskibot.ru AI dialog."),
-				QStringLiteral("Открыть встроенный ИИ-диалог sosiskibot.ru.")),
-			[this] {
-				openChatDialog(resolveChatWindow(), QString());
+				u8"Открыть встроенный ИИ-диалог sosiskibot.ru."),
+			[this](const Plugins::ActionContext &context) {
+				Q_UNUSED(context);
+				scheduleOpenChat(QString());
 			});
 	}
 
@@ -205,6 +230,10 @@ public:
 		if (_actionId) {
 			_host->unregisterAction(_actionId);
 			_actionId = 0;
+		}
+		if (_outgoingInterceptorId) {
+			_host->unregisterOutgoingTextInterceptor(_outgoingInterceptorId);
+			_outgoingInterceptorId = 0;
 		}
 		if (_settingsPageId) {
 			_host->unregisterSettingsPage(_settingsPageId);
@@ -260,20 +289,24 @@ private:
 		return language.startsWith(QStringLiteral("ru"), Qt::CaseInsensitive);
 	}
 
-	QString tr(QString en, QString ru) const {
-		return useRussian() ? std::move(ru) : std::move(en);
+	QString tr(QString en, const char *ru) const {
+		return useRussian() ? Utf8(ru) : std::move(en);
+	}
+
+	QString tr(QString en, const char8_t *ru) const {
+		return useRussian() ? Utf8(ru) : std::move(en);
 	}
 
 	void refreshInfo() {
 		_info.id = Latin1(kPluginId);
 		_info.name = tr(
 			QStringLiteral("AI Chat"),
-			QStringLiteral("ИИ чат"));
+			u8"ИИ-чат");
 		_info.version = Latin1(kPluginVersion);
 		_info.author = Latin1(kPluginAuthor);
 		_info.description = tr(
 			QStringLiteral("Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api."),
-			QStringLiteral("Перехватывает /ai, открывает диалог ИИ-чата и использует sosiskibot.ru/api."));
+			u8"Перехватывает /ai, открывает диалог ИИ-чата и использует sosiskibot.ru/api.");
 		_info.website = Latin1(kSiteUrl);
 	}
 
@@ -282,25 +315,25 @@ private:
 		apiKey.id = Latin1(kApiKeySettingId);
 		apiKey.title = tr(
 			QStringLiteral("API key"),
-			QStringLiteral("API ключ"));
+			u8"API-ключ");
 		apiKey.description = tr(
 			QStringLiteral("Bearer token for requests to sosiskibot.ru/api."),
-			QStringLiteral("Bearer-токен для запросов к sosiskibot.ru/api."));
+			u8"Bearer-токен для запросов к sosiskibot.ru/api.");
 		apiKey.type = Plugins::SettingControl::TextInput;
 		apiKey.textValue = _apiKey;
 		apiKey.placeholderText = tr(
 			QStringLiteral("Paste your sosiskibot.ru API key"),
-			QStringLiteral("Вставь сюда свой API ключ от sosiskibot.ru"));
+			u8"Вставь сюда свой API-ключ от sosiskibot.ru");
 		apiKey.secret = true;
 
 		auto openSite = Plugins::SettingDescriptor();
 		openSite.id = Latin1(kOpenSiteSettingId);
 		openSite.title = tr(
 			QStringLiteral("Get API key"),
-			QStringLiteral("Получить API ключ"));
+			u8"Получить API-ключ");
 		openSite.description = tr(
 			QStringLiteral("Open sosiskibot.ru to create or manage your API key."),
-			QStringLiteral("Открыть sosiskibot.ru, чтобы создать или управлять API ключом."));
+			u8"Открыть sosiskibot.ru, чтобы создать или управлять API-ключом.");
 		openSite.type = Plugins::SettingControl::ActionButton;
 		openSite.buttonText = QStringLiteral("sosiskibot.ru");
 
@@ -308,17 +341,17 @@ private:
 		info.id = Latin1(kInfoSettingId);
 		info.title = tr(
 			QStringLiteral("Usage"),
-			QStringLiteral("Использование"));
+			u8"Как использовать");
 		info.description = tr(
 			QStringLiteral("Use /ai to open the AI chat. The command is intercepted and is not sent into the chat."),
-			QStringLiteral("Используй /ai, чтобы открыть ИИ-чат. Команда перехватывается и не отправляется в текущий чат."));
+			u8"Используй /ai, чтобы открыть ИИ-чат. Команда перехватывается и не отправляется в текущий чат.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
 		section.id = QStringLiteral("connection");
 		section.title = tr(
 			QStringLiteral("Connection"),
-			QStringLiteral("Подключение"));
+			u8"Подключение");
 		section.settings.push_back(apiKey);
 		section.settings.push_back(openSite);
 		section.settings.push_back(info);
@@ -327,10 +360,10 @@ private:
 		page.id = QStringLiteral("ai_chat");
 		page.title = tr(
 			QStringLiteral("AI Chat"),
-			QStringLiteral("ИИ чат"));
+			u8"ИИ-чат");
 		page.description = tr(
 			QStringLiteral("Configure access to the built-in AI chat dialog."),
-			QStringLiteral("Настрой доступ к встроенному диалогу ИИ-чата."));
+			u8"Настрой доступ к встроенному диалогу ИИ-чата.");
 		page.sections.push_back(section);
 		return page;
 	}
@@ -346,10 +379,10 @@ private:
 		return _apiKey.isEmpty()
 			? tr(
 				QStringLiteral("Add your sosiskibot.ru API key in Settings > Plugins > AI Chat."),
-				QStringLiteral("Добавь свой API ключ от sosiskibot.ru в Настройки > Плагины > ИИ чат."))
+				u8"Добавь свой API-ключ от sosiskibot.ru в Настройки > Плагины > ИИ-чат.")
 			: tr(
 				QStringLiteral("Ready. Model: %1").arg(Latin1(kModelName)),
-				QStringLiteral("Готово. Модель: %1").arg(Latin1(kModelName)));
+				u8"Готово. Модель: %1").arg(Latin1(kModelName));
 	}
 
 	void handleSettingChanged(const Plugins::SettingDescriptor &setting) {
@@ -362,9 +395,31 @@ private:
 			if (!QDesktopServices::openUrl(QUrl(Latin1(kSiteUrl)))) {
 				_host->showToast(tr(
 					QStringLiteral("Could not open sosiskibot.ru."),
-					QStringLiteral("Не удалось открыть sosiskibot.ru.")));
+					u8"Не удалось открыть sosiskibot.ru."));
 			}
 		}
+	}
+
+	bool extractAiCommandArgs(const QString &text, QString *args) const {
+		const auto normalized = NormalizeText(text);
+		if (normalized.isEmpty() || !normalized.startsWith(QChar::fromLatin1('/'))) {
+			return false;
+		}
+		auto end = normalized.size();
+		for (auto i = 1; i < normalized.size(); ++i) {
+			if (normalized.at(i).isSpace()) {
+				end = i;
+				break;
+			}
+		}
+		const auto token = normalized.mid(1, end - 1);
+		if (token.compare(QStringLiteral("ai"), Qt::CaseInsensitive) != 0) {
+			return false;
+		}
+		if (args) {
+			*args = normalized.mid(end).trimmed();
+		}
+		return true;
 	}
 
 	WindowState *findWindowState(QWidget *windowKey) {
@@ -390,31 +445,64 @@ private:
 						it->second.pendingReply->deleteLater();
 						it->second.pendingReply = nullptr;
 					}
+					if (auto it = _windowStates.find(windowKey);
+						it != _windowStates.end()
+						&& it->second.dialog) {
+						it->second.dialog->close();
+					}
 					_windowStates.erase(windowKey);
 				});
 		}
 		return state;
 	}
 
-	QWidget *resolveChatWindow() const {
-		if (auto *active = _host->activeWindowWidget();
-			active && active->isWindow()) {
-			return active;
+	QWidget *resolveChatWindow(QWidget *preferred = nullptr) const {
+		if (preferred) {
+			if (auto *top = preferred->window();
+				top && top->isWindow() && !top->parentWidget()) {
+				return top;
+			}
+		}
+		if (auto *active = _host->activeWindowWidget()) {
+			if (auto *top = active->window();
+				top && top->isWindow() && !top->parentWidget()) {
+				return top;
+			}
 		}
 		QWidget *fallback = nullptr;
 		_host->forEachWindowWidget([&](QWidget *widget) {
-			if (!fallback && widget && widget->isWindow() && !widget->parentWidget()) {
-				fallback = widget;
+			if (!fallback && widget) {
+				auto *top = widget->window();
+				if (top && top->isWindow() && !top->parentWidget()) {
+					fallback = top;
+				}
 			}
 		});
 		return fallback;
+	}
+
+	void scheduleOpenChat(const QString &prefill, QWidget *preferredWindow = nullptr) {
+		const auto normalizedPrefill = NormalizeText(prefill);
+		const auto preferred = QPointer<QWidget>(preferredWindow);
+		QTimer::singleShot(0, this, [this, normalizedPrefill, preferred] {
+			if (_isUnloading) {
+				return;
+			}
+			if (auto *window = resolveChatWindow(preferred.data())) {
+				openChatDialog(window, normalizedPrefill);
+				return;
+			}
+			_host->showToast(tr(
+				QStringLiteral("Open a Telegram window before using /ai."),
+				u8"Сначала открой окно Telegram, потом используй /ai."));
+		});
 	}
 
 	void openChatDialog(QWidget *parentWindow, const QString &prefill) {
 		if (!parentWindow) {
 			_host->showToast(tr(
 				QStringLiteral("Open a Telegram window before using /ai."),
-				QStringLiteral("Сначала открой окно Telegram, потом используй /ai.")));
+				u8"Сначала открой окно Telegram, потом используй /ai."));
 			return;
 		}
 
@@ -437,10 +525,16 @@ private:
 	}
 
 	void createDialog(QWidget *parentWindow, WindowState &state) {
-		auto dialog = new QDialog(parentWindow);
+		auto dialog = new QDialog(nullptr, Qt::Window);
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
+		dialog->setAttribute(Qt::WA_QuitOnClose, false);
+		dialog->setModal(false);
 		dialog->setWindowTitle(QStringLiteral("Sosiski AI"));
 		dialog->resize(kDialogWidth, kDialogHeight);
+		if (parentWindow) {
+			const auto center = parentWindow->frameGeometry().center();
+			dialog->move(center - QPoint(dialog->width() / 2, dialog->height() / 2));
+		}
 
 		auto layout = new QVBoxLayout(dialog);
 		layout->setContentsMargins(12, 12, 12, 12);
@@ -449,7 +543,7 @@ private:
 		auto intro = new QLabel(
 			tr(
 				QStringLiteral("Chat with sosiskibot.ru directly inside Astrogram. Each Telegram window keeps its own in-memory conversation."),
-				QStringLiteral("Общайся с sosiskibot.ru прямо внутри Astrogram. У каждого окна Telegram будет своя отдельная история диалога в памяти.")),
+				u8"Общайся с sosiskibot.ru прямо внутри Astrogram. У каждого окна Telegram будет своя отдельная история диалога в памяти."),
 			dialog);
 		intro->setWordWrap(true);
 		layout->addWidget(intro);
@@ -459,7 +553,7 @@ private:
 		transcript->setMinimumHeight(kTranscriptMinimumHeight);
 		transcript->setPlaceholderText(tr(
 			QStringLiteral("Conversation messages will appear here."),
-			QStringLiteral("Здесь будут появляться сообщения диалога.")));
+			u8"Здесь будут появляться сообщения диалога."));
 		layout->addWidget(transcript, 1);
 
 		auto status = new QLabel(dialog);
@@ -470,7 +564,7 @@ private:
 		auto input = new QPlainTextEdit(dialog);
 		input->setPlaceholderText(tr(
 			QStringLiteral("Ask something..."),
-			QStringLiteral("Спроси что-нибудь...")));
+			u8"Спроси что-нибудь..."));
 		input->setFixedHeight(kInputHeight);
 		layout->addWidget(input);
 
@@ -480,10 +574,10 @@ private:
 
 		auto clearButton = new QPushButton(tr(
 			QStringLiteral("Clear history"),
-			QStringLiteral("Очистить историю")), dialog);
+			u8"Очистить историю"), dialog);
 		auto sendButton = new QPushButton(tr(
 			QStringLiteral("Send"),
-			QStringLiteral("Отправить")), dialog);
+			u8"Отправить"), dialog);
 		sendButton->setDefault(true);
 
 		buttonsLayout->addWidget(clearButton);
@@ -492,10 +586,10 @@ private:
 		layout->addLayout(buttonsLayout);
 
 		auto sendShortcut = new QShortcut(
-			QKeySequence(Qt::CTRL | Qt::Key_Return),
+			QKeySequence(int(Qt::CTRL) | int(Qt::Key_Return)),
 			dialog);
 		auto keypadSendShortcut = new QShortcut(
-			QKeySequence(Qt::CTRL | Qt::Key_Enter),
+			QKeySequence(int(Qt::CTRL) | int(Qt::Key_Enter)),
 			dialog);
 
 		state.dialog = dialog;
@@ -521,7 +615,7 @@ private:
 			[this, parentWindow] {
 				sendCurrentPrompt(parentWindow);
 			});
-		QObject::connect(dialog, &QDialog::finished, this, [this, parentWindow](int) {
+		QObject::connect(dialog, &QObject::destroyed, this, [this, parentWindow](QObject *) {
 			if (auto *existing = findWindowState(parentWindow)) {
 				existing->dialog = nullptr;
 				existing->transcriptWidget = nullptr;
@@ -628,7 +722,7 @@ private:
 		if (_apiKey.isEmpty()) {
 			state->statusText = tr(
 				QStringLiteral("Configure your sosiskibot.ru API key in Settings > Plugins > AI Chat."),
-				QStringLiteral("Настрой свой API ключ от sosiskibot.ru в Настройки > Плагины > ИИ чат."));
+				u8"Настрой свой API-ключ от sosiskibot.ru в Настройки > Плагины > ИИ-чат.");
 			applyWindowState(*state);
 			return;
 		}
@@ -637,20 +731,20 @@ private:
 		if (prompt.isEmpty()) {
 			state->statusText = tr(
 				QStringLiteral("Type a prompt before sending."),
-				QStringLiteral("Напиши запрос перед отправкой."));
+				u8"Напиши запрос перед отправкой.");
 			applyWindowState(*state);
 			return;
 		}
 
 		addTranscriptEntry(
 			*state,
-			tr(QStringLiteral("You"), QStringLiteral("Ты")),
+			tr(QStringLiteral("You"), u8"Ты"),
 			prompt);
 		state->pendingUserPrompt = prompt;
 		state->inputWidget->clear();
 		state->statusText = tr(
 			QStringLiteral("Waiting for response..."),
-			QStringLiteral("Жду ответ..."));
+			u8"Жду ответ...");
 		applyWindowState(*state);
 
 		auto messages = QJsonArray();
@@ -710,11 +804,11 @@ private:
 		if (statusCode > 0) {
 			return tr(
 				QStringLiteral("Request failed with HTTP %1.").arg(statusCode),
-				QStringLiteral("Запрос завершился ошибкой HTTP %1.").arg(statusCode));
+				u8"Запрос завершился ошибкой HTTP %1.").arg(statusCode);
 		}
 		return tr(
 			QStringLiteral("Request failed."),
-			QStringLiteral("Запрос завершился ошибкой."));
+			u8"Запрос завершился ошибкой.");
 	}
 
 	void finishReply(QWidget *windowKey, QNetworkReply *reply) {
@@ -740,7 +834,7 @@ private:
 		if (reply->error() != QNetworkReply::NoError || statusCode >= 400) {
 			addTranscriptEntry(
 				*state,
-				tr(QStringLiteral("System"), QStringLiteral("Система")),
+				tr(QStringLiteral("System"), u8"Система"),
 				requestErrorText(reply, body, statusCode));
 			state->pendingUserPrompt.clear();
 			state->statusText = defaultStatusText();
@@ -754,10 +848,10 @@ private:
 		if (parseError.error != QJsonParseError::NoError || !parsed.isObject()) {
 			addTranscriptEntry(
 				*state,
-				tr(QStringLiteral("System"), QStringLiteral("Система")),
+				tr(QStringLiteral("System"), u8"Система"),
 				tr(
 					QStringLiteral("Received an invalid JSON response from the API."),
-					QStringLiteral("API вернул некорректный JSON ответ.")));
+					u8"API вернул некорректный JSON-ответ."));
 			state->pendingUserPrompt.clear();
 			state->statusText = defaultStatusText();
 			applyWindowState(*state);
@@ -769,10 +863,10 @@ private:
 		if (assistantText.isEmpty()) {
 			addTranscriptEntry(
 				*state,
-				tr(QStringLiteral("System"), QStringLiteral("Система")),
+				tr(QStringLiteral("System"), u8"Система"),
 				tr(
 					QStringLiteral("The API response did not contain assistant text."),
-					QStringLiteral("В ответе API не оказалось текста ассистента.")));
+					u8"В ответе API не оказалось текста ассистента."));
 			state->pendingUserPrompt.clear();
 			state->statusText = defaultStatusText();
 			applyWindowState(*state);
@@ -792,7 +886,7 @@ private:
 		});
 		addTranscriptEntry(
 			*state,
-			tr(QStringLiteral("AI"), QStringLiteral("ИИ")),
+			tr(QStringLiteral("AI"), u8"ИИ"),
 			assistantText);
 		state->statusText = defaultStatusText();
 		applyWindowState(*state);
@@ -804,6 +898,7 @@ private:
 	QNetworkAccessManager *_network = nullptr;
 	Plugins::CommandId _commandId = 0;
 	Plugins::ActionId _actionId = 0;
+	Plugins::OutgoingInterceptorId _outgoingInterceptorId = 0;
 	Plugins::SettingsPageId _settingsPageId = 0;
 	Plugins::PluginInfo _info;
 	QString _apiKey;
