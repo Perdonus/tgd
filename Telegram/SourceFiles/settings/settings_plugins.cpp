@@ -123,39 +123,27 @@ QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 }
 
 QString FormatPluginStatusBadge(const ::Plugins::PluginState &state) {
-	QString status;
-	if (state.disabledByRecovery) {
-		status = PluginUiText(
-			u"Recovery disabled"_q,
-			u"Выключен recovery"_q);
-	} else if (!state.error.trimmed().isEmpty()) {
-		status = PluginUiText(u"Error"_q, u"Ошибка"_q);
-	} else if (!state.enabled) {
-		status = PluginUiText(u"Disabled"_q, u"Выключен"_q);
-	} else if (state.loaded) {
-		status = PluginUiText(u"Active"_q, u"Активен"_q);
-	} else {
-		status = PluginUiText(u"Metadata only"_q, u"Только метаданные"_q);
-	}
 	const auto version = state.info.version.trimmed();
-	if (version.isEmpty()) {
-		return status;
+	if (state.disabledByRecovery) {
+		return version.isEmpty()
+			? PluginUiText(
+				u"Disabled after crash"_q,
+				u"Выключен после сбоя"_q)
+			: version + u" • "_q + PluginUiText(
+				u"Disabled after crash"_q,
+				u"Выключен после сбоя"_q);
 	}
-	return version + u" • "_q + status;
-}
-
-QString FormatPluginFeatureList(const ::Plugins::PluginState &state) {
-	auto items = QStringList();
-	if (!Core::App().plugins().settingsPagesFor(state.info.id).empty()) {
-		items.push_back(PluginUiText(u"Settings"_q, u"Настройки"_q));
+	if (!state.error.trimmed().isEmpty()) {
+		return version.isEmpty()
+			? PluginUiText(u"Error"_q, u"Ошибка"_q)
+			: version + u" • "_q + PluginUiText(u"Error"_q, u"Ошибка"_q);
 	}
-	if (!Core::App().plugins().actionsFor(state.info.id).empty()) {
-		items.push_back(PluginUiText(u"Actions"_q, u"Действия"_q));
+	if (!state.enabled) {
+		return version.isEmpty()
+			? PluginUiText(u"Disabled"_q, u"Выключен"_q)
+			: version + u" • "_q + PluginUiText(u"Disabled"_q, u"Выключен"_q);
 	}
-	if (!Core::App().plugins().panelsFor(state.info.id).empty()) {
-		items.push_back(PluginUiText(u"Custom UI"_q, u"Пользовательский UI"_q));
-	}
-	return items.join(u" • "_q);
+	return version;
 }
 
 QString PluginDocsText() {
@@ -373,7 +361,7 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 1. plugins.log: `load-failed`, `abi-mismatch`, `onload failed`, `panel failed`.
 2. Путь и SHA пакета в логе.
 3. Совпадение compiler + Qt.
-4. Не храните long-lived сырые указатели на объекты Telegram.
+4. Не храните long-lived сырые указатели на объекты Astrogram.
 5. Уберите тяжёлую синхронную работу из callback'ов UI.
 
 17) Практика надёжности
@@ -593,7 +581,7 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 - ABI failures are logged as load-failed/abi-mismatch in plugins.log.
 
 15) Recovery/safe mode
-- If Telegram detects crash risk in plugin operation, it enables safe mode.
+- If Astrogram detects crash risk in plugin operation, it enables safe mode.
 - Suspected plugin is disabled automatically.
 - Recovery notice appears on next start.
 
@@ -601,7 +589,7 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 1. Check plugins.log (`load-failed`, `abi-mismatch`, `onload failed`, `panel failed`).
 2. Verify package path and SHA in log.
 3. Verify compiler + Qt match.
-4. Avoid long-lived raw pointers to Telegram internals.
+4. Avoid long-lived raw pointers to Astrogram internals.
 5. Move heavy sync work out of UI callbacks.
 
 17) Runtime API and host info
@@ -619,7 +607,7 @@ QString PluginRuntimeText() {
 	auto lines = QStringList();
 	lines.push_back(PluginUiText(
 		u"Plugin Runtime & Diagnostics"_q,
-		u"Рантайм плагинов и диагностика"_q));
+		u"Рантайм и диагностика плагинов"_q));
 	lines.push_back(QString());
 	lines.push_back(PluginUiText(
 		u"Host"_q,
@@ -769,20 +757,6 @@ void OpenPluginsFolder() {
 	File::ShowInFolder(Core::App().plugins().pluginsPath());
 }
 
-QString FormatPluginSummary(const ::Plugins::PluginState &state) {
-	auto lines = QStringList();
-	const auto &info = state.info;
-	if (!info.version.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Version: "_q, u"Версия: "_q)
-			+ info.version.trimmed());
-	}
-	if (!info.description.trimmed().isEmpty()) {
-		lines.push_back(info.description.trimmed());
-	}
-	return lines.join(u"\n"_q);
-}
-
 QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
@@ -790,56 +764,6 @@ QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 		lines.push_back(info.description.trimmed());
 	}
 	return lines.join(u"\n"_q);
-}
-
-QString FormatPluginCapabilityLine(const ::Plugins::PluginState &state) {
-	const auto features = FormatPluginFeatureList(state);
-	const auto settingsCount = int(Core::App().plugins().settingsPagesFor(
-		state.info.id).size());
-	const auto actionsCount = int(Core::App().plugins().actionsFor(
-		state.info.id).size());
-	const auto panelsCount = int(Core::App().plugins().panelsFor(
-		state.info.id).size());
-	return PluginUiText(
-		u"Available: "_q,
-		u"Доступно: "_q)
-		+ (features.isEmpty()
-			? PluginUiText(u"Metadata only"_q, u"Только метаданные"_q)
-			: features)
-		+ u"\n"_q
-		+ PluginUiText(u"Pages: "_q, u"Страницы: "_q)
-		+ QString::number(settingsCount)
-		+ u"  •  "_q
-		+ PluginUiText(u"Actions: "_q, u"Действия: "_q)
-		+ QString::number(actionsCount)
-		+ u"  •  "_q
-		+ PluginUiText(u"Panels: "_q, u"Панели: "_q)
-		+ QString::number(panelsCount);
-}
-
-QString PluginOverviewText(const std::vector<::Plugins::PluginState> &plugins) {
-	auto enabled = 0;
-	auto loaded = 0;
-	auto recovery = 0;
-	auto failed = 0;
-	for (const auto &state : plugins) {
-		if (state.enabled) {
-			++enabled;
-		}
-		if (state.loaded) {
-			++loaded;
-		}
-		if (state.disabledByRecovery || state.recoverySuspected) {
-			++recovery;
-		}
-		if (!state.error.trimmed().isEmpty()) {
-			++failed;
-		}
-	}
-	return PluginUiText(
-		u"Installed: %1  •  Enabled: %2  •  Loaded: %3  •  Recovery: %4  •  Errors: %5"_q,
-		u"Установлено: %1  •  Включено: %2  •  Загружено: %3  •  Recovery: %4  •  Ошибки: %5"_q
-	).arg(plugins.size()).arg(enabled).arg(loaded).arg(recovery).arg(failed);
 }
 
 QString FormatPluginCardNote(const ::Plugins::PluginState &state) {

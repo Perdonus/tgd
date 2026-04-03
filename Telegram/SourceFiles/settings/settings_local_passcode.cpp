@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/auto_lock_box.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_domain.h"
@@ -35,6 +36,30 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Settings {
 namespace {
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString PasscodeAbout1() {
+	return RuEn(
+		"Когда задан локальный код-пароль, вверху списка чатов появляется значок замка.",
+		"When a local passcode is set, a lock icon appears at the top of your chat list.");
+}
+
+[[nodiscard]] QString PasscodeAbout2() {
+	return RuEn(
+		"Нажми на него, чтобы заблокировать Astrogram Desktop.",
+		"Click it to lock Astrogram Desktop.");
+}
+
+[[nodiscard]] QString PasscodeAbout3() {
+	return RuEn(
+		"Если забудешь код-пароль, придётся выйти из Astrogram Desktop и войти заново.",
+		"Note: if you forget your passcode, you'll need to log out of Astrogram Desktop and log in again.");
+}
 
 void SetPasscode(
 		not_null<Window::SessionController*> controller,
@@ -153,9 +178,9 @@ void LocalPasscodeEnter::setupContent() {
 		)->setTryMakeSimilarLines(true);
 	};
 
-	addDescription(tr::lng_passcode_about1());
+	addDescription(rpl::single(PasscodeAbout1()));
 	Ui::AddSkip(content);
-	addDescription(tr::lng_passcode_about2());
+	addDescription(rpl::single(PasscodeAbout2()));
 
 	Ui::AddSkip(content, st::settingLocalPasscodeDescriptionBottomSkip);
 
@@ -502,8 +527,8 @@ void LocalPasscodeManage::setupContent() {
 			object_ptr<Ui::FlatLabel>(
 				content,
 				rpl::combine(
-					tr::lng_passcode_about1(),
-					tr::lng_passcode_about3()
+					rpl::single(PasscodeAbout1()),
+					rpl::single(PasscodeAbout3())
 				) | rpl::map([](const QString &s1, const QString &s2) {
 					return s1 + "\n\n" + s2;
 				}),

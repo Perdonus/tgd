@@ -72,6 +72,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_values.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "window/window_session_controller_link_info.h"
 #include "base/call_delayed.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/style_chat.h"
@@ -995,34 +996,14 @@ void SetupHelp(
 		tr::lng_settings_ask_question(),
 		st::settingsButton,
 		{ &st::menuIconDiscussion });
-	const auto requestId = button->lifetime().make_state<mtpRequestId>();
-	button->lifetime().add([=] {
-		if (*requestId) {
-			controller->session().api().request(*requestId).cancel();
-		}
-	});
 	button->addClickHandler([=] {
-		const auto sure = crl::guard(button, [=] {
-			if (*requestId) {
-				return;
-			}
-			*requestId = controller->session().api().request(
-				MTPhelp_GetSupport()
-			).done([=](const MTPhelp_Support &result) {
-				*requestId = 0;
-				result.match([&](const MTPDhelp_support &data) {
-					auto &owner = controller->session().data();
-					if (const auto user = owner.processUser(data.vuser())) {
-						controller->showPeerHistory(user);
-					}
-				});
-			}).fail([=] {
-				*requestId = 0;
-			}).send();
-		});
-		auto box = Ui::MakeConfirmBox({
+		controller->show(Ui::MakeConfirmBox({
 			.text = tr::lng_settings_ask_sure(),
-			.confirmed = sure,
+			.confirmed = crl::guard(button, [=] {
+				controller->showPeerByLink(Window::PeerByLinkInfo{
+					.usernameOrId = QStringLiteral("astrogram_chat"),
+				});
+			}),
 			.cancelled = [=](Fn<void()> close) {
 				OpenFaq(controller);
 				close();
@@ -1031,7 +1012,6 @@ void SetupHelp(
 			.cancelText = tr::lng_settings_faq_button(),
 			.strictCancel = true,
 		});
-		controller->show(std::move(box));
 	});
 }
 

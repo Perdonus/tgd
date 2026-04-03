@@ -293,7 +293,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_flood_error" = "Too many tries. Please try again later.";
 "lng_edit_error" = "You can't edit this message.";
 "lng_error_phone_flood" = "Sorry, you have deleted and re-created your account too many times recently. Please wait for a few days before signing up again.";
-"lng_error_start_minimized_passcoded" = "You have set a local passcode, so Telegram Desktop can't be launched minimized; it will ask you to enter your passcode before it can start working.";
+"lng_error_start_minimized_passcoded" = "You have set a local passcode, so Astrogram Desktop can't be launched minimized; it will ask you to enter your passcode before it can start working.";
 "lng_error_public_groups_denied" = "Unfortunately, you are banned from participating in public groups.\n{more_info}";
 "lng_error_cant_add_member" = "Sorry, you can't add the bot to this group. Ask a group admin to do it.";
 "lng_error_cant_add_bot" = "Sorry, this bot can't be added to groups.";
@@ -457,7 +457,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_contacts_not_found" = "No contacts found";
 "lng_topics_not_found" = "No topics found.";
 "lng_dlg_search_for_messages" = "Search for messages";
-"lng_update_telegram" = "Update Telegram";
+"lng_update_telegram" = "Update Astrogram";
 "lng_dlg_search_in" = "Search messages in";
 "lng_dlg_search_from" = "From: {user}";
 
@@ -640,11 +640,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_title_total_count" = "Total unread count";
 "lng_settings_native_frame" = "Use system window frame";
 "lng_settings_qt_frame" = "Use Qt window frame";
-"lng_settings_auto_start" = "Launch Telegram when system starts";
+"lng_settings_auto_start" = "Launch Astrogram when system starts";
 "lng_settings_start_min" = "Launch minimized";
-"lng_settings_auto_start_disabled_uwp" = "Starting with the system was disabled in Windows Settings.\n\nPlease enable Telegram Desktop in the Startup Apps Settings.";
+"lng_settings_auto_start_disabled_uwp" = "Starting with the system was disabled in Windows Settings.\n\nPlease enable Astrogram Desktop in the Startup Apps Settings.";
 "lng_settings_open_system_settings" = "Open Settings";
-"lng_settings_add_sendto" = "Place Telegram in \"Send to\" menu";
+"lng_settings_add_sendto" = "Place Astrogram in \"Send to\" menu";
 "lng_settings_mac_warn_before_quit" = "Show warning before quitting with {text}";
 "lng_settings_mac_round_icon" = "Round application icon";
 
@@ -1120,10 +1120,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passcode_enter_first" = "Enter a passcode";
 "lng_passcode_enter_new" = "Enter new passcode";
 "lng_passcode_confirm_new" = "Re-enter new passcode";
-"lng_passcode_about" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Telegram Desktop.\n\nNote: if you forget your local passcode, you'll need to log out of Telegram Desktop and log in again.";
+"lng_passcode_about" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Astrogram Desktop.\n\nNote: if you forget your local passcode, you'll need to log out of Astrogram Desktop and log in again.";
 "lng_passcode_about1" = "When a local passcode is set, a lock icon appears at the top of your chat list.";
-"lng_passcode_about2" = "Click it to lock Telegram Desktop.";
-"lng_passcode_about3" = "Note: if you forget your passcode, you'll need to log out of Telegram Desktop and log in again.";
+"lng_passcode_about2" = "Click it to lock Astrogram Desktop.";
+"lng_passcode_about3" = "Note: if you forget your passcode, you'll need to log out of Astrogram Desktop and log in again.";
 "lng_passcode_differ" = "Passcodes are different";
 "lng_passcode_wrong" = "Wrong passcode";
 "lng_passcode_is_same" = "Passcode was not changed";
@@ -1242,12 +1242,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_device_name" = "Device name";
 "lng_settings_rename_device_title" = "Rename current device";
 "lng_settings_manage_local_storage" = "Manage local storage";
-"lng_settings_ask_question" = "Ask a Question";
-"lng_settings_ask_sure" = "Please note that Telegram Support is done by volunteers. We try to respond as quickly as possible, but it may take a while.\n\nPlease take a look at the Telegram FAQ: it has important troubleshooting tips and answers to most questions.";
-"lng_settings_faq_button" = "Go to FAQ";
-"lng_settings_ask_ok" = "Ask a Volunteer";
-"lng_settings_faq" = "Telegram FAQ";
-"lng_settings_faq_link" = "https://telegram.org/faq#general-questions";
+"lng_settings_ask_question" = "Open Community Chat";
+"lng_settings_ask_sure" = "Astrogram support is handled through the community chat.\n\nPlease read the Astrogram documentation first: it contains troubleshooting tips and answers to the most common questions.";
+"lng_settings_faq_button" = "Open Documentation";
+"lng_settings_ask_ok" = "Open Chat";
+"lng_settings_faq" = "Astrogram Documentation";
+"lng_settings_faq_link" = "https://docs.astrogram.su";
 "lng_settings_features" = "Astrogram Features";
 "lng_settings_credits" = "My Stars";
 "lng_settings_currency" = "My TON";
@@ -6851,7 +6851,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sponsored_revenued_footer_search_description" = "Anyone can create an ad to display in search results for any query. Check out the **Telegram Ad Platform** for details. {link}";
 "lng_sponsored_top_bar_hide" = "remove";
 
-"lng_telegram_features_url" = "https://t.me/TelegramTips";
+"lng_telegram_features_url" = "https://t.me/astrogramchannel";
 
 "lng_mini_apps_disclaimer_title" = "Warning";
 "lng_mini_apps_disclaimer_text" = "You are about to use a mini app operated by an independent party **not affiliated with Telegram**. You must agree to the Terms of Use for mini apps to continue.";

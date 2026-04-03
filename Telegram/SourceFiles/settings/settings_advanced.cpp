@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "core/update_checker.h"
 #include "core/launcher.h"
@@ -68,6 +69,12 @@ namespace {
 	return result;
 }
 #endif // Q_OS_MAC && !OS_MAC_STORE
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
 
 } // namespace
 
@@ -146,7 +153,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		st::settingsButtonNoIcon));
 	const auto update = Ui::CreateChild<Button>(
 		check,
-		tr::lng_update_telegram(),
+		rpl::single(RuEn("Обновить Astrogram", "Update Astrogram")),
 		st::settingsUpdate);
 	update->hide();
 	check->widthValue() | rpl::on_next([=](int width) {
@@ -608,7 +615,9 @@ void SetupSystemIntegrationContent(
 		};
 
 		const auto autostart = addCheckbox(
-			tr::lng_settings_auto_start(),
+			rpl::single(RuEn(
+				"Запускать Astrogram вместе с системой",
+				"Launch Astrogram when system starts")),
 			cAutoStart());
 		const auto minimized = addSlidingCheckbox(
 			tr::lng_settings_start_min(),
@@ -648,8 +657,9 @@ void SetupSystemIntegrationContent(
 		}) | rpl::on_next([=](bool checked) {
 			if (controller->session().domain().local().hasLocalPasscode()) {
 				minimized->entity()->setChecked(false);
-				controller->show(Ui::MakeInformBox(
-					tr::lng_error_start_minimized_passcoded()));
+				controller->show(Ui::MakeInformBox(rpl::single(RuEn(
+					"Задан локальный код-пароль, поэтому Astrogram Desktop нельзя запускать свёрнутым. Сначала приложение должно запросить пароль.",
+					"You have set a local passcode, so Astrogram Desktop can't be launched minimized; it will ask for your passcode before it can start working."))));
 			} else {
 				cSetStartMinimized(checked);
 				Local::writeSettings();
@@ -664,7 +674,9 @@ void SetupSystemIntegrationContent(
 
 	if (Platform::IsWindows() && !Platform::IsWindowsStoreBuild()) {
 		const auto sendto = addCheckbox(
-			tr::lng_settings_add_sendto(),
+			rpl::single(RuEn(
+				"Добавить Astrogram в меню «Отправить»",
+				"Place Astrogram in \"Send to\" menu")),
 			cSendToMenu());
 
 		sendto->checkedChanges(

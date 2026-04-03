@@ -84,8 +84,8 @@ constexpr auto kAvatarRadius = 18.;
 
 [[nodiscard]] QString AstrogramHeaderDescription() {
 	return RuEn(
-		"Клиент, приватность, защита от удаления и плагины Astrogram.",
-		"Astrogram keeps its client features, privacy tools, anti-recall options and plugins here.");
+		"Настройки Astrogram Desktop.",
+		"Astrogram Desktop settings.");
 }
 
 void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
@@ -277,7 +277,12 @@ void SetupAstrogramHome(
 		RuEn("Плагины", "Plugins"),
 		Plugins::Id(),
 		{ &st::menuIconCustomize });
-	AddLinksSection(controller, container);
+	AddSectionButton(
+		controller,
+		container,
+		RuEn("Ссылки", "Links"),
+		AstrogramLinks::Id(),
+		{ &st::menuIconIpAddress });
 }
 
 void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {

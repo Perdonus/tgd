@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/passcode_box.h"
 
 #include "base/bytes.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/confirm_box.h"
 #include "base/unixtime.h"
@@ -42,6 +43,14 @@ enum class PasswordErrorType {
 	NoPassword,
 	Later,
 };
+
+[[nodiscard]] QString PasscodeAboutText() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(
+			"Когда задан локальный код-пароль, вверху списка чатов появляется значок замка. Нажми на него, чтобы заблокировать Astrogram Desktop.\n\nЕсли забудешь локальный код-пароль, придётся выйти из Astrogram Desktop и войти заново.")
+		: QString::fromUtf8(
+			"When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Astrogram Desktop.\n\nNote: if you forget your local passcode, you'll need to log out of Astrogram Desktop and log in again.");
+}
 
 void SetCloudPassword(
 		not_null<Ui::GenericBox*> box,
@@ -276,7 +285,7 @@ void PasscodeBox::prepare() {
 			? *_cloudFields.customDescription
 			: _cloudPwd
 			? tr::lng_cloud_password_about(tr::now)
-			: tr::lng_passcode_about(tr::now)));
+			: PasscodeAboutText()));
 	_aboutHeight = _about.countHeight(_textWidth);
 	const auto onlyCheck = onlyCheckCurrent();
 	if (onlyCheck) {

@@ -163,7 +163,7 @@ void ShowInFolder(const QString &filepath) {
 
 QString DefaultDownloadPathFolder(not_null<Main::Session*> session) {
 #if OS_MAC_STORE
-	return u"Telegram Lite"_q;
+	return u"Astrogram Desktop"_q;
 #else // OS_MAC_STORE
 	return session->supportMode()
 		? u"Tsupport Desktop"_q
