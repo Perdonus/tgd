@@ -12,6 +12,7 @@ Allows scale tuning and loading a custom font from file or URL.
 #include <QtCore/QPointer>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QString>
+#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>

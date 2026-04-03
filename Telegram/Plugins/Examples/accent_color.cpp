@@ -34,6 +34,7 @@ constexpr auto kDefaultAccentHex = "#69A1FF";
 constexpr int kDefaultSurfaceMix = 18;
 constexpr int kMinSurfaceMix = 0;
 constexpr int kMaxSurfaceMix = 40;
+constexpr int kPaletteApplyDelayMs = 120;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
@@ -53,6 +54,14 @@ bool UseRussian(const Plugins::Host *host) {
 
 QString Tr(const Plugins::Host *host, const char *en, const char *ru) {
 	return UseRussian(host) ? Utf8(ru) : Utf8(en);
+}
+
+bool IsReadyTopLevelWidget(QWidget *widget) {
+	return widget
+		&& widget->isWindow()
+		&& !widget->parentWidget()
+		&& widget->testAttribute(Qt::WA_WState_Created)
+		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
 }
 
 QColor Mix(const QColor &base, const QColor &accent, int accentPercent) {
@@ -94,7 +103,7 @@ public:
 		_info.description = Tr(
 			_host,
 			"Applies a custom accent palette to Astrogram windows and controls.",
-			"Применяет кастомную accent-палитру к окнам и контролам Astrogram.");
+			"Применяет пользовательскую акцентную палитру к окнам и элементам Astrogram.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_hex = _host->settingStringValue(
 			_info.id,
@@ -135,11 +144,11 @@ private:
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto hex = Plugins::SettingDescriptor();
 		hex.id = Latin1(kHexSettingId);
-		hex.title = Tr(_host, "Accent color", "Accent цвет");
+		hex.title = Tr(_host, "Accent color", "Акцентный цвет");
 		hex.description = Tr(
 			_host,
 			"Use a hex color like #69A1FF. The palette updates live.",
-			"Используй hex-цвет вроде #69A1FF. Палитра меняется сразу.");
+			"Укажи hex-цвет вроде #69A1FF. Палитра обновляется сразу.");
 		hex.type = Plugins::SettingControl::TextInput;
 		hex.textValue = _hex;
 		hex.placeholderText = Latin1(kDefaultAccentHex);
@@ -150,7 +159,7 @@ private:
 		mix.description = Tr(
 			_host,
 			"How much the accent color mixes into buttons, highlight surfaces and secondary backgrounds.",
-			"Насколько сильно accent-цвет подмешивается в кнопки, подсветку и вторичные фоны.");
+			"Насколько сильно акцентный цвет подмешивается в кнопки, подсветку и вторичные фоны.");
 		mix.type = Plugins::SettingControl::IntSlider;
 		mix.intValue = _surfaceMix;
 		mix.intMinimum = kMinSurfaceMix;
@@ -174,7 +183,7 @@ private:
 		info.description = Tr(
 			_host,
 			"Accent Color changes the shared Qt palette, so native custom-painted areas may still keep the client default colors.",
-			"Accent Color меняет общую Qt-палитру, поэтому кастомно отрисованные нативные зоны клиента могут сохранить дефолтные цвета.");
+			"Плагин меняет общую Qt-палитру, поэтому кастомно отрисованные нативные зоны клиента могут сохранить стандартные цвета.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -184,11 +193,11 @@ private:
 
 		auto page = Plugins::SettingsPageDescriptor();
 		page.id = QStringLiteral("accent_color");
-		page.title = Tr(_host, "Accent Color", "Accent Color");
+		page.title = Tr(_host, "Accent Color", "Акцентный цвет");
 		page.description = Tr(
 			_host,
 			"Accent palette controls for Astrogram.",
-			"Настройка accent-палитры для Astrogram.");
+			"Настройка акцентной палитры для Astrogram.");
 		page.sections.push_back(section);
 		return page;
 	}
@@ -218,7 +227,7 @@ private:
 			return;
 		}
 		_applyScheduled = true;
-		QTimer::singleShot(0, this, [this] {
+		QTimer::singleShot(kPaletteApplyDelayMs, this, [this] {
 			_applyScheduled = false;
 			if (_restoreRequested) {
 				restorePalette();
@@ -229,6 +238,17 @@ private:
 	}
 
 	void applyPaletteNow() {
+		auto hasReadyWindow = false;
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (IsReadyTopLevelWidget(widget)) {
+				hasReadyWindow = true;
+				break;
+			}
+		}
+		if (!hasReadyWindow) {
+			return;
+		}
+
 		auto accent = ParseAccent(_hex);
 		auto palette = _basePalette;
 
@@ -260,21 +280,21 @@ private:
 		palette.setColor(QPalette::BrightText, highlightText);
 
 		QApplication::setPalette(palette);
-		_host->forEachWindowWidget([](QWidget *widget) {
-			if (widget && widget->isWindow()) {
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (IsReadyTopLevelWidget(widget)) {
 				widget->update();
 			}
-		});
+		}
 	}
 
 	void restorePalette() {
 		_restoreRequested = false;
 		QApplication::setPalette(_basePalette);
-		_host->forEachWindowWidget([](QWidget *widget) {
-			if (widget && widget->isWindow()) {
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (IsReadyTopLevelWidget(widget)) {
 				widget->update();
 			}
-		});
+		}
 	}
 
 	Plugins::Host *_host = nullptr;

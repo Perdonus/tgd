@@ -33,6 +33,7 @@ constexpr int kDefaultMessageOpacityPercent = 100;
 constexpr int kDefaultTextOpacityPercent = 100;
 constexpr int kMinOpacityPercent = 20;
 constexpr int kMaxOpacityPercent = 100;
+constexpr int kAppearanceApplyDelayMs = 120;
 constexpr auto kPluginId = "example.transparent_telegram";
 
 QString Latin1(const char *value) {
@@ -71,6 +72,10 @@ bool IsReadyWidget(QWidget *widget) {
 	return widget
 		&& widget->testAttribute(Qt::WA_WState_Created)
 		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
+}
+
+bool IsReadyWindowWidget(QWidget *widget) {
+	return IsSupportedWindowWidget(widget) && IsReadyWidget(widget);
 }
 
 bool LooksLikeMessageSurface(QWidget *widget) {
@@ -188,7 +193,7 @@ public:
 
 		_host->onWindowWidgetCreated([this](QWidget *widget) {
 			const auto guard = QPointer<QWidget>(widget);
-			QTimer::singleShot(0, this, [this, guard] {
+			QTimer::singleShot(kAppearanceApplyDelayMs, this, [this, guard] {
 				if (guard) {
 					applyToWindow(guard.data());
 				}
@@ -212,12 +217,12 @@ private:
 		windowSlider.id = QStringLiteral("window_opacity");
 		windowSlider.title = PluginText(
 			_host,
-			"Window opacity",
-			"Прозрачность окна");
+			"Interface opacity",
+			"Прозрачность интерфейса");
 		windowSlider.description = PluginText(
 			_host,
-			"Controls the opacity of Astrogram windows.",
-			"Управляет общей прозрачностью окон Astrogram.");
+			"Controls the overall opacity of the Astrogram interface.",
+			"Управляет общей прозрачностью интерфейса Astrogram.");
 		windowSlider.type = Plugins::SettingControl::IntSlider;
 		windowSlider.intValue = _windowOpacityPercent;
 		windowSlider.intMinimum = kMinOpacityPercent;
@@ -337,7 +342,7 @@ private:
 			return;
 		}
 		_appearanceApplyScheduled = true;
-		QTimer::singleShot(0, this, [this] {
+		QTimer::singleShot(kAppearanceApplyDelayMs, this, [this] {
 			_appearanceApplyScheduled = false;
 			applyCurrentAppearance();
 		});
@@ -345,23 +350,24 @@ private:
 
 	void applyCurrentAppearance() {
 		applyWindowOpacity();
+		if (_messageOpacityPercent >= kMaxOpacityPercent
+			&& _textOpacityPercent >= kMaxOpacityPercent) {
+			restorePalettes();
+			return;
+		}
 		applyWidgetPalettes();
 	}
 
 	void applyWindowOpacity() const {
-		_host->forEachWindowWidget([this](QWidget *widget) {
-			if (IsSupportedWindowWidget(widget)) {
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (IsReadyWindowWidget(widget)) {
 				widget->setWindowOpacity(windowOpacityValue());
 			}
-		});
-		if (const auto widget = _host->activeWindowWidget();
-			IsSupportedWindowWidget(widget)) {
-			widget->setWindowOpacity(windowOpacityValue());
 		}
 	}
 
 	void applyToWindow(QWidget *widget) {
-		if (!IsSupportedWindowWidget(widget)) {
+		if (!IsReadyWindowWidget(widget)) {
 			return;
 		}
 		widget->setWindowOpacity(windowOpacityValue());
@@ -369,16 +375,13 @@ private:
 	}
 
 	void applyWidgetPalettes() {
-		_host->forEachWindowWidget([this](QWidget *widget) {
-			applyPalettePassToRoot(widget);
-		});
-		if (const auto widget = _host->activeWindowWidget()) {
+		for (auto *widget : QApplication::topLevelWidgets()) {
 			applyPalettePassToRoot(widget);
 		}
 	}
 
 	void applyPalettePassToRoot(QWidget *root) {
-		if (!IsSupportedWindowWidget(root) || !IsReadyWidget(root)) {
+		if (!IsReadyWindowWidget(root)) {
 			return;
 		}
 		for (const auto child : root->findChildren<QWidget*>()) {
@@ -446,14 +449,10 @@ private:
 	}
 
 	void restoreDefaults() {
-		_host->forEachWindowWidget([](QWidget *widget) {
-			if (IsSupportedWindowWidget(widget)) {
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (IsReadyWindowWidget(widget)) {
 				widget->setWindowOpacity(1.0);
 			}
-		});
-		if (const auto widget = _host->activeWindowWidget();
-			IsSupportedWindowWidget(widget)) {
-			widget->setWindowOpacity(1.0);
 		}
 		restorePalettes();
 	}
