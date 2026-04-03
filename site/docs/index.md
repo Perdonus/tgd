@@ -24,6 +24,8 @@ features:
     details: Plugins are compiled shared libraries loaded directly into Astrogram Desktop. You get Qt, native widgets, and host APIs without a scripting bridge.
   - title: Stable settings UI
     details: Register settings pages and let the host render sliders, toggles, text inputs, and action buttons inside Settings > Plugins.
+  - title: Built-in plugin references
+    details: Study AstroTransparent, AI Chat, Blur, Accent Color and other in-tree plugins as real examples of the runtime.
   - title: Command and message hooks
     details: Intercept slash commands, outgoing text, and message events. Build utility plugins without patching the whole client.
   - title: Window and session access
@@ -52,4 +54,6 @@ The plugin manager tracks load failures, writes detailed logs, and can automatic
 - Jump to [First Plugin](/first-plugin) if you want a minimal working example.
 - Open [Plugin Settings](/plugin-settings) for the host-rendered settings system.
 - Use [Commands & Interceptors](/commands-and-interceptors) for `/command` handling and outgoing text hooks.
+- Browse [Built-in Plugins](/built-in-plugins) to see which reference plugins ship with the tree.
 - Check [Troubleshooting](/troubleshooting) if a plugin installs but does not load or forces safe mode.
+- Read [Safe Mode & Recovery](/safe-mode) for the crash-handling model and the recovery files Astrogram writes.
