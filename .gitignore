@@ -61,6 +61,10 @@ settings.local.json
 .env.local
 .env.*.local
 /ssl/
+/output/
+/site/node_modules/
+/site/package-lock.json
+/site/docs/.vitepress/dist/
 
 # Cursor IDE local settings (but keep .cursor/rules/)
 .cursor/*

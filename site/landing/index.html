@@ -1,186 +1,218 @@
 <!doctype html>
 <html lang="ru" data-theme="light">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Astrogram Desktop</title>
-  <meta
-    name="description"
-    content="Astrogram Desktop: Telegram client with native plugins, privacy controls, expressive UI and desktop-first customization.">
-  <meta property="og:title" content="Astrogram Desktop">
-  <meta
-    property="og:description"
-    content="Desktop-first Telegram fork with native plugins, privacy tools and a more expressive interface.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://astrogram.su/">
-  <meta name="theme-color" content="#ef7147">
-  <link rel="stylesheet" href="./styles.css">
-</head>
-<body>
-  <div class="page-shell">
-    <header class="site-header">
-      <a class="brand" href="#top" aria-label="Astrogram">
-        <img src="./assets/brand-mark.svg" alt="">
-        <span>Astrogram</span>
-      </a>
-      <nav class="site-nav" aria-label="Primary">
-        <a href="#features" data-copy="nav.features">Функции</a>
-        <a href="#plugins" data-copy="nav.plugins">Плагины</a>
-        <a href="#links" data-copy="nav.links">Ссылки</a>
-        <a href="https://docs.astrogram.su" target="_blank" rel="noreferrer" data-copy="nav.docs">Документация</a>
-      </nav>
-      <div class="site-controls">
-        <button class="control-button" id="lang-toggle" type="button" aria-label="Language">EN</button>
-        <button class="control-button" id="theme-toggle" type="button" aria-label="Theme">◐</button>
-      </div>
-    </header>
-
-    <main id="top">
-      <section class="hero">
-        <div class="hero__copy">
-          <p class="eyebrow" data-copy="hero.eyebrow">Desktop-first Telegram fork</p>
-          <h1 data-copy="hero.title">Astrogram makes Telegram Desktop more expressive, more extensible and less sterile.</h1>
-          <p class="hero__lead" data-copy="hero.lead">
-            Native plugins, privacy tools, anti-recall history, ghost mode, local premium visuals and a cleaner plugin runtime,
-            all shaped for desktop instead of copied from mobile.
-          </p>
-          <div class="hero__actions">
-            <a class="button button--primary" href="https://github.com/Perdonus/tgd/actions/workflows/build-desktop.yml" target="_blank" rel="noreferrer" data-copy="hero.ctaBuilds">Сборки Windows</a>
-            <a class="button button--secondary" href="https://docs.astrogram.su" target="_blank" rel="noreferrer" data-copy="hero.ctaDocs">Документация</a>
-            <a class="button button--ghost" href="https://t.me/astrogramchannel" target="_blank" rel="noreferrer" data-copy="hero.ctaChannel">Канал</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Astrogram Desktop</title>
+    <meta
+      name="description"
+      content="Astrogram Desktop — неофициальный Telegram-клиент для Windows и Linux с нативными плагинами, встроенными функциями и отдельной экосистемой."
+    />
+    <meta name="theme-color" content="#ff7b42" />
+    <meta property="og:title" content="Astrogram Desktop" />
+    <meta
+      property="og:description"
+      content="Desktop-клиент Telegram с нативными плагинами, встроенными фишками Astrogram и отдельной экосистемой."
+    />
+    <meta property="og:image" content="https://astrogram.su/assets/astrogram-mark.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://astrogram.su" />
+    <link rel="icon" href="./assets/astrogram-mark.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>
+      (() => {
+        const storedTheme = localStorage.getItem('astrogram-theme')
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        const theme = storedTheme || (systemDark ? 'dark' : 'light')
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#top">
+          <img src="./assets/astrogram-mark.png" alt="Astrogram" />
+          <span class="brand__copy">
+            <strong>Astrogram</strong>
+            <small data-i18n="brand_caption">Десктопный клиент</small>
+          </span>
+        </a>
+        <nav class="topbar__nav">
+          <a href="#features" data-i18n="nav_features">Функции</a>
+          <a href="#plugins" data-i18n="nav_plugins">Плагины</a>
+          <a href="#links" data-i18n="nav_links">Ссылки</a>
+          <a href="https://docs.astrogram.su" target="_blank" rel="noreferrer" data-i18n="nav_docs">Документация</a>
+        </nav>
+        <div class="topbar__controls">
+          <div class="lang-switch" aria-label="Language switch">
+            <button class="lang-switch__button is-active" data-lang="ru">RU</button>
+            <button class="lang-switch__button" data-lang="en">EN</button>
           </div>
-          <div class="hero__tags">
-            <span data-copy="hero.tag1">Native plugins</span>
-            <span data-copy="hero.tag2">Anti-recall</span>
-            <span data-copy="hero.tag3">Ghost mode</span>
-            <span data-copy="hero.tag4">Desktop UI</span>
-          </div>
+          <button class="theme-switch" type="button" aria-label="Toggle theme">
+            <span class="theme-switch__sun">Light</span>
+            <span class="theme-switch__moon">Dark</span>
+          </button>
         </div>
+      </header>
 
-        <div class="hero__visual" aria-hidden="true">
-          <div class="window-card window-card--main">
-            <div class="window-card__top">
-              <div class="window-card__dots"><span></span><span></span><span></span></div>
-              <div class="window-card__title">Astrogram Desktop</div>
+      <main>
+        <section class="hero" id="top">
+          <div class="hero__copy">
+            <span class="eyebrow" data-i18n="hero_eyebrow">Astrogram Desktop</span>
+            <h1 data-i18n="hero_title">Клиент Telegram для тех, кому мало стока.</h1>
+            <p data-i18n="hero_text">
+              Нативные плагины, отдельный раздел Astrogram, встроенные десктопные функции и
+              собственная экосистема без скриптового костыля.
+            </p>
+            <div class="hero__actions">
+              <a class="button button--primary" href="https://t.me/astrogramchannel" target="_blank" rel="noreferrer" data-i18n="hero_primary">Скачать и обновления</a>
+              <a class="button button--secondary" href="https://docs.astrogram.su" target="_blank" rel="noreferrer" data-i18n="hero_secondary">Документация</a>
             </div>
-            <div class="window-card__layout">
-              <aside class="window-card__sidebar">
-                <span data-copy="visual.sidebar1">Режим невидимки</span>
-                <span data-copy="visual.sidebar2">Журнал удалений</span>
-                <span data-copy="visual.sidebar3">Плагины</span>
-              </aside>
-              <div class="window-card__content">
-                <div class="chat-bubble" data-copy="visual.bubble1">История удалённых сообщений остаётся видимой локально.</div>
-                <div class="chat-bubble chat-bubble--accent" data-copy="visual.bubble2">Плагины используют настройки, которые рендерит сам клиент, и реальные оконные API.</div>
-                <div class="metrics">
-                  <div>
-                    <strong>API v5</strong>
-                    <span data-copy="visual.metric1">нативный runtime</span>
+            <div class="hero__meta">
+              <span data-i18n="meta_native">Нативные `.tgd` плагины</span>
+              <span data-i18n="meta_settings">Отдельные настройки Astrogram</span>
+              <span data-i18n="meta_desktop">Десктопный UX</span>
+            </div>
+          </div>
+
+          <div class="hero__visual" aria-hidden="true">
+            <div class="window-mock">
+              <div class="window-mock__head">
+                <span class="window-dot"></span>
+                <span class="window-dot"></span>
+                <span class="window-dot"></span>
+                <strong>Astrogram Desktop</strong>
+              </div>
+              <div class="window-mock__body">
+                <aside class="window-sidebar">
+                  <div class="window-sidebar__brand">
+                    <img src="./assets/astrogram-mark.png" alt="" />
+                    <span>Astrogram</span>
                   </div>
-                  <div>
-                    <strong data-copy="visual.metric2Strong">Безопасный режим</strong>
-                    <span data-copy="visual.metric2">отслеживаемое восстановление</span>
+                  <div class="window-sidebar__item is-active"></div>
+                  <div class="window-sidebar__item"></div>
+                  <div class="window-sidebar__item"></div>
+                  <div class="window-sidebar__item window-sidebar__item--short"></div>
+                </aside>
+                <div class="window-main">
+                  <div class="window-panel window-panel--accent">
+                    <p class="window-panel__eyebrow" data-i18n="mock_settings">Настройки Astrogram</p>
+                    <h2 data-i18n="mock_title">Встроенные фишки, а не просто витрина.</h2>
+                    <div class="window-list">
+                      <span data-i18n="mock_line_one">Антиудаление и журналы</span>
+                      <span data-i18n="mock_line_two">Режим невидимки и локальные флаги</span>
+                      <span data-i18n="mock_line_three">Плагины с host-side интерфейсом</span>
+                    </div>
+                  </div>
+                  <div class="window-cards">
+                    <article class="window-card">
+                      <span data-i18n="card_plugins_label">Плагины</span>
+                      <strong data-i18n="card_plugins_value">Нативный runtime</strong>
+                    </article>
+                    <article class="window-card">
+                      <span data-i18n="card_safe_label">Восстановление</span>
+                      <strong data-i18n="card_safe_value">Безопасный режим и восстановление</strong>
+                    </article>
+                    <article class="window-card">
+                      <span data-i18n="card_ui_label">Интерфейс</span>
+                      <strong data-i18n="card_ui_value">Material-подход для десктопа</strong>
+                    </article>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-          <div class="floating-card floating-card--orange">
-            <span data-copy="visual.card1Label">Plugin runtime</span>
-            <strong data-copy="visual.card1Value">Host-rendered settings</strong>
-          </div>
-          <div class="floating-card floating-card--sand">
-            <span data-copy="visual.card2Label">Astrogram UI</span>
-            <strong data-copy="visual.card2Value">Light and dark themes</strong>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="section section--compact" id="features">
-        <div class="section-heading">
-          <p class="eyebrow" data-copy="features.eyebrow">Why Astrogram</p>
-          <h2 data-copy="features.title">Not just a rebrand, but a desktop client with its own priorities.</h2>
-        </div>
-        <div class="feature-grid">
+        <section class="feature-grid" id="features">
           <article class="feature-card">
-            <h3 data-copy="features.cards.native.title">Native plugin runtime</h3>
-            <p data-copy="features.cards.native.body">`.tgd` plugins load as native modules with window APIs, command interceptors, settings pages and recovery-aware logs.</p>
+            <span class="feature-card__index">01</span>
+            <h3 data-i18n="feature_client_title">Клиент со своим характером</h3>
+            <p data-i18n="feature_client_text">
+              Astrogram не прячет всё важное в плагины: часть функций живёт прямо в клиенте и
+              управляется из отдельного раздела настроек.
+            </p>
           </article>
           <article class="feature-card">
-            <h3 data-copy="features.cards.privacy.title">Privacy controls</h3>
-            <p data-copy="features.cards.privacy.body">Ghost mode, anti-recall logging and client-side controls live directly in Astrogram instead of being hidden behind random patches.</p>
+            <span class="feature-card__index">02</span>
+            <h3 data-i18n="feature_plugins_title">Нормальная система плагинов</h3>
+            <p data-i18n="feature_plugins_text">
+              `.tgd` пакеты, настройки от самого клиента, безопасный режим, восстановление после сбоев и
+              нативная работа с окнами.
+            </p>
           </article>
           <article class="feature-card">
-            <h3 data-copy="features.cards.design.title">Expressive interface</h3>
-            <p data-copy="features.cards.design.body">Warmer colors, stronger hierarchy, better cards and more room for desktop-first interactions than stock Telegram Desktop.</p>
+            <span class="feature-card__index">03</span>
+            <h3 data-i18n="feature_brand_title">Своя экосистема</h3>
+            <p data-i18n="feature_brand_text">
+              Канал, чат, документация и отдельные сборки Astrogram Desktop вместо случайного
+              набора ссылок.
+            </p>
           </article>
-          <article class="feature-card">
-            <h3 data-copy="features.cards.recovery.title">Recovery that matters</h3>
-            <p data-copy="features.cards.recovery.body">Tracked installs, plugin logs, safe mode and plugin quarantine make debugging less chaotic when native code breaks.</p>
-          </article>
-        </div>
-      </section>
+        </section>
 
-      <section class="section section--split" id="plugins">
-        <div class="section-heading">
-          <p class="eyebrow" data-copy="plugins.eyebrow">Plugin platform</p>
-          <h2 data-copy="plugins.title">Astrogram keeps plugin power native, but pushes fragile UI back into the client.</h2>
-        </div>
-        <div class="split-grid">
-          <div class="story-card">
-            <h3 data-copy="plugins.story.title">What ships today</h3>
-            <ul>
-              <li data-copy="plugins.story.item1">Host-rendered settings pages with toggles, buttons, inputs and sliders.</li>
-              <li data-copy="plugins.story.item2">Window/session hooks for plugins like AstroTransparent, AI Chat and diagnostics.</li>
-              <li data-copy="plugins.story.item3">Safe mode, runtime docs and package metadata that stay visible by default.</li>
-            </ul>
+        <section class="showcase" id="plugins">
+          <div class="showcase__copy">
+            <span class="eyebrow" data-i18n="plugins_eyebrow">Платформа Astrogram</span>
+            <h2 data-i18n="plugins_title">Плагины здесь часть клиента, а не чужая надстройка.</h2>
+            <p data-i18n="plugins_text">
+              Отдельный вход в плагины, host-side элементы интерфейса, безопасный режим, восстановление
+              и документация под десктопную платформу.
+            </p>
           </div>
-          <div class="story-card story-card--accent">
-            <h3 data-copy="plugins.next.title">Where to go next</h3>
-            <ul>
-              <li data-copy="plugins.next.item1">Read the runtime docs and package format at docs.astrogram.su.</li>
-              <li data-copy="plugins.next.item2">Follow Windows builds from GitHub Actions while releases are still moving fast.</li>
-              <li data-copy="plugins.next.item3">Join the channel and chat to track new client-side features and plugin API changes.</li>
-            </ul>
+          <div class="showcase__stack">
+            <article class="showcase-card">
+              <span data-i18n="showcase_one_label">Документация</span>
+              <h3 data-i18n="showcase_one_title">docs.astrogram.su</h3>
+              <p data-i18n="showcase_one_text">
+                Рантайм, примеры, безопасный режим, встроенные плагины и настройки от клиента.
+              </p>
+            </article>
+            <article class="showcase-card">
+              <span data-i18n="showcase_two_label">Astrogram</span>
+              <h3 data-i18n="showcase_two_title">Встроенные десктопные функции</h3>
+              <p data-i18n="showcase_two_text">
+                Отдельный раздел настроек, фирменный интерфейс и место для того, чего нет в донорских клиентах.
+              </p>
+            </article>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="section section--links" id="links">
-        <div class="section-heading">
-          <p class="eyebrow" data-copy="links.eyebrow">Links</p>
-          <h2 data-copy="links.title">Core places around Astrogram.</h2>
-        </div>
-        <div class="link-grid">
-          <a class="link-card" href="https://t.me/astrogramchannel" target="_blank" rel="noreferrer">
-            <span data-copy="links.channel.label">Основной канал</span>
-            <strong>t.me/astrogramchannel</strong>
-          </a>
-          <a class="link-card" href="https://t.me/astrogram_chat" target="_blank" rel="noreferrer">
-            <span data-copy="links.chat.label">Чат сообщества</span>
-            <strong>t.me/astrogram_chat</strong>
-          </a>
-          <a class="link-card" href="https://docs.astrogram.su" target="_blank" rel="noreferrer">
-            <span data-copy="links.docs.label">Документация</span>
-            <strong>docs.astrogram.su</strong>
-          </a>
-          <a class="link-card" href="https://github.com/Perdonus/tgd/actions/workflows/build-desktop.yml" target="_blank" rel="noreferrer">
-            <span data-copy="links.builds.label">Сборки</span>
-            <strong>GitHub Actions</strong>
-          </a>
-        </div>
-      </section>
-    </main>
+        <section class="links-panel" id="links">
+          <div class="links-panel__head">
+            <span class="eyebrow" data-i18n="links_eyebrow">Ссылки</span>
+            <h2 data-i18n="links_title">Вся экосистема Astrogram в одном месте.</h2>
+          </div>
+          <div class="links-grid">
+            <a class="link-card" href="https://t.me/astrogramchannel" target="_blank" rel="noreferrer">
+              <strong data-i18n="link_channel_title">Канал</strong>
+              <span data-i18n="link_channel_text">Сборки, обновления и анонсы.</span>
+            </a>
+            <a class="link-card" href="https://t.me/astrogram_chat" target="_blank" rel="noreferrer">
+              <strong data-i18n="link_chat_title">Чат</strong>
+              <span data-i18n="link_chat_text">Обсуждение сборок, багов и плагинов.</span>
+            </a>
+            <a class="link-card" href="https://docs.astrogram.su" target="_blank" rel="noreferrer">
+              <strong data-i18n="link_docs_title">Документация</strong>
+              <span data-i18n="link_docs_text">Runtime API, safe mode и примеры плагинов.</span>
+            </a>
+            <a class="link-card" href="https://github.com/Perdonus/tgd" target="_blank" rel="noreferrer">
+              <strong data-i18n="link_github_title">GitHub</strong>
+              <span data-i18n="link_github_text">Исходники клиента, runtime и каталог плагинов.</span>
+            </a>
+          </div>
+        </section>
+      </main>
 
-    <footer class="site-footer">
-      <div>
-        <strong>Astrogram Desktop</strong>
-        <span data-copy="footer.text">Desktop-first Telegram fork with native plugins and a warmer interface.</span>
-      </div>
-      <a href="#top" data-copy="footer.up">Наверх</a>
-    </footer>
-  </div>
-
-  <script src="./app.js"></script>
-</body>
+      <footer class="footer">
+        <div>
+          <strong>Astrogram Desktop</strong>
+          <span data-i18n="footer_text">Неофициальный Telegram-клиент с нативными плагинами и отдельной десктопной экосистемой.</span>
+        </div>
+        <a href="#top" data-i18n="footer_top">Наверх</a>
+      </footer>
+    </div>
+    <script src="./app.js"></script>
+  </body>
 </html>

@@ -1,170 +1,191 @@
-const copy = {
+const translations = {
   ru: {
-    pageTitle: 'Astrogram Desktop',
-    pageDescription: 'Astrogram Desktop — десктопный Telegram-клиент с нативными плагинами, собственными настройками Astrogram и более выразительным интерфейсом.',
-    'nav.features': 'Функции',
-    'nav.plugins': 'Плагины',
-    'nav.links': 'Ссылки',
-    'nav.docs': 'Документация',
-    'hero.eyebrow': 'Telegram Desktop, но по правилам Astrogram',
-    'hero.title': 'Astrogram делает Telegram Desktop более выразительным, расширяемым и менее стерильным.',
-    'hero.lead': 'Нативные плагины, инструменты приватности, история удалённых сообщений, режим невидимки, локальный премиум-визуал и более чистый runtime плагинов, спроектированные именно под десктоп.',
-    'hero.ctaBuilds': 'Сборки Windows',
-    'hero.ctaDocs': 'Документация',
-    'hero.ctaChannel': 'Канал',
-    'hero.tag1': 'Нативные плагины',
-    'hero.tag2': 'Антиудаление',
-    'hero.tag3': 'Режим невидимки',
-    'hero.tag4': 'Десктопный UI',
-    'visual.sidebar1': 'Режим невидимки',
-    'visual.sidebar2': 'Журнал удалений',
-    'visual.sidebar3': 'Плагины',
-    'visual.bubble1': 'История удалённых сообщений остаётся видимой локально.',
-    'visual.bubble2': 'Плагины используют настройки, которые рендерит сам клиент, и реальные оконные API.',
-    'visual.metric1': 'нативный runtime',
-    'visual.metric2Strong': 'Безопасный режим',
-    'visual.metric2': 'отслеживаемое восстановление',
-    'visual.card1Label': 'Платформа плагинов',
-    'visual.card1Value': 'Настройки рендерит сам клиент',
-    'visual.card2Label': 'Интерфейс',
-    'visual.card2Value': 'Светлая и тёмная темы',
-    'features.eyebrow': 'Почему Astrogram',
-    'features.title': 'Это не просто ребренд, а десктопный клиент со своими приоритетами.',
-    'features.cards.native.title': 'Нативный runtime плагинов',
-    'features.cards.native.body': '`.tgd`-плагины грузятся как нативные модули и получают оконный API, перехват команд, страницы настроек и логи с привязкой к восстановлению.',
-    'features.cards.privacy.title': 'Инструменты приватности',
-    'features.cards.privacy.body': 'Режим невидимки, журнал антиудаления и клиентские переключатели живут прямо в Astrogram, а не теряются в случайных патчах.',
-    'features.cards.design.title': 'Более выразительный интерфейс',
-    'features.cards.design.body': 'Тёплая палитра, более сильная иерархия, карточки и больше пространства для desktop-first взаимодействий, чем в стоковом Telegram Desktop.',
-    'features.cards.recovery.title': 'Восстановление без хаоса',
-    'features.cards.recovery.body': 'Отслеживаемые установки, логи плагинов, безопасный режим и карантин пакетов упрощают отладку, когда ломается нативный код.',
-    'plugins.eyebrow': 'Платформа плагинов',
-    'plugins.title': 'Astrogram оставляет мощь плагинов нативной, но возвращает хрупкий UI обратно в клиент.',
-    'plugins.story.title': 'Что уже есть',
-    'plugins.story.item1': 'Страницы настроек, которые рендерит сам клиент: тумблеры, кнопки, поля и ползунки.',
-    'plugins.story.item2': 'Оконные и сессионные хуки для AstroTransparent, AI Chat и диагностических плагинов.',
-    'plugins.story.item3': 'Безопасный режим, runtime-документация и метаданные пакетов, которые всегда видимы по умолчанию.',
-    'plugins.next.title': 'Куда идти дальше',
-    'plugins.next.item1': 'Читай runtime-документацию и формат пакетов на docs.astrogram.su.',
-    'plugins.next.item2': 'Следи за Windows-сборками через GitHub Actions, пока релизы ещё быстро меняются.',
-    'plugins.next.item3': 'Заходи в канал и чат, чтобы отслеживать новые клиентские фишки и изменения API плагинов.',
-    'links.eyebrow': 'Ссылки',
-    'links.title': 'Основные точки вокруг Astrogram.',
-    'links.channel.label': 'Основной канал',
-    'links.chat.label': 'Чат сообщества',
-    'links.docs.label': 'Документация',
-    'links.builds.label': 'Сборки',
-    'footer.text': 'Десктопный Telegram-клиент с нативными плагинами и более тёплым интерфейсом.',
-    'footer.up': 'Наверх'
+    page_title: 'Astrogram Desktop',
+    page_description:
+      'Astrogram Desktop — неофициальный Telegram-клиент для Windows и Linux с нативными плагинами, встроенными функциями и отдельной экосистемой.',
+    brand_caption: 'Десктопный клиент',
+    nav_features: 'Функции',
+    nav_plugins: 'Плагины',
+    nav_links: 'Ссылки',
+    nav_docs: 'Документация',
+    hero_eyebrow: 'Astrogram Desktop',
+    hero_title: 'Клиент Telegram для тех, кому мало стока.',
+    hero_text:
+      'Нативные плагины, отдельный раздел Astrogram, встроенные десктопные функции и собственная экосистема без скриптового костыля.',
+    hero_primary: 'Скачать и обновления',
+    hero_secondary: 'Документация',
+    meta_native: 'Нативные `.tgd` плагины',
+    meta_settings: 'Отдельные настройки Astrogram',
+    meta_desktop: 'Десктопный UX',
+    mock_settings: 'Настройки Astrogram',
+    mock_title: 'Встроенные фишки, а не просто витрина.',
+    mock_line_one: 'Антиудаление и журналы',
+    mock_line_two: 'Режим невидимки и локальные флаги',
+    mock_line_three: 'Плагины с host-side интерфейсом',
+    card_plugins_label: 'Плагины',
+    card_plugins_value: 'Нативный runtime',
+    card_safe_label: 'Восстановление',
+    card_safe_value: 'Безопасный режим и восстановление',
+    card_ui_label: 'Интерфейс',
+    card_ui_value: 'Material-подход для десктопа',
+    feature_client_title: 'Клиент со своим характером',
+    feature_client_text:
+      'Astrogram не прячет всё важное в плагины: часть функций живёт прямо в клиенте и управляется из отдельного раздела настроек.',
+    feature_plugins_title: 'Нормальная система плагинов',
+    feature_plugins_text:
+      '`.tgd` пакеты, настройки от самого клиента, безопасный режим, восстановление после сбоев и нативная работа с окнами.',
+    feature_brand_title: 'Своя экосистема',
+    feature_brand_text:
+      'Канал, чат, документация и отдельные сборки Astrogram Desktop вместо случайного набора ссылок.',
+    plugins_eyebrow: 'Платформа Astrogram',
+    plugins_title: 'Плагины здесь часть клиента, а не чужая надстройка.',
+    plugins_text:
+      'Отдельный вход в плагины, host-side элементы интерфейса, безопасный режим, восстановление и документация под десктопную платформу.',
+    showcase_one_label: 'Документация',
+    showcase_one_title: 'docs.astrogram.su',
+    showcase_one_text: 'Рантайм, примеры, безопасный режим, встроенные плагины и настройки от клиента.',
+    showcase_two_label: 'Astrogram',
+    showcase_two_title: 'Встроенные десктопные функции',
+    showcase_two_text:
+      'Отдельный раздел настроек, фирменный интерфейс и место для того, чего нет в донорских клиентах.',
+    links_eyebrow: 'Ссылки',
+    links_title: 'Вся экосистема Astrogram в одном месте.',
+    link_channel_title: 'Канал',
+    link_channel_text: 'Сборки, обновления и анонсы.',
+    link_chat_title: 'Чат',
+    link_chat_text: 'Обсуждение сборок, багов и плагинов.',
+    link_docs_title: 'Документация',
+    link_docs_text: 'Runtime API, safe mode и примеры плагинов.',
+    link_github_title: 'GitHub',
+    link_github_text: 'Исходники клиента, runtime и каталог плагинов.',
+    footer_text:
+      'Неофициальный Telegram-клиент с нативными плагинами и отдельной десктопной экосистемой.',
+    footer_top: 'Наверх',
   },
   en: {
-    pageTitle: 'Astrogram Desktop',
-    pageDescription: 'Astrogram Desktop is a desktop-first Telegram client with native plugins, dedicated Astrogram settings, and a more expressive interface.',
-    'nav.features': 'Features',
-    'nav.plugins': 'Plugins',
-    'nav.links': 'Links',
-    'nav.docs': 'Docs',
-    'hero.eyebrow': 'Desktop-first Telegram fork',
-    'hero.title': 'Astrogram makes Telegram Desktop more expressive, more extensible and less sterile.',
-    'hero.lead': 'Native plugins, privacy tools, deleted-message history, ghost mode, local premium visuals and a cleaner plugin runtime, all shaped for desktop instead of copied from mobile.',
-    'hero.ctaBuilds': 'Windows builds',
-    'hero.ctaDocs': 'Documentation',
-    'hero.ctaChannel': 'Channel',
-    'hero.tag1': 'Native plugins',
-    'hero.tag2': 'Anti-recall',
-    'hero.tag3': 'Ghost mode',
-    'hero.tag4': 'Desktop UI',
-    'visual.sidebar1': 'Ghost mode',
-    'visual.sidebar2': 'Recall log',
-    'visual.sidebar3': 'Plugins',
-    'visual.bubble1': 'Deleted message history stays visible locally.',
-    'visual.bubble2': 'Plugins use host-rendered settings and real window APIs.',
-    'visual.metric1': 'native runtime',
-    'visual.metric2Strong': 'Safe mode',
-    'visual.metric2': 'tracked recovery',
-    'visual.card1Label': 'Plugin runtime',
-    'visual.card1Value': 'Settings are rendered by the client',
-    'visual.card2Label': 'Interface',
-    'visual.card2Value': 'Light and dark themes',
-    'features.eyebrow': 'Why Astrogram',
-    'features.title': 'Not just a rebrand, but a desktop client with its own priorities.',
-    'features.cards.native.title': 'Native plugin runtime',
-    'features.cards.native.body': '`.tgd` plugins load as native modules with window APIs, command interceptors, settings pages and recovery-aware logs.',
-    'features.cards.privacy.title': 'Privacy controls',
-    'features.cards.privacy.body': 'Ghost mode, anti-recall logging and client-side controls live directly in Astrogram instead of hiding behind random patches.',
-    'features.cards.design.title': 'More expressive interface',
-    'features.cards.design.body': 'Warmer colors, stronger hierarchy, cleaner cards and more room for desktop-first interactions than stock Telegram Desktop.',
-    'features.cards.recovery.title': 'Recovery that matters',
-    'features.cards.recovery.body': 'Tracked installs, plugin logs, safe mode and package quarantine make debugging less chaotic when native code breaks.',
-    'plugins.eyebrow': 'Plugin platform',
-    'plugins.title': 'Astrogram keeps plugin power native, but moves fragile UI back into the client.',
-    'plugins.story.title': 'What ships today',
-    'plugins.story.item1': 'Host-rendered settings pages with toggles, buttons, inputs and sliders.',
-    'plugins.story.item2': 'Window and session hooks for AstroTransparent, AI Chat and diagnostics.',
-    'plugins.story.item3': 'Safe mode, runtime docs and package metadata that stay visible by default.',
-    'plugins.next.title': 'Where to go next',
-    'plugins.next.item1': 'Read the runtime docs and package format at docs.astrogram.su.',
-    'plugins.next.item2': 'Follow Windows builds from GitHub Actions while releases are still moving fast.',
-    'plugins.next.item3': 'Join the channel and chat to track new client-side features and plugin API changes.',
-    'links.eyebrow': 'Links',
-    'links.title': 'Core places around Astrogram.',
-    'links.channel.label': 'Main channel',
-    'links.chat.label': 'Community chat',
-    'links.docs.label': 'Documentation',
-    'links.builds.label': 'Builds',
-    'footer.text': 'Desktop-first Telegram fork with native plugins and a warmer interface.',
-    'footer.up': 'Back to top'
-  }
+    page_title: 'Astrogram Desktop',
+    page_description:
+      'Astrogram Desktop is an unofficial Telegram client for Windows and Linux with native plugins, built-in features, and its own ecosystem.',
+    brand_caption: 'Desktop client',
+    nav_features: 'Features',
+    nav_plugins: 'Plugins',
+    nav_links: 'Links',
+    nav_docs: 'Documentation',
+    hero_eyebrow: 'Astrogram Desktop',
+    hero_title: 'A Telegram client for people who outgrow stock builds.',
+    hero_text:
+      'Native plugins, a dedicated Astrogram settings space, built-in desktop features and a full ecosystem without a scripting shim.',
+    hero_primary: 'Downloads and updates',
+    hero_secondary: 'Documentation',
+    meta_native: 'Native `.tgd` plugins',
+    meta_settings: 'Dedicated Astrogram settings',
+    meta_desktop: 'Desktop-first UX',
+    mock_settings: 'Astrogram settings',
+    mock_title: 'Built-in features, not just a plugin storefront.',
+    mock_line_one: 'Anti-recall and local logs',
+    mock_line_two: 'Ghost mode and local flags',
+    mock_line_three: 'Plugins with host-side UI',
+    card_plugins_label: 'Plugins',
+    card_plugins_value: 'Native runtime',
+    card_safe_label: 'Recovery',
+    card_safe_value: 'Safe mode and recovery',
+    card_ui_label: 'Interface',
+    card_ui_value: 'Material-inspired desktop UI',
+    feature_client_title: 'A client with its own identity',
+    feature_client_text:
+      'Astrogram does not hide everything behind plugins: some features live in the client and are managed from a dedicated settings section.',
+    feature_plugins_title: 'A proper plugin system',
+    feature_plugins_text:
+      '`.tgd` packages, host-rendered settings, safe mode, crash recovery and native access to real windows.',
+    feature_brand_title: 'A full ecosystem',
+    feature_brand_text:
+      'Channel, chat, documentation and Astrogram Desktop builds instead of a random pile of links.',
+    plugins_eyebrow: 'Astrogram Runtime',
+    plugins_title: 'Plugins here are part of the client, not an afterthought.',
+    plugins_text:
+      'A dedicated plugins entry point, host-side UI, safe mode, recovery and desktop-specific documentation.',
+    showcase_one_label: 'Documentation',
+    showcase_one_title: 'docs.astrogram.su',
+    showcase_one_text: 'Runtime notes, examples, safe mode, built-in plugins and host-side settings.',
+    showcase_two_label: 'Astrogram',
+    showcase_two_title: 'Built-in desktop features',
+    showcase_two_text:
+      'A dedicated settings hub, strong branding and room for features that donor clients do not ship.',
+    links_eyebrow: 'Links',
+    links_title: 'The whole Astrogram ecosystem in one place.',
+    link_channel_title: 'Channel',
+    link_channel_text: 'Builds, release notes and announcements.',
+    link_chat_title: 'Chat',
+    link_chat_text: 'Discussion about builds, bugs and plugins.',
+    link_docs_title: 'Documentation',
+    link_docs_text: 'Runtime API, safe mode and plugin examples.',
+    link_github_title: 'GitHub',
+    link_github_text: 'Client source, runtime code and plugin catalog.',
+    footer_text:
+      'An unofficial Telegram client with native plugins and a dedicated desktop ecosystem.',
+    footer_top: 'Back to top',
+  },
 }
 
 const root = document.documentElement
-const langToggle = document.getElementById('lang-toggle')
-const themeToggle = document.getElementById('theme-toggle')
-const pageTitle = document.querySelector('title')
-const pageDescription = document.querySelector('meta[name=\"description\"]')
+const themeButton = document.querySelector('.theme-switch')
+const langButtons = Array.from(document.querySelectorAll('.lang-switch__button'))
+const title = document.querySelector('title')
+const description = document.querySelector('meta[name=\"description\"]')
+const ogDescription = document.querySelector('meta[property=\"og:description\"]')
 
-const savedLang = localStorage.getItem('astrogram-lang')
-const initialLang = savedLang || (
-  (navigator.language || '').toLowerCase().startsWith('ru') ? 'ru' : 'en'
-)
+const applyTheme = (theme) => {
+  root.dataset.theme = theme
+  localStorage.setItem('astrogram-theme', theme)
+  const color = theme === 'dark' ? '#18120f' : '#ff7b42'
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color)
+}
 
-const savedTheme = localStorage.getItem('astrogram-theme')
-const initialTheme = savedTheme || (
-  window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-)
+const applyLanguage = (lang) => {
+  const locale = translations[lang] ? lang : 'ru'
+  root.lang = locale
+  localStorage.setItem('astrogram-lang', locale)
 
-function applyLanguage(lang) {
-  const dict = copy[lang] || copy.en
-  root.lang = lang
-  document.querySelectorAll('[data-copy]').forEach((node) => {
-    const key = node.getAttribute('data-copy')
-    if (key && dict[key]) {
-      node.textContent = dict[key]
+  document.querySelectorAll('[data-i18n]').forEach((element) => {
+    const key = element.getAttribute('data-i18n')
+    if (!key) {
+      return
+    }
+    const value = translations[locale][key]
+    if (value) {
+      element.textContent = value
     }
   })
-  if (pageTitle && dict.pageTitle) {
-    pageTitle.textContent = dict.pageTitle
+
+  if (title && translations[locale].page_title) {
+    title.textContent = translations[locale].page_title
   }
-  if (pageDescription && dict.pageDescription) {
-    pageDescription.setAttribute('content', dict.pageDescription)
+  if (description && translations[locale].page_description) {
+    description.setAttribute('content', translations[locale].page_description)
   }
-  langToggle.textContent = lang === 'ru' ? 'EN' : 'RU'
-  localStorage.setItem('astrogram-lang', lang)
+  if (ogDescription && translations[locale].page_description) {
+    ogDescription.setAttribute('content', translations[locale].page_description)
+  }
+
+  langButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.lang === locale)
+  })
 }
 
-function applyTheme(theme) {
-  root.dataset.theme = theme
-  themeToggle.textContent = theme === 'dark' ? '☀' : '◐'
-  localStorage.setItem('astrogram-theme', theme)
-}
-
-langToggle.addEventListener('click', () => {
-  applyLanguage(root.lang === 'ru' ? 'en' : 'ru')
-})
-
-themeToggle.addEventListener('click', () => {
+themeButton?.addEventListener('click', () => {
   applyTheme(root.dataset.theme === 'dark' ? 'light' : 'dark')
 })
 
-applyLanguage(initialLang)
-applyTheme(initialTheme)
+langButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    applyLanguage(button.dataset.lang || 'ru')
+  })
+})
+
+const storedTheme = localStorage.getItem('astrogram-theme')
+const storedLang = localStorage.getItem('astrogram-lang')
+
+applyTheme(storedTheme || root.dataset.theme || 'light')
+applyLanguage(
+  storedLang || ((navigator.language || '').toLowerCase().startsWith('ru') ? 'ru' : 'en'),
+)
