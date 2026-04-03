@@ -3,6 +3,16 @@ name: Build Astrogram Desktop Force
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-desktop.yml'
+      - '.github/workflows/build-desktop-force.yml'
+      - 'Telegram/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'lib/**'
 
 permissions:
   contents: write

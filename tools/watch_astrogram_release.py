@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -51,6 +52,20 @@ def fetch_text(url: str) -> str:
         return response.read().decode("utf-8")
 
 
+def fetch_run_state_from_html(repo: str, run_id: str) -> dict:
+    html = fetch_text(f"https://github.com/{repo}/actions/runs/{run_id}")
+    normalized = re.sub(r"\s+", " ", html)
+    if "In progress" in normalized:
+        return {"status": "in_progress", "conclusion": None}
+    if "Failure" in normalized:
+        return {"status": "completed", "conclusion": "failure"}
+    if "Cancelled" in normalized:
+        return {"status": "completed", "conclusion": "cancelled"}
+    if "Success" in normalized:
+        return {"status": "completed", "conclusion": "success"}
+    raise RuntimeError("unable to infer run status from GitHub run page HTML")
+
+
 def download(url: str, destination: Path) -> None:
     request = urllib.request.Request(
         url,
@@ -63,12 +78,20 @@ def download(url: str, destination: Path) -> None:
 def wait_for_run(repo: str, run_id: str, log_path: Path, poll_seconds: int) -> dict:
     last_state: tuple[str, str | None] | None = None
     while True:
-        payload = fetch_json(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}")
+        try:
+            payload = fetch_json(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}")
+        except urllib.error.HTTPError as error:
+            if error.code != 403:
+                raise
+            payload = fetch_run_state_from_html(repo, run_id)
+            payload["source"] = "html"
+        else:
+            payload["source"] = "api"
         state = (payload["status"], payload.get("conclusion"))
         if state != last_state:
             log_line(
                 log_path,
-                f"run={run_id} status={payload['status']} conclusion={payload.get('conclusion')}",
+                f"run={run_id} status={payload['status']} conclusion={payload.get('conclusion')} source={payload.get('source')}",
             )
             last_state = state
         if payload["status"] == "completed":
