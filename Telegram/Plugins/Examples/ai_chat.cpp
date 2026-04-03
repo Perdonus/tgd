@@ -25,6 +25,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QShortcut>
 #include <QtWidgets/QVBoxLayout>
@@ -316,13 +317,13 @@ private:
 			QStringLiteral("API key"),
 			u8"API-ключ");
 		apiKey.description = tr(
-			QStringLiteral("Bearer token for requests to sosiskibot.ru/api."),
-			u8"Bearer-токен для запросов к sosiskibot.ru/api.");
+			QStringLiteral("Access token for requests to sosiskibot.ru/api."),
+			u8"Токен доступа для запросов к sosiskibot.ru/api.");
 		apiKey.type = Plugins::SettingControl::TextInput;
 		apiKey.textValue = _apiKey;
 		apiKey.placeholderText = tr(
 			QStringLiteral("Paste your sosiskibot.ru API key"),
-			u8"Вставь сюда свой API-ключ от sosiskibot.ru");
+			u8"Вставьте API-ключ от sosiskibot.ru");
 		apiKey.secret = true;
 
 		auto openSite = Plugins::SettingDescriptor();
@@ -331,23 +332,23 @@ private:
 			QStringLiteral("Get API key"),
 			u8"Получить API-ключ");
 		openSite.description = tr(
-			QStringLiteral("Open sosiskibot.ru to create or manage your API key."),
-			u8"Открыть sosiskibot.ru, чтобы создать или управлять API-ключом.");
+			QStringLiteral("Open sosiskibot.ru to get or manage your API key."),
+			u8"Открыть sosiskibot.ru, чтобы получить или настроить API-ключ.");
 		openSite.type = Plugins::SettingControl::ActionButton;
 		openSite.buttonText = QStringLiteral("sosiskibot.ru");
 
 		auto info = Plugins::SettingDescriptor();
 		info.id = Latin1(kInfoSettingId);
 		info.title = tr(
-			QStringLiteral("Usage"),
-			u8"Как использовать");
+			QStringLiteral("How it works"),
+			u8"Как это работает");
 		info.description = _outgoingInterceptorId
 			? tr(
-				QStringLiteral("Use /ai to open the AI chat. The command is intercepted before sending and is not posted into the current chat. API keys are issued at sosiskibot.ru."),
-				u8"Используй /ai, чтобы открыть ИИ-чат. Команда перехватывается до отправки и не публикуется в текущем чате. API-ключи выдаются на sosiskibot.ru.")
+				QStringLiteral("Use /ai to open the AI chat. The plugin intercepts the command before sending, so it is not posted into the current chat. API keys are available at sosiskibot.ru."),
+				u8"Используйте /ai, чтобы открыть ИИ-чат. Плагин перехватывает команду до отправки, поэтому она не попадает в текущий чат. API-ключ можно получить на sosiskibot.ru.")
 			: tr(
-				QStringLiteral("Use /ai to open the AI chat. This build did not expose the outgoing slash interceptor, so sending /ai directly may still reach the chat. The plugin action still opens the dialog. API keys are issued at sosiskibot.ru."),
-				u8"Используй /ai, чтобы открыть ИИ-чат. В этой сборке не удалось подключить перехват исходящего слеш-команд, поэтому прямое отправление /ai может уйти в чат. Окно всё равно можно открыть через действие плагина. API-ключи выдаются на sosiskibot.ru.");
+				QStringLiteral("Use /ai to open the AI chat. In this build, outgoing slash-command interception is unavailable, so sending /ai may still reach the chat. You can still open the dialog from the plugin action. API keys are available at sosiskibot.ru."),
+				u8"Используйте /ai, чтобы открыть ИИ-чат. В этой сборке недоступен перехват исходящих slash-команд, поэтому /ai может уйти в чат. Окно по-прежнему можно открыть через действие плагина. API-ключ можно получить на sosiskibot.ru.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -365,8 +366,8 @@ private:
 			QStringLiteral("AI Chat"),
 			u8"ИИ-чат");
 		page.description = tr(
-			QStringLiteral("Configure the built-in AI chat dialog and sosiskibot.ru access."),
-			u8"Настрой встроенный диалог ИИ-чата и доступ к sosiskibot.ru.");
+			QStringLiteral("Configure the built-in AI chat dialog and access to sosiskibot.ru."),
+			u8"Настройте встроенный ИИ-чат и доступ к sosiskibot.ru.");
 		page.sections.push_back(section);
 		return page;
 	}
@@ -382,14 +383,14 @@ private:
 		return _apiKey.isEmpty()
 			? tr(
 				QStringLiteral("Add your sosiskibot.ru API key in Settings > Plugins > AI Chat."),
-				u8"Добавь свой API-ключ от sosiskibot.ru в Настройки > Плагины > ИИ-чат.")
+				u8"Добавьте API-ключ от sosiskibot.ru: Настройки > Плагины > ИИ-чат.")
 			: (_outgoingInterceptorId
 				? tr(
 					QStringLiteral("Ready. Model: %1").arg(Latin1(kModelName)),
 					u8"Готово. Модель: %1").arg(Latin1(kModelName))
 				: tr(
 					QStringLiteral("Ready, but outgoing /ai interception is unavailable in this build. Model: %1").arg(Latin1(kModelName)),
-					u8"Готово, но перехват исходящего /ai в этой сборке недоступен. Модель: %1").arg(Latin1(kModelName)));
+					u8"Готово, но перехват исходящих /ai в этой сборке недоступен. Модель: %1").arg(Latin1(kModelName)));
 	}
 
 	void handleSettingChanged(const Plugins::SettingDescriptor &setting) {
@@ -735,7 +736,7 @@ private:
 		if (_apiKey.isEmpty()) {
 			state->statusText = tr(
 				QStringLiteral("Configure your sosiskibot.ru API key in Settings > Plugins > AI Chat."),
-				u8"Настрой свой API-ключ от sosiskibot.ru в Настройки > Плагины > ИИ-чат.");
+				u8"Укажите API-ключ от sosiskibot.ru: Настройки > Плагины > ИИ-чат.");
 			applyWindowState(*state);
 			return;
 		}
