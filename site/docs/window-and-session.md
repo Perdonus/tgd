@@ -35,6 +35,30 @@ _host->onWindowWidgetCreated([=](QWidget *widget) {
 
 This is the preferred path for appearance plugins like `transparent_telegram`, because it works with real window widgets instead of guessing random Qt top-levels.
 
+## Example: applying opacity safely
+
+```cpp
+void TransparentPlugin::applyToWidget(QWidget *widget) {
+	if (!widget || !widget->isWindow()) {
+		return;
+	}
+	if (widget->windowType() != Qt::Window) {
+		return;
+	}
+	widget->setWindowOpacity(_interfaceOpacity / 100.0);
+}
+
+void TransparentPlugin::bindWindows() {
+	_host->forEachWindowWidget([=](QWidget *widget) {
+		applyToWidget(widget);
+	});
+
+	_windowWidgetId = _host->onWindowWidgetCreated([=](QWidget *widget) {
+		applyToWidget(widget);
+	});
+}
+```
+
 ## Active window and session
 
 ```cpp
@@ -60,8 +84,24 @@ _host->onSessionActivated([=](Main::Session *session) {
 });
 ```
 
+## Example: session-aware behavior
+
+```cpp
+_sessionActivatedId = _host->onSessionActivated([=](Main::Session *session) {
+	if (!session) {
+		return;
+	}
+	refreshForSession(session);
+});
+
+if (auto *session = _host->activeSession()) {
+	refreshForSession(session);
+}
+```
+
 ## Practical advice
 
 - Prefer `forEachWindowWidget()` for visual effects.
 - Prefer `activeSession()` or `forEachSession()` for chat/session-aware logic.
 - Be conservative with widget mutation. A plugin still runs in-process.
+- Treat callbacks as runtime hooks, not as a place to do heavy blocking work.

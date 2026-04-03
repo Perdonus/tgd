@@ -58,6 +58,61 @@ _settingsPageId = _host->registerSettingsPage(
 	});
 ```
 
+## Full settings page example
+
+```cpp
+void MyPlugin::registerSettings() {
+	Plugins::SettingDescriptor enabled;
+	enabled.id = "enabled";
+	enabled.title = "Enable plugin";
+	enabled.description = "Turns the runtime behavior on or off.";
+	enabled.type = Plugins::SettingControl::Toggle;
+	enabled.boolValue = _host->settingBoolValue(id(), "enabled", true);
+
+	Plugins::SettingDescriptor apiKey;
+	apiKey.id = "api_key";
+	apiKey.title = "API key";
+	apiKey.description = "Used for remote requests.";
+	apiKey.type = Plugins::SettingControl::TextInput;
+	apiKey.textValue = _host->settingStringValue(id(), "api_key", QString());
+	apiKey.placeholderText = "Paste your key";
+	apiKey.secret = true;
+
+	Plugins::SettingDescriptor openSite;
+	openSite.id = "open_site";
+	openSite.title = "Open API site";
+	openSite.description = "Open the provider website in your browser.";
+	openSite.type = Plugins::SettingControl::ActionButton;
+
+	Plugins::SettingDescriptor status;
+	status.id = "status";
+	status.title = "Status";
+	status.description = _host->settingStringValue(id(), "api_key", QString()).isEmpty()
+		? "API key is missing."
+		: "Plugin is configured.";
+	status.type = Plugins::SettingControl::InfoText;
+
+	Plugins::SettingsSectionDescriptor general;
+	general.id = "general";
+	general.title = "General";
+	general.settings = { enabled, apiKey, status, openSite };
+
+	_settingsPageId = _host->registerSettingsPage(
+		id(),
+		{
+			.id = "my_plugin_settings",
+			.title = "My Plugin",
+			.description = "Host-rendered settings page.",
+			.sections = { general },
+		},
+		[=](const Plugins::SettingDescriptor &setting) {
+			if (setting.id == "open_site") {
+				_host->openUrl("https://example.org");
+			}
+		});
+}
+```
+
 ## Reading persisted values
 
 The host stores setting values for you.
@@ -91,9 +146,35 @@ apiKey.placeholderText = "Paste your key";
 apiKey.secret = true;
 ```
 
+## Reacting to setting changes
+
+The settings callback receives the updated descriptor, so you can immediately apply the new value:
+
+```cpp
+_settingsPageId = _host->registerSettingsPage(
+	id(),
+	page,
+	[=](const Plugins::SettingDescriptor &setting) {
+		if (setting.id == "enabled") {
+			_enabled = setting.boolValue;
+			return;
+		}
+		if (setting.id == "opacity") {
+			_opacity = setting.intValue;
+			applyToAllWindows();
+			return;
+		}
+		if (setting.id == "api_key") {
+			_apiKey = setting.textValue;
+		}
+	});
+```
+
 ## Recommended patterns
 
 - Keep settings pages small and task-focused.
 - Prefer `ActionButton` for “Open site”, “Export”, or “Reset”.
 - Use `InfoText` for status or developer notes.
 - Store runtime-critical values through the host instead of ad hoc local files.
+- Use stable setting IDs so user data survives plugin updates.
+- Treat the settings page as a view layer; actual runtime state should live in your plugin object.

@@ -60,6 +60,36 @@ _outgoingId = _host->registerOutgoingTextInterceptor(
 
 This is what powers plugins like `AI Chat`, where `/ai` can be intercepted before the command is sent into the chat.
 
+## Example: `/ai` interception
+
+```cpp
+_aiInterceptId = _host->registerOutgoingTextInterceptor(
+	"astro.ai_chat",
+	[=](const Plugins::OutgoingTextContext &ctx) {
+		const auto text = ctx.text.trimmed();
+		if (!text.startsWith("/ai")) {
+			return Plugins::CommandResult{
+				.action = Plugins::CommandResult::Action::Continue,
+			};
+		}
+
+		if (_apiKey.isEmpty()) {
+			_host->showToast("Configure the API key first.");
+			return Plugins::CommandResult{
+				.action = Plugins::CommandResult::Action::Cancel,
+			};
+		}
+
+		openAiPanel(text.mid(3).trimmed(), ctx.window, ctx.session);
+		return Plugins::CommandResult{
+			.action = Plugins::CommandResult::Action::Handled,
+		};
+	},
+	200);
+```
+
+This pattern lets a plugin hijack a slash command locally without sending it into the current chat history.
+
 ## Actions in Settings > Plugins
 
 ```cpp
@@ -104,3 +134,12 @@ _observerId = _host->registerMessageObserver(
 		}
 	});
 ```
+
+## Priority and coexistence
+
+Interceptors and observers can coexist. Keep these rules in mind:
+
+- use a higher priority only when you truly must run before other plugins
+- prefer `Handled` or `Cancel` only when you intentionally stop the client path
+- do not silently swallow unrelated text or commands
+- log key transitions if you are building a stateful plugin
