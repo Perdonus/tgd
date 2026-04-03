@@ -17,7 +17,7 @@ Applies a configurable blur to major Telegram surfaces.
 TGD_PLUGIN_PREVIEW(
 	"astro.blur_telegram",
 	"Blur Telegram",
-	"1.0",
+	"1.1",
 	"@etopizdesblin",
 	"Applies a soft blur to Astrogram chat and dialog surfaces.",
 	"https://sosiskibot.ru",
@@ -38,6 +38,14 @@ QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
 }
 
+QString Utf8(const char *value) {
+	return QString::fromUtf8(value);
+}
+
+QString Utf8(const char8_t *value) {
+	return QString::fromUtf8(reinterpret_cast<const char*>(value));
+}
+
 bool UseRussian(const Plugins::Host *host) {
 	auto language = host->hostInfo().appUiLanguage.trimmed();
 	if (language.isEmpty()) {
@@ -46,8 +54,12 @@ bool UseRussian(const Plugins::Host *host) {
 	return language.startsWith(QStringLiteral("ru"), Qt::CaseInsensitive);
 }
 
+QString Tr(const Plugins::Host *host, const char *en, const char8_t *ru) {
+	return UseRussian(host) ? Utf8(ru) : Latin1(en);
+}
+
 QString Tr(const Plugins::Host *host, const char *en, const char *ru) {
-	return UseRussian(host) ? Latin1(ru) : Latin1(en);
+	return UseRussian(host) ? Utf8(ru) : Latin1(en);
 }
 
 bool IsSupportedWindowWidget(QWidget *widget) {
@@ -160,13 +172,13 @@ public:
 	: QObject(nullptr)
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
-		_info.name = Tr(_host, "Blur Telegram", "Размытие Telegram");
-		_info.version = QStringLiteral("1.0");
+		_info.name = Tr(_host, "Blur Telegram", u8"Размытие Telegram");
+		_info.version = QStringLiteral("1.1");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
 			"Applies a soft blur to Astrogram chat and dialog surfaces.",
-			"Применяет мягкий blur к поверхностям чатов и списков Astrogram.");
+			u8"Применяет мягкое размытие поверхностей чатов и списков Astrogram.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_enabled = _host->settingBoolValue(
 			_info.id,
@@ -214,21 +226,21 @@ private:
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto enabled = Plugins::SettingDescriptor();
 		enabled.id = Latin1(kEnabledSettingId);
-		enabled.title = Tr(_host, "Enable blur", "Включить blur");
+		enabled.title = Tr(_host, "Enable blur", u8"Включить размытие");
 		enabled.description = Tr(
 			_host,
 			"Turns the blur pass on or off without uninstalling the plugin.",
-			"Включает или выключает blur-проход без удаления плагина.");
+			u8"Включает или выключает эффект размытия без удаления плагина.");
 		enabled.type = Plugins::SettingControl::Toggle;
 		enabled.boolValue = _enabled;
 
 		auto radius = Plugins::SettingDescriptor();
 		radius.id = Latin1(kRadiusSettingId);
-		radius.title = Tr(_host, "Blur radius", "Радиус blur");
+		radius.title = Tr(_host, "Blur radius", u8"Радиус размытия");
 		radius.description = Tr(
 			_host,
 			"Controls how strong the blur effect is on supported Astrogram surfaces.",
-			"Управляет силой blur-эффекта на поддерживаемых поверхностях Astrogram.");
+			u8"Управляет силой эффекта размытия на поддерживаемых поверхностях Astrogram.");
 		radius.type = Plugins::SettingControl::IntSlider;
 		radius.intValue = _radius;
 		radius.intMinimum = kMinRadius;
@@ -238,35 +250,35 @@ private:
 
 		auto expanded = Plugins::SettingDescriptor();
 		expanded.id = Latin1(kExpandedTargetsSettingId);
-		expanded.title = Tr(_host, "Blur more surfaces", "Размывать больше поверхностей");
+		expanded.title = Tr(_host, "Blur more surfaces", u8"Размывать больше поверхностей");
 		expanded.description = Tr(
 			_host,
 			"Also touches sidebars and extra sections, not only history/dialog areas.",
-			"Дополнительно затрагивает боковые панели и вторичные секции, а не только историю и список диалогов.");
+			u8"Дополнительно затрагивает боковые панели и вторичные секции, а не только историю и список диалогов.");
 		expanded.type = Plugins::SettingControl::Toggle;
 		expanded.boolValue = _expandedTargets;
 
 		auto info = Plugins::SettingDescriptor();
 		info.id = QStringLiteral("info");
-		info.title = Tr(_host, "How it works", "Как это работает");
+		info.title = Tr(_host, "How it works", u8"Как это работает");
 		info.description = Tr(
 			_host,
 			"Blur Telegram works best on large chat/history containers. Interactive controls are intentionally skipped for stability.",
-			"Blur Telegram лучше всего работает на крупных контейнерах истории/чатов. Интерактивные контролы специально пропускаются ради стабильности.");
+			u8"Blur Telegram лучше всего работает на крупных контейнерах истории и чатов. Интерактивные элементы специально пропускаются ради стабильности.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
 		section.id = QStringLiteral("blur");
-		section.title = Tr(_host, "Blur", "Blur");
+		section.title = Tr(_host, "Blur", u8"Размытие");
 		section.settings = { enabled, radius, expanded, info };
 
 		auto page = Plugins::SettingsPageDescriptor();
 		page.id = QStringLiteral("blur_telegram");
-		page.title = Tr(_host, "Blur Telegram", "Blur Telegram");
+		page.title = Tr(_host, "Blur Telegram", u8"Размытие Telegram");
 		page.description = Tr(
 			_host,
 			"Soft blur for Astrogram without rebuilding the client.",
-			"Мягкий blur для Astrogram без перебилда клиента.");
+			u8"Мягкое размытие для Astrogram без перебилда клиента.");
 		page.sections.push_back(section);
 		return page;
 	}
