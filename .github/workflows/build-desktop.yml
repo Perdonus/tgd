@@ -1,5 +1,6 @@
 name: Build Astrogram Desktop
-# CI touch: rerun Windows pipeline after site-only pushes.
+# Site/docs pushes do not trigger this workflow by design.
+# Touch this workflow or use workflow_dispatch when a fresh desktop artifact is needed.
 
 on:
   workflow_dispatch:

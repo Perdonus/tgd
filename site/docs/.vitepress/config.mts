@@ -1,6 +1,13 @@
 import { defineConfig } from 'vitepress'
 
+const base = (
+	process.env.BASE_URL
+	&& process.env.BASE_URL !== '/'
+	&& process.env.BASE_URL !== ''
+) ? process.env.BASE_URL : '/'
+
 export default defineConfig({
+  base,
   title: 'Astrogram Docs',
   description: 'Native C++ plugin development for Astrogram Desktop.',
   cleanUrls: true,
@@ -15,6 +22,8 @@ export default defineConfig({
     siteTitle: 'Astrogram Docs',
     nav: [
       { text: 'Documentation', link: '/' },
+      { text: 'Changelog', link: '/changelog' },
+      { text: 'Links', link: '/links' },
       { text: 'Channel', link: 'https://t.me/astrogramchannel' },
       { text: 'Community Chat', link: 'https://t.me/astrogram_chat' }
     ],
@@ -27,13 +36,18 @@ export default defineConfig({
     outline: {
       level: [2, 3]
     },
+    footer: {
+      message: 'Astrogram Desktop plugin documentation and runtime notes.',
+      copyright: 'Copyright © 2026 Astrogram'
+    },
     sidebar: [
       {
         text: 'Getting Started',
         items: [
           { text: 'Introduction', link: '/' },
           { text: 'Setup', link: '/setup' },
-          { text: 'First Plugin', link: '/first-plugin' }
+          { text: 'First Plugin', link: '/first-plugin' },
+          { text: 'Troubleshooting', link: '/troubleshooting' }
         ]
       },
       {
@@ -56,6 +70,9 @@ export default defineConfig({
       {
         text: 'Other',
         items: [
+          { text: 'Packaging & Release', link: '/packaging-and-release' },
+          { text: 'Changelog', link: '/changelog' },
+          { text: 'Links', link: '/links' },
           { text: 'Available Libraries', link: '/available-libraries' },
           { text: 'Common Classes', link: '/common-classes' }
         ]

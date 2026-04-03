@@ -2,9 +2,9 @@
 layout: home
 
 hero:
-  name: Astrogram Plugins
-  text: Native C++ plugins for Astrogram Desktop
-  tagline: Build `.tgd` plugins with Qt, host-rendered settings, command hooks, observers, and window/session callbacks.
+  name: Astrogram Docs
+  text: Native plugins and desktop runtime notes
+  tagline: Build `.tgd` plugins with Qt, host-rendered settings, command hooks, observers, window/session callbacks, and Astrogram-specific client integration.
   image:
     src: /logo.png
     alt: Astrogram
@@ -15,6 +15,9 @@ hero:
     - theme: alt
       text: First Plugin
       link: /first-plugin
+    - theme: alt
+      text: Changelog
+      link: /changelog
 
 features:
   - title: Native runtime
@@ -25,6 +28,8 @@ features:
     details: Intercept slash commands, outgoing text, and message events. Build utility plugins without patching the whole client.
   - title: Window and session access
     details: React to real Telegram windows and sessions through the host API instead of guessing top-level widgets blindly.
+  - title: Public release entry points
+    details: Astrogram uses docs.astrogram.su for docs, runtime notes, troubleshooting, and changelog links used directly by the client.
 ---
 
 ## What Astrogram plugins are
@@ -47,3 +52,4 @@ The plugin manager tracks load failures, writes detailed logs, and can automatic
 - Jump to [First Plugin](/first-plugin) if you want a minimal working example.
 - Open [Plugin Settings](/plugin-settings) for the host-rendered settings system.
 - Use [Commands & Interceptors](/commands-and-interceptors) for `/command` handling and outgoing text hooks.
+- Check [Troubleshooting](/troubleshooting) if a plugin installs but does not load or forces safe mode.
