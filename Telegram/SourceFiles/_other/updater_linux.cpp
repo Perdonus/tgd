@@ -511,7 +511,7 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 
-		writeLog("Executed Telegram, closing log and quitting..");
+		writeLog("Executed Astrogram, closing log and quitting..");
 	}
 
 	closeLog();

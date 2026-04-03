@@ -125,24 +125,19 @@ QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 
 QString FormatPluginStatusBadge(const ::Plugins::PluginState &state) {
 	const auto version = state.info.version.trimmed();
+	if (!version.isEmpty()) {
+		return version;
+	}
 	if (state.disabledByRecovery) {
-		return version.isEmpty()
-			? PluginUiText(
-				u"Disabled after crash"_q,
-				u"Выключен после сбоя"_q)
-			: version + u" • "_q + PluginUiText(
-				u"Disabled after crash"_q,
-				u"Выключен после сбоя"_q);
+		return PluginUiText(
+			u"Disabled after crash"_q,
+			u"Выключен после сбоя"_q);
 	}
 	if (!state.error.trimmed().isEmpty()) {
-		return version.isEmpty()
-			? PluginUiText(u"Error"_q, u"Ошибка"_q)
-			: version + u" • "_q + PluginUiText(u"Error"_q, u"Ошибка"_q);
+		return PluginUiText(u"Error"_q, u"Ошибка"_q);
 	}
 	if (!state.enabled) {
-		return version.isEmpty()
-			? PluginUiText(u"Disabled"_q, u"Выключен"_q)
-			: version + u" • "_q + PluginUiText(u"Disabled"_q, u"Выключен"_q);
+		return PluginUiText(u"Disabled"_q, u"Выключен"_q);
 	}
 	return version;
 }
@@ -834,6 +829,11 @@ QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 
 QString FormatPluginCardNote(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
+	if (!state.enabled && !state.disabledByRecovery && state.error.trimmed().isEmpty()) {
+		lines.push_back(PluginUiText(
+			u"Plugin is disabled."_q,
+			u"Плагин выключен."_q));
+	}
 	if (state.disabledByRecovery) {
 		lines.push_back(PluginUiText(
 			u"Disabled automatically after a recovery event."_q,
