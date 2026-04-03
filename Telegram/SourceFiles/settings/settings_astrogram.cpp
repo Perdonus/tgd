@@ -35,7 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-constexpr auto kHeaderHeight = 378;
+constexpr auto kHeaderHeight = 420;
 constexpr auto kAvatarSize = 248;
 constexpr auto kAvatarRadius = 14.;
 
@@ -80,6 +80,12 @@ constexpr auto kAvatarRadius = 14.;
 [[nodiscard]] QString AstrogramVersionText() {
 	return QString::fromLatin1("Astrogram Desktop %1").arg(
 		QString::fromLatin1(AppVersionStr));
+}
+
+[[nodiscard]] QString AstrogramTaglineText() {
+	return RuEn(
+		"Плагины, приватность и встроенные инструменты",
+		"Plugins, privacy, and desktop tools");
 }
 
 void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
@@ -133,6 +139,18 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 				QRect(24, versionTop, width - 48, versionMetrics.height() + 10),
 				Qt::AlignHCenter | Qt::TextSingleLine,
 				AstrogramVersionText());
+
+		auto subtitleFont = st::defaultFlatLabel.style.font->f;
+		subtitleFont.setPixelSize(subtitleFont.pixelSize() + 2);
+		const auto subtitleMetrics = QFontMetrics(subtitleFont);
+		const auto subtitleTop = versionTop + versionMetrics.height() + 10;
+
+			p.setPen(st::windowSubTextFg);
+			p.setFont(subtitleFont);
+			p.drawText(
+				QRect(24, subtitleTop, width - 48, subtitleMetrics.height() + 8),
+				Qt::AlignHCenter | Qt::TextSingleLine,
+				AstrogramTaglineText());
 		}, raw->lifetime());
 }
 
