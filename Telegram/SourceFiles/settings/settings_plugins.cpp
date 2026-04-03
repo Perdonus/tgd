@@ -944,10 +944,7 @@ void AttachPluginCardActions(
 
 	raw->widthValue() | rpl::start_with_next([=](int width) {
 		const auto gap = 6;
-		auto buttons = std::vector<Ui::IconButton*>();
-		if (settings) {
-			buttons.push_back(settings);
-		}
+		auto buttons = std::vector<Ui::IconButton*>{ settings.get() };
 		if (share) {
 			buttons.push_back(share);
 		}

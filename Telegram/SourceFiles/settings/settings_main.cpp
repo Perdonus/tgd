@@ -1023,7 +1023,7 @@ void SetupHelp(
 			.confirmText = tr::lng_settings_ask_ok(),
 			.cancelText = tr::lng_settings_faq_button(),
 			.strictCancel = true,
-		});
+		}));
 	});
 }
 
