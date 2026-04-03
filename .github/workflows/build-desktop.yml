@@ -1,5 +1,5 @@
 name: Build Astrogram Desktop
-# CI touch: rerun Windows pipeline after canceled run.
+# CI touch: rerun Windows pipeline after site-only pushes.
 
 on:
   workflow_dispatch:
