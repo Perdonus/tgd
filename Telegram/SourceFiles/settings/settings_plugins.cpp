@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace Settings {
 namespace {
@@ -923,30 +924,52 @@ void AttachPluginCardActions(
 		const ::Plugins::PluginState &state,
 		Fn<void()> onChanged) {
 	const auto raw = static_cast<Ui::RpWidget*>(button.get());
-	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarEdit);
-	const auto share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
+	const auto hasSettings = !Core::App().plugins().settingsPagesFor(state.info.id).empty();
+	const auto hasPackagePath = !state.path.trimmed().isEmpty();
+	Ui::IconButton *settings = nullptr;
+	Ui::IconButton *share = nullptr;
 	const auto remove = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarDelete);
 
-	settings->setClickedCallback([=] {
-		controller->showSettings(PluginDetailsId(state.info.id));
-	});
-	share->setClickedCallback([=] {
-		SharePluginPackage(controller, state);
-	});
+	if (hasSettings) {
+		settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarEdit);
+		settings->setClickedCallback([=] {
+			controller->showSettings(PluginDetailsId(state.info.id));
+		});
+	}
+	if (hasPackagePath) {
+		share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
+		share->setClickedCallback([=] {
+			SharePluginPackage(controller, state);
+		});
+	}
 	remove->setClickedCallback([=] {
 		RequestPluginRemoval(controller, raw, state, onChanged);
 	});
 
 	raw->widthValue() | rpl::start_with_next([=](int width) {
 		const auto gap = 6;
-		const auto total = settings->width() + share->width() + remove->width() + (gap * 2);
-		auto left = std::max(st::settingsButton.padding.left(), width - total - st::settingsButton.padding.right() - 6);
-		const auto top = std::max(0, (raw->height() - settings->height()) / 2);
-		settings->move(left, top);
-		left += settings->width() + gap;
-		share->move(left, top);
-		left += share->width() + gap;
-		remove->move(left, top);
+		auto buttons = std::vector<Ui::IconButton*>();
+		if (settings) {
+			buttons.push_back(settings);
+		}
+		if (share) {
+			buttons.push_back(share);
+		}
+		buttons.push_back(remove);
+		auto total = 0;
+		for (const auto current : buttons) {
+			total += current->width();
+		}
+		total += std::max(0, int(buttons.size()) - 1) * gap;
+		auto left = std::max(
+			st::settingsButton.padding.left(),
+			width - total - st::settingsButton.padding.right() - 6);
+		const auto buttonHeight = buttons.empty() ? 0 : buttons.front()->height();
+		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
+		for (const auto current : buttons) {
+			current->move(left, top);
+			left += current->width() + gap;
+		}
 	}, raw->lifetime());
 }
 
