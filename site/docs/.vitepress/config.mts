@@ -55,7 +55,8 @@ export default defineConfig({
         items: [
           { text: 'Plugin Class', link: '/plugin-class' },
           { text: 'Plugin Settings', link: '/plugin-settings' },
-          { text: 'Commands & Interceptors', link: '/commands-and-interceptors' }
+          { text: 'Commands & Interceptors', link: '/commands-and-interceptors' },
+          { text: 'Built-in Plugins', link: '/built-in-plugins' }
         ]
       },
       {
@@ -64,7 +65,8 @@ export default defineConfig({
           { text: 'Window & Session API', link: '/window-and-session' },
           { text: 'Runtime API', link: '/runtime-api' },
           { text: 'File Utilities', link: '/file-utilities' },
-          { text: 'System Info', link: '/system-info' }
+          { text: 'System Info', link: '/system-info' },
+          { text: 'Safe Mode & Recovery', link: '/safe-mode' }
         ]
       },
       {
