@@ -28,7 +28,7 @@ Allows scale tuning and loading a custom font from file or URL.
 TGD_PLUGIN_PREVIEW(
 	"astro.font_tuner",
 	"Font Tuner",
-	"1.1",
+	"1.2",
 	"@etopizdesblin",
 	"Tunes Astrogram fonts, loads a custom font from file or URL, and applies a live scale.",
 	"https://sosiskibot.ru",
@@ -101,7 +101,7 @@ public:
 			_host,
 			"Font Tuner",
 			u8"Тюнер шрифтов");
-		_info.version = QStringLiteral("1.1");
+		_info.version = QStringLiteral("1.2");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -256,7 +256,7 @@ private:
 			return;
 		}
 		if (setting.id == Latin1(kChooseFileSettingId)) {
-			chooseFontFile();
+			scheduleChooseFontFile();
 			return;
 		}
 		if (setting.id == Latin1(kDownloadSettingId)) {
@@ -285,7 +285,18 @@ private:
 			QString());
 	}
 
-	void chooseFontFile() {
+	void scheduleChooseFontFile() {
+		if (_chooseFileScheduled) {
+			return;
+		}
+		_chooseFileScheduled = true;
+		QTimer::singleShot(0, this, [this] {
+			_chooseFileScheduled = false;
+			chooseFontFileNow();
+		});
+	}
+
+	void chooseFontFileNow() {
 		auto *parent = _host->activeWindowWidget();
 		const auto path = QFileDialog::getOpenFileName(
 			parent,
@@ -500,6 +511,7 @@ private:
 	QString _loadedFamily;
 	int _applicationFontId = -1;
 	int _scalePercent = kDefaultScalePercent;
+	bool _chooseFileScheduled = false;
 };
 
 TGD_PLUGIN_ENTRY {

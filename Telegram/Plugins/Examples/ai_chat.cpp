@@ -36,7 +36,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.3",
+	"1.4",
 	"Codex",
 	"Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -45,14 +45,13 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.3";
+constexpr auto kPluginVersion = "1.4";
 constexpr auto kPluginAuthor = "Codex";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
 constexpr auto kModelName = "gpt-4o-mini";
 
 constexpr auto kApiKeySettingId = "api_key";
-constexpr auto kOpenSiteSettingId = "open_site";
 constexpr auto kInfoSettingId = "usage_info";
 
 constexpr int kDialogWidth = 560;
@@ -326,25 +325,14 @@ private:
 			u8"Вставь сюда свой API-ключ от sosiskibot.ru");
 		apiKey.secret = true;
 
-		auto openSite = Plugins::SettingDescriptor();
-		openSite.id = Latin1(kOpenSiteSettingId);
-		openSite.title = tr(
-			QStringLiteral("Get API key"),
-			u8"Получить API-ключ");
-		openSite.description = tr(
-			QStringLiteral("Open sosiskibot.ru to create or manage your API key."),
-			u8"Открыть sosiskibot.ru, чтобы создать или управлять API-ключом.");
-		openSite.type = Plugins::SettingControl::ActionButton;
-		openSite.buttonText = QStringLiteral("sosiskibot.ru");
-
 		auto info = Plugins::SettingDescriptor();
 		info.id = Latin1(kInfoSettingId);
 		info.title = tr(
 			QStringLiteral("Usage"),
 			u8"Как использовать");
 		info.description = tr(
-			QStringLiteral("Use /ai to open the AI chat. The command is intercepted and is not sent into the chat."),
-			u8"Используй /ai, чтобы открыть ИИ-чат. Команда перехватывается и не отправляется в текущий чат.");
+			QStringLiteral("Use /ai to open the AI chat. The command is intercepted and is not sent into the chat. API keys are issued at sosiskibot.ru."),
+			u8"Используй /ai, чтобы открыть ИИ-чат. Команда перехватывается и не отправляется в текущий чат. API-ключи выдаются на sosiskibot.ru.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -353,7 +341,6 @@ private:
 			QStringLiteral("Connection"),
 			u8"Подключение");
 		section.settings.push_back(apiKey);
-		section.settings.push_back(openSite);
 		section.settings.push_back(info);
 
 		auto page = Plugins::SettingsPageDescriptor();
@@ -390,13 +377,6 @@ private:
 			_apiKey = NormalizeText(setting.textValue);
 			refreshIdleWindows();
 			return;
-		}
-		if (setting.id == Latin1(kOpenSiteSettingId)) {
-			if (!QDesktopServices::openUrl(QUrl(Latin1(kSiteUrl)))) {
-				_host->showToast(tr(
-					QStringLiteral("Could not open sosiskibot.ru."),
-					u8"Не удалось открыть sosiskibot.ru."));
-			}
 		}
 	}
 
@@ -493,16 +473,16 @@ private:
 				return;
 			}
 			_host->showToast(tr(
-				QStringLiteral("Open a Telegram window before using /ai."),
-				u8"Сначала открой окно Telegram, потом используй /ai."));
+				QStringLiteral("Open an Astrogram window before using /ai."),
+				u8"Сначала открой окно Astrogram, потом используй /ai."));
 		});
 	}
 
 	void openChatDialog(QWidget *parentWindow, const QString &prefill) {
 		if (!parentWindow) {
 			_host->showToast(tr(
-				QStringLiteral("Open a Telegram window before using /ai."),
-				u8"Сначала открой окно Telegram, потом используй /ai."));
+				QStringLiteral("Open an Astrogram window before using /ai."),
+				u8"Сначала открой окно Astrogram, потом используй /ai."));
 			return;
 		}
 
@@ -542,8 +522,8 @@ private:
 
 		auto intro = new QLabel(
 			tr(
-				QStringLiteral("Chat with sosiskibot.ru directly inside Astrogram. Each Telegram window keeps its own in-memory conversation."),
-				u8"Общайся с sosiskibot.ru прямо внутри Astrogram. У каждого окна Telegram будет своя отдельная история диалога в памяти."),
+				QStringLiteral("Chat with sosiskibot.ru directly inside Astrogram. Each Astrogram window keeps its own in-memory conversation."),
+				u8"Общайся с sosiskibot.ru прямо внутри Astrogram. У каждого окна Astrogram будет своя отдельная история диалога в памяти."),
 			dialog);
 		intro->setWordWrap(true);
 		layout->addWidget(intro);
