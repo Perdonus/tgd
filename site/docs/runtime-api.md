@@ -49,3 +49,28 @@ if (host.runtimeApiEnabled && host.runtimeApiPort > 0) {
 		QString("Runtime at %1").arg(host.runtimeApiBaseUrl));
 }
 ```
+
+## Example: diagnostics info block
+
+```cpp
+Plugins::SettingDescriptor diagnostics;
+diagnostics.id = "runtime_status";
+diagnostics.title = "Runtime API";
+diagnostics.type = Plugins::SettingControl::InfoText;
+diagnostics.description = _host->hostInfo().runtimeApiEnabled
+	? QString("Enabled at %1").arg(_host->hostInfo().runtimeApiBaseUrl)
+	: "Disabled";
+```
+
+This is useful when you want a plugin settings page to expose developer-facing runtime information without building a custom dialog.
+
+## Safe mode awareness
+
+```cpp
+const auto host = _host->hostInfo();
+if (host.safeModeEnabled) {
+	_host->showToast("Astrogram is running in safe mode.");
+}
+```
+
+Plugins that behave differently in safe mode should read this state and degrade gracefully instead of assuming the full runtime is always available.

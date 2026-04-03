@@ -37,6 +37,28 @@ const auto line = QString("%1 • %2 • %3")
 _host->showToast(line);
 ```
 
+## Example: structured diagnostics dump
+
+```cpp
+const auto system = _host->systemInfo();
+QStringList lines;
+lines.push_back(QString("OS: %1").arg(system.prettyProductName));
+lines.push_back(QString("Kernel: %1 %2")
+	.arg(system.kernelType)
+	.arg(system.kernelVersion));
+lines.push_back(QString("CPU: %1 logical / %2 physical")
+	.arg(system.logicalCpuCores)
+	.arg(system.physicalCpuCores));
+lines.push_back(QString("Memory: %1 / %2 MiB free")
+	.arg(system.availableMemoryBytes / 1024 / 1024)
+	.arg(system.totalMemoryBytes / 1024 / 1024));
+lines.push_back(QString("Locale: %1 (%2)")
+	.arg(system.locale)
+	.arg(system.uiLanguage));
+
+_host->log(lines.join('\n'));
+```
+
 ## Good use cases
 
 - diagnostics plugins

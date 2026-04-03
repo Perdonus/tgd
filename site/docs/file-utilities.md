@@ -41,3 +41,28 @@ That is why `TGD_PLUGIN_PREVIEW(...)` is strongly recommended.
 - Keep plugin-owned data inside the plugin folder or a stable subfolder under `workingPath`.
 - Use absolute paths for imported assets after copying them.
 - Avoid assuming the process working directory outside the host API.
+
+## Example: per-plugin JSON state file
+
+```cpp
+QString MyPlugin::statePath() const {
+	const auto base = _host->hostInfo().workingPath;
+	return QDir(base).filePath("tdata/my_plugin_state.json");
+}
+
+void MyPlugin::saveState(const QJsonObject &state) {
+	QFile file(statePath());
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		return;
+	}
+	file.write(QJsonDocument(state).toJson(QJsonDocument::Indented));
+}
+```
+
+## Example: logging an imported file location
+
+```cpp
+const auto pluginDir = _host->hostInfo().pluginsPath;
+const auto assetPath = QDir(pluginDir).filePath("my_plugin/background.png");
+_host->log(QString("Using asset: %1").arg(assetPath));
+```
