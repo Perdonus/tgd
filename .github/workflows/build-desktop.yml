@@ -1,6 +1,7 @@
 name: Build Astrogram Desktop
 # Site/docs pushes do not trigger this workflow by design.
 # Touch this workflow or use workflow_dispatch when a fresh desktop artifact is needed.
+# CI touch: rerun Windows pipeline after stalled run #91.
 # CI touch: retrigger Windows build after confirmed long-running compile hang.
 
 on:
