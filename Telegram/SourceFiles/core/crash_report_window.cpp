@@ -435,9 +435,9 @@ LastCrashedWindow::LastCrashedWindow(
 	});
 	_saveReport.setText(u"SAVE TO FILE"_q);
 	connect(&_saveReport, &QPushButton::clicked, [=] { saveReport(); });
-	_getApp.setText(u"GET THE LATEST OFFICIAL VERSION OF TELEGRAM DESKTOP"_q);
+	_getApp.setText(u"GET THE LATEST ASTROGRAM DESKTOP BUILD"_q);
 	connect(&_getApp, &QPushButton::clicked, [=] {
-		QDesktopServices::openUrl(u"https://desktop.telegram.org"_q);
+		QDesktopServices::openUrl(u"https://t.me/astrogramchannel"_q);
 	});
 
 	_send.setText(u"SEND CRASH REPORT"_q);

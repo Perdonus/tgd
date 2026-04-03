@@ -1124,7 +1124,7 @@ bool Application::openInternalUrl(const QString &url, QVariant context) {
 }
 
 QString Application::changelogLink() const {
-	const auto base = u"https://desktop.telegram.org/changelog"_q;
+	const auto base = u"https://docs.astrogram.su/changelog"_q;
 	const auto languages = {
 		"id",
 		"de",

@@ -1245,7 +1245,7 @@ void CheckReactionNotificationSchedule(
 }
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
-	const auto siteLink = u"https://desktop.telegram.org"_q;
+	const auto siteLink = u"https://docs.astrogram.su"_q;
 	auto result = TextWithEntities{
 		tr::lng_message_unsupported(tr::now, lt_link, siteLink)
 	};
