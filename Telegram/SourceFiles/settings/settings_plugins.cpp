@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "plugins/plugins_manager.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
+#include "ui/painter.h"
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/widgets/continuous_sliders.h"
@@ -757,6 +758,71 @@ void OpenPluginsFolder() {
 	File::ShowInFolder(Core::App().plugins().pluginsPath());
 }
 
+constexpr auto kPluginCardRadius = 20.;
+constexpr auto kPluginCardVerticalMargin = 10;
+
+[[nodiscard]] QColor PluginCardBackgroundColor(
+		const ::Plugins::PluginState &state) {
+	auto color = st::windowBgOver->c;
+	if (state.recoverySuspected || state.disabledByRecovery) {
+		color = st::attentionButtonFg->c;
+		color.setAlpha(18);
+	} else if (!state.error.isEmpty()) {
+		color = st::windowBgActive->c;
+		color.setAlpha(18);
+	}
+	return color;
+}
+
+[[nodiscard]] QColor PluginCardBorderColor(
+		const ::Plugins::PluginState &state) {
+	if (state.recoverySuspected || state.disabledByRecovery) {
+		return st::attentionButtonFg->c;
+	} else if (!state.error.isEmpty()) {
+		return st::windowBgActive->c;
+	}
+	auto color = st::windowBgOver->c;
+	color.setAlpha(0);
+	return color;
+}
+
+[[nodiscard]] not_null<Ui::VerticalLayout*> AddPluginCardContainer(
+		not_null<Ui::VerticalLayout*> container,
+		const ::Plugins::PluginState &state) {
+	const auto card = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		style::margins(0, 0, 0, 0),
+		style::al_top);
+	const auto raw = static_cast<Ui::RpWidget*>(card);
+	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
+	const auto margins = QMargins(
+		st::settingsButton.padding.left(),
+		12,
+		st::settingsButton.padding.right(),
+		14);
+
+	raw->widthValue() | rpl::start_with_next([=](int width) {
+		const auto innerWidth = std::max(0, width - margins.left() - margins.right());
+		inner->resizeToWidth(innerWidth);
+		inner->move(margins.left(), margins.top());
+	}, raw->lifetime());
+	inner->heightValue() | rpl::start_with_next([=](int height) {
+		raw->resize(
+			raw->width(),
+			height + margins.top() + margins.bottom());
+	}, raw->lifetime());
+	raw->paintRequest() | rpl::start_with_next([=] {
+		auto p = Painter(raw);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(QPen(PluginCardBorderColor(state), state.recoverySuspected ? 1.5 : 1.0));
+		p.setBrush(PluginCardBackgroundColor(state));
+		const auto rect = QRectF(raw->rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+		p.drawRoundedRect(rect, kPluginCardRadius, kPluginCardRadius);
+	}, raw->lifetime());
+
+	return inner;
+}
+
 QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
 	const auto &info = state.info;
@@ -780,20 +846,6 @@ QString FormatPluginCardNote(const ::Plugins::PluginState &state) {
 		lines.push_back(
 			PluginUiText(u"Error: "_q, u"Ошибка: "_q)
 			+ state.error.trimmed());
-	}
-	return lines.join(u"\n"_q);
-}
-
-QString FormatPluginDetailsNote(const ::Plugins::PluginState &state) {
-	auto lines = QStringList();
-	const auto base = FormatPluginCardNote(state);
-	if (!base.isEmpty()) {
-		lines.push_back(base);
-	}
-	if (!state.path.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Package: "_q, u"Пакет: "_q)
-			+ QDir::toNativeSeparators(state.path));
 	}
 	return lines.join(u"\n"_q);
 }
@@ -1170,14 +1222,6 @@ private:
 
 		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
 
-		if (Core::App().plugins().safeModeEnabled()) {
-			Ui::AddDividerText(
-				_content,
-				rpl::single(PluginUiText(
-					u"Safe mode is enabled. The plugin is shown as metadata only."_q,
-					u"Безопасный режим включён. Плагин показан только как метаданные."_q)));
-		}
-
 		if (!settingsPages.empty()) {
 			Ui::AddSubsectionTitle(
 				_content,
@@ -1379,25 +1423,25 @@ void Plugins::rebuildList() {
 	auto first = true;
 	for (const auto &state : plugins) {
 		if (!first) {
-			Ui::AddSkip(_list);
-			Ui::AddDivider(_list);
+			Ui::AddSkip(_list, st::settingsCheckboxesSkip);
 		}
 		first = false;
-		Ui::AddSkip(_list);
+		Ui::AddSkip(_list, kPluginCardVerticalMargin);
 
 		const auto title = FormatPluginTitle(state);
 		const auto versionBadge = FormatPluginStatusBadge(state);
 		const auto summary = FormatPluginCardSummary(state);
 		const auto stateNote = FormatPluginCardNote(state);
+		const auto card = AddPluginCardContainer(_list, state);
 		const auto header = AddButtonWithIcon(
-			_list,
+			card,
 			rpl::single(title),
 			state.recoverySuspected
 				? st::settingsAttentionButton
 				: !state.error.isEmpty() && !state.disabledByRecovery
 				? st::settingsOptionDisabled
 				: st::settingsButtonLightNoIcon);
-		header->toggleOn(rpl::single(state.enabled));
+			header->toggleOn(rpl::single(state.enabled));
 		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			header->setToggleLocked(true);
 		}
@@ -1407,21 +1451,21 @@ void Plugins::rebuildList() {
 				_controller->window().showToast(PluginUiText(
 					u"Could not change state."_q,
 					u"Не удалось изменить состояние плагина."_q));
-				}
-			rebuildList();
-		}, header->lifetime());
+					}
+				rebuildList();
+			}, header->lifetime());
 		AttachPluginCardActions(
 			header,
 			_controller,
 			state,
 			crl::guard(this, [=] { rebuildList(); }));
-		Ui::AddDividerText(_list, rpl::single(versionBadge));
+		Ui::AddDividerText(card, rpl::single(versionBadge));
 		if (!summary.isEmpty()) {
-			Ui::AddDividerText(_list, rpl::single(summary));
+			Ui::AddDividerText(card, rpl::single(summary));
 		}
-		AddPluginAuthorLabel(_list, state.info.author);
+		AddPluginAuthorLabel(card, state.info.author);
 		if (!stateNote.isEmpty()) {
-			Ui::AddDividerText(_list, rpl::single(stateNote));
+			Ui::AddDividerText(card, rpl::single(stateNote));
 		}
 	}
 

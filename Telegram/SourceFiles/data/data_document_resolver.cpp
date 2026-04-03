@@ -659,7 +659,9 @@ void ResolveDocument(
 					item ? item->fullId() : Data::FileOrigin(),
 					tempPath);
 				controller->showToast(
-					u"Downloading plugin package..."_q);
+					PluginUiText(
+						u"Downloading plugin package..."_q,
+						u"Скачиваю пакет плагина..."_q));
 				const auto wait = std::make_shared<rpl::lifetime>();
 				session->downloaderTaskFinished(
 				) | rpl::on_next(crl::guard(controller, [=] {
@@ -673,7 +675,9 @@ void ResolveDocument(
 						: LocalPluginPackagePath(current);
 					if (readyPath.isEmpty()) {
 						controller->showToast(
-							u"Could not prepare the plugin package."_q);
+							PluginUiText(
+								u"Could not prepare the plugin package."_q,
+								u"Не удалось подготовить пакет плагина."_q));
 						return;
 					}
 					ShowPluginPackageBox(
@@ -682,7 +686,9 @@ void ResolveDocument(
 				}), *wait);
 			} else {
 				controller->showToast(
-					u"Plugin package is still downloading."_q);
+					PluginUiText(
+						u"Plugin package is still downloading."_q,
+						u"Пакет плагина ещё скачивается."_q));
 			}
 			return;
 		}
