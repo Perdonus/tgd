@@ -1,0 +1,49 @@
+---
+layout: home
+
+hero:
+  name: Astrogram Plugins
+  text: Native C++ plugins for Astrogram Desktop
+  tagline: Build `.tgd` plugins with Qt, host-rendered settings, command hooks, observers, and window/session callbacks.
+  image:
+    src: /logo.png
+    alt: Astrogram
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /setup
+    - theme: alt
+      text: First Plugin
+      link: /first-plugin
+
+features:
+  - title: Native runtime
+    details: Plugins are compiled shared libraries loaded directly into Astrogram Desktop. You get Qt, native widgets, and host APIs without a scripting bridge.
+  - title: Stable settings UI
+    details: Register settings pages and let the host render sliders, toggles, text inputs, and action buttons inside Settings > Plugins.
+  - title: Command and message hooks
+    details: Intercept slash commands, outgoing text, and message events. Build utility plugins without patching the whole client.
+  - title: Window and session access
+    details: React to real Telegram windows and sessions through the host API instead of guessing top-level widgets blindly.
+---
+
+## What Astrogram plugins are
+
+Astrogram plugins are native `.tgd` libraries that run inside the Astrogram Desktop process. They are powerful, but they are not sandboxed. A bad ABI mismatch or a native crash inside a plugin can crash the client too.
+
+The plugin manager tracks load failures, writes detailed logs, and can automatically switch the client into safe mode if a plugin crashes during a tracked operation.
+
+## Current API target
+
+- Plugin API version: `5`
+- Language: `C++20`
+- UI/toolkit: `Qt`
+- Binary format: shared library with `.tgd` suffix
+- Primary header: `Telegram/SourceFiles/plugins/plugins_api.h`
+
+## Where to look next
+
+- Start with [Setup](/setup) to understand ABI requirements and directory layout.
+- Jump to [First Plugin](/first-plugin) if you want a minimal working example.
+- Open [Plugin Settings](/plugin-settings) for the host-rendered settings system.
+- Use [Commands & Interceptors](/commands-and-interceptors) for `/command` handling and outgoing text hooks.
