@@ -9,7 +9,7 @@ export default {
   Layout: () =>
     h('div', { class: 'docs-theme-shell' }, [
       h(DefaultTheme.Layout, null, {
-        'sidebar-nav-before': () => h(SidebarToggleControl),
+        'nav-bar-content-before': () => h(SidebarToggleControl),
       }),
     ]),
   enhanceApp() {},

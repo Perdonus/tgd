@@ -924,18 +924,14 @@ void AttachPluginCardActions(
 		const ::Plugins::PluginState &state,
 		Fn<void()> onChanged) {
 	const auto raw = static_cast<Ui::RpWidget*>(button.get());
-	const auto hasSettings = !Core::App().plugins().settingsPagesFor(state.info.id).empty();
 	const auto hasPackagePath = !state.path.trimmed().isEmpty();
-	Ui::IconButton *settings = nullptr;
+	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarEdit);
 	Ui::IconButton *share = nullptr;
 	const auto remove = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarDelete);
 
-	if (hasSettings) {
-		settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarEdit);
-		settings->setClickedCallback([=] {
-			controller->showSettings(PluginDetailsId(state.info.id));
-		});
-	}
+	settings->setClickedCallback([=] {
+		controller->showSettings(PluginDetailsId(state.info.id));
+	});
 	if (hasPackagePath) {
 		share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
 		share->setClickedCallback([=] {
@@ -1405,20 +1401,6 @@ void Plugins::rebuildList() {
 				PluginUiText(
 					u"Safe mode is enabled. Plugins are shown without loading. Open the top bar menu to disable it."_q,
 					u"Безопасный режим включён. Плагины показаны без загрузки. Откройте меню в верхней панели, чтобы выключить его."_q)));
-		const auto disableSafeModeButton = AddButtonWithIcon(
-			_list,
-			rpl::single(PluginUiText(
-				u"Disable Safe Mode"_q,
-				u"Выключить безопасный режим"_q)),
-			st::settingsAttentionButton,
-			{ &st::menuIconSettings });
-		disableSafeModeButton->addClickHandler([=] {
-			RequestSafeModeChange(
-				_controller,
-				this,
-				false,
-				crl::guard(this, [=] { rebuildList(); }));
-		});
 		Ui::AddSkip(_list);
 	}
 
@@ -1427,18 +1409,8 @@ void Plugins::rebuildList() {
 		Ui::AddDividerText(
 			_list,
 			rpl::single(PluginUiText(
-				u"No plugins found in tdata/plugins."_q,
-				u"В tdata/plugins плагины не найдены."_q)));
-		const auto folderButton = AddButtonWithIcon(
-			_list,
-			rpl::single(PluginUiText(
-				u"Open Plugins Folder"_q,
-				u"Открыть папку плагинов"_q)),
-			st::settingsButton,
-			{ &st::menuIconShowInFolder });
-		folderButton->addClickHandler([=] {
-			OpenPluginsFolder();
-		});
+				u"No plugins found in tdata/plugins. Use the top bar menu for the plugins folder and diagnostics."_q,
+				u"В tdata/plugins плагины не найдены. Для папки плагинов и диагностики используйте меню в верхней панели."_q)));
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
 		return;

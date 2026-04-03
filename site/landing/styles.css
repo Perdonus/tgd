@@ -106,7 +106,7 @@ img {
 .brand img {
   width: 48px;
   height: 48px;
-  border-radius: 16px;
+  border-radius: 50%;
 }
 
 .brand__copy {
@@ -353,7 +353,7 @@ html[data-theme='dark'] .theme-switch__moon {
 .hero-frame__brand img {
   width: 32px;
   height: 32px;
-  border-radius: 12px;
+  border-radius: 50%;
 }
 
 .hero-frame__slot {

@@ -35,9 +35,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-constexpr auto kHeaderHeight = 420;
-constexpr auto kAvatarSize = 248;
-constexpr auto kAvatarRadius = 14.;
+constexpr auto kHeaderHeight = 468;
+constexpr auto kAvatarSize = 284;
+constexpr auto kAvatarRadius = 22.;
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -100,7 +100,7 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		const auto width = raw->width();
 			const auto avatarRect = QRect(
 				(width - kAvatarSize) / 2,
-				12,
+				18,
 				kAvatarSize,
 				kAvatarSize);
 		const auto avatar = AstrogramHeaderImage();
@@ -116,10 +116,10 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		}
 
 		auto titleFont = st::semiboldFont->f;
-		titleFont.setPixelSize(titleFont.pixelSize() + 18);
+		titleFont.setPixelSize(titleFont.pixelSize() + 26);
 		titleFont.setBold(true);
 		const auto titleMetrics = QFontMetrics(titleFont);
-		const auto titleTop = avatarRect.bottom() + 24;
+		const auto titleTop = avatarRect.bottom() + 28;
 
 			p.setPen(st::windowFg);
 			p.setFont(titleFont);
@@ -129,9 +129,9 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 				u"Astrogram"_q);
 
 		auto versionFont = st::defaultFlatLabel.style.font->f;
-		versionFont.setPixelSize(versionFont.pixelSize() + 8);
+		versionFont.setPixelSize(versionFont.pixelSize() + 11);
 		const auto versionMetrics = QFontMetrics(versionFont);
-		const auto versionTop = titleTop + titleMetrics.height() + 16;
+		const auto versionTop = titleTop + titleMetrics.height() + 18;
 
 			p.setPen(st::windowSubTextFg);
 			p.setFont(versionFont);
@@ -141,9 +141,9 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 				AstrogramVersionText());
 
 		auto subtitleFont = st::defaultFlatLabel.style.font->f;
-		subtitleFont.setPixelSize(subtitleFont.pixelSize() + 2);
+		subtitleFont.setPixelSize(subtitleFont.pixelSize() + 4);
 		const auto subtitleMetrics = QFontMetrics(subtitleFont);
-		const auto subtitleTop = versionTop + versionMetrics.height() + 10;
+		const auto subtitleTop = versionTop + versionMetrics.height() + 12;
 
 			p.setPen(st::windowSubTextFg);
 			p.setFont(subtitleFont);
