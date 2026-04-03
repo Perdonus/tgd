@@ -60,6 +60,7 @@ settings.local.json
 .env
 .env.local
 .env.*.local
+/ssl/
 
 # Cursor IDE local settings (but keep .cursor/rules/)
 .cursor/*
