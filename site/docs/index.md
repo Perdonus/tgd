@@ -57,3 +57,4 @@ The plugin manager tracks load failures, writes detailed logs, and can automatic
 - Browse [Built-in Plugins](/built-in-plugins) to see which reference plugins ship with the tree.
 - Check [Troubleshooting](/troubleshooting) if a plugin installs but does not load or forces safe mode.
 - Read [Safe Mode & Recovery](/safe-mode) for the crash-handling model and the recovery files Astrogram writes.
+- Open [Astrogram Features](/astrogram-features) for the built-in client layer that lives beside the plugin runtime.
