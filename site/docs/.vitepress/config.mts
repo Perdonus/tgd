@@ -15,7 +15,10 @@ export default defineConfig({
   head: [
     ['meta', { name: 'theme-color', content: '#ff6a3d' }],
     ['meta', { property: 'og:title', content: 'Astrogram Docs' }],
-    ['meta', { property: 'og:description', content: 'Native C++ plugin development for Astrogram Desktop.' }]
+    ['meta', { property: 'og:description', content: 'Native C++ plugin development for Astrogram Desktop.' }],
+    ['meta', { property: 'og:image', content: 'https://docs.astrogram.su/logo.png' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['link', { rel: 'icon', href: '/logo.png' }]
   ],
   themeConfig: {
     logo: '/logo.png',
@@ -56,7 +59,8 @@ export default defineConfig({
           { text: 'Plugin Class', link: '/plugin-class' },
           { text: 'Plugin Settings', link: '/plugin-settings' },
           { text: 'Commands & Interceptors', link: '/commands-and-interceptors' },
-          { text: 'Built-in Plugins', link: '/built-in-plugins' }
+          { text: 'Built-in Plugins', link: '/built-in-plugins' },
+          { text: 'Astrogram Features', link: '/astrogram-features' }
         ]
       },
       {
