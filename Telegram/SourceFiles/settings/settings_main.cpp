@@ -638,6 +638,11 @@ void SetupSections(
 	}
 
 	addSection(
+		rpl::single(u"Astrogram"_q),
+		Astrogram::Id(),
+		{ &st::menuIconCustomize });
+
+	addSection(
 		tr::lng_settings_section_notify(),
 		Notifications::Id(),
 		{ &st::menuIconNotifications });
@@ -649,10 +654,6 @@ void SetupSections(
 		tr::lng_settings_section_chat_settings(),
 		Chat::Id(),
 		{ &st::menuIconChatBubble });
-	addSection(
-		rpl::single(u"Astrogram"_q),
-		Astrogram::Id(),
-		{ &st::menuIconCustomize });
 
 	const auto preload = [=] {
 		controller->session().data().chatsFilters().requestSuggested();

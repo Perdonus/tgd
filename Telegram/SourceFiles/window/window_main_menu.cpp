@@ -40,7 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_advanced.h"
 #include "settings/settings_calls.h"
 #include "settings/settings_information.h"
-#include "settings/settings_plugins.h"
+#include "settings/settings_astrogram.h"
 #include "storage/localstorage.h"
 #include "storage/storage_account.h"
 #include "support/support_templates.h"
@@ -391,8 +391,8 @@ MainMenu::MainMenu(
 	parentResized();
 
 	_telegram->setMarkedText(tr::link(
-		u"Telegram Desktop"_q,
-		u"https://desktop.telegram.org"_q));
+		u"Astrogram Desktop"_q,
+		u"https://t.me/astrogramchannel"_q));
 	_telegram->setLinksTrusted();
 	_version->setMarkedText(
 		tr::link(
@@ -743,10 +743,10 @@ void MainMenu::setupMenu() {
 		controller->showSettings();
 	});
 	addAction(
-		rpl::single(RuEn("Плагины", "Plugins")),
+		rpl::single(u"Astrogram"_q),
 		{ &st::menuIconCustomize }
 	)->setClickedCallback([=] {
-		controller->showSettings(Settings::Plugins::Id());
+		controller->showSettings(Settings::Astrogram::Id());
 	});
 	addAction(
 		rpl::single(RuEn("Режим призрака", "Ghost mode")),
@@ -754,14 +754,6 @@ void MainMenu::setupMenu() {
 	)->toggleOn(Core::App().settings().ghostModeValue())->toggledChanges(
 	) | rpl::on_next([=](bool enabled) {
 		Core::App().settings().setGhostMode(enabled);
-		Core::App().saveSettingsDelayed();
-	}, _menu->lifetime());
-	addAction(
-		rpl::single(RuEn("Локальный Premium", "Local Premium")),
-		{ &st::menuIconEmojiObjects }
-	)->toggleOn(Core::App().settings().localPremiumValue())->toggledChanges(
-	) | rpl::on_next([=](bool enabled) {
-		Core::App().settings().setLocalPremium(enabled);
 		Core::App().saveSettingsDelayed();
 	}, _menu->lifetime());
 

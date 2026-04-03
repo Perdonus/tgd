@@ -19,26 +19,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 #include "ui/painter.h"
-#include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
+#include "window/window_session_controller_link_info.h"
 
-#include <optional>
+#include <QDesktopServices>
+#include <QFont>
+#include <QFontMetrics>
 #include <QImage>
 #include <QPainterPath>
 #include <QTextOption>
+#include <QUrl>
 
 namespace Settings {
 namespace {
 
-struct PluginShortcutSpec {
-	QString id;
-	const char *titleRu = nullptr;
-	const char *titleEn = nullptr;
-	const char *descriptionRu = nullptr;
-	const char *descriptionEn = nullptr;
-};
+constexpr auto kHeaderHeight = 364;
+constexpr auto kAvatarSize = 188;
+constexpr auto kAvatarRadius = 24.;
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -58,16 +57,6 @@ struct PluginShortcutSpec {
 	return IsRussianUi()
 		? QString::fromUtf8("%1 плагинов").arg(count)
 		: QString::fromUtf8("%1 plugins").arg(count);
-}
-
-[[nodiscard]] std::optional<::Plugins::PluginState> LookupPlugin(
-		const QString &pluginId) {
-	for (const auto &state : Core::App().plugins().plugins()) {
-		if (state.info.id == pluginId) {
-			return state;
-		}
-	}
-	return std::nullopt;
 }
 
 [[nodiscard]] QImage AstrogramHeaderImage() {
@@ -99,67 +88,72 @@ struct PluginShortcutSpec {
 }
 
 [[nodiscard]] QString AstrogramVersionText() {
-	return RuEn("Версия %1", "Version %1").arg(QString::fromLatin1(AppVersionStr));
+	return QString::fromLatin1("Astrogram Desktop %1").arg(
+		QString::fromLatin1(AppVersionStr));
 }
 
 [[nodiscard]] QString AstrogramHeaderDescription() {
 	return RuEn(
-		"Здесь собраны основные возможности Astrogram: приватность, защита от удаления, оформление и вся система плагинов.",
-		"Astrogram keeps its core client features, privacy tools, anti-recall options, appearance controls and the plugin system here.");
+		"Главное меню Astrogram: встроенные возможности клиента, приватность, защита от удаления и плагины.",
+		"Astrogram keeps its client features, privacy tools, anti-recall options and plugins here.");
 }
 
 void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 	const auto header = container->add(object_ptr<Ui::RpWidget>(container));
 	const auto raw = header;
-	raw->setMinimumHeight(248);
-	raw->setMaximumHeight(248);
+	raw->setMinimumHeight(kHeaderHeight);
+	raw->setMaximumHeight(kHeaderHeight);
 
 	raw->paintRequest(
 	) | rpl::on_next([=] {
 		auto p = Painter(raw);
-		const auto avatar = AstrogramHeaderImage();
 		const auto width = raw->width();
-		const auto avatarSize = st::settingsCloudPasswordIconSize;
 		const auto avatarRect = QRect(
-			(width - avatarSize) / 2,
-			12,
-			avatarSize,
-			avatarSize);
+			(width - kAvatarSize) / 2,
+			20,
+			kAvatarSize,
+			kAvatarSize);
+		const auto avatar = AstrogramHeaderImage();
 
 		if (!avatar.isNull()) {
 			auto hq = PainterHighQualityEnabler(p);
 			QPainterPath path;
-			path.addRoundedRect(
-				QRectF(avatarRect),
-				avatarRect.width() / 2.0,
-				avatarRect.height() / 2.0);
+			path.addRoundedRect(QRectF(avatarRect), kAvatarRadius, kAvatarRadius);
 			p.save();
 			p.setClipPath(path);
 			p.drawImage(avatarRect, avatar, CenterCropSourceRect(avatar));
 			p.restore();
 		}
 
-		const auto titleTop = avatarRect.bottom() + 24;
+		auto titleFont = st::semiboldFont->f;
+		titleFont.setPixelSize(titleFont.pixelSize() + 14);
+		titleFont.setBold(true);
+		const auto titleMetrics = QFontMetrics(titleFont);
+		const auto titleTop = avatarRect.bottom() + 28;
+
 		p.setPen(st::windowFg);
-		p.setFont(st::semiboldFont);
+		p.setFont(titleFont);
 		p.drawText(
-			QRect(24, titleTop, width - 48, st::semiboldFont->height + 8),
+			QRect(24, titleTop, width - 48, titleMetrics.height() + 12),
 			Qt::AlignHCenter | Qt::TextSingleLine,
 			u"Astrogram"_q);
 
-		const auto versionTop = titleTop + st::semiboldFont->height + 8;
+		auto versionFont = st::defaultFlatLabel.style.font->f;
+		versionFont.setPixelSize(versionFont.pixelSize() + 6);
+		const auto versionMetrics = QFontMetrics(versionFont);
+		const auto versionTop = titleTop + titleMetrics.height() + 16;
+
 		p.setPen(st::windowSubTextFg);
-		p.setFont(st::defaultFlatLabel.style.font);
+		p.setFont(versionFont);
 		p.drawText(
-			QRect(24, versionTop, width - 48, st::defaultFlatLabel.style.font->height + 6),
+			QRect(24, versionTop, width - 48, versionMetrics.height() + 10),
 			Qt::AlignHCenter | Qt::TextSingleLine,
 			AstrogramVersionText());
 
-		const auto descriptionTop = versionTop
-			+ st::defaultFlatLabel.style.font->height
-			+ 12;
+		const auto descriptionTop = versionTop + versionMetrics.height() + 20;
+		p.setFont(st::defaultFlatLabel.style.font);
 		p.drawText(
-			QRect(36, descriptionTop, width - 72, 64),
+			QRect(48, descriptionTop, width - 96, 82),
 			AstrogramHeaderDescription(),
 			QTextOption(Qt::AlignHCenter | Qt::AlignTop));
 	}, raw->lifetime());
@@ -199,147 +193,142 @@ void AddActionButtonWithLabel(
 	)->addClickHandler(std::move(callback));
 }
 
-void AddPluginShortcut(
+void AddSectionButton(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
-		const PluginShortcutSpec &spec) {
-	const auto state = LookupPlugin(spec.id);
-	const auto title = IsRussianUi()
-		? QString::fromUtf8(spec.titleRu)
-		: QString::fromUtf8(spec.titleEn);
-	const auto label = [&] {
-		if (state) {
-			auto version = state->info.version.trimmed();
-			if (version.isEmpty()) {
-				version = RuEn("Установлен", "Installed");
-			}
-			return state->loaded
-				? version
-				: version + u" • "_q + RuEn("метаданные", "metadata");
-		}
-		return RuEn("Открыть менеджер", "Open manager");
-	}();
+		const QString &title,
+		const QString &label,
+		Type type,
+		IconDescriptor descriptor) {
 	AddActionButtonWithLabel(
 		container,
 		title,
 		label,
-		[=] {
-			if (state) {
-				controller->showSettings(PluginDetailsId(state->info.id));
-			} else {
-				controller->showSettings(Plugins::Id());
-			}
-		},
-		{ &st::menuIconCustomize });
-	const auto description = IsRussianUi()
-		? QString::fromUtf8(spec.descriptionRu)
-		: QString::fromUtf8(spec.descriptionEn);
-	if (!description.trimmed().isEmpty()) {
-		Ui::AddDividerText(container, rpl::single(description));
-	}
+		[=] { controller->showSettings(type); },
+		std::move(descriptor));
 }
 
-void SetupAstrogram(
+void AddLinksSection(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	auto &settings = Core::App().settings();
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn("Ссылки", "Links")));
+	AddActionButtonWithLabel(
+		container,
+		RuEn("Основной канал", "Main channel"),
+		u"@astrogramchannel"_q,
+		[=] {
+			controller->showPeerByLink(Window::PeerByLinkInfo{
+				.usernameOrId = QStringLiteral("astrogramchannel"),
+			});
+		},
+		{ &st::menuIconChannel });
+	AddActionButtonWithLabel(
+		container,
+		RuEn("Чат сообщества", "Community chat"),
+		u"@astrogram_chat"_q,
+		[=] {
+			controller->showPeerByLink(Window::PeerByLinkInfo{
+				.usernameOrId = QStringLiteral("astrogram_chat"),
+			});
+		},
+		{ &st::menuIconChats });
+	AddActionButtonWithLabel(
+		container,
+		RuEn("Документация", "Documentation"),
+		u"docs.astrogram.su"_q,
+		[] {
+			QDesktopServices::openUrl(QUrl(u"https://docs.astrogram.su"_q));
+		},
+		{ &st::menuIconIpAddress });
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
 
+void SetupAstrogramHome(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
 	AddAstrogramHeader(container);
 	Ui::AddSkip(container);
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(
 		container,
-		rpl::single(RuEn("Плагины", "Extensions")));
-	AddActionButtonWithLabel(
+		rpl::single(RuEn("Разделы", "Sections")));
+	AddSectionButton(
+		controller,
+		container,
+		u"Astrogram"_q,
+		RuEn(
+			"Локальный премиум, реклама и системные возможности клиента",
+			"Local premium, ads and client-level features"),
+		AstrogramCore::Id(),
+		{ &st::menuIconPremium });
+	AddSectionButton(
+		controller,
+		container,
+		RuEn("Приватность", "Privacy"),
+		RuEn(
+			"Режим призрака, статусы сети и скрытие чтения",
+			"Ghost mode, online packets and read-state controls"),
+		AstrogramPrivacy::Id(),
+		{ &st::menuIconLock });
+	AddSectionButton(
+		controller,
+		container,
+		RuEn("Интерфейс", "Interface"),
+		RuEn(
+			"Истории, ссылки, время сообщений и похожие каналы",
+			"Stories, links, timestamps and similar channels"),
+		AstrogramInterface::Id(),
+		{ &st::menuIconPalette });
+	AddSectionButton(
+		controller,
+		container,
+		RuEn("Защита от удаления", "Anti-recall"),
+		RuEn(
+			"Удалённые сообщения, история правок и журнал",
+			"Deleted messages, edit history and the local log"),
+		AstrogramAntiRecall::Id(),
+		{ &st::menuIconRestore });
+	AddSectionButton(
+		controller,
 		container,
 		RuEn("Плагины", "Plugins"),
 		PluginsLabel(),
-		[=] { controller->showSettings(Plugins::Id()); },
+		Plugins::Id(),
 		{ &st::menuIconCustomize });
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Здесь открывается менеджер плагинов Astrogram. Документация, встроенный API плагинов, безопасный режим, журнал и папка плагинов вынесены в меню с тремя точками внутри раздела.",
-			"This opens the Astrogram plugin manager. Plugin system actions, documentation, runtime API, safe mode, logs and the plugins folder live in the three-dots menu inside that section.")));
+	AddLinksSection(controller, container);
+}
 
-	Ui::AddSkip(container);
+void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
+	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(
+	AddToggle(
 		container,
-		rpl::single(RuEn("Быстрый доступ", "Quick Access")));
-	AddPluginShortcut(
-		controller,
+		settings.localPremiumValue(),
+		RuEn("Локальный премиум", "Local Premium"),
+		[&](bool toggled) { settings.setLocalPremium(toggled); });
+	AddToggle(
 		container,
-		{
-			.id = u"example.transparent_telegram"_q,
-			.titleRu = "AstroTransparent",
-			.titleEn = "AstroTransparent",
-			.descriptionRu = "Прозрачность интерфейса, сообщений и текста в отдельной странице плагина.",
-			.descriptionEn = "Interface, message and text transparency in a dedicated plugin page.",
-		});
-	AddPluginShortcut(
-		controller,
-		container,
-		{
-			.id = u"astro.blur_telegram"_q,
-			.titleRu = "Blur Telegram",
-			.titleEn = "Blur Telegram",
-			.descriptionRu = "Живое размытие крупных элементов Astrogram с настройкой силы эффекта.",
-			.descriptionEn = "Live blur for major Astrogram surfaces with strength controls.",
-		});
-	AddPluginShortcut(
-		controller,
-		container,
-		{
-			.id = u"astro.accent_color"_q,
-			.titleRu = "Accent Color",
-			.titleEn = "Accent Color",
-			.descriptionRu = "Акцентные цвета и тонировка поверхностей для более выразительного оформления.",
-			.descriptionEn = "Accent palette and surface tinting for a more expressive appearance.",
-		});
-	AddPluginShortcut(
-		controller,
-		container,
-		{
-			.id = u"astro.font_tuner"_q,
-			.titleRu = "Font Tuner",
-			.titleEn = "Font Tuner",
-			.descriptionRu = "Масштаб шрифта и загрузка кастомных шрифтов по ссылке или из файла.",
-			.descriptionEn = "Font scaling and custom font loading from a URL or a local file.",
-		});
-	AddPluginShortcut(
-		controller,
-		container,
-		{
-			.id = u"sosiskibot.ai_chat"_q,
-			.titleRu = "AI Chat",
-			.titleEn = "AI Chat",
-			.descriptionRu = "Перехватывает /ai и открывает встроенный чат с ИИ на sosiskibot.ru/api.",
-			.descriptionEn = "Intercepts /ai and opens the built-in AI chat backed by sosiskibot.ru/api.",
-		});
-	AddPluginShortcut(
-		controller,
-		container,
-		{
-			.id = u"astro.ayu_safe"_q,
-			.titleRu = "AyuSafe",
-			.titleEn = "AyuSafe",
-			.descriptionRu = "",
-			.descriptionEn = "",
-		});
+		settings.disableAdsValue(),
+		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
+		[&](bool toggled) { settings.setDisableAds(toggled); });
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
 
-	Ui::AddSkip(container);
+void SetupAstrogramPrivacy(not_null<Ui::VerticalLayout*> container) {
+	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn("Приватность", "Privacy")));
 	AddToggle(
 		container,
 		settings.ghostModeValue(),
-		RuEn("Режим невидимки", "Ghost mode"),
+		RuEn("Режим призрака", "Ghost mode"),
 		[&](bool toggled) { settings.setGhostMode(toggled); });
 	AddToggle(
 		container,
@@ -356,32 +345,22 @@ void SetupAstrogram(
 		settings.ghostHideTypingProgressValue(),
 		RuEn("Не отправлять набор текста и ход загрузки", "Don't send typing/upload progress"),
 		[&](bool toggled) { settings.setGhostHideTypingProgress(toggled); });
-	AddToggle(
-		container,
-		settings.localPremiumValue(),
-		RuEn("Локальный премиум", "Local Premium"),
-		[&](bool toggled) { settings.setLocalPremium(toggled); });
-	AddToggle(
-		container,
-		settings.disableAdsValue(),
-		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
-		[&](bool toggled) { settings.setDisableAds(toggled); });
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
 
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
+	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn("Интерфейс", "Interface")));
+	Ui::AddSkip(container);
 	AddToggle(
 		container,
 		settings.disableStoriesValue(),
-		RuEn("Скрыть истории", "Disable Stories"),
+		RuEn("Скрыть истории", "Hide stories"),
 		[&](bool toggled) { settings.setDisableStories(toggled); });
 	AddToggle(
 		container,
 		settings.disableOpenLinkWarningValue(),
-		RuEn("Не спрашивать перед открытием ссылок", "Disable open-link warning"),
+		RuEn("Не спрашивать перед открытием ссылок", "Skip link warning"),
 		[&](bool toggled) { settings.setDisableOpenLinkWarning(toggled); });
 	AddToggle(
 		container,
@@ -391,19 +370,20 @@ void SetupAstrogram(
 	AddToggle(
 		container,
 		settings.collapseSimilarChannelsValue(),
-		RuEn("Сворачивать похожие каналы", "Collapse Similar Channels"),
+		RuEn("Сворачивать похожие каналы", "Collapse similar channels"),
 		[&](bool toggled) { settings.setCollapseSimilarChannels(toggled); });
 	AddToggle(
 		container,
 		settings.hideSimilarChannelsValue(),
-		RuEn("Скрыть похожие каналы", "Hide Similar Channels"),
+		RuEn("Скрыть похожие каналы", "Hide similar channels"),
 		[&](bool toggled) { settings.setHideSimilarChannels(toggled); });
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
+
+void SetupAstrogramAntiRecall(not_null<Ui::VerticalLayout*> container) {
+	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn("Защита от удаления", "Anti-recall")));
+	Ui::AddSkip(container);
 	AddToggle(
 		container,
 		settings.saveDeletedMessagesValue(),
@@ -421,11 +401,19 @@ void SetupAstrogram(
 		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
 	AddActionButtonWithLabel(
 		container,
-		RuEn("Показать журнал защиты от удаления", "Show anti-recall log"),
-		QString::fromUtf8("astro_recall_log.jsonl"),
-		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); });
-
+		RuEn("Показать журнал", "Show local log"),
+		u"astro_recall_log.jsonl"_q,
+		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); },
+		{ &st::menuIconShowInFolder });
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
+
+void SetupAstrogramLinks(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	AddLinksSection(controller, container);
 }
 
 } // namespace
@@ -444,7 +432,101 @@ rpl::producer<QString> Astrogram::title() {
 void Astrogram::setupContent(
 		not_null<Window::SessionController*> controller) {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-	SetupAstrogram(controller, content);
+	SetupAstrogramHome(controller, content);
+	Ui::ResizeFitChild(this, content);
+}
+
+AstrogramCore::AstrogramCore(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: Section(parent) {
+	setupContent(controller);
+}
+
+rpl::producer<QString> AstrogramCore::title() {
+	return rpl::single(u"Astrogram"_q);
+}
+
+void AstrogramCore::setupContent(
+		not_null<Window::SessionController*> controller) {
+	Q_UNUSED(controller);
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	SetupAstrogramCore(content);
+	Ui::ResizeFitChild(this, content);
+}
+
+AstrogramPrivacy::AstrogramPrivacy(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: Section(parent) {
+	setupContent(controller);
+}
+
+rpl::producer<QString> AstrogramPrivacy::title() {
+	return rpl::single(RuEn("Приватность", "Privacy"));
+}
+
+void AstrogramPrivacy::setupContent(
+		not_null<Window::SessionController*> controller) {
+	Q_UNUSED(controller);
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	SetupAstrogramPrivacy(content);
+	Ui::ResizeFitChild(this, content);
+}
+
+AstrogramInterface::AstrogramInterface(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: Section(parent) {
+	setupContent(controller);
+}
+
+rpl::producer<QString> AstrogramInterface::title() {
+	return rpl::single(RuEn("Интерфейс", "Interface"));
+}
+
+void AstrogramInterface::setupContent(
+		not_null<Window::SessionController*> controller) {
+	Q_UNUSED(controller);
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	SetupAstrogramInterface(content);
+	Ui::ResizeFitChild(this, content);
+}
+
+AstrogramAntiRecall::AstrogramAntiRecall(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: Section(parent) {
+	setupContent(controller);
+}
+
+rpl::producer<QString> AstrogramAntiRecall::title() {
+	return rpl::single(RuEn("Защита от удаления", "Anti-recall"));
+}
+
+void AstrogramAntiRecall::setupContent(
+		not_null<Window::SessionController*> controller) {
+	Q_UNUSED(controller);
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	SetupAstrogramAntiRecall(content);
+	Ui::ResizeFitChild(this, content);
+}
+
+AstrogramLinks::AstrogramLinks(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: Section(parent) {
+	setupContent(controller);
+}
+
+rpl::producer<QString> AstrogramLinks::title() {
+	return rpl::single(RuEn("Ссылки", "Links"));
+}
+
+void AstrogramLinks::setupContent(
+		not_null<Window::SessionController*> controller) {
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	SetupAstrogramLinks(controller, content);
 	Ui::ResizeFitChild(this, content);
 }
 

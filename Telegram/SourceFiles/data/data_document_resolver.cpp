@@ -396,6 +396,10 @@ void ShowPluginPackageBox(
 				style::al_top);
 		}
 
+		box->addLeftButton(rpl::single(PluginUiText(u"Cancel"_q, u"Отмена"_q)), [=] {
+			box->closeBox();
+		});
+
 		if (preview.compatible) {
 			box->addButton(rpl::single(PluginPackageButtonText(preview)), [=] {
 				auto error = QString();
@@ -419,9 +423,6 @@ void ShowPluginPackageBox(
 				box->closeBox();
 			});
 		}
-		box->addButton(rpl::single(PluginUiText(u"Cancel"_q, u"Отмена"_q)), [=] {
-			box->closeBox();
-		});
 	}));
 }
 

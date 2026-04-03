@@ -492,6 +492,94 @@ QString DescribeBinaryInfoMismatchField(const Plugins::BinaryInfo &info) {
 	return QString();
 }
 
+struct PackageLoadabilityCheckResult {
+	bool compatible = false;
+	bool libraryLoaded = false;
+	bool previewExportFound = false;
+	bool previewExportValid = false;
+	bool binaryInfoFound = false;
+	bool entryFound = false;
+	PluginInfo previewInfo;
+	QString previewIcon;
+	QString error;
+	QString binarySummary;
+	QString mismatchField;
+};
+
+PackageLoadabilityCheckResult CheckPackageLoadability(const QString &path) {
+	auto result = PackageLoadabilityCheckResult();
+	auto library = QLibrary(path);
+	if (!library.load()) {
+		const auto message = library.errorString().trimmed();
+		result.error = message.isEmpty()
+			? u"Could not load the plugin package as a library."_q
+			: message;
+		return result;
+	}
+	result.libraryLoaded = true;
+
+	const auto finish = [&](QString error = QString()) {
+		result.compatible = error.isEmpty();
+		if (!error.isEmpty()) {
+			result.error = std::move(error);
+		}
+		library.unload();
+		return result;
+	};
+
+	if (const auto previewInfo = reinterpret_cast<PreviewInfoFn>(
+			library.resolve(kPreviewInfoName))) {
+		result.previewExportFound = true;
+		auto preview = static_cast<const Plugins::PreviewInfo*>(nullptr);
+		try {
+			InvokePluginCallbackOrThrow([&] {
+				preview = previewInfo();
+			});
+		} catch (...) {
+			return finish(u"Plugin preview export failed: "_q + CurrentExceptionText());
+		}
+		if (preview
+			&& preview->structVersion == kPreviewInfoVersion
+			&& preview->apiVersion == kApiVersion) {
+			result.previewExportValid = true;
+			result.previewInfo = PluginInfoFromPreview(*preview);
+			result.previewIcon = PreviewIconFromInfo(*preview);
+		}
+	}
+
+	const auto binaryInfo = reinterpret_cast<BinaryInfoFn>(
+		library.resolve(kBinaryInfoName));
+	if (!binaryInfo) {
+		return finish(u"Missing TgdPluginBinaryInfo export."_q);
+	}
+	result.binaryInfoFound = true;
+
+	auto info = static_cast<const Plugins::BinaryInfo*>(nullptr);
+	try {
+		InvokePluginCallbackOrThrow([&] {
+			info = binaryInfo();
+		});
+	} catch (...) {
+		return finish(u"TgdPluginBinaryInfo failed: "_q + CurrentExceptionText());
+	}
+	if (!info) {
+		return finish(u"Plugin binary metadata is null."_q);
+	}
+	result.binarySummary = DescribeBinaryInfo(*info);
+	if (const auto mismatch = DescribeBinaryInfoMismatch(*info);
+		!mismatch.isEmpty()) {
+		result.mismatchField = DescribeBinaryInfoMismatchField(*info);
+		return finish(mismatch);
+	}
+
+	result.entryFound = (library.resolve(kEntryName) != nullptr);
+	if (!result.entryFound) {
+		return finish(u"Missing TgdPluginEntry export."_q);
+	}
+
+	return finish();
+}
+
 QString JsonValueToText(const QJsonValue &value) {
 	if (value.isUndefined() || value.isNull()) {
 		return u"null"_q;
@@ -873,8 +961,8 @@ QStringList Manager::describeRecoveryPlugins(
 QString Manager::composeRecoveryClipboardText() const {
 	auto lines = QStringList();
 	lines.push_back(PluginUiText(
-		u"Telegram Desktop plugin recovery log"_q,
-		u"Лог восстановления плагинов Telegram Desktop"_q));
+		u"Astrogram Desktop plugin recovery log"_q,
+		u"Лог восстановления плагинов Astrogram Desktop"_q));
 	if (_recoveryNotice.active) {
 		const auto plugins = describeRecoveryPlugins(_recoveryNotice.pluginIds);
 		lines.push_back(
@@ -933,23 +1021,23 @@ void Manager::showRecoveryNotice(Window::Controller *window) {
 	const auto title = PluginUiText(u"Safe Mode"_q, u"Безопасный режим"_q);
 	const auto body = plugins.size() == 1
 		? PluginUiText(
-			u"Telegram noticed a crash during "_q
+			u"Astrogram noticed a crash during "_q
 				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nSuspected plugin: "_q
 				+ pluginText
 				+ u"\n\nSafe mode was enabled automatically, the plugin was turned off, and the recovery log was copied to the clipboard."_q,
-			u"Telegram заметил крэш во время "_q
+			u"Astrogram заметил сбой во время "_q
 				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nПодозреваемый плагин: "_q
 				+ pluginText
 				+ u"\n\nБезопасный режим включён автоматически, плагин выключен, лог восстановления уже скопирован в буфер обмена."_q)
 		: PluginUiText(
-			u"Telegram noticed a crash during "_q
+			u"Astrogram noticed a crash during "_q
 				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nSuspected plugins: "_q
 				+ pluginText
 				+ u"\n\nSafe mode was enabled automatically, the listed plugins were turned off, and the recovery log was copied to the clipboard."_q,
-			u"Telegram заметил крэш во время "_q
+			u"Astrogram заметил сбой во время "_q
 				+ RecoveryOperationText(_recoveryNotice.kind)
 				+ u".\n\nПодозреваемые плагины: "_q
 				+ pluginText
@@ -1159,7 +1247,16 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 		MergePluginInfo(result.info, previewInfo);
 		result.icon = previewIcon;
 	}
-	result.compatible = true;
+	const auto loadability = CheckPackageLoadability(path);
+	if (loadability.previewExportValid) {
+		result.previewAvailable = true;
+		MergePluginInfo(result.info, loadability.previewInfo);
+		if (result.icon.isEmpty()) {
+			result.icon = loadability.previewIcon;
+		}
+	}
+	result.compatible = loadability.compatible;
+	result.error = loadability.error;
 
 	if (result.info.id.isEmpty()) {
 		result.info.id = PluginBaseName(path);
@@ -1190,6 +1287,16 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 			{ u"icon"_q, result.icon },
 			{ u"plugin"_q, pluginInfoToJson(result.info) },
 			{ u"error"_q, result.error },
+			{ u"loadability"_q, QJsonObject{
+				{ u"libraryLoaded"_q, loadability.libraryLoaded },
+				{ u"previewExportFound"_q, loadability.previewExportFound },
+				{ u"previewExportValid"_q, loadability.previewExportValid },
+				{ u"binaryInfoFound"_q, loadability.binaryInfoFound },
+				{ u"entryFound"_q, loadability.entryFound },
+				{ u"binarySummary"_q, loadability.binarySummary },
+				{ u"mismatchField"_q, loadability.mismatchField },
+				{ u"error"_q, loadability.error },
+			}},
 		});
 	return result;
 }
@@ -1221,6 +1328,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	const auto targetPath = QDir(_pluginsPath).absoluteFilePath(
 		fileStem + u".tgd"_q);
 	const auto tempPath = targetPath + u".tmp"_q;
+	const auto rollbackBackupPath = targetPath + u".rollback"_q;
 	const auto rescanNow = [this] {
 		if (safeModeEnabled()) {
 			logEvent(u"safe-mode"_q, u"install-rescan-metadata-only"_q);
@@ -1252,6 +1360,67 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 	loadRecoveryState();
 
 	QFile::remove(tempPath);
+	QFile::remove(rollbackBackupPath);
+
+	auto rollbackRestorePath = QString();
+	auto rollbackBackupCreated = false;
+	const auto restoreRollbackBackup = [&](const QString &reason) {
+		QFile::remove(tempPath);
+		if (QFileInfo::exists(targetPath)
+			&& QFileInfo(targetPath).absoluteFilePath() != sourceInfo.absoluteFilePath()) {
+			QFile::remove(targetPath);
+		}
+		if (!rollbackBackupCreated) {
+			logEvent(
+				u"package"_q,
+				u"rollback-skipped"_q,
+				QJsonObject{
+					{ u"sourcePath"_q, sourcePath },
+					{ u"targetPath"_q, targetPath },
+					{ u"reason"_q, reason },
+				});
+			return;
+		}
+		if (QFileInfo::exists(rollbackRestorePath)) {
+			QFile::remove(rollbackRestorePath);
+		}
+		if (!QFile::rename(rollbackBackupPath, rollbackRestorePath)) {
+			logEvent(
+				u"package"_q,
+				u"rollback-restore-failed"_q,
+				QJsonObject{
+					{ u"backupPath"_q, rollbackBackupPath },
+					{ u"restorePath"_q, rollbackRestorePath },
+					{ u"reason"_q, reason },
+				});
+			return;
+		}
+		logEvent(
+			u"package"_q,
+			u"rollback-restored"_q,
+			QJsonObject{
+				{ u"backupPath"_q, rollbackBackupPath },
+				{ u"restorePath"_q, rollbackRestorePath },
+				{ u"reason"_q, reason },
+			});
+	};
+	const auto rollbackInstalledPackage = [&](const QString &reason) {
+		logEvent(
+			u"package"_q,
+			u"rollback-start"_q,
+			QJsonObject{
+				{ u"sourcePath"_q, sourcePath },
+				{ u"targetPath"_q, targetPath },
+				{ u"backupPath"_q, rollbackBackupPath },
+				{ u"restorePath"_q, rollbackRestorePath },
+				{ u"reason"_q, reason },
+			});
+		unloadAll();
+		restoreRollbackBackup(reason);
+		loadConfig();
+		loadRecoveryState();
+		rescanNow();
+	};
 
 	if (sourceInfo.absoluteFilePath() != targetPath) {
 		if (!QFile::copy(sourcePath, tempPath)) {
@@ -1269,24 +1438,31 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 			finishRecoveryOperation();
 			return false;
 		}
-		if (!preview.installedPath.isEmpty()
-			&& preview.installedPath != targetPath
-			&& QFileInfo::exists(preview.installedPath)
-			&& !QFile::remove(preview.installedPath)) {
-			logEvent(
-				u"package"_q,
-				u"remove-previous-failed"_q,
-				QJsonObject{
-					{ u"installedPath"_q, preview.installedPath },
-					{ u"targetPath"_q, targetPath },
-				});
-			QFile::remove(tempPath);
-			rescanNow();
-			if (error) {
-				*error = u"Could not replace the previous plugin file."_q;
+		const auto existingPathToProtect = (!preview.installedPath.isEmpty()
+			&& QFileInfo::exists(preview.installedPath))
+			? QFileInfo(preview.installedPath).absoluteFilePath()
+			: (QFileInfo::exists(targetPath)
+				? QFileInfo(targetPath).absoluteFilePath()
+				: QString());
+		if (!existingPathToProtect.isEmpty()) {
+			rollbackRestorePath = existingPathToProtect;
+			if (!QFile::rename(existingPathToProtect, rollbackBackupPath)) {
+				logEvent(
+					u"package"_q,
+					u"backup-existing-failed"_q,
+					QJsonObject{
+						{ u"existingPath"_q, existingPathToProtect },
+						{ u"backupPath"_q, rollbackBackupPath },
+					});
+				QFile::remove(tempPath);
+				rescanNow();
+				if (error) {
+					*error = u"Could not prepare rollback for the previous plugin file."_q;
+				}
+				finishRecoveryOperation();
+				return false;
 			}
-			finishRecoveryOperation();
-			return false;
+			rollbackBackupCreated = true;
 		}
 		if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
 			logEvent(
@@ -1295,7 +1471,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 				QJsonObject{
 					{ u"targetPath"_q, targetPath },
 				});
-			QFile::remove(tempPath);
+			restoreRollbackBackup(u"overwrite-remove-failed"_q);
 			rescanNow();
 			if (error) {
 				*error = u"Could not overwrite the target plugin file."_q;
@@ -1311,7 +1487,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 					{ u"tempPath"_q, tempPath },
 					{ u"targetPath"_q, targetPath },
 				});
-			QFile::remove(tempPath);
+			restoreRollbackBackup(u"rename-failed"_q);
 			rescanNow();
 			if (error) {
 				*error = u"Could not finalize the installed plugin file."_q;
@@ -1348,6 +1524,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 						{ u"plugin"_q, pluginInfoToJson(preview.info) },
 						{ u"loadError"_q, record->state.error.trimmed() },
 					});
+				rollbackInstalledPackage(record->state.error.trimmed());
 				if (error) {
 					*error = record->state.error.trimmed();
 				}
@@ -1357,6 +1534,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 		}
 	}
 	finishRecoveryOperation();
+	QFile::remove(rollbackBackupPath);
 	if (error) {
 		error->clear();
 	}

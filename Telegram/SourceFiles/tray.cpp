@@ -119,22 +119,6 @@ void Tray::rebuildMenu() {
 				settings.setGhostMode(!settings.ghostMode());
 				Core::App().saveSettingsDelayed();
 			});
-
-		auto localPremiumText = rpl::combine(
-			_textUpdates.events_starting_with({}),
-			Core::App().settings().localPremiumValue()
-		) | rpl::map([](auto, bool enabled) {
-			return enabled
-				? RuEn("Выключить локальный Premium", "Disable Local Premium")
-				: RuEn("Включить локальный Premium", "Enable Local Premium");
-		});
-		_tray.addAction(
-			std::move(localPremiumText),
-			[=] {
-				auto &settings = Core::App().settings();
-				settings.setLocalPremium(!settings.localPremium());
-				Core::App().saveSettingsDelayed();
-			});
 	}
 
 	_tray.addAction(tr::lng_quit_from_tray(), [] { Core::Quit(); });

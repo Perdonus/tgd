@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <propvarutil.h>
 #include <propkey.h>
+#include <QDir>
+#include <QFileInfo>
 
 namespace Platform {
 namespace AppUserModelId {
@@ -356,7 +358,7 @@ bool checkInstalled(QString path = {}) {
 		}
 	}
 
-	const auto branded = u"Astrogram/Astrogram.lnk"_q;
+	const auto branded = u"Astrogram Desktop/Astrogram.lnk"_q;
 	const auto installed = u"Telegram Desktop/Telegram.lnk"_q;
 	const auto old = u"Telegram Win (Unofficial)/Telegram.lnk"_q;
 	return validateShortcutAt(path + branded)
@@ -380,7 +382,7 @@ bool ValidateShortcut() {
 			return true;
 		}
 
-		path += u"Astrogram.lnk"_q;
+		path += u"Astrogram Desktop/Astrogram.lnk"_q;
 		if (validateShortcutAt(path)) {
 			return true;
 		}
@@ -470,6 +472,9 @@ bool ValidateShortcut() {
 
 	auto persistFile = shellLink.try_as<IPersistFile>();
 	if (!persistFile) {
+		return false;
+	}
+	if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
 		return false;
 	}
 
