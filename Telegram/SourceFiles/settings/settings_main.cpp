@@ -90,6 +90,12 @@ namespace {
 
 constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
 class Cover final : public Ui::FixedHeightWidget {
 public:
 	Cover(
@@ -975,7 +981,9 @@ void SetupHelp(
 
 	AddButtonWithIcon(
 		container,
-		tr::lng_settings_faq(),
+		rpl::single(RuEn(
+			"Документация Astrogram",
+			"Astrogram Documentation")),
 		st::settingsButton,
 		{ &st::menuIconFaq }
 	)->addClickHandler([=] {
@@ -984,7 +992,9 @@ void SetupHelp(
 
 	AddButtonWithIcon(
 		container,
-		tr::lng_settings_features(),
+		rpl::single(RuEn(
+			"Возможности Astrogram",
+			"Astrogram Features")),
 		st::settingsButton,
 		{ &st::menuIconEmojiObjects }
 	)->setClickedCallback([=] {
@@ -993,7 +1003,9 @@ void SetupHelp(
 
 	const auto button = AddButtonWithIcon(
 		container,
-		tr::lng_settings_ask_question(),
+		rpl::single(RuEn(
+			"Чат сообщества",
+			"Community Chat")),
 		st::settingsButton,
 		{ &st::menuIconDiscussion });
 	button->addClickHandler([=] {
