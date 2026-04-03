@@ -48,6 +48,7 @@ export default defineConfig({
         text: 'Getting Started',
         items: [
           { text: 'Introduction', link: '/' },
+          { text: 'Astrogram Features', link: '/astrogram-features' },
           { text: 'Setup', link: '/setup' },
           { text: 'First Plugin', link: '/first-plugin' },
           { text: 'Troubleshooting', link: '/troubleshooting' }

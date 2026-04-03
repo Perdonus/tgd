@@ -51,6 +51,7 @@ The plugin manager tracks load failures, writes detailed logs, and can automatic
 ## Where to look next
 
 - Start with [Setup](/setup) to understand ABI requirements and directory layout.
+- Read [Astrogram Features](/astrogram-features) for the split between built-in client features and plugin-side features.
 - Jump to [First Plugin](/first-plugin) if you want a minimal working example.
 - Open [Plugin Settings](/plugin-settings) for the host-rendered settings system.
 - Use [Commands & Interceptors](/commands-and-interceptors) for `/command` handling and outgoing text hooks.
