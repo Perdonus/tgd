@@ -160,10 +160,10 @@ QString FormatPluginFeatureList(const ::Plugins::PluginState &state) {
 
 QString PluginDocsText() {
 	return UseRussianPluginUi()
-		? QString::fromUtf8(R"PLUGIN(Плагины Telegram Desktop (техническая документация)
+		? QString::fromUtf8(R"PLUGIN(Плагины Astrogram Desktop (техническая документация)
 
 0) Кратко про архитектуру
-- Плагин = нативная библиотека .tgd, загружается в процесс Telegram Desktop.
+- Плагин = нативная библиотека .tgd, загружается в процесс Astrogram Desktop.
 - Любая ошибка ABI или native-crash в плагине может уронить процесс.
 - Менеджер плагинов ведёт recovery-state и может включить safe mode.
 
@@ -388,10 +388,10 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 - Если runtime API выключен, пустые/нулевые значения — нормальное состояние.
 - Проверяйте `runtimeApiEnabled`, а не наличие «секретной» кнопки или серии кликов по документации.
 )PLUGIN")
-		: QString::fromUtf8(R"PLUGIN(Telegram Desktop Plugins (technical documentation)
+		: QString::fromUtf8(R"PLUGIN(Astrogram Desktop Plugins (technical documentation)
 
 0) Architecture
-- Plugin = native .tgd shared library loaded into Telegram Desktop process.
+- Plugin = native .tgd shared library loaded into Astrogram Desktop process.
 - ABI mismatch or native crash in plugin code can crash the process.
 - Plugin manager stores recovery-state and can auto-enable safe mode.
 
@@ -941,13 +941,12 @@ void RequestPluginRemoval(
 	}));
 }
 
-void AddPluginCardActions(
-		not_null<Ui::VerticalLayout*> container,
+void AttachPluginCardActions(
+		not_null<Button*> button,
 		not_null<Window::SessionController*> controller,
 		const ::Plugins::PluginState &state,
 		Fn<void()> onChanged) {
-	const auto row = container->add(object_ptr<Ui::RpWidget>(container));
-	const auto raw = row;
+	const auto raw = static_cast<Ui::RpWidget*>(button.get());
 	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarEdit);
 	const auto share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
 	const auto remove = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarDelete);
@@ -963,16 +962,15 @@ void AddPluginCardActions(
 	});
 
 	raw->widthValue() | rpl::start_with_next([=](int width) {
-		const auto gap = 8;
+		const auto gap = 6;
 		const auto total = settings->width() + share->width() + remove->width() + (gap * 2);
-		auto left = std::max(0, (width - total) / 2);
-		const auto top = 0;
+		auto left = std::max(st::settingsButton.padding.left(), width - total - st::settingsButton.padding.right() - 6);
+		const auto top = std::max(0, (raw->height() - settings->height()) / 2);
 		settings->move(left, top);
 		left += settings->width() + gap;
 		share->move(left, top);
 		left += share->width() + gap;
 		remove->move(left, top);
-		raw->resize(width, std::max({ settings->height(), share->height(), remove->height() }));
 	}, raw->lifetime());
 }
 
@@ -1467,10 +1465,9 @@ void Plugins::rebuildList() {
 		const auto versionBadge = FormatPluginStatusBadge(state);
 		const auto summary = FormatPluginCardSummary(state);
 		const auto stateNote = FormatPluginCardNote(state);
-		const auto header = AddButtonWithLabel(
+		const auto header = AddButtonWithIcon(
 			_list,
 			rpl::single(title),
-			rpl::single(versionBadge),
 			state.recoverySuspected
 				? st::settingsAttentionButton
 				: !state.error.isEmpty() && !state.disabledByRecovery
@@ -1486,9 +1483,15 @@ void Plugins::rebuildList() {
 				_controller->window().showToast(PluginUiText(
 					u"Could not change state."_q,
 					u"Не удалось изменить состояние плагина."_q));
-			}
+				}
 			rebuildList();
 		}, header->lifetime());
+		AttachPluginCardActions(
+			header,
+			_controller,
+			state,
+			crl::guard(this, [=] { rebuildList(); }));
+		Ui::AddDividerText(_list, rpl::single(versionBadge));
 		if (!summary.isEmpty()) {
 			Ui::AddDividerText(_list, rpl::single(summary));
 		}
@@ -1496,11 +1499,6 @@ void Plugins::rebuildList() {
 		if (!stateNote.isEmpty()) {
 			Ui::AddDividerText(_list, rpl::single(stateNote));
 		}
-		AddPluginCardActions(
-			_list,
-			_controller,
-			state,
-			crl::guard(this, [=] { rebuildList(); }));
 	}
 
 	Ui::ResizeFitChild(this, _content);

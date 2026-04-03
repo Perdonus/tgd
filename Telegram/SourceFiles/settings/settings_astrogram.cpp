@@ -35,9 +35,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-constexpr auto kHeaderHeight = 364;
-constexpr auto kAvatarSize = 188;
-constexpr auto kAvatarRadius = 24.;
+constexpr auto kHeaderHeight = 396;
+constexpr auto kAvatarSize = 220;
+constexpr auto kAvatarRadius = 18.;
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -47,16 +47,6 @@ constexpr auto kAvatarRadius = 24.;
 	return IsRussianUi()
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
-}
-
-[[nodiscard]] QString PluginsLabel() {
-	const auto count = int(Core::App().plugins().plugins().size());
-	if (Core::App().plugins().safeModeEnabled()) {
-		return RuEn("Безопасный режим", "Safe mode");
-	}
-	return IsRussianUi()
-		? QString::fromUtf8("%1 плагинов").arg(count)
-		: QString::fromUtf8("%1 plugins").arg(count);
 }
 
 [[nodiscard]] QImage AstrogramHeaderImage() {
@@ -94,7 +84,7 @@ constexpr auto kAvatarRadius = 24.;
 
 [[nodiscard]] QString AstrogramHeaderDescription() {
 	return RuEn(
-		"Главное меню Astrogram: встроенные возможности клиента, приватность, защита от удаления и плагины.",
+		"Клиент, приватность, защита от удаления и плагины Astrogram.",
 		"Astrogram keeps its client features, privacy tools, anti-recall options and plugins here.");
 }
 
@@ -110,7 +100,7 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		const auto width = raw->width();
 		const auto avatarRect = QRect(
 			(width - kAvatarSize) / 2,
-			20,
+			16,
 			kAvatarSize,
 			kAvatarSize);
 		const auto avatar = AstrogramHeaderImage();
@@ -126,10 +116,10 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		}
 
 		auto titleFont = st::semiboldFont->f;
-		titleFont.setPixelSize(titleFont.pixelSize() + 14);
+		titleFont.setPixelSize(titleFont.pixelSize() + 18);
 		titleFont.setBold(true);
 		const auto titleMetrics = QFontMetrics(titleFont);
-		const auto titleTop = avatarRect.bottom() + 28;
+		const auto titleTop = avatarRect.bottom() + 24;
 
 		p.setPen(st::windowFg);
 		p.setFont(titleFont);
@@ -139,7 +129,7 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 			u"Astrogram"_q);
 
 		auto versionFont = st::defaultFlatLabel.style.font->f;
-		versionFont.setPixelSize(versionFont.pixelSize() + 6);
+		versionFont.setPixelSize(versionFont.pixelSize() + 8);
 		const auto versionMetrics = QFontMetrics(versionFont);
 		const auto versionTop = titleTop + titleMetrics.height() + 16;
 
@@ -153,7 +143,7 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		const auto descriptionTop = versionTop + versionMetrics.height() + 20;
 		p.setFont(st::defaultFlatLabel.style.font);
 		p.drawText(
-			QRect(48, descriptionTop, width - 96, 82),
+			QRect(40, descriptionTop, width - 80, 96),
 			AstrogramHeaderDescription(),
 			QTextOption(Qt::AlignHCenter | Qt::AlignTop));
 	}, raw->lifetime());
@@ -197,15 +187,14 @@ void AddSectionButton(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
 		const QString &title,
-		const QString &label,
 		Type type,
 		IconDescriptor descriptor) {
-	AddActionButtonWithLabel(
+	AddButtonWithIcon(
 		container,
-		title,
-		label,
-		[=] { controller->showSettings(type); },
-		std::move(descriptor));
+		rpl::single(title),
+		st::settingsButton,
+		std::move(descriptor)
+	)->addClickHandler([=] { controller->showSettings(type); });
 }
 
 void AddLinksSection(
@@ -262,43 +251,30 @@ void SetupAstrogramHome(
 		controller,
 		container,
 		u"Astrogram"_q,
-		RuEn(
-			"Локальный премиум, реклама и системные возможности клиента",
-			"Local premium, ads and client-level features"),
 		AstrogramCore::Id(),
 		{ &st::menuIconPremium });
 	AddSectionButton(
 		controller,
 		container,
 		RuEn("Приватность", "Privacy"),
-		RuEn(
-			"Режим призрака, статусы сети и скрытие чтения",
-			"Ghost mode, online packets and read-state controls"),
 		AstrogramPrivacy::Id(),
 		{ &st::menuIconLock });
 	AddSectionButton(
 		controller,
 		container,
 		RuEn("Интерфейс", "Interface"),
-		RuEn(
-			"Истории, ссылки, время сообщений и похожие каналы",
-			"Stories, links, timestamps and similar channels"),
 		AstrogramInterface::Id(),
 		{ &st::menuIconPalette });
 	AddSectionButton(
 		controller,
 		container,
 		RuEn("Защита от удаления", "Anti-recall"),
-		RuEn(
-			"Удалённые сообщения, история правок и журнал",
-			"Deleted messages, edit history and the local log"),
 		AstrogramAntiRecall::Id(),
 		{ &st::menuIconRestore });
 	AddSectionButton(
 		controller,
 		container,
 		RuEn("Плагины", "Plugins"),
-		PluginsLabel(),
 		Plugins::Id(),
 		{ &st::menuIconCustomize });
 	AddLinksSection(controller, container);

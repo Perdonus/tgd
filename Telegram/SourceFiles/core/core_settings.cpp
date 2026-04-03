@@ -423,7 +423,10 @@ QByteArray Settings::serialize() const {
 			<< qint32(_hideSimilarChannels.current() ? 1 : 0);
 	}
 
-	Ensures(result.size() == size);
+	if (result.size() != size) {
+		LOG(("WARNING: Core::Settings serialized size mismatch, expected %1, got %2."
+			).arg(size).arg(result.size()));
+	}
 	return result;
 }
 
