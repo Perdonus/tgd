@@ -2,12 +2,9 @@
 layout: home
 
 hero:
-  name: Astrogram Docs
-  text: Native plugins and desktop runtime notes
-  tagline: Build `.tgd` plugins with Qt, host-rendered settings, command hooks, observers, window/session callbacks, and Astrogram-specific client integration.
-  image:
-    src: /logo.png
-    alt: Astrogram
+  name: Astrogram Plugins
+  text: Native C++ plugins for Astrogram Desktop
+  tagline: A simple way to extend Astrogram with `.tgd` plugins, Qt, host-rendered settings, command hooks and desktop-native runtime APIs.
   actions:
     - theme: brand
       text: Get Started
@@ -15,23 +12,14 @@ hero:
     - theme: alt
       text: First Plugin
       link: /first-plugin
-    - theme: alt
-      text: Changelog
-      link: /changelog
 
 features:
   - title: Native runtime
-    details: Plugins are compiled shared libraries loaded directly into Astrogram Desktop. You get Qt, native widgets, and host APIs without a scripting bridge.
-  - title: Stable settings UI
-    details: Register settings pages and let the host render sliders, toggles, text inputs, and action buttons inside Settings > Plugins.
-  - title: Built-in plugin references
-    details: Study AstroTransparent, AI Chat, Blur, Accent Color and other in-tree plugins as real examples of the runtime.
-  - title: Command and message hooks
-    details: Intercept slash commands, outgoing text, and message events. Build utility plugins without patching the whole client.
-  - title: Window and session access
-    details: React to real Telegram windows and sessions through the host API instead of guessing top-level widgets blindly.
-  - title: Public release entry points
-    details: Astrogram uses docs.astrogram.su for docs, runtime notes, troubleshooting, and changelog links used directly by the client.
+    details: Compile native `.tgd` libraries and use Qt plus host APIs without a scripting bridge.
+  - title: Stable settings
+    details: Register host-rendered settings pages instead of building fragile plugin-owned dialogs.
+  - title: Hooks and windows
+    details: Intercept commands, observe messages, and work with real Astrogram windows and sessions.
 ---
 
 ## What Astrogram plugins are
@@ -40,7 +28,7 @@ Astrogram plugins are native `.tgd` libraries that run inside the Astrogram Desk
 
 The plugin manager tracks load failures, writes detailed logs, and can automatically switch the client into safe mode if a plugin crashes during a tracked operation.
 
-## Current API target
+## Quick facts
 
 - Plugin API version: `5`
 - Language: `C++20`
@@ -58,4 +46,3 @@ The plugin manager tracks load failures, writes detailed logs, and can automatic
 - Browse [Built-in Plugins](/built-in-plugins) to see which reference plugins ship with the tree.
 - Check [Troubleshooting](/troubleshooting) if a plugin installs but does not load or forces safe mode.
 - Read [Safe Mode & Recovery](/safe-mode) for the crash-handling model and the recovery files Astrogram writes.
-- Open [Astrogram Features](/astrogram-features) for the built-in client layer that lives beside the plugin runtime.
