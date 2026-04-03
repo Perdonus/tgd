@@ -797,17 +797,17 @@ constexpr auto kPluginCardVerticalMargin = 10;
 		st::settingsButton.padding.right(),
 		14);
 
-	raw->widthValue() | rpl::start_with_next([=](int width) {
+	raw->widthValue() | rpl::on_next([=](int width) {
 		const auto innerWidth = std::max(0, width - margins.left() - margins.right());
 		inner->resizeToWidth(innerWidth);
 		inner->move(margins.left(), margins.top());
 	}, raw->lifetime());
-	inner->heightValue() | rpl::start_with_next([=](int height) {
+	inner->heightValue() | rpl::on_next([=](int height) {
 		raw->resize(
 			raw->width(),
 			height + margins.top() + margins.bottom());
 	}, raw->lifetime());
-	raw->paintRequest() | rpl::start_with_next([=] {
+	raw->paintRequest() | rpl::on_next([=] {
 		auto p = Painter(raw);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setPen(QPen(PluginCardBorderColor(state), state.recoverySuspected ? 1.5 : 1.0));
@@ -942,7 +942,7 @@ void AttachPluginCardActions(
 		RequestPluginRemoval(controller, raw, state, onChanged);
 	});
 
-	raw->widthValue() | rpl::start_with_next([=](int width) {
+	raw->widthValue() | rpl::on_next([=](int width) {
 		const auto gap = 6;
 		auto buttons = std::vector<Ui::IconButton*>{ settings.get() };
 		if (share) {
