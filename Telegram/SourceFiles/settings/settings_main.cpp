@@ -975,60 +975,6 @@ void SetupInterfaceScale(
 	}
 }
 
-void SetupHelp(
-		not_null<Window::SessionController*> controller,
-		not_null<Ui::VerticalLayout*> container) {
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
-
-	AddButtonWithIcon(
-		container,
-		rpl::single(RuEn(
-			"Документация Astrogram",
-			"Astrogram Documentation")),
-		st::settingsButton,
-		{ &st::menuIconFaq }
-	)->addClickHandler([=] {
-		OpenFaq(controller);
-	});
-
-	AddButtonWithIcon(
-		container,
-		rpl::single(RuEn(
-			"Возможности Astrogram",
-			"Astrogram Features")),
-		st::settingsButton,
-		{ &st::menuIconEmojiObjects }
-	)->setClickedCallback([=] {
-		UrlClickHandler::Open(tr::lng_telegram_features_url(tr::now));
-	});
-
-	const auto button = AddButtonWithIcon(
-		container,
-		rpl::single(RuEn(
-			"Чат сообщества",
-			"Community Chat")),
-		st::settingsButton,
-		{ &st::menuIconDiscussion });
-	button->addClickHandler([=] {
-		controller->show(Ui::MakeConfirmBox({
-			.text = tr::lng_settings_ask_sure(),
-			.confirmed = crl::guard(button, [=] {
-				controller->showPeerByLink(Window::PeerByLinkInfo{
-					.usernameOrId = QStringLiteral("astrogram_chat"),
-				});
-			}),
-			.cancelled = [=](Fn<void()> close) {
-				OpenFaq(controller);
-				close();
-			},
-			.confirmText = tr::lng_settings_ask_ok(),
-			.cancelText = tr::lng_settings_faq_button(),
-			.strictCancel = true,
-		}));
-	});
-}
-
 Main::Main(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
@@ -1087,7 +1033,6 @@ void Main::setupContent(not_null<Window::SessionController*> controller) {
 		Ui::AddSkip(content);
 	}
 	SetupPremium(controller, content, showOtherMethod());
-	SetupHelp(controller, content);
 
 	Ui::ResizeFitChild(this, content);
 

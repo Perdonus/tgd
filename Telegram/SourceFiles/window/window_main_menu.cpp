@@ -743,12 +743,6 @@ void MainMenu::setupMenu() {
 	)->setClickedCallback([=] {
 		controller->showSettings();
 	});
-	addAction(
-		rpl::single(u"Astrogram"_q),
-		{ &st::menuIconCustomize }
-	)->setClickedCallback([=] {
-		controller->showSettings(Settings::Astrogram::Id());
-	});
 	if (const auto logActions = Core::App().plugins().actionsFor(
 			QStringLiteral("astro.show_logs"));
 		!logActions.empty()) {

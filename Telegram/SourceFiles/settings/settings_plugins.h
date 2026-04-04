@@ -31,7 +31,7 @@ public:
 private:
 	void setupContent();
 	void rebuildList();
-	void scheduleRebuildList(int delayMs = 80);
+	void scheduleRebuildList(int delayMs = 0);
 
 	const not_null<Window::SessionController*> _controller;
 	not_null<Ui::VerticalLayout*> _content;

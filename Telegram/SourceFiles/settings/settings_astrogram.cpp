@@ -271,6 +271,9 @@ void SetupAstrogramHome(
 		RuEn("Плагины", "Plugins"),
 		Plugins::Id(),
 		{ &st::menuIconCustomize });
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
 	AddLinksSection(controller, container);
 }
 

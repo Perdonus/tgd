@@ -832,10 +832,10 @@ constexpr auto kPluginCardVerticalMargin = 4;
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
-		4,
-		10,
-		6,
-		12);
+		3,
+		8,
+		5,
+		10);
 
 	raw->widthValue() | rpl::on_next([=](int width) {
 		const auto innerWidth = std::max(0, width - margins.left() - margins.right());
@@ -864,24 +864,6 @@ QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 	const auto &info = state.info;
 	if (!info.description.trimmed().isEmpty()) {
 		lines.push_back(info.description.trimmed());
-	}
-	return lines.join(u"\n"_q);
-}
-
-QString FormatPluginCardNote(const ::Plugins::PluginState &state) {
-	auto lines = QStringList();
-	if (state.disabledByRecovery) {
-		lines.push_back(PluginUiText(
-			u"Disabled automatically after a recovery event."_q,
-			u"Автоматически выключен после recovery-события."_q));
-	}
-	if (!state.recoveryReason.trimmed().isEmpty()) {
-		lines.push_back(state.recoveryReason.trimmed());
-	}
-	if (!state.error.trimmed().isEmpty()) {
-		lines.push_back(
-			PluginUiText(u"Error: "_q, u"Ошибка: "_q)
-			+ state.error.trimmed());
 	}
 	return lines.join(u"\n"_q);
 }
@@ -1487,7 +1469,7 @@ void Plugins::rebuildList() {
 	Ui::ResizeFitChild(this, _content);
 	update();
 	const auto scheduleRefresh = crl::guard(this, [=] {
-		scheduleRebuildList();
+		scheduleRebuildList(0);
 	});
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
@@ -1520,7 +1502,6 @@ void Plugins::rebuildList() {
 		const auto title = FormatPluginTitle(state);
 		const auto meta = PluginCardMetaText(state);
 		const auto summary = FormatPluginCardSummary(state);
-		const auto stateNote = FormatPluginCardNote(state);
 		const auto card = AddPluginCardContainer(_list, state);
 		const auto header = card->add(object_ptr<Button>(
 			card,
@@ -1544,9 +1525,6 @@ void Plugins::rebuildList() {
 		}
 		if (!summary.isEmpty()) {
 			AddPluginMetaText(card, summary);
-		}
-		if (!stateNote.isEmpty()) {
-			AddPluginMetaText(card, stateNote);
 		}
 		AddPluginCardActionRow(
 			card,
