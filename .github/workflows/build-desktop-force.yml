@@ -521,13 +521,14 @@ jobs:
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
           set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-force-target.log"
           set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-force-release.log"
+          set "BUILD_JOBS=2"
 
-          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
+          cmake --build ..\out --config Release --parallel %BUILD_JOBS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok
           echo [build] target Telegram failed, retrying default Release build on Visual Studio generator
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 120"
           powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Force target build failed::' + $tail)"
-          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% > "%BUILD_LOG_RELEASE%" 2>&1
+          cmake --build ..\out --config Release --parallel %BUILD_JOBS% > "%BUILD_LOG_RELEASE%" 2>&1
           if not errorlevel 1 goto build_ok
           echo [build] Visual Studio x64 Release build failed
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 120"
