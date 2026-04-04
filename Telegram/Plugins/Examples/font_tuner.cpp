@@ -1,6 +1,6 @@
 /*
 Astrogram font tuning plugin.
-Allows scale tuning and loading a custom font from file or URL.
+Allows scale tuning and loading a custom font from a local file.
 */
 #include "plugins/plugins_api.h"
 
@@ -13,12 +13,8 @@ Allows scale tuning and loading a custom font from file or URL.
 #include <QtCore/QStandardPaths>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
-#include <QtCore/QUrl>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
-#include <QtNetwork/QNetworkAccessManager>
-#include <QtNetwork/QNetworkReply>
-#include <QtNetwork/QNetworkRequest>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QWidget>
@@ -29,9 +25,9 @@ Allows scale tuning and loading a custom font from file or URL.
 TGD_PLUGIN_PREVIEW(
 	"astro.font_tuner",
 	"Font Tuner",
-	"1.5",
+	"1.6",
 	"@etopizdesblin",
-	"Tunes Astrogram fonts, loads a custom font from file or URL, and applies the changes live.",
+	"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
 	"https://sosiskibot.ru",
 	"GusTheDuck/11")
 
@@ -39,16 +35,13 @@ namespace {
 
 constexpr auto kPluginId = "astro.font_tuner";
 constexpr auto kScaleSettingId = "font_scale";
-constexpr auto kUrlSettingId = "font_url";
 constexpr auto kChooseFileSettingId = "choose_file";
-constexpr auto kDownloadSettingId = "download_font";
 constexpr auto kResetSettingId = "reset_font";
 constexpr auto kInfoSettingId = "usage_info";
 
 constexpr int kDefaultScalePercent = 100;
 constexpr int kMinScalePercent = 70;
 constexpr int kMaxScalePercent = 160;
-constexpr int kDownloadTimeoutMs = 30000;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
@@ -101,14 +94,6 @@ bool IsSupportedFontSuffix(QString suffix) {
 		|| suffix == QStringLiteral("otf");
 }
 
-bool IsSupportedFontUrl(const QUrl &url) {
-	const auto scheme = url.scheme().trimmed().toLower();
-	return url.isValid()
-		&& !url.host().trimmed().isEmpty()
-		&& (scheme == QStringLiteral("http")
-			|| scheme == QStringLiteral("https"));
-}
-
 } // namespace
 
 class FontTunerPlugin final
@@ -117,23 +102,21 @@ class FontTunerPlugin final
 public:
 	explicit FontTunerPlugin(Plugins::Host *host)
 	: QObject(nullptr)
-	, _host(host)
-	, _network(new QNetworkAccessManager(this)) {
+	, _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(
 			_host,
 			"Font Tuner",
 			u8"Тюнер шрифтов");
-		_info.version = QStringLiteral("1.5");
+		_info.version = QStringLiteral("1.6");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
-			"Tunes Astrogram fonts, loads a custom font from file or URL, and applies the changes live.",
-			u8"Настраивает шрифты Astrogram, загружает пользовательский шрифт из файла или по ссылке и применяет изменения сразу.");
+			"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
+			u8"Настраивает шрифты Astrogram, загружает пользовательский шрифт из файла и применяет изменения сразу.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_baseFont = QApplication::font();
 		_scalePercent = readScalePercent();
-		_fontUrl = readFontUrl();
 		const auto storageRoot = StorageRoot(_host);
 		_statePath = QDir(storageRoot).filePath(
 			QStringLiteral("tdata/font_tuner_state.json"));
@@ -148,7 +131,6 @@ public:
 	void onLoad() override {
 		_baseFont = QApplication::font();
 		_scalePercent = readScalePercent();
-		_fontUrl = readFontUrl();
 		loadLocalState();
 		applyConfiguredFont();
 
@@ -165,10 +147,10 @@ public:
 			_host->unregisterSettingsPage(_settingsPageId);
 			_settingsPageId = 0;
 		}
-		if (_pendingReply) {
-			_pendingReply->abort();
-			_pendingReply->deleteLater();
-			_pendingReply = nullptr;
+		if (_fileDialog) {
+			_fileDialog->close();
+			_fileDialog->deleteLater();
+			_fileDialog = nullptr;
 		}
 		unloadApplicationFont();
 		QApplication::setFont(_baseFont);
@@ -190,20 +172,6 @@ private:
 		scale.intStep = 1;
 		scale.valueSuffix = QStringLiteral("%");
 
-		auto url = Plugins::SettingDescriptor();
-		url.id = Latin1(kUrlSettingId);
-		url.title = Tr(_host, "Font URL", u8"Ссылка на шрифт");
-		url.description = Tr(
-			_host,
-			"Direct URL to a .ttf or .otf file. Use the download button below after pasting the link.",
-			u8"Прямая ссылка на файл .ttf или .otf. После вставки нажми кнопку загрузки ниже.");
-		url.type = Plugins::SettingControl::TextInput;
-		url.textValue = _fontUrl;
-		url.placeholderText = Tr(
-			_host,
-			"https://example.com/font.ttf",
-			"https://example.com/font.ttf");
-
 		auto chooseFile = Plugins::SettingDescriptor();
 		chooseFile.id = Latin1(kChooseFileSettingId);
 		chooseFile.title = Tr(_host, "Load font from file", u8"Загрузить шрифт из файла");
@@ -213,16 +181,6 @@ private:
 			u8"Открыть выбор файла и импортировать локальный .ttf/.otf в Astrogram.");
 		chooseFile.type = Plugins::SettingControl::ActionButton;
 		chooseFile.buttonText = Tr(_host, "Choose file", u8"Выбрать файл");
-
-		auto download = Plugins::SettingDescriptor();
-		download.id = Latin1(kDownloadSettingId);
-		download.title = Tr(_host, "Download from URL", u8"Скачать по ссылке");
-		download.description = Tr(
-			_host,
-			"Downloads the font from the URL above and applies it immediately.",
-			u8"Скачивает шрифт по ссылке выше и сразу применяет его.");
-		download.type = Plugins::SettingControl::ActionButton;
-		download.buttonText = Tr(_host, "Download", u8"Скачать");
 
 		auto reset = Plugins::SettingDescriptor();
 		reset.id = Latin1(kResetSettingId);
@@ -239,8 +197,8 @@ private:
 		info.title = Tr(_host, "How it works", u8"Как это работает");
 		info.description = Tr(
 			_host,
-			"The plugin stores the last imported font in tdata/plugin-fonts/font_tuner and reapplies it on restart.",
-			u8"Плагин хранит последний импортированный шрифт в tdata/plugin-fonts/font_tuner и применяет его после перезапуска.");
+			"The plugin stores the last imported font in tdata/plugin-fonts/font_tuner and reapplies it on restart. Only local .ttf and .otf files are supported.",
+			u8"Плагин хранит последний импортированный шрифт в tdata/plugin-fonts/font_tuner и применяет его после перезапуска. Поддерживаются только локальные файлы .ttf и .otf.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -248,9 +206,7 @@ private:
 		section.title = Tr(_host, "Typography", u8"Типографика");
 		section.settings = {
 			scale,
-			url,
 			chooseFile,
-			download,
 			reset,
 			info,
 		};
@@ -275,16 +231,8 @@ private:
 			applyConfiguredFont();
 			return;
 		}
-		if (setting.id == Latin1(kUrlSettingId)) {
-			_fontUrl = setting.textValue.trimmed();
-			return;
-		}
 		if (setting.id == Latin1(kChooseFileSettingId)) {
 			scheduleChooseFontFile();
-			return;
-		}
-		if (setting.id == Latin1(kDownloadSettingId)) {
-			downloadFont();
 			return;
 		}
 		if (setting.id == Latin1(kResetSettingId)) {
@@ -302,112 +250,95 @@ private:
 			kMaxScalePercent);
 	}
 
-	QString readFontUrl() const {
-		return _host->settingStringValue(
-			_info.id,
-			Latin1(kUrlSettingId),
-			QString());
-	}
-
 	void scheduleChooseFontFile() {
 		if (_chooseFileScheduled) {
 			return;
 		}
 		_chooseFileScheduled = true;
-		QTimer::singleShot(0, this, [this] {
+		QTimer::singleShot(90, this, [this] {
 			_chooseFileScheduled = false;
 			chooseFontFileNow();
 		});
 	}
 
+	QWidget *resolveDialogParent() const {
+		auto accept = [](QWidget *candidate) -> QWidget* {
+			if (!candidate) {
+				return nullptr;
+			}
+			auto *window = candidate->window();
+			if (!window || !window->isWindow() || window->parentWidget()) {
+				return nullptr;
+			}
+			if (!window->isVisible()
+				|| !window->testAttribute(Qt::WA_WState_Created)
+				|| window->testAttribute(Qt::WA_DontShowOnScreen)) {
+				return nullptr;
+			}
+			return window;
+		};
+		if (auto *window = accept(_host->activeWindowWidget())) {
+			return window;
+		}
+		auto *fallback = static_cast<QWidget*>(nullptr);
+		_host->forEachWindowWidget([&](QWidget *widget) {
+			if (!fallback) {
+				fallback = accept(widget);
+			}
+		});
+		if (fallback) {
+			return fallback;
+		}
+		if (auto *window = accept(QApplication::activeWindow())) {
+			return window;
+		}
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (auto *window = accept(widget)) {
+				return window;
+			}
+		}
+		return nullptr;
+	}
+
 	void chooseFontFileNow() {
-		auto *parent = _host->activeWindowWidget();
-		const auto path = QFileDialog::getOpenFileName(
+		auto *parent = resolveDialogParent();
+		if (_fileDialog) {
+			_fileDialog->show();
+			_fileDialog->raise();
+			_fileDialog->activateWindow();
+			return;
+		}
+		auto *dialog = new QFileDialog(
 			parent,
-			Tr(_host, "Choose font file", u8"Выбери файл шрифта"),
+			Tr(_host, "Choose font file", u8"Выберите файл шрифта"),
 			QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
 			Tr(
 				_host,
 				"Fonts (*.ttf *.otf);;All files (*.*)",
 				u8"Шрифты (*.ttf *.otf);;Все файлы (*.*)"));
-		if (path.isEmpty()) {
-			return;
-		}
-		importFontFile(path);
-	}
-
-	void downloadFont() {
-		const auto trimmed = _fontUrl.trimmed();
-		const auto url = QUrl(trimmed);
-		if (trimmed.isEmpty() || !IsSupportedFontUrl(url)) {
-			_host->showToast(Tr(
-				_host,
-				"Paste a direct http(s) URL to a .ttf or .otf font first.",
-				u8"Сначала вставь прямую http(s)-ссылку на шрифт .ttf или .otf."));
-			return;
-		}
-		if (_pendingReply) {
-			_pendingReply->abort();
-			_pendingReply->deleteLater();
-			_pendingReply = nullptr;
-		}
-		auto request = QNetworkRequest(url);
-		request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-		request.setTransferTimeout(kDownloadTimeoutMs);
-		_pendingReply = _network->get(request);
+		dialog->setAttribute(Qt::WA_DeleteOnClose);
+		dialog->setFileMode(QFileDialog::ExistingFile);
+		dialog->setAcceptMode(QFileDialog::AcceptOpen);
+		dialog->setOption(QFileDialog::DontUseNativeDialog, true);
+		dialog->setModal(true);
+		_fileDialog = dialog;
 		QObject::connect(
-			_pendingReply,
-			&QNetworkReply::finished,
+			dialog,
+			&QFileDialog::fileSelected,
 			this,
-			[this, url] {
-				auto reply = _pendingReply;
-				_pendingReply = nullptr;
-				if (!reply) {
-					return;
-				}
-				reply->deleteLater();
-				const auto statusCode = reply->attribute(
-					QNetworkRequest::HttpStatusCodeAttribute).toInt();
-				if (reply->error() != QNetworkReply::NoError || statusCode >= 400) {
-					_host->showToast(Tr(
-						_host,
-						"Could not download the font.",
-						u8"Не удалось скачать шрифт."));
-					return;
-				}
-				const auto bytes = reply->readAll();
-				if (bytes.isEmpty()) {
-					_host->showToast(Tr(
-						_host,
-						"Downloaded font is empty.",
-						u8"Скачанный шрифт пустой."));
-					return;
-				}
-				QDir().mkpath(_fontsDir);
-				const auto suffix = QFileInfo(url.path()).suffix().trimmed().toLower();
-				const auto fileName = SafeFileStem(
-					QFileInfo(url.path()).completeBaseName().trimmed().isEmpty()
-						? QStringLiteral("downloaded_font")
-						: QFileInfo(url.path()).completeBaseName())
-					+ QStringLiteral(".")
-					+ (suffix.isEmpty() ? QStringLiteral("ttf") : suffix);
-				const auto target = QDir(_fontsDir).filePath(fileName);
-				QFile output(target);
-				if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-					_host->showToast(Tr(
-						_host,
-						"Could not save the downloaded font.",
-						u8"Не удалось сохранить скачанный шрифт."));
-					return;
-				}
-				output.write(bytes);
-				output.close();
-				loadFontFromPath(target);
+			[this](const QString &path) {
+				importFontFile(path);
 			});
-		_host->showToast(Tr(
-			_host,
-			"Downloading font...",
-			u8"Скачиваю шрифт..."));
+		QObject::connect(
+			dialog,
+			&QObject::destroyed,
+			this,
+			[this](QObject *) {
+				_fileDialog = nullptr;
+			});
+		dialog->open();
+		dialog->raise();
+		dialog->activateWindow();
 	}
 
 	void importFontFile(const QString &path) {
@@ -557,19 +488,17 @@ private:
 	}
 
 	Plugins::Host *_host = nullptr;
-	QNetworkAccessManager *_network = nullptr;
-	QPointer<QNetworkReply> _pendingReply;
 	Plugins::SettingsPageId _settingsPageId = 0;
 	Plugins::PluginInfo _info;
 	QFont _baseFont;
 	QString _statePath;
 	QString _fontsDir;
-	QString _fontUrl;
 	QString _loadedFontPath;
 	QString _loadedFamily;
 	int _applicationFontId = -1;
 	int _scalePercent = kDefaultScalePercent;
 	bool _chooseFileScheduled = false;
+	QPointer<QFileDialog> _fileDialog;
 };
 
 TGD_PLUGIN_ENTRY {

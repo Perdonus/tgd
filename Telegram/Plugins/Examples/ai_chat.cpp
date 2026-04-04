@@ -11,6 +11,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtCore/QObject>
 #include <QtCore/QPoint>
 #include <QtCore/QPointer>
+#include <QtCore/QProcess>
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
@@ -38,7 +39,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.7",
+	"1.8",
 	"@etopizdesblin",
 	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -47,7 +48,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.7";
+constexpr auto kPluginVersion = "1.8";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
@@ -428,7 +429,7 @@ private:
 			return;
 		}
 		if (setting.id == Latin1(kOpenChatSettingId)) {
-			QTimer::singleShot(0, this, [this] {
+			QTimer::singleShot(120, this, [this] {
 				if (!_isUnloading) {
 					scheduleOpenChat(QString());
 				}
@@ -436,7 +437,7 @@ private:
 			return;
 		}
 		if (setting.id == Latin1(kOpenSiteSettingId)) {
-			QTimer::singleShot(0, this, [this] {
+			QTimer::singleShot(120, this, [this] {
 				if (!_isUnloading) {
 					openSite();
 				}
@@ -447,7 +448,29 @@ private:
 
 	void openSite() const {
 		const auto url = QUrl(Latin1(kSiteUrl));
-		if (!url.isValid() || !QDesktopServices::openUrl(url)) {
+		auto launched = false;
+#ifdef Q_OS_WIN
+		launched = QProcess::startDetached(
+			QStringLiteral("cmd"),
+			{
+				QStringLiteral("/c"),
+				QStringLiteral("start"),
+				QStringLiteral(""),
+				url.toString(),
+			});
+#elif defined(Q_OS_MACOS)
+		launched = QProcess::startDetached(
+			QStringLiteral("open"),
+			{ url.toString() });
+#else
+		launched = QProcess::startDetached(
+			QStringLiteral("xdg-open"),
+			{ url.toString() });
+#endif // Q_OS_WIN
+		if (!launched) {
+			launched = url.isValid() && QDesktopServices::openUrl(url);
+		}
+		if (!launched) {
 			_host->showToast(tr(
 				QStringLiteral("Could not open sosiskibot.ru."),
 				u8"Не удалось открыть sosiskibot.ru."));
@@ -583,7 +606,7 @@ private:
 	void scheduleOpenChat(const QString &prefill, QWidget *preferredWindow = nullptr) {
 		const auto normalizedPrefill = NormalizeText(prefill);
 		const auto preferred = QPointer<QWidget>(preferredWindow);
-		QTimer::singleShot(0, this, [this, normalizedPrefill, preferred] {
+		QTimer::singleShot(120, this, [this, normalizedPrefill, preferred] {
 			if (_isUnloading) {
 				return;
 			}
@@ -619,7 +642,7 @@ private:
 	void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
 		auto *dialogParent = stableParentWindow(parentWindow);
 		auto dialog = new QDialog(
-			dialogParent,
+			nullptr,
 			Qt::Dialog
 				| Qt::WindowTitleHint
 				| Qt::WindowCloseButtonHint
@@ -635,6 +658,11 @@ private:
 		if (dialogParent) {
 			const auto center = dialogParent->frameGeometry().center();
 			dialog->move(center - QPoint(dialog->width() / 2, dialog->height() / 2));
+		} else if (auto *screen = QApplication::primaryScreen()) {
+			const auto geometry = screen->availableGeometry();
+			dialog->move(
+				geometry.center().x() - (dialog->width() / 2),
+				geometry.center().y() - (dialog->height() / 2));
 		}
 
 		auto layout = new QVBoxLayout(dialog);

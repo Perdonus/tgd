@@ -30,7 +30,7 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.0",
+	"1.1",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
 	"https://sosiskibot.ru",
@@ -39,7 +39,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.0";
+constexpr auto kPluginVersion = "1.1";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
@@ -152,7 +152,19 @@ void CenterOver(QWidget *anchor, QWidget *widget) {
 		geometry.center().y() - (size.height() / 2));
 }
 
-class LogsOverlay final : public QDialog {
+QWidget *StableAnchorWindow(QWidget *candidate) {
+	auto *window = candidate ? candidate->window() : nullptr;
+	if (!window || !window->isWindow() || window->parentWidget()) {
+		return nullptr;
+	}
+	if (!window->testAttribute(Qt::WA_WState_Created)
+		|| window->testAttribute(Qt::WA_DontShowOnScreen)) {
+		return nullptr;
+	}
+	return window;
+}
+
+class LogsOverlay final : public QWidget {
 public:
 	using ReadHandler = std::function<QStringList(int, const QString &)>;
 	using ClearHandler = std::function<bool()>;
@@ -164,17 +176,15 @@ public:
 		ClearHandler clearHandler,
 		ToastHandler toastHandler,
 		QWidget *parent)
-	: QDialog(parent)
+	: QWidget(parent)
 	, _host(host)
 	, _readHandler(std::move(readHandler))
 	, _clearHandler(std::move(clearHandler))
 	, _toastHandler(std::move(toastHandler)) {
 		setWindowFlags(
-			Qt::Dialog
+			Qt::Window
 			| Qt::FramelessWindowHint
-			| Qt::Tool
 			| Qt::WindowStaysOnTopHint);
-		setModal(false);
 		setAttribute(Qt::WA_DeleteOnClose, false);
 		setAttribute(Qt::WA_TranslucentBackground, true);
 		resize(760, 560);
@@ -279,7 +289,9 @@ public:
 						u8"Не удалось очистить логи плагинов."));
 			}
 		});
-		connect(closeButton, &QPushButton::clicked, this, &QDialog::hide);
+		connect(closeButton, &QPushButton::clicked, this, [this] {
+			hide();
+		});
 		connect(applyFilterButton, &QPushButton::clicked, this, [this] {
 			_filter = _filterEdit->text().trimmed();
 			refreshNow();
@@ -351,7 +363,7 @@ public:
 				u8"Открыть overlay-окно с логами плагинов Astrogram."),
 			[this](const Plugins::ActionContext &context) {
 				Q_UNUSED(context);
-				showOverlay();
+				scheduleShowOverlay();
 			});
 		_settingsPageId = _host->registerSettingsPage(
 			_info.id,
@@ -362,6 +374,7 @@ public:
 	}
 
 	void onUnload() override {
+		_overlayScheduled = false;
 		if (_settingsPageId) {
 			_host->unregisterSettingsPage(_settingsPageId);
 			_settingsPageId = 0;
@@ -466,8 +479,43 @@ private:
 		return true;
 	}
 
-	void showOverlay() {
-		auto *anchor = _host->activeWindowWidget();
+	QWidget *resolveOverlayAnchor() const {
+		if (auto *anchor = StableAnchorWindow(_host->activeWindowWidget())) {
+			return anchor;
+		}
+		auto *fallback = static_cast<QWidget*>(nullptr);
+		_host->forEachWindowWidget([&](QWidget *widget) {
+			if (!fallback) {
+				fallback = StableAnchorWindow(widget);
+			}
+		});
+		if (fallback) {
+			return fallback;
+		}
+		if (auto *active = StableAnchorWindow(QApplication::activeWindow())) {
+			return active;
+		}
+		for (auto *widget : QApplication::topLevelWidgets()) {
+			if (auto *stable = StableAnchorWindow(widget)) {
+				return stable;
+			}
+		}
+		return nullptr;
+	}
+
+	void scheduleShowOverlay() {
+		if (_overlayScheduled) {
+			return;
+		}
+		_overlayScheduled = true;
+		QTimer::singleShot(75, this, [this] {
+			_overlayScheduled = false;
+			showOverlayNow();
+		});
+	}
+
+	void showOverlayNow() {
+		auto *anchor = resolveOverlayAnchor();
 		if (!_overlay) {
 			_overlay = new LogsOverlay(
 				_host,
@@ -480,13 +528,16 @@ private:
 				[this](const QString &text) {
 					_host->showToast(text);
 				},
-				anchor);
+				nullptr);
 			_overlay->setMaxLines(_maxLines);
 		}
-		_overlay->setParent(anchor, _overlay->windowFlags());
 		_overlay->setMaxLines(_maxLines);
 		CenterOver(anchor, _overlay);
-		_overlay->show();
+		if (_overlay->isHidden()) {
+			_overlay->show();
+		} else {
+			_overlay->showNormal();
+		}
 		_overlay->raise();
 		_overlay->activateWindow();
 	}
@@ -500,7 +551,7 @@ private:
 			}
 		} else if (setting.id == Latin1(kOpenOverlaySettingId)
 			&& setting.type == Plugins::SettingControl::ActionButton) {
-			showOverlay();
+			scheduleShowOverlay();
 		}
 	}
 
@@ -509,6 +560,7 @@ private:
 	Plugins::ActionId _actionId = 0;
 	Plugins::SettingsPageId _settingsPageId = 0;
 	int _maxLines = kDefaultMaxLines;
+	bool _overlayScheduled = false;
 	QPointer<LogsOverlay> _overlay;
 };
 
