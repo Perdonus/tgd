@@ -118,8 +118,15 @@ namespace {
 [[nodiscard]] TextWithEntities PluginCardMetaText(
 		const ::Plugins::PluginState &state) {
 	auto result = TextWithEntities();
+	const auto version = state.info.version.trimmed();
+	if (!version.isEmpty()) {
+		result.text += version;
+	}
 	const auto author = PluginAuthorText(state.info.author);
 	if (!author.text.isEmpty()) {
+		if (!result.text.isEmpty()) {
+			result.text += u" • "_q;
+		}
 		const auto offset = result.text.size();
 		result.text += author.text;
 		for (const auto &entity : author.entities) {
@@ -130,13 +137,6 @@ namespace {
 				entity.data,
 			});
 		}
-	}
-	const auto version = state.info.version.trimmed();
-	if (!version.isEmpty()) {
-		if (!result.text.isEmpty()) {
-			result.text += u" • "_q;
-		}
-		result.text += version;
 	}
 	return result;
 }
@@ -795,7 +795,7 @@ void OpenPluginsFolder() {
 }
 
 constexpr auto kPluginCardRadius = 20.;
-constexpr auto kPluginCardVerticalMargin = 6;
+constexpr auto kPluginCardVerticalMargin = 4;
 
 [[nodiscard]] QColor PluginCardBackgroundColor(
 		const ::Plugins::PluginState &state) {
@@ -827,14 +827,14 @@ constexpr auto kPluginCardVerticalMargin = 6;
 		const ::Plugins::PluginState &state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(16, 0, 16, 0),
+		style::margins(18, 0, 18, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
-		6,
+		4,
 		10,
-		8,
+		6,
 		12);
 
 	raw->widthValue() | rpl::on_next([=](int width) {
@@ -1456,7 +1456,7 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 				_controller,
 				this,
 				!safeModeEnabled,
-				crl::guard(this, [=] { rebuildList(); }));
+				crl::guard(this, [=] { scheduleRebuildList(0); }));
 		},
 		.icon = &st::menuIconSettings,
 	});
@@ -1476,7 +1476,6 @@ void Plugins::scheduleRebuildList(int delayMs) {
 	_rebuildScheduled = true;
 	QTimer::singleShot(delayMs, this, [=] {
 		_rebuildScheduled = false;
-		_list->clear();
 		rebuildList();
 		Ui::ResizeFitChild(this, _content);
 		update();
