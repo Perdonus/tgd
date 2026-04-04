@@ -130,6 +130,14 @@ constexpr auto kMaxPluginLogBackups = 5;
 	return PluginUiText(u"plugin operation"_q, u"операции плагина"_q);
 }
 
+void FlushPluginUnload() {
+	for (auto attempt = 0; attempt != 6; ++attempt) {
+		QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+		QCoreApplication::processEvents();
+		QThread::msleep(25);
+	}
+}
+
 class RecoveryDuckIcon final : public Ui::RpWidget {
 public:
 	explicit RecoveryDuckIcon(QWidget *parent) : Ui::RpWidget(parent) {
@@ -1129,14 +1137,7 @@ void Manager::reload() {
 	unloadAll();
 	loadConfig();
 	loadRecoveryState();
-	const auto flushPluginUnload = [] {
-		for (auto attempt = 0; attempt != 6; ++attempt) {
-			QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-			QCoreApplication::processEvents();
-			QThread::msleep(25);
-		}
-	};
-	flushPluginUnload();
+	FlushPluginUnload();
 	if (safeModeEnabled()) {
 		logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
 		scanPlugins(true);
@@ -1626,7 +1627,7 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 			break;
 		}
 		removeError = file.errorString();
-		flushPluginUnload();
+		FlushPluginUnload();
 	}
 
 	if (!removed) {
