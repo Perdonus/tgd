@@ -12,6 +12,7 @@ Rules:
 - Client-facing plugins currently targeted in this repo are:
   - `transparent_telegram`
   - `ai_chat`
+  - `show_logs`
   - `ayu_safe`
   - `font_tuner`
   - `blur_telegram`

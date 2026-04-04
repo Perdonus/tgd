@@ -32,13 +32,14 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtWidgets/QWidget>
 
 #include <utility>
+#include <memory>
 #include <unordered_map>
 
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.4",
-	"Codex",
+	"1.6",
+	"@etopizdesblin",
 	"Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
 	"")
@@ -46,13 +47,14 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.4";
-constexpr auto kPluginAuthor = "Codex";
+constexpr auto kPluginVersion = "1.6";
+constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
 constexpr auto kModelName = "gpt-4o-mini";
 
 constexpr auto kApiKeySettingId = "api_key";
+constexpr auto kOpenChatSettingId = "open_chat";
 constexpr auto kOpenSiteSettingId = "open_site";
 constexpr auto kInfoSettingId = "usage_info";
 
@@ -253,6 +255,18 @@ public:
 			}
 		}
 		_windowStates.clear();
+		if (_standaloneState) {
+			if (_standaloneState->pendingReply) {
+				_standaloneState->pendingReply->abort();
+				_standaloneState->pendingReply->deleteLater();
+				_standaloneState->pendingReply = nullptr;
+			}
+			if (_standaloneState->dialog) {
+				_standaloneState->dialog->close();
+				_standaloneState->dialog = nullptr;
+			}
+			_standaloneState.reset();
+		}
 	}
 
 private:
@@ -337,6 +351,19 @@ private:
 		openSite.type = Plugins::SettingControl::ActionButton;
 		openSite.buttonText = QStringLiteral("sosiskibot.ru");
 
+		auto openChat = Plugins::SettingDescriptor();
+		openChat.id = Latin1(kOpenChatSettingId);
+		openChat.title = tr(
+			QStringLiteral("Open AI chat"),
+			u8"Открыть ИИ-чат");
+		openChat.description = tr(
+			QStringLiteral("Open the built-in AI chat window without sending /ai into any chat."),
+			u8"Открывает встроенное окно ИИ-чата без отправки /ai в какой-либо чат.");
+		openChat.type = Plugins::SettingControl::ActionButton;
+		openChat.buttonText = tr(
+			QStringLiteral("Open"),
+			u8"Открыть");
+
 		auto info = Plugins::SettingDescriptor();
 		info.id = Latin1(kInfoSettingId);
 		info.title = tr(
@@ -357,6 +384,7 @@ private:
 			QStringLiteral("Connection"),
 			u8"Подключение");
 		section.settings.push_back(apiKey);
+		section.settings.push_back(openChat);
 		section.settings.push_back(openSite);
 		section.settings.push_back(info);
 
@@ -399,6 +427,10 @@ private:
 			refreshIdleWindows();
 			return;
 		}
+		if (setting.id == Latin1(kOpenChatSettingId)) {
+			scheduleOpenChat(QString());
+			return;
+		}
 		if (setting.id == Latin1(kOpenSiteSettingId)) {
 			openSite();
 			return;
@@ -437,6 +469,9 @@ private:
 	}
 
 	WindowState *findWindowState(QWidget *windowKey) {
+		if (!windowKey) {
+			return _standaloneState.get();
+		}
 		const auto it = _windowStates.find(windowKey);
 		return (it == _windowStates.end()) ? nullptr : &it->second;
 	}
@@ -470,12 +505,39 @@ private:
 		return state;
 	}
 
+	WindowState &ensureStandaloneState() {
+		if (!_standaloneState) {
+			_standaloneState = std::make_unique<WindowState>();
+			_standaloneState->statusText = defaultStatusText();
+		}
+		return *_standaloneState;
+	}
+
 	QWidget *resolveChatWindow(QWidget *preferred = nullptr) const {
 		if (preferred) {
 			if (auto *top = preferred->window();
 				top && top->isWindow() && !top->parentWidget()) {
 				return top;
 			}
+		}
+		if (auto *active = _host->activeWindowWidget()) {
+			if (auto *top = active->window();
+				top && top->isWindow() && !top->parentWidget()) {
+				return top;
+			}
+		}
+		auto *hostFallback = static_cast<QWidget*>(nullptr);
+		_host->forEachWindowWidget([&](QWidget *widget) {
+			if (hostFallback || !widget) {
+				return;
+			}
+			if (auto *top = widget->window();
+				top && top->isWindow() && !top->parentWidget()) {
+				hostFallback = top;
+			}
+		});
+		if (hostFallback) {
+			return hostFallback;
 		}
 		if (auto *active = QApplication::activeWindow();
 			active && active->isWindow() && !active->parentWidget()) {
@@ -504,23 +566,16 @@ private:
 				openChatDialog(window, normalizedPrefill);
 				return;
 			}
-			_host->showToast(tr(
-				QStringLiteral("Open an Astrogram window before using /ai."),
-				u8"Сначала открой окно Astrogram, потом используй /ai."));
+			openChatDialog(nullptr, normalizedPrefill);
 		});
 	}
 
 	void openChatDialog(QWidget *parentWindow, const QString &prefill) {
-		if (!parentWindow) {
-			_host->showToast(tr(
-				QStringLiteral("Open an Astrogram window before using /ai."),
-				u8"Сначала открой окно Astrogram, потом используй /ai."));
-			return;
-		}
-
-		auto &state = ensureWindowState(parentWindow);
+		auto &state = parentWindow
+			? ensureWindowState(parentWindow)
+			: ensureStandaloneState();
 		if (!state.dialog) {
-			createDialog(parentWindow, state);
+			createDialog(parentWindow, state, parentWindow);
 		} else {
 			state.dialog->show();
 			state.dialog->raise();
@@ -536,11 +591,17 @@ private:
 		applyWindowState(state);
 	}
 
-	void createDialog(QWidget *parentWindow, WindowState &state) {
-		auto dialog = new QDialog(parentWindow, Qt::Window);
+	void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
+		auto dialog = new QDialog(
+			parentWindow,
+			Qt::Dialog
+				| Qt::WindowTitleHint
+				| Qt::WindowCloseButtonHint
+				| Qt::CustomizeWindowHint);
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
 		dialog->setAttribute(Qt::WA_QuitOnClose, false);
 		dialog->setModal(false);
+		dialog->setWindowModality(Qt::NonModal);
 		dialog->setWindowTitle(tr(
 			QStringLiteral("AI Chat"),
 			u8"ИИ-чат"));
@@ -613,24 +674,24 @@ private:
 		state.sendButton = sendButton;
 		state.clearButton = clearButton;
 
-		QObject::connect(sendButton, &QPushButton::clicked, this, [this, parentWindow] {
-			sendCurrentPrompt(parentWindow);
+		QObject::connect(sendButton, &QPushButton::clicked, this, [this, stateKey] {
+			sendCurrentPrompt(stateKey);
 		});
-		QObject::connect(clearButton, &QPushButton::clicked, this, [this, parentWindow] {
-			clearHistory(parentWindow);
+		QObject::connect(clearButton, &QPushButton::clicked, this, [this, stateKey] {
+			clearHistory(stateKey);
 		});
-		QObject::connect(sendShortcut, &QShortcut::activated, this, [this, parentWindow] {
-			sendCurrentPrompt(parentWindow);
+		QObject::connect(sendShortcut, &QShortcut::activated, this, [this, stateKey] {
+			sendCurrentPrompt(stateKey);
 		});
 		QObject::connect(
 			keypadSendShortcut,
 			&QShortcut::activated,
 			this,
-			[this, parentWindow] {
-				sendCurrentPrompt(parentWindow);
+			[this, stateKey] {
+				sendCurrentPrompt(stateKey);
 			});
-		QObject::connect(dialog, &QObject::destroyed, this, [this, parentWindow](QObject *) {
-			if (auto *existing = findWindowState(parentWindow)) {
+		QObject::connect(dialog, &QObject::destroyed, this, [this, stateKey](QObject *) {
+			if (auto *existing = findWindowState(stateKey)) {
 				existing->dialog = nullptr;
 				existing->transcriptWidget = nullptr;
 				existing->inputWidget = nullptr;
@@ -643,7 +704,7 @@ private:
 		rebuildTranscript(state);
 		applyWindowState(state);
 
-		dialog->show();
+		dialog->showNormal();
 		dialog->raise();
 		dialog->activateWindow();
 	}
@@ -709,6 +770,10 @@ private:
 				state.statusText = defaultStatusText();
 				applyWindowState(state);
 			}
+		}
+		if (_standaloneState && !_standaloneState->pendingReply) {
+			_standaloneState->statusText = defaultStatusText();
+			applyWindowState(*_standaloneState);
 		}
 	}
 
@@ -918,6 +983,7 @@ private:
 	QString _apiKey;
 	bool _isUnloading = false;
 	std::unordered_map<QWidget*, WindowState> _windowStates;
+	std::unique_ptr<WindowState> _standaloneState;
 };
 
 TGD_PLUGIN_ENTRY {

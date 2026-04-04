@@ -1,26 +1,31 @@
 /*
 Astrogram transparency plugin.
-Adds separate host-managed sliders for window opacity, message opacity,
-and text/widget opacity.
+Adds separate host-managed sliders for interface, message, and text opacity.
 */
 #include "plugins/plugins_api.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QHash>
+#include <QtCore/QList>
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
-#include <QtGui/QPalette>
+#include <QtWidgets/QAbstractButton>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QGraphicsOpacityEffect>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QPlainTextEdit>
+#include <QtWidgets/QTextEdit>
 #include <QtWidgets/QWidget>
 
 #include <algorithm>
-#include <cmath>
 
 TGD_PLUGIN_PREVIEW(
-	"example.transparent_telegram",
+	"astro.transparent",
 	"AstroTransparent",
-	"2.5",
+	"2.7",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
@@ -28,44 +33,34 @@ TGD_PLUGIN_PREVIEW(
 
 namespace {
 
+constexpr auto kPluginId = "astro.transparent";
+constexpr auto kLegacyPluginId = "example.transparent_telegram";
+
 constexpr int kDefaultWindowOpacityPercent = 85;
 constexpr int kDefaultMessageOpacityPercent = 100;
 constexpr int kDefaultTextOpacityPercent = 100;
 constexpr int kMinOpacityPercent = 20;
 constexpr int kMaxOpacityPercent = 100;
-constexpr int kAppearanceApplyDelayMs = 120;
-constexpr auto kPluginId = "example.transparent_telegram";
+constexpr int kAppearanceApplyDelayMs = 16;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
 }
 
-QString Utf8(const char *value) {
-	return QString::fromUtf8(value);
+QString Utf8(const char8_t *value) {
+	return QString::fromUtf8(reinterpret_cast<const char*>(value));
 }
 
 bool UseRussian(const Plugins::Host *host) {
-	const auto hostInfo = host->hostInfo();
-	const auto fallback = host->systemInfo().uiLanguage;
-	const auto language = !hostInfo.appUiLanguage.trimmed().isEmpty()
-		? hostInfo.appUiLanguage.trimmed()
-		: fallback.trimmed();
-	return language.toLower().startsWith(QStringLiteral("ru"));
-}
-
-QString PluginText(
-		const Plugins::Host *host,
-		const char *en,
-		const char *ru) {
-	return UseRussian(host) ? Utf8(ru) : Utf8(en);
-}
-
-bool IsSupportedWindowWidget(QWidget *widget) {
-	if (!widget || !widget->isWindow() || widget->parentWidget()) {
-		return false;
+	auto language = host->hostInfo().appUiLanguage.trimmed();
+	if (language.isEmpty()) {
+		language = host->systemInfo().uiLanguage.trimmed();
 	}
-	return widget->windowType() == Qt::Window
-		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
+	return language.startsWith(QStringLiteral("ru"), Qt::CaseInsensitive);
+}
+
+QString Tr(const Plugins::Host *host, const char *en, const char8_t *ru) {
+	return UseRussian(host) ? Utf8(ru) : Latin1(en);
 }
 
 bool IsReadyWidget(QWidget *widget) {
@@ -74,74 +69,136 @@ bool IsReadyWidget(QWidget *widget) {
 		&& !widget->testAttribute(Qt::WA_DontShowOnScreen);
 }
 
+bool IsSupportedWindowWidget(QWidget *widget) {
+	if (!widget || !widget->isWindow() || widget->parentWidget()) {
+		return false;
+	}
+	return widget->windowType() == Qt::Window;
+}
+
 bool IsReadyWindowWidget(QWidget *widget) {
 	return IsSupportedWindowWidget(widget) && IsReadyWidget(widget);
 }
 
-bool LooksLikeMessageSurface(QWidget *widget) {
-	if (!widget || widget->isWindow()) {
+QByteArray WidgetClassName(QWidget *widget) {
+	return widget
+		? QByteArray(widget->metaObject()->className()).toLower()
+		: QByteArray();
+}
+
+QString WidgetObjectName(QWidget *widget) {
+	return widget ? widget->objectName().toLower() : QString();
+}
+
+bool NameContains(QWidget *widget, const char *needle) {
+	return WidgetObjectName(widget).contains(QString::fromLatin1(needle))
+		|| WidgetClassName(widget).contains(needle);
+}
+
+bool HasAnyNameToken(QWidget *widget, std::initializer_list<const char*> needles) {
+	for (const auto needle : needles) {
+		if (NameContains(widget, needle)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool LooksLikeMessageContainer(QWidget *widget) {
+	if (!widget || widget->isWindow() || !IsReadyWidget(widget)) {
 		return false;
 	}
-	const auto objectName = widget->objectName().toLower();
-	const auto className = QByteArray(widget->metaObject()->className()).toLower();
-	const auto contains = [&](const char *needle) {
-		return objectName.contains(QString::fromLatin1(needle))
-			|| className.contains(needle);
-	};
-	if (contains("tooltip")
-		|| contains("menu")
-		|| contains("button")
-		|| contains("input")
-		|| contains("edit")
-		|| contains("lineedit")
-		|| contains("scrollbar")
-		|| contains("slider")
-		|| contains("checkbox")
-		|| contains("radiobutton")
-		|| contains("emoji")) {
+	if (widget->width() < 36 || widget->height() < 20) {
 		return false;
 	}
-	return contains("history")
-		|| contains("message")
-		|| contains("media")
-		|| contains("overview")
-		|| contains("chatlist")
-		|| contains("dialogs");
+	if (HasAnyNameToken(widget, {
+			"tooltip",
+			"menu",
+			"button",
+			"checkbox",
+			"radio",
+			"slider",
+			"scrollbar",
+			"lineedit",
+			"input",
+			"editfield",
+			"settings",
+			"controls",
+			"title",
+			"subtitle",
+			"header",
+		})) {
+		return false;
+	}
+	return HasAnyNameToken(widget, {
+		"history",
+		"message",
+		"bubble",
+		"media",
+		"photo",
+		"video",
+		"overview",
+		"peerlist",
+		"dialogs",
+		"chatlist",
+		"background",
+		"compose",
+	});
 }
 
 bool LooksLikeTextWidget(QWidget *widget) {
-	if (!widget || widget->isWindow()) {
+	if (!widget || widget->isWindow() || !IsReadyWidget(widget)) {
 		return false;
 	}
-	const auto objectName = widget->objectName().toLower();
-	const auto className = QByteArray(widget->metaObject()->className()).toLower();
-	const auto contains = [&](const char *needle) {
-		return objectName.contains(QString::fromLatin1(needle))
-			|| className.contains(needle);
-	};
-	return contains("label")
-		|| contains("text")
-		|| contains("button")
-		|| contains("input")
-		|| contains("edit")
-		|| contains("lineedit")
-		|| contains("checkbox")
-		|| contains("radio")
-		|| contains("switch")
-		|| contains("title")
-		|| contains("subtitle");
+	return widget->inherits("QLabel")
+		|| widget->inherits("QAbstractButton")
+		|| widget->inherits("QLineEdit")
+		|| widget->inherits("QTextEdit")
+		|| widget->inherits("QPlainTextEdit")
+		|| HasAnyNameToken(widget, {
+			"label",
+			"text",
+			"caption",
+			"title",
+			"subtitle",
+			"lineedit",
+			"input",
+			"button",
+		});
 }
 
-void ApplyAlpha(QPalette &palette, QPalette::ColorRole role, int alpha) {
-	for (const auto group : {
-			QPalette::Active,
-			QPalette::Inactive,
-			QPalette::Disabled,
-		}) {
-		auto color = palette.color(group, role);
-		color.setAlpha(std::clamp(alpha, 0, 255));
-		palette.setColor(group, role, color);
+bool HasTrackedAncestor(
+		QWidget *widget,
+		const QSet<QWidget*> &tracked) {
+	for (auto *parent = widget ? widget->parentWidget() : nullptr;
+		parent;
+		parent = parent->parentWidget()) {
+		if (tracked.contains(parent)) {
+			return true;
+		}
 	}
+	return false;
+}
+
+QList<QWidget*> WindowRoots(Plugins::Host *host) {
+	auto result = QList<QWidget*>();
+	auto seen = QSet<QWidget*>();
+	host->forEachWindowWidget([&](QWidget *widget) {
+		if (IsReadyWindowWidget(widget) && !seen.contains(widget)) {
+			seen.insert(widget);
+			result.push_back(widget);
+		}
+	});
+	if (!result.isEmpty()) {
+		return result;
+	}
+	for (auto *widget : QApplication::topLevelWidgets()) {
+		if (IsReadyWindowWidget(widget) && !seen.contains(widget)) {
+			seen.insert(widget);
+			result.push_back(widget);
+		}
+	}
+	return result;
 }
 
 } // namespace
@@ -154,16 +211,13 @@ public:
 	: QObject(nullptr)
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
-		_info.name = PluginText(
-			_host,
-			"AstroTransparent",
-			"АстроПрозрачность");
-		_info.version = QStringLiteral("2.5");
+		_info.name = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
+		_info.version = QStringLiteral("2.7");
 		_info.author = QStringLiteral("@etopizdesblin");
-		_info.description = PluginText(
+		_info.description = Tr(
 			_host,
 			"Adds separate interface, message, and text transparency controls for Astrogram.",
-			"Добавляет отдельные настройки прозрачности интерфейса, сообщений и текста в Astrogram.");
+			u8"Добавляет отдельные настройки прозрачности интерфейса, сообщений и текста в Astrogram.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_windowOpacityPercent = readWindowOpacityPercent();
 		_messageOpacityPercent = readMessageOpacityPercent();
@@ -178,6 +232,7 @@ public:
 		_windowOpacityPercent = readWindowOpacityPercent();
 		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();
+
 		_settingsPageId = _host->registerSettingsPage(
 			_info.id,
 			makeSettingsPage(),
@@ -215,14 +270,11 @@ private:
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto windowSlider = Plugins::SettingDescriptor();
 		windowSlider.id = QStringLiteral("window_opacity");
-		windowSlider.title = PluginText(
-			_host,
-			"Interface opacity",
-			"Прозрачность интерфейса");
-		windowSlider.description = PluginText(
+		windowSlider.title = Tr(_host, "Interface opacity", u8"Прозрачность интерфейса");
+		windowSlider.description = Tr(
 			_host,
 			"Controls the overall opacity of the Astrogram interface.",
-			"Управляет общей прозрачностью интерфейса Astrogram.");
+			u8"Управляет общей прозрачностью интерфейса Astrogram.");
 		windowSlider.type = Plugins::SettingControl::IntSlider;
 		windowSlider.intValue = _windowOpacityPercent;
 		windowSlider.intMinimum = kMinOpacityPercent;
@@ -232,14 +284,11 @@ private:
 
 		auto messageSlider = Plugins::SettingDescriptor();
 		messageSlider.id = QStringLiteral("message_opacity");
-		messageSlider.title = PluginText(
+		messageSlider.title = Tr(_host, "Message opacity", u8"Прозрачность сообщений");
+		messageSlider.description = Tr(
 			_host,
-			"Message opacity",
-			"Прозрачность сообщений");
-		messageSlider.description = PluginText(
-			_host,
-			"Controls message/history surfaces and attached media blocks separately from the main interface.",
-			"Отдельно управляет поверхностями сообщений, истории и медиа-блоками независимо от общего интерфейса.");
+			"Applies one uniform opacity to message bubbles and media blocks without per-child gradients.",
+			u8"Применяет одну равномерную прозрачность к пузырям сообщений и медиа-блокам без градиентов по дочерним элементам.");
 		messageSlider.type = Plugins::SettingControl::IntSlider;
 		messageSlider.intValue = _messageOpacityPercent;
 		messageSlider.intMinimum = kMinOpacityPercent;
@@ -249,14 +298,11 @@ private:
 
 		auto textSlider = Plugins::SettingDescriptor();
 		textSlider.id = QStringLiteral("text_opacity");
-		textSlider.title = PluginText(
+		textSlider.title = Tr(_host, "Text opacity", u8"Прозрачность текста");
+		textSlider.description = Tr(
 			_host,
-			"Text opacity",
-			"Прозрачность текста");
-		textSlider.description = PluginText(
-			_host,
-			"Applies a softer alpha to widget-based text and controls.",
-			"Применяет более мягкую альфу к тексту и элементам управления на виджетах.");
+			"Softens labels and text controls outside message bubbles.",
+			u8"Смягчает прозрачность надписей и текстовых контролов вне пузырей сообщений.");
 		textSlider.type = Plugins::SettingControl::IntSlider;
 		textSlider.intValue = _textOpacityPercent;
 		textSlider.intMinimum = kMinOpacityPercent;
@@ -266,46 +312,36 @@ private:
 
 		auto info = Plugins::SettingDescriptor();
 		info.id = QStringLiteral("info");
-		info.title = PluginText(
+		info.title = Tr(_host, "How it works", u8"Как это работает");
+		info.description = Tr(
 			_host,
-			"How it works",
-			"Как это работает");
-		info.description = PluginText(
-			_host,
-			"Interface opacity affects the whole Astrogram window. Message opacity targets history/message surfaces. Text opacity adjusts widget-based text and controls and may be partial in heavily custom-drawn areas.",
-			"Прозрачность интерфейса влияет на всё окно Astrogram. Прозрачность сообщений нацелена на поверхности истории и пузырей. Прозрачность текста меняет альфу текста виджетов и контролов и может работать частично в сильно кастомно отрисованных зонах.");
+			"Interface opacity affects the whole Astrogram window. Message opacity targets message/media containers. Text opacity targets text controls outside those containers.",
+			u8"Прозрачность интерфейса влияет на всё окно Astrogram. Прозрачность сообщений нацелена на контейнеры сообщений и медиа. Прозрачность текста нацелена на текстовые контролы вне этих контейнеров.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
 		section.id = QStringLiteral("appearance");
-		section.title = PluginText(
-			_host,
-			"Appearance",
-			"Оформление");
-		section.settings.push_back(windowSlider);
-		section.settings.push_back(messageSlider);
-		section.settings.push_back(textSlider);
-		section.settings.push_back(info);
+		section.title = Tr(_host, "Appearance", u8"Оформление");
+		section.settings = {
+			windowSlider,
+			messageSlider,
+			textSlider,
+			info,
+		};
 
 		auto page = Plugins::SettingsPageDescriptor();
 		page.id = QStringLiteral("astro_transparent");
-		page.title = PluginText(
-			_host,
-			"AstroTransparent",
-			"АстроПрозрачность");
-		page.description = PluginText(
+		page.title = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
+		page.description = Tr(
 			_host,
 			"Separate transparency controls for interface, messages, and text.",
-			"Раздельные настройки прозрачности для интерфейса, сообщений и текста.");
-		page.sections.push_back(section);
+			u8"Раздельные настройки прозрачности для интерфейса, сообщений и текста.");
+		page.sections = { section };
 		return page;
 	}
 
 	void setWindowOpacityPercent(int value) {
-		const auto clamped = std::clamp(
-			value,
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
+		const auto clamped = std::clamp(value, kMinOpacityPercent, kMaxOpacityPercent);
 		if (_windowOpacityPercent == clamped) {
 			return;
 		}
@@ -314,10 +350,7 @@ private:
 	}
 
 	void setMessageOpacityPercent(int value) {
-		const auto clamped = std::clamp(
-			value,
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
+		const auto clamped = std::clamp(value, kMinOpacityPercent, kMaxOpacityPercent);
 		if (_messageOpacityPercent == clamped) {
 			return;
 		}
@@ -326,10 +359,7 @@ private:
 	}
 
 	void setTextOpacityPercent(int value) {
-		const auto clamped = std::clamp(
-			value,
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
+		const auto clamped = std::clamp(value, kMinOpacityPercent, kMaxOpacityPercent);
 		if (_textOpacityPercent == clamped) {
 			return;
 		}
@@ -350,20 +380,16 @@ private:
 
 	void applyCurrentAppearance() {
 		applyWindowOpacity();
-		if (_messageOpacityPercent >= kMaxOpacityPercent
-			&& _textOpacityPercent >= kMaxOpacityPercent) {
-			restorePalettes();
-			return;
-		}
-		applyWidgetPalettes();
-	}
 
-	void applyWindowOpacity() const {
-		for (auto *widget : QApplication::topLevelWidgets()) {
-			if (IsReadyWindowWidget(widget)) {
-				widget->setWindowOpacity(windowOpacityValue());
-			}
+		auto messageTargets = QSet<QWidget*>();
+		auto textTargets = QSet<QWidget*>();
+		const auto windows = WindowRoots(_host);
+		for (auto *window : windows) {
+			collectTargets(window, messageTargets, textTargets);
 		}
+
+		syncEffects(_messageEffects, messageTargets, messageOpacityValue());
+		syncEffects(_textEffects, textTargets, textOpacityValue());
 	}
 
 	void applyToWindow(QWidget *widget) {
@@ -371,164 +397,163 @@ private:
 			return;
 		}
 		widget->setWindowOpacity(windowOpacityValue());
-		applyPalettePassToRoot(widget);
+		scheduleAppearanceApply();
 	}
 
-	void applyWidgetPalettes() {
-		for (auto *widget : QApplication::topLevelWidgets()) {
-			applyPalettePassToRoot(widget);
-		}
-	}
-
-	void applyPalettePassToRoot(QWidget *root) {
+	void collectTargets(
+			QWidget *root,
+			QSet<QWidget*> &messageTargets,
+			QSet<QWidget*> &textTargets) {
 		if (!IsReadyWindowWidget(root)) {
 			return;
 		}
-		for (const auto child : root->findChildren<QWidget*>()) {
-			applyPaletteToWidget(child);
+		auto widgets = QList<QWidget*>{ root };
+		const auto children = root->findChildren<QWidget*>();
+		for (auto *child : children) {
+			widgets.push_back(child);
+		}
+
+		for (auto *widget : widgets) {
+			if (!IsReadyWidget(widget) || widget->isWindow()) {
+				continue;
+			}
+			if (_messageOpacityPercent < kMaxOpacityPercent
+				&& LooksLikeMessageContainer(widget)
+				&& !HasTrackedAncestor(widget, messageTargets)) {
+				messageTargets.insert(widget);
+			}
+		}
+
+		for (auto *widget : widgets) {
+			if (!IsReadyWidget(widget) || widget->isWindow()) {
+				continue;
+			}
+			if (_textOpacityPercent < kMaxOpacityPercent
+				&& LooksLikeTextWidget(widget)
+				&& !HasTrackedAncestor(widget, messageTargets)
+				&& !HasTrackedAncestor(widget, textTargets)) {
+				textTargets.insert(widget);
+			}
 		}
 	}
 
-	void applyPaletteToWidget(QWidget *widget) {
-		if (!widget || !IsReadyWidget(widget)) {
+	void syncEffects(
+			QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> &storage,
+			const QSet<QWidget*> &targets,
+			double opacity) {
+		for (auto it = storage.begin(); it != storage.end();) {
+			const auto widget = it.key();
+			const auto effect = it.value();
+			if (!widget || !targets.contains(widget) || opacity >= 0.999) {
+				if (widget && effect && widget->graphicsEffect() == effect) {
+					widget->setGraphicsEffect(nullptr);
+				}
+				if (effect) {
+					effect->deleteLater();
+				}
+				it = storage.erase(it);
+				continue;
+			}
+			if (effect) {
+				effect->setOpacity(opacity);
+			}
+			++it;
+		}
+		if (opacity >= 0.999) {
 			return;
 		}
-		if (!_originalPalettes.contains(widget)) {
-			_originalPalettes.insert(widget, widget->palette());
-			QObject::connect(
-				widget,
-				&QObject::destroyed,
-				this,
-				[this, widget](QObject *) {
-					_originalPalettes.remove(widget);
-				});
+		for (auto *widget : targets) {
+			if (!widget) {
+				continue;
+			}
+			auto effect = storage.value(widget);
+			if (!effect) {
+				if (auto *foreign = widget->graphicsEffect();
+					foreign && !storage.contains(widget)) {
+					continue;
+				}
+				effect = new QGraphicsOpacityEffect(widget);
+				effect->setOpacity(opacity);
+				widget->setGraphicsEffect(effect);
+				storage.insert(widget, effect);
+				QObject::connect(
+					widget,
+					&QObject::destroyed,
+					this,
+					[this, widget](QObject *) {
+						_messageEffects.remove(widget);
+						_textEffects.remove(widget);
+					});
+			} else {
+				effect->setOpacity(opacity);
+				if (widget->graphicsEffect() != effect) {
+					widget->setGraphicsEffect(effect);
+				}
+			}
 		}
-		const auto original = _originalPalettes.value(widget);
-		auto adjusted = original;
-		auto changed = false;
-		if (LooksLikeMessageSurface(widget) && _messageOpacityPercent < kMaxOpacityPercent) {
-			adjusted = adjustedMessagePalette(adjusted);
-			changed = true;
-		}
-		if (LooksLikeTextWidget(widget) && _textOpacityPercent < kMaxOpacityPercent) {
-			adjusted = adjustedTextPalette(adjusted);
-			changed = true;
-		}
-		widget->setPalette(changed ? adjusted : original);
-		widget->update();
 	}
 
-	QPalette adjustedMessagePalette(QPalette palette) const {
-		const auto alpha = messageOpacityAlpha();
-		for (const auto role : {
-				QPalette::Window,
-				QPalette::Base,
-				QPalette::AlternateBase,
-				QPalette::Button,
-				QPalette::ToolTipBase,
-			}) {
-			ApplyAlpha(palette, role, alpha);
+	void applyWindowOpacity() const {
+		for (auto *widget : WindowRoots(_host)) {
+			if (IsReadyWindowWidget(widget)) {
+				widget->setWindowOpacity(windowOpacityValue());
+			}
 		}
-		return palette;
-	}
-
-	QPalette adjustedTextPalette(QPalette palette) const {
-		const auto alpha = textOpacityAlpha();
-		for (const auto role : {
-				QPalette::WindowText,
-				QPalette::Text,
-				QPalette::ButtonText,
-				QPalette::BrightText,
-				QPalette::HighlightedText,
-				QPalette::PlaceholderText,
-				QPalette::ToolTipText,
-			}) {
-			ApplyAlpha(palette, role, alpha);
-		}
-		return palette;
 	}
 
 	void restoreDefaults() {
-		for (auto *widget : QApplication::topLevelWidgets()) {
+		for (auto *widget : WindowRoots(_host)) {
 			if (IsReadyWindowWidget(widget)) {
 				widget->setWindowOpacity(1.0);
 			}
 		}
-		restorePalettes();
+		clearEffects(_messageEffects);
+		clearEffects(_textEffects);
 	}
 
-	void restorePalettes() {
-		for (auto i = _originalPalettes.begin(); i != _originalPalettes.end(); ++i) {
-			if (i.key()) {
-				i.key()->setPalette(i.value());
-				i.key()->update();
+	void clearEffects(QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> &storage) {
+		for (auto it = storage.begin(); it != storage.end(); ++it) {
+			if (it.key() && it.value() && it.key()->graphicsEffect() == it.value()) {
+				it.key()->setGraphicsEffect(nullptr);
+			}
+			if (it.value()) {
+				it.value()->deleteLater();
 			}
 		}
-		_originalPalettes.clear();
+		storage.clear();
 	}
 
 	double windowOpacityValue() const {
-		return std::clamp(
-			_windowOpacityPercent,
-			kMinOpacityPercent,
-			kMaxOpacityPercent) / 100.0;
+		return std::clamp(_windowOpacityPercent, kMinOpacityPercent, kMaxOpacityPercent) / 100.0;
 	}
 
 	double messageOpacityValue() const {
-		return std::clamp(
-			_messageOpacityPercent,
-			kMinOpacityPercent,
-			kMaxOpacityPercent) / 100.0;
+		return std::clamp(_messageOpacityPercent, kMinOpacityPercent, kMaxOpacityPercent) / 100.0;
 	}
 
-	int messageOpacityAlpha() const {
-		return std::clamp(
-			int(std::lround(std::clamp(
-				_messageOpacityPercent,
-				kMinOpacityPercent,
-				kMaxOpacityPercent) * 2.55)),
-			51,
-			255);
-	}
-
-	int textOpacityAlpha() const {
-		return std::clamp(
-			int(std::lround(std::clamp(
-				_textOpacityPercent,
-				kMinOpacityPercent,
-				kMaxOpacityPercent) * 2.55)),
-			51,
-			255);
+	double textOpacityValue() const {
+		return std::clamp(_textOpacityPercent, kMinOpacityPercent, kMaxOpacityPercent) / 100.0;
 	}
 
 	int readWindowOpacityPercent() const {
-		return std::clamp(
-			_host->settingIntValue(
-				_info.id,
-				QStringLiteral("window_opacity"),
-				kDefaultWindowOpacityPercent),
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
+		return readIntSetting(QStringLiteral("window_opacity"), kDefaultWindowOpacityPercent);
 	}
 
 	int readMessageOpacityPercent() const {
-		return std::clamp(
-			_host->settingIntValue(
-				_info.id,
-				QStringLiteral("message_opacity"),
-				kDefaultMessageOpacityPercent),
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
+		return readIntSetting(QStringLiteral("message_opacity"), kDefaultMessageOpacityPercent);
 	}
 
 	int readTextOpacityPercent() const {
-		return std::clamp(
-			_host->settingIntValue(
-				_info.id,
-				QStringLiteral("text_opacity"),
-				kDefaultTextOpacityPercent),
-			kMinOpacityPercent,
-			kMaxOpacityPercent);
+		return readIntSetting(QStringLiteral("text_opacity"), kDefaultTextOpacityPercent);
+	}
+
+	int readIntSetting(const QString &settingId, int fallback) const {
+		const auto current = _host->settingIntValue(_info.id, settingId, fallback);
+		if (current != fallback) {
+			return std::clamp(current, kMinOpacityPercent, kMaxOpacityPercent);
+		}
+		const auto legacy = _host->settingIntValue(Latin1(kLegacyPluginId), settingId, fallback);
+		return std::clamp(legacy, kMinOpacityPercent, kMaxOpacityPercent);
 	}
 
 	Plugins::Host *_host = nullptr;
@@ -537,7 +562,8 @@ private:
 	int _windowOpacityPercent = kDefaultWindowOpacityPercent;
 	int _messageOpacityPercent = kDefaultMessageOpacityPercent;
 	int _textOpacityPercent = kDefaultTextOpacityPercent;
-	QHash<QWidget*, QPalette> _originalPalettes;
+	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _messageEffects;
+	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _textEffects;
 	bool _appearanceApplyScheduled = false;
 };
 
