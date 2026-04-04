@@ -1129,6 +1129,14 @@ void Manager::reload() {
 	unloadAll();
 	loadConfig();
 	loadRecoveryState();
+	const auto flushPluginUnload = [] {
+		for (auto attempt = 0; attempt != 6; ++attempt) {
+			QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+			QCoreApplication::processEvents();
+			QThread::msleep(25);
+		}
+	};
+	flushPluginUnload();
 	if (safeModeEnabled()) {
 		logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
 		scanPlugins(true);
@@ -1609,17 +1617,32 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 		return false;
 	}
 
-	if (!QFile::remove(pluginPath)) {
+	auto removed = false;
+	auto removeError = QString();
+	for (auto attempt = 0; attempt != 8; ++attempt) {
+		QFile file(pluginPath);
+		if (file.remove() || !QFileInfo::exists(pluginPath)) {
+			removed = true;
+			break;
+		}
+		removeError = file.errorString();
+		flushPluginUnload();
+	}
+
+	if (!removed) {
 		logEvent(
 			u"package"_q,
 			u"remove-file-failed"_q,
 			QJsonObject{
 				{ u"pluginId"_q, pluginId },
 				{ u"path"_q, pluginPath },
+				{ u"reason"_q, removeError },
 			});
 		rescanNow();
 		if (error) {
-			*error = u"Could not delete the plugin package file."_q;
+			*error = removeError.isEmpty()
+				? u"Could not delete the plugin package file."_q
+				: removeError;
 		}
 		finishRecoveryOperation();
 		return false;
