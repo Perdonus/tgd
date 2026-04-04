@@ -29,7 +29,7 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.2",
+	"1.3",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
 	"https://sosiskibot.ru",
@@ -38,7 +38,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.2";
+constexpr auto kPluginVersion = "1.3";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
@@ -187,15 +187,17 @@ public:
 		ClearHandler clearHandler,
 		ToastHandler toastHandler,
 		QWidget *parent)
-		: QWidget(parent)
+		: QWidget(nullptr)
 	, _host(host)
 	, _readHandler(std::move(readHandler))
 	, _clearHandler(std::move(clearHandler))
 		, _toastHandler(std::move(toastHandler)) {
+			Q_UNUSED(parent);
 			setWindowFlags(
-				Qt::Widget
+				Qt::Tool
 				| Qt::FramelessWindowHint
-				| Qt::NoDropShadowWindowHint);
+				| Qt::NoDropShadowWindowHint
+				| Qt::WindowStaysOnTopHint);
 			setAttribute(Qt::WA_DeleteOnClose, false);
 			setAttribute(Qt::WA_TranslucentBackground, true);
 			setAttribute(Qt::WA_StyledBackground, true);
@@ -537,8 +539,6 @@ private:
 		}
 		if (_overlay && _overlay->parentWidget() != anchor) {
 			_overlay->hide();
-			_overlay->deleteLater();
-			_overlay = nullptr;
 		}
 		if (!_overlay) {
 			_overlay = new LogsOverlay(
@@ -552,7 +552,7 @@ private:
 					[this](const QString &text) {
 						_host->showToast(text);
 					},
-					anchor);
+					nullptr);
 			_overlay->setMaxLines(_maxLines);
 		}
 		_overlay->setMaxLines(_maxLines);

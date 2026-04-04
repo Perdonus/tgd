@@ -44,7 +44,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.9",
+	"2.0",
 	"@etopizdesblin",
 	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -53,7 +53,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.9";
+constexpr auto kPluginVersion = "2.0";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
@@ -621,12 +621,11 @@ private:
 
 	void scheduleOpenChat(const QString &prefill, QWidget *preferredWindow = nullptr) {
 		const auto normalizedPrefill = NormalizeText(prefill);
-		Q_UNUSED(preferredWindow);
-		QTimer::singleShot(120, this, [this, normalizedPrefill] {
+		QTimer::singleShot(120, this, [this, normalizedPrefill, preferredWindow] {
 			if (_isUnloading) {
 				return;
 			}
-				openChatDialog(nullptr, normalizedPrefill);
+			openChatDialog(resolveChatWindow(preferredWindow), normalizedPrefill);
 			});
 		}
 
@@ -654,9 +653,8 @@ private:
 		void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
 			auto *dialogParent = stableParentWindow(parentWindow);
 			auto dialog = new QDialog(
-				nullptr,
-				Qt::Window
-					| Qt::Tool
+				dialogParent,
+				Qt::Dialog
 					| Qt::WindowTitleHint
 					| Qt::WindowCloseButtonHint
 					| Qt::CustomizeWindowHint

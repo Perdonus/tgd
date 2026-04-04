@@ -25,7 +25,7 @@ Allows scale tuning and loading a custom font from a local file.
 TGD_PLUGIN_PREVIEW(
 	"astro.font_tuner",
 	"Font Tuner",
-	"1.7",
+	"1.8",
 	"@etopizdesblin",
 	"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
 	"https://sosiskibot.ru",
@@ -108,7 +108,7 @@ public:
 			_host,
 			"Font Tuner",
 			u8"Тюнер шрифтов");
-			_info.version = QStringLiteral("1.7");
+			_info.version = QStringLiteral("1.8");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -297,16 +297,23 @@ private:
 
 	void chooseFontFileNow() {
 		auto *parent = resolveDialogParent();
-		const auto path = QFileDialog::getOpenFileName(
+		QFileDialog dialog(
 			parent,
 			Tr(_host, "Choose font file", u8"Выберите файл шрифта"),
 			QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
 			Tr(
 				_host,
 				"Fonts (*.ttf *.otf);;All files (*.*)",
-				u8"Шрифты (*.ttf *.otf);;Все файлы (*.*)"),
-			nullptr,
-			QFileDialog::ReadOnly);
+				u8"Шрифты (*.ttf *.otf);;Все файлы (*.*)"));
+		dialog.setFileMode(QFileDialog::ExistingFile);
+		dialog.setAcceptMode(QFileDialog::AcceptOpen);
+		dialog.setOption(QFileDialog::ReadOnly, true);
+		dialog.setWindowModality(Qt::ApplicationModal);
+		if (dialog.exec() != QDialog::Accepted) {
+			return;
+		}
+		const auto files = dialog.selectedFiles();
+		const auto path = files.isEmpty() ? QString() : files.front();
 		if (!path.isEmpty()) {
 			importFontFile(path);
 		}
