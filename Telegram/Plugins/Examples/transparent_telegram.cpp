@@ -25,7 +25,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 TGD_PLUGIN_PREVIEW(
 	"astro.transparent",
 	"AstroTransparent",
-	"2.9",
+	"3.0",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
@@ -103,6 +103,8 @@ bool HasAnyNameToken(QWidget *widget, std::initializer_list<const char*> needles
 	}
 	return false;
 }
+
+int WidgetDepth(QWidget *widget);
 
 bool IsTextWidgetClass(QWidget *widget) {
 	return widget
@@ -368,7 +370,7 @@ public:
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
-		_info.version = QStringLiteral("2.9");
+			_info.version = QStringLiteral("3.0");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -534,33 +536,34 @@ private:
 		});
 	}
 
-	void applyCurrentAppearance() {
-		auto interfaceTargets = QSet<QWidget*>();
-		auto messageTargets = QSet<QWidget*>();
-		auto textTargets = QSet<QWidget*>();
-		const auto windows = WindowRoots(_host);
-		for (auto *window : windows) {
-			collectTargets(window, interfaceTargets, messageTargets, textTargets);
+		void applyCurrentAppearance() {
+			auto messageTargets = QSet<QWidget*>();
+			auto textTargets = QSet<QWidget*>();
+			const auto windows = WindowRoots(_host);
+			for (auto *window : windows) {
+				if (IsReadyWindowWidget(window)) {
+					window->setWindowOpacity(interfaceOpacityValue());
+				}
+				collectTargets(window, messageTargets, textTargets);
+			}
+
+			clearEffects(_interfaceEffects);
+			syncEffects(_messageEffects, messageTargets, messageOpacityValue());
+			syncEffects(_textEffects, textTargets, textOpacityValue());
 		}
 
-		syncEffects(_interfaceEffects, interfaceTargets, interfaceOpacityValue());
-		syncEffects(_messageEffects, messageTargets, messageOpacityValue());
-		syncEffects(_textEffects, textTargets, textOpacityValue());
-	}
-
-	void applyToWindow(QWidget *widget) {
-		if (!IsReadyWindowWidget(widget)) {
-			return;
+		void applyToWindow(QWidget *widget) {
+			if (!IsReadyWindowWidget(widget)) {
+				return;
+			}
+			widget->setWindowOpacity(interfaceOpacityValue());
+			scheduleAppearanceApply();
 		}
-		widget->setWindowOpacity(1.0);
-		scheduleAppearanceApply();
-	}
 
-	void collectTargets(
-			QWidget *root,
-			QSet<QWidget*> &interfaceTargets,
-			QSet<QWidget*> &messageTargets,
-			QSet<QWidget*> &textTargets) {
+		void collectTargets(
+				QWidget *root,
+				QSet<QWidget*> &messageTargets,
+				QSet<QWidget*> &textTargets) {
 		if (!IsReadyWindowWidget(root)) {
 			return;
 		}
@@ -600,28 +603,7 @@ private:
 			}
 		}
 
-		std::sort(
-			widgets.begin(),
-			widgets.end(),
-			[](QWidget *a, QWidget *b) {
-				return WidgetDepth(a) < WidgetDepth(b);
-			});
-		for (auto *widget : widgets) {
-			if (!IsReadyWidget(widget) || widget->isWindow()) {
-				continue;
-			}
-			if (_windowOpacityPercent < kMaxOpacityPercent
-				&& LooksLikeInterfaceContainer(widget)
-				&& !HasTrackedAncestor(widget, interfaceTargets)
-				&& !HasTrackedDescendant(widget, interfaceTargets)
-				&& !HasTrackedAncestor(widget, messageTargets)
-				&& !HasTrackedDescendant(widget, messageTargets)
-				&& !HasTrackedAncestor(widget, textTargets)
-				&& !HasTrackedDescendant(widget, textTargets)) {
-				interfaceTargets.insert(widget);
-			}
 		}
-	}
 
 	void syncEffects(
 			QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> &storage,

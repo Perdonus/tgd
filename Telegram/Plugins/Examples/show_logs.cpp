@@ -14,7 +14,6 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QDialog>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
@@ -30,7 +29,7 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.1",
+	"1.2",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
 	"https://sosiskibot.ru",
@@ -39,7 +38,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.1";
+constexpr auto kPluginVersion = "1.2";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
@@ -144,7 +143,7 @@ void CenterOver(QWidget *anchor, QWidget *widget) {
 		return;
 	}
 	const auto geometry = anchor
-		? anchor->frameGeometry()
+		? QRect(QPoint(0, 0), anchor->size())
 		: QApplication::primaryScreen()->availableGeometry();
 	const auto size = widget->size();
 	widget->move(
@@ -157,8 +156,20 @@ QWidget *StableAnchorWindow(QWidget *candidate) {
 	if (!window || !window->isWindow() || window->parentWidget()) {
 		return nullptr;
 	}
+	const auto type = window->windowType();
+	if (type == Qt::Dialog
+		|| type == Qt::Popup
+		|| type == Qt::Tool
+		|| type == Qt::ToolTip
+		|| type == Qt::Sheet
+		|| type == Qt::Drawer
+		|| type == Qt::SplashScreen
+		|| type == Qt::SubWindow) {
+		return nullptr;
+	}
 	if (!window->testAttribute(Qt::WA_WState_Created)
-		|| window->testAttribute(Qt::WA_DontShowOnScreen)) {
+		|| window->testAttribute(Qt::WA_DontShowOnScreen)
+		|| !window->isVisible()) {
 		return nullptr;
 	}
 	return window;
@@ -176,18 +187,19 @@ public:
 		ClearHandler clearHandler,
 		ToastHandler toastHandler,
 		QWidget *parent)
-	: QWidget(parent)
+		: QWidget(parent)
 	, _host(host)
 	, _readHandler(std::move(readHandler))
 	, _clearHandler(std::move(clearHandler))
-	, _toastHandler(std::move(toastHandler)) {
-		setWindowFlags(
-			Qt::Window
-			| Qt::FramelessWindowHint
-			| Qt::WindowStaysOnTopHint);
-		setAttribute(Qt::WA_DeleteOnClose, false);
-		setAttribute(Qt::WA_TranslucentBackground, true);
-		resize(760, 560);
+		, _toastHandler(std::move(toastHandler)) {
+			setWindowFlags(
+				Qt::Widget
+				| Qt::FramelessWindowHint
+				| Qt::NoDropShadowWindowHint);
+			setAttribute(Qt::WA_DeleteOnClose, false);
+			setAttribute(Qt::WA_TranslucentBackground, true);
+			setAttribute(Qt::WA_StyledBackground, true);
+			resize(760, 560);
 		setObjectName(QStringLiteral("showLogsOverlay"));
 		setStyleSheet(QStringLiteral(
 			"#showLogsOverlay {"
@@ -516,6 +528,18 @@ private:
 
 	void showOverlayNow() {
 		auto *anchor = resolveOverlayAnchor();
+		if (!anchor) {
+			_host->showToast(Tr(
+				_host,
+				"Could not find an Astrogram window for the log overlay.",
+				u8"Не удалось найти окно Astrogram для overlay с логами."));
+			return;
+		}
+		if (_overlay && _overlay->parentWidget() != anchor) {
+			_overlay->hide();
+			_overlay->deleteLater();
+			_overlay = nullptr;
+		}
 		if (!_overlay) {
 			_overlay = new LogsOverlay(
 				_host,
@@ -525,10 +549,10 @@ private:
 				[this] {
 					return clearLogs();
 				},
-				[this](const QString &text) {
-					_host->showToast(text);
-				},
-				nullptr);
+					[this](const QString &text) {
+						_host->showToast(text);
+					},
+					anchor);
 			_overlay->setMaxLines(_maxLines);
 		}
 		_overlay->setMaxLines(_maxLines);
@@ -539,7 +563,6 @@ private:
 			_overlay->showNormal();
 		}
 		_overlay->raise();
-		_overlay->activateWindow();
 	}
 
 	void handleSetting(const Plugins::SettingDescriptor &setting) {

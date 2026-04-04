@@ -18,6 +18,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <QtCore/QVector>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QKeySequence>
+#include <QtGui/QScreen>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -36,10 +37,14 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #include <memory>
 #include <unordered_map>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif // Q_OS_WIN
+
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.8",
+	"1.9",
 	"@etopizdesblin",
 	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -48,7 +53,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.8";
+constexpr auto kPluginVersion = "1.9";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
@@ -448,24 +453,35 @@ private:
 
 	void openSite() const {
 		const auto url = QUrl(Latin1(kSiteUrl));
+		const auto urlText = url.toString();
 		auto launched = false;
 #ifdef Q_OS_WIN
-		launched = QProcess::startDetached(
-			QStringLiteral("cmd"),
-			{
-				QStringLiteral("/c"),
-				QStringLiteral("start"),
-				QStringLiteral(""),
-				url.toString(),
-			});
+		const auto shellResult = reinterpret_cast<quintptr>(ShellExecuteW(
+			nullptr,
+			L"open",
+			reinterpret_cast<LPCWSTR>(urlText.utf16()),
+			nullptr,
+			nullptr,
+			SW_SHOWNORMAL));
+		launched = (shellResult > 32);
+		if (!launched) {
+			launched = QProcess::startDetached(
+				QStringLiteral("cmd"),
+				{
+					QStringLiteral("/c"),
+					QStringLiteral("start"),
+					QStringLiteral(""),
+					urlText,
+				});
+		}
 #elif defined(Q_OS_MACOS)
 		launched = QProcess::startDetached(
 			QStringLiteral("open"),
-			{ url.toString() });
+			{ urlText });
 #else
 		launched = QProcess::startDetached(
 			QStringLiteral("xdg-open"),
-			{ url.toString() });
+			{ urlText });
 #endif // Q_OS_WIN
 		if (!launched) {
 			launched = url.isValid() && QDesktopServices::openUrl(url);
@@ -605,18 +621,14 @@ private:
 
 	void scheduleOpenChat(const QString &prefill, QWidget *preferredWindow = nullptr) {
 		const auto normalizedPrefill = NormalizeText(prefill);
-		const auto preferred = QPointer<QWidget>(preferredWindow);
-		QTimer::singleShot(120, this, [this, normalizedPrefill, preferred] {
+		Q_UNUSED(preferredWindow);
+		QTimer::singleShot(120, this, [this, normalizedPrefill] {
 			if (_isUnloading) {
 				return;
 			}
-			if (auto *window = resolveChatWindow(preferred.data())) {
-				openChatDialog(window, normalizedPrefill);
-				return;
-			}
-			openChatDialog(nullptr, normalizedPrefill);
-		});
-	}
+				openChatDialog(nullptr, normalizedPrefill);
+			});
+		}
 
 	void openChatDialog(QWidget *parentWindow, const QString &prefill) {
 		auto &state = parentWindow
@@ -639,14 +651,16 @@ private:
 		applyWindowState(state);
 	}
 
-	void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
-		auto *dialogParent = stableParentWindow(parentWindow);
-		auto dialog = new QDialog(
-			nullptr,
-			Qt::Dialog
-				| Qt::WindowTitleHint
-				| Qt::WindowCloseButtonHint
-				| Qt::CustomizeWindowHint);
+		void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
+			auto *dialogParent = stableParentWindow(parentWindow);
+			auto dialog = new QDialog(
+				nullptr,
+				Qt::Window
+					| Qt::Tool
+					| Qt::WindowTitleHint
+					| Qt::WindowCloseButtonHint
+					| Qt::CustomizeWindowHint
+					| Qt::WindowStaysOnTopHint);
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
 		dialog->setAttribute(Qt::WA_QuitOnClose, false);
 		dialog->setModal(false);
