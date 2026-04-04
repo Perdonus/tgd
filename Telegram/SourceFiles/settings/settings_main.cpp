@@ -632,6 +632,13 @@ void SetupSections(
 			showOther(type);
 		});
 	};
+	addSection(
+		rpl::single(u"Astrogram"_q),
+		Astrogram::Id(),
+		{ &st::menuIconCustomize });
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+
 	if (controller->session().supportMode()) {
 		SetupSupport(controller, container);
 
@@ -643,11 +650,6 @@ void SetupSections(
 			Information::Id(),
 			{ &st::menuIconProfile });
 	}
-
-	addSection(
-		rpl::single(u"Astrogram"_q),
-		Astrogram::Id(),
-		{ &st::menuIconCustomize });
 
 	addSection(
 		tr::lng_settings_section_notify(),

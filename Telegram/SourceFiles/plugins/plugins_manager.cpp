@@ -1620,7 +1620,7 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 
 	auto removed = false;
 	auto removeError = QString();
-	for (auto attempt = 0; attempt != 8; ++attempt) {
+	for (auto attempt = 0; attempt != 16; ++attempt) {
 		QFile file(pluginPath);
 		if (file.remove() || !QFileInfo::exists(pluginPath)) {
 			removed = true;

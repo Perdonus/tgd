@@ -82,10 +82,8 @@ namespace {
 
 [[nodiscard]] TextWithEntities PluginAuthorText(const QString &author) {
 	const auto trimmed = author.trimmed();
-	auto result = TextWithEntities{
-		PluginUiText(u"Author: "_q, u"Автор: "_q) + trimmed
-	};
-	const auto offset = result.text.size() - trimmed.size();
+	auto result = TextWithEntities{ trimmed };
+	const auto offset = 0;
 	if (const auto handle = NormalizedTelegramHandle(trimmed); !handle.isEmpty()) {
 		result.entities.push_back({
 			EntityType::CustomUrl,
@@ -117,6 +115,32 @@ namespace {
 	return result;
 }
 
+[[nodiscard]] TextWithEntities PluginCardMetaText(
+		const ::Plugins::PluginState &state) {
+	auto result = TextWithEntities();
+	const auto author = PluginAuthorText(state.info.author);
+	if (!author.text.isEmpty()) {
+		const auto offset = result.text.size();
+		result.text += author.text;
+		for (const auto &entity : author.entities) {
+			result.entities.push_back({
+				entity.type,
+				entity.offset + offset,
+				entity.length,
+				entity.data,
+			});
+		}
+	}
+	const auto version = state.info.version.trimmed();
+	if (!version.isEmpty()) {
+		if (!result.text.isEmpty()) {
+			result.text += u" • "_q;
+		}
+		result.text += version;
+	}
+	return result;
+}
+
 void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
 	label->setClickHandlerFilter([=](const auto &handler, auto) {
 		const auto entity = handler->getTextEntity();
@@ -128,28 +152,17 @@ void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
 	});
 }
 
-void AddPluginAuthorLabel(
-		not_null<Ui::VerticalLayout*> container,
-		const QString &author) {
-	if (author.trimmed().isEmpty()) {
-		return;
-	}
-	const auto label = Ui::AddDividerText(
-		container,
-		rpl::single(PluginAuthorText(author)));
-	WireExternalLinks(label);
-}
-
 void AddPluginMetaText(
 		not_null<Ui::VerticalLayout*> container,
 		const TextWithEntities &text) {
-	container->add(
+	const auto label = container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(text),
 			st::defaultFlatLabel),
 		style::margins(0, 0, 0, 0),
 		style::al_top);
+	WireExternalLinks(label);
 }
 
 void AddPluginMetaText(
@@ -168,25 +181,6 @@ QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 		: (!info.id.isEmpty()
 			? info.id
 			: PluginUiText(u"Plugin"_q, u"Плагин"_q));
-}
-
-QString FormatPluginStatusBadge(const ::Plugins::PluginState &state) {
-	const auto version = state.info.version.trimmed();
-	if (!version.isEmpty()) {
-		return version;
-	}
-	if (state.disabledByRecovery) {
-		return PluginUiText(
-			u"Disabled after crash"_q,
-			u"Выключен после сбоя"_q);
-	}
-	if (!state.error.trimmed().isEmpty()) {
-		return PluginUiText(u"Error"_q, u"Ошибка"_q);
-	}
-	if (!state.enabled) {
-		return PluginUiText(u"Disabled"_q, u"Выключен"_q);
-	}
-	return version;
 }
 
 QString PluginDocsText() {
@@ -833,12 +827,12 @@ constexpr auto kPluginCardVerticalMargin = 6;
 		const ::Plugins::PluginState &state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(10, 0, 10, 0),
+		style::margins(16, 0, 16, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
-		8,
+		6,
 		10,
 		8,
 		12);
@@ -876,11 +870,6 @@ QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 
 QString FormatPluginCardNote(const ::Plugins::PluginState &state) {
 	auto lines = QStringList();
-	if (!state.enabled && !state.disabledByRecovery && state.error.trimmed().isEmpty()) {
-		lines.push_back(PluginUiText(
-			u"Plugin is disabled."_q,
-			u"Плагин выключен."_q));
-	}
 	if (state.disabledByRecovery) {
 		lines.push_back(PluginUiText(
 			u"Disabled automatically after a recovery event."_q,
@@ -895,6 +884,68 @@ QString FormatPluginCardNote(const ::Plugins::PluginState &state) {
 			+ state.error.trimmed());
 	}
 	return lines.join(u"\n"_q);
+}
+
+void SharePluginPackage(
+		not_null<Window::SessionController*> controller,
+		const ::Plugins::PluginState &state);
+
+void RequestPluginRemoval(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> context,
+		const ::Plugins::PluginState &state,
+		Fn<void()> onRemoved);
+
+void AddPluginCardActionRow(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Window::SessionController*> controller,
+		const ::Plugins::PluginState &state,
+		Fn<void()> onChanged) {
+	const auto row = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		style::margins(0, 4, 0, 0),
+		style::al_top);
+	const auto raw = static_cast<Ui::RpWidget*>(row);
+	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
+	Ui::IconButton *share = nullptr;
+	const auto remove = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarDelete);
+
+	settings->setClickedCallback([=] {
+		controller->showSettings(PluginDetailsId(state.info.id));
+	});
+	if (!state.path.trimmed().isEmpty()) {
+		share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
+		share->setClickedCallback([=] {
+			SharePluginPackage(controller, state);
+		});
+	}
+	remove->setClickedCallback([=] {
+		RequestPluginRemoval(controller, raw, state, onChanged);
+	});
+
+	const auto buttonHeight = std::max({
+		settings->height(),
+		share ? share->height() : 0,
+		remove->height(),
+	});
+	raw->resize(raw->width(), buttonHeight);
+	raw->setMinimumHeight(buttonHeight);
+	raw->setMaximumHeight(buttonHeight);
+
+	raw->widthValue() | rpl::on_next([=](int width) {
+		const auto gap = 8;
+		auto buttons = std::vector<Ui::IconButton*>{ settings };
+		if (share) {
+			buttons.push_back(share);
+		}
+		buttons.push_back(remove);
+		auto left = 0;
+		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
+		for (const auto current : buttons) {
+			current->move(left, top);
+			left += current->width() + gap;
+		}
+	}, raw->lifetime());
 }
 
 void RevealPluginAuxFile(
@@ -962,54 +1013,6 @@ void RequestPluginRemoval(
 		}),
 		.confirmText = PluginUiText(u"Delete"_q, u"Удалить"_q),
 	}));
-}
-
-void AttachPluginCardActions(
-		not_null<Button*> button,
-		not_null<Window::SessionController*> controller,
-		const ::Plugins::PluginState &state,
-		Fn<void()> onChanged) {
-	const auto raw = static_cast<Ui::RpWidget*>(button.get());
-	const auto hasPackagePath = !state.path.trimmed().isEmpty();
-	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
-	Ui::IconButton *share = nullptr;
-	const auto remove = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarDelete);
-
-	settings->setClickedCallback([=] {
-		controller->showSettings(PluginDetailsId(state.info.id));
-	});
-	if (hasPackagePath) {
-		share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
-		share->setClickedCallback([=] {
-			SharePluginPackage(controller, state);
-		});
-	}
-	remove->setClickedCallback([=] {
-		RequestPluginRemoval(controller, raw, state, onChanged);
-	});
-
-	raw->widthValue() | rpl::on_next([=](int width) {
-		const auto gap = 6;
-		auto buttons = std::vector<Ui::IconButton*>{ settings };
-		if (share) {
-			buttons.push_back(share);
-		}
-		buttons.push_back(remove);
-		auto total = 0;
-		for (const auto current : buttons) {
-			total += current->width();
-		}
-		total += std::max(0, int(buttons.size()) - 1) * gap;
-		auto left = std::max(
-			8,
-			width - total - 8);
-		const auto buttonHeight = buttons.empty() ? 0 : buttons.front()->height();
-		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
-		for (const auto current : buttons) {
-			current->move(left, top);
-			left += current->width() + gap;
-		}
-	}, raw->lifetime());
 }
 
 void RequestSafeModeChange(
@@ -1435,8 +1438,27 @@ void Plugins::setupContent() {
 	Ui::ResizeFitChild(this, _content);
 }
 
+void Plugins::scheduleRebuildList(int delayMs) {
+	if (_rebuildScheduled) {
+		return;
+	}
+	_rebuildScheduled = true;
+	QTimer::singleShot(delayMs, this, [=] {
+		_rebuildScheduled = false;
+		_list->clear();
+		rebuildList();
+		Ui::ResizeFitChild(this, _content);
+		update();
+	});
+}
+
 void Plugins::rebuildList() {
 	_list->clear();
+	Ui::ResizeFitChild(this, _content);
+	update();
+	const auto scheduleRefresh = crl::guard(this, [=] {
+		scheduleRebuildList();
+	});
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
 			_list,
@@ -1467,14 +1489,14 @@ void Plugins::rebuildList() {
 		Ui::AddSkip(_list, kPluginCardVerticalMargin);
 
 		const auto title = FormatPluginTitle(state);
-		const auto versionBadge = FormatPluginStatusBadge(state);
+		const auto meta = PluginCardMetaText(state);
 		const auto summary = FormatPluginCardSummary(state);
 		const auto stateNote = FormatPluginCardNote(state);
 		const auto card = AddPluginCardContainer(_list, state);
-		const auto header = AddButtonWithIcon(
+		const auto header = card->add(object_ptr<Button>(
 			card,
 			rpl::single(title),
-			st::settingsPluginCardHeader);
+			st::settingsPluginCardHeader));
 		header->toggleOn(rpl::single(state.enabled));
 		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			header->setToggleLocked(true);
@@ -1486,23 +1508,22 @@ void Plugins::rebuildList() {
 					u"Could not change state."_q,
 					u"Не удалось изменить состояние плагина."_q));
 			}
-			QTimer::singleShot(0, this, [=] {
-				rebuildList();
-			});
+			scheduleRefresh();
 		}, header->lifetime());
-		AttachPluginCardActions(
-			header,
-			_controller,
-			state,
-			crl::guard(this, [=] { rebuildList(); }));
-		AddPluginMetaText(card, versionBadge);
+		if (!meta.text.isEmpty()) {
+			AddPluginMetaText(card, meta);
+		}
 		if (!summary.isEmpty()) {
 			AddPluginMetaText(card, summary);
 		}
-		AddPluginAuthorLabel(card, state.info.author);
 		if (!stateNote.isEmpty()) {
 			AddPluginMetaText(card, stateNote);
 		}
+		AddPluginCardActionRow(
+			card,
+			_controller,
+			state,
+			scheduleRefresh);
 	}
 
 	Ui::ResizeFitChild(this, _content);

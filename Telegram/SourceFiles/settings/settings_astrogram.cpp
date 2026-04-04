@@ -36,8 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-constexpr auto kHeaderHeight = 240;
-constexpr auto kAvatarSize = 120;
+constexpr auto kHeaderHeight = 214;
+constexpr auto kAvatarSize = 92;
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -110,7 +110,7 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 		}
 
 		auto titleFont = st::semiboldFont->f;
-		titleFont.setPixelSize(titleFont.pixelSize() + 9);
+		titleFont.setPixelSize(titleFont.pixelSize() + 5);
 		titleFont.setBold(true);
 		const auto titleMetrics = QFontMetrics(titleFont);
 		const auto titleTop = avatarRect.bottom() + 12;
@@ -123,7 +123,6 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 				u"Astrogram"_q);
 
 		auto versionFont = st::defaultFlatLabel.style.font->f;
-		versionFont.setPixelSize(versionFont.pixelSize() + 1);
 		const auto versionMetrics = QFontMetrics(versionFont);
 		const auto versionTop = titleTop + titleMetrics.height() + 6;
 
@@ -201,9 +200,6 @@ void AddSectionButton(
 void AddLinksSection(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	Ui::AddSkip(container);
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
 	Ui::AddSubsectionTitle(
 		container,
 		rpl::single(RuEn("Ссылки", "Links")));
@@ -242,6 +238,9 @@ void SetupAstrogramHome(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	AddAstrogramHeader(container);
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
 	AddSectionButton(
 		controller,
 		container,
@@ -275,9 +274,6 @@ void SetupAstrogramHome(
 		RuEn("Плагины", "Plugins"),
 		Plugins::Id(),
 		{ &st::menuIconCustomize });
-	Ui::AddSkip(container);
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
 	AddLinksSection(controller, container);
 }
 
