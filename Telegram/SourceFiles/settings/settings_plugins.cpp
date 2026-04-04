@@ -1513,10 +1513,9 @@ void Plugins::rebuildList() {
 	auto first = true;
 	for (const auto &state : plugins) {
 		if (!first) {
-			Ui::AddSkip(_list, st::settingsCheckboxesSkip);
+			Ui::AddSkip(_list, kPluginCardVerticalMargin);
 		}
 		first = false;
-		Ui::AddSkip(_list, kPluginCardVerticalMargin);
 
 		const auto title = FormatPluginTitle(state);
 		const auto meta = PluginCardMetaText(state);

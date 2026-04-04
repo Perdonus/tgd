@@ -36,8 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
-constexpr auto kHeaderHeight = 214;
-constexpr auto kAvatarSize = 92;
+constexpr auto kHeaderHeight = 188;
+constexpr auto kAvatarSize = 76;
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -109,8 +109,8 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 			p.restore();
 		}
 
-		auto titleFont = st::semiboldFont->f;
-		titleFont.setPixelSize(titleFont.pixelSize() + 5);
+	auto titleFont = st::semiboldFont->f;
+	titleFont.setPixelSize(titleFont.pixelSize() + 3);
 		titleFont.setBold(true);
 		const auto titleMetrics = QFontMetrics(titleFont);
 		const auto titleTop = avatarRect.bottom() + 12;
@@ -200,9 +200,6 @@ void AddSectionButton(
 void AddLinksSection(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn("Ссылки", "Links")));
 	AddActionButtonWithLabel(
 		container,
 		RuEn("Основной канал", "Main channel"),
