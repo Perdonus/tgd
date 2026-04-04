@@ -25,7 +25,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 TGD_PLUGIN_PREVIEW(
 	"astro.transparent",
 	"AstroTransparent",
-	"3.1",
+	"3.2",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
@@ -370,7 +370,7 @@ public:
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
-			_info.version = QStringLiteral("3.1");
+			_info.version = QStringLiteral("3.2");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -587,21 +587,6 @@ private:
 			if (!IsReadyWidget(widget) || widget->isWindow()) {
 				continue;
 			}
-			if (_windowOpacityPercent < kMaxOpacityPercent
-				&& (LooksLikeInterfaceContainer(widget) || LooksLikeInterfaceWidget(widget))
-				&& !HasTrackedAncestor(widget, messageTargets)
-				&& !HasTrackedAncestor(widget, textTargets)
-				&& !HasTrackedAncestor(widget, interfaceTargets)
-				&& !HasTrackedDescendant(widget, messageTargets)
-				&& !HasTrackedDescendant(widget, textTargets)) {
-				interfaceTargets.insert(widget);
-			}
-		}
-
-		for (auto *widget : widgets) {
-			if (!IsReadyWidget(widget) || widget->isWindow()) {
-				continue;
-			}
 			if (_messageOpacityPercent < kMaxOpacityPercent
 				&& LooksLikeMessageContainer(widget)
 				&& !HasTrackedAncestor(widget, messageTargets)) {
@@ -619,6 +604,21 @@ private:
 				&& !HasTrackedAncestor(widget, textTargets)
 				&& !HasTrackedDescendant(widget, textTargets)) {
 				textTargets.insert(widget);
+			}
+		}
+
+		for (auto *widget : widgets) {
+			if (!IsReadyWidget(widget) || widget->isWindow()) {
+				continue;
+			}
+			if (_windowOpacityPercent < kMaxOpacityPercent
+				&& (LooksLikeInterfaceContainer(widget) || LooksLikeInterfaceWidget(widget))
+				&& !HasTrackedAncestor(widget, messageTargets)
+				&& !HasTrackedAncestor(widget, textTargets)
+				&& !HasTrackedAncestor(widget, interfaceTargets)
+				&& !HasTrackedDescendant(widget, messageTargets)
+				&& !HasTrackedDescendant(widget, textTargets)) {
+				interfaceTargets.insert(widget);
 			}
 		}
 
