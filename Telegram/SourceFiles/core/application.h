@@ -356,7 +356,7 @@ protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
-	static constexpr auto kDefaultSaveDelay = crl::time(1000);
+	static constexpr auto kDefaultSaveDelay = crl::time(150);
 
 	friend bool IsAppLaunched();
 	friend Application &App();

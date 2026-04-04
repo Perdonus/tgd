@@ -755,7 +755,7 @@ void OpenPluginsFolder() {
 }
 
 constexpr auto kPluginCardRadius = 20.;
-constexpr auto kPluginCardVerticalMargin = 10;
+constexpr auto kPluginCardVerticalMargin = 6;
 
 [[nodiscard]] QColor PluginCardBackgroundColor(
 		const ::Plugins::PluginState &state) {
@@ -787,15 +787,15 @@ constexpr auto kPluginCardVerticalMargin = 10;
 		const ::Plugins::PluginState &state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(0, 0, 0, 0),
+		style::margins(6, 0, 6, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
-		st::settingsButton.padding.left(),
-		12,
-		st::settingsButton.padding.right(),
-		14);
+		14,
+		10,
+		14,
+		12);
 
 	raw->widthValue() | rpl::on_next([=](int width) {
 		const auto innerWidth = std::max(0, width - margins.left() - margins.right());
@@ -925,7 +925,7 @@ void AttachPluginCardActions(
 		Fn<void()> onChanged) {
 	const auto raw = static_cast<Ui::RpWidget*>(button.get());
 	const auto hasPackagePath = !state.path.trimmed().isEmpty();
-	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarEdit);
+	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
 	Ui::IconButton *share = nullptr;
 	const auto remove = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarDelete);
 
@@ -955,8 +955,8 @@ void AttachPluginCardActions(
 		}
 		total += std::max(0, int(buttons.size()) - 1) * gap;
 		auto left = std::max(
-			st::settingsButton.padding.left(),
-			width - total - st::settingsButton.padding.right() - 6);
+			14,
+			width - total - 14);
 		const auto buttonHeight = buttons.empty() ? 0 : buttons.front()->height();
 		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
 		for (const auto current : buttons) {
@@ -1428,12 +1428,8 @@ void Plugins::rebuildList() {
 		const auto header = AddButtonWithIcon(
 			card,
 			rpl::single(title),
-			state.recoverySuspected
-				? st::settingsAttentionButton
-				: !state.error.isEmpty() && !state.disabledByRecovery
-				? st::settingsOptionDisabled
-				: st::settingsButtonLightNoIcon);
-			header->toggleOn(rpl::single(state.enabled));
+			st::settingsPluginCardHeader);
+		header->toggleOn(rpl::single(state.enabled));
 		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			header->setToggleLocked(true);
 		}
@@ -1443,9 +1439,11 @@ void Plugins::rebuildList() {
 				_controller->window().showToast(PluginUiText(
 					u"Could not change state."_q,
 					u"Не удалось изменить состояние плагина."_q));
-					}
+			}
+			QTimer::singleShot(0, this, [=] {
 				rebuildList();
-			}, header->lifetime());
+			});
+		}, header->lifetime());
 		AttachPluginCardActions(
 			header,
 			_controller,
