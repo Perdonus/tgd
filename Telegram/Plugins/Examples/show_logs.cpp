@@ -30,7 +30,7 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.4",
+	"1.5",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
 	"https://sosiskibot.ru",
@@ -188,12 +188,11 @@ public:
 		ClearHandler clearHandler,
 		ToastHandler toastHandler,
 		QWidget *parent)
-		: QDialog(nullptr)
+		: QDialog(parent)
 	, _host(host)
 	, _readHandler(std::move(readHandler))
 	, _clearHandler(std::move(clearHandler))
 		, _toastHandler(std::move(toastHandler)) {
-			Q_UNUSED(parent);
 			setWindowFlags(
 				Qt::Dialog
 				| Qt::WindowTitleHint
@@ -542,6 +541,10 @@ private:
 				u8"Не удалось найти окно Astrogram для overlay с логами."));
 			return;
 		}
+		if (_overlay && _overlay->parentWidget() != anchor) {
+			_overlay->close();
+			_overlay = nullptr;
+		}
 		if (!_overlay) {
 			_overlay = new LogsOverlay(
 				_host,
@@ -554,7 +557,7 @@ private:
 					[this](const QString &text) {
 						_host->showToast(text);
 					},
-					nullptr);
+					anchor);
 			_overlay->setMaxLines(_maxLines);
 		}
 		_overlay->setMaxLines(_maxLines);

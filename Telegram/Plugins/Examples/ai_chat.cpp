@@ -44,7 +44,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"2.1",
+	"2.2",
 	"@etopizdesblin",
 	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -53,7 +53,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "2.1";
+constexpr auto kPluginVersion = "2.2";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
@@ -487,9 +487,12 @@ private:
 			launched = url.isValid() && QDesktopServices::openUrl(url);
 		}
 		if (!launched) {
+			if (const auto clipboard = QGuiApplication::clipboard()) {
+				clipboard->setText(urlText);
+			}
 			_host->showToast(tr(
-				QStringLiteral("Could not open sosiskibot.ru."),
-				u8"Не удалось открыть sosiskibot.ru."));
+				QStringLiteral("Could not open sosiskibot.ru. The link was copied to the clipboard."),
+				u8"Не удалось открыть sosiskibot.ru. Ссылка скопирована в буфер обмена."));
 		}
 	}
 
