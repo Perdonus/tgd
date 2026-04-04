@@ -130,12 +130,11 @@ namespace {
 		const auto offset = result.text.size();
 		result.text += author.text;
 		for (const auto &entity : author.entities) {
-			result.entities.push_back({
+			result.entities.push_back(EntityInText(
 				entity.type,
 				entity.offset + offset,
 				entity.length,
-				entity.data,
-			});
+				entity.data));
 		}
 	}
 	return result;
@@ -990,7 +989,12 @@ void RequestPluginRemoval(
 				return;
 			}
 			if (onRemoved) {
-				onRemoved();
+				QTimer::singleShot(
+					120,
+					context.get(),
+					crl::guard(context, [=] {
+						onRemoved();
+					}));
 			}
 		}),
 		.confirmText = PluginUiText(u"Delete"_q, u"Удалить"_q),
@@ -1466,8 +1470,6 @@ void Plugins::scheduleRebuildList(int delayMs) {
 
 void Plugins::rebuildList() {
 	_list->clear();
-	Ui::ResizeFitChild(this, _content);
-	update();
 	const auto scheduleRefresh = crl::guard(this, [=] {
 		scheduleRebuildList(0);
 	});
