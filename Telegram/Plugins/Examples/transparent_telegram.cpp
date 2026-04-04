@@ -25,7 +25,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 TGD_PLUGIN_PREVIEW(
 	"astro.transparent",
 	"AstroTransparent",
-	"3.2",
+	"3.3",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
@@ -169,7 +169,39 @@ bool LooksLikeMessageContainer(QWidget *widget) {
 				"item",
 				"entry",
 			});
+}
+
+bool BelongsToConversationTree(QWidget *widget) {
+	const auto matches = [](QWidget *candidate) {
+		return HasAnyNameToken(candidate, {
+			"history",
+			"message",
+			"bubble",
+			"media",
+			"photo",
+			"video",
+			"sticker",
+			"gif",
+			"album",
+			"reply",
+			"attachment",
+			"webpage",
+			"reactions",
+			"comments",
+		});
+	};
+	if (matches(widget)) {
+		return true;
 	}
+	for (auto *parent = widget ? widget->parentWidget() : nullptr;
+		parent;
+		parent = parent->parentWidget()) {
+		if (matches(parent)) {
+			return true;
+		}
+	}
+	return false;
+}
 
 bool LooksLikeTextWidget(QWidget *widget) {
 	if (!widget || widget->isWindow() || !IsReadyWidget(widget)) {
@@ -224,8 +256,6 @@ bool LooksLikeInterfaceWidget(QWidget *widget) {
 		"panel",
 		"background",
 		"sidebar",
-		"history",
-		"chat",
 		"list",
 		"footer",
 		"header",
@@ -233,7 +263,6 @@ bool LooksLikeInterfaceWidget(QWidget *widget) {
 		"controls",
 		"search",
 		"compose",
-		"reply",
 		"tabs",
 		"navigation",
 		"info",
@@ -287,14 +316,9 @@ bool LooksLikeInterfaceContainer(QWidget *widget) {
 		"background",
 		"column",
 		"chatlist",
-		"history",
 		"compose",
-		"content",
 		"wrap",
 		"container",
-		"body",
-		"main",
-		"stack",
 		"settings",
 	});
 }
@@ -589,7 +613,8 @@ private:
 			}
 			if (_messageOpacityPercent < kMaxOpacityPercent
 				&& LooksLikeMessageContainer(widget)
-				&& !HasTrackedAncestor(widget, messageTargets)) {
+				&& !HasTrackedAncestor(widget, messageTargets)
+				&& !HasTrackedDescendant(widget, messageTargets)) {
 				messageTargets.insert(widget);
 			}
 		}
@@ -600,6 +625,7 @@ private:
 			}
 			if (_textOpacityPercent < kMaxOpacityPercent
 				&& LooksLikeTextWidget(widget)
+				&& !BelongsToConversationTree(widget)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedAncestor(widget, textTargets)
 				&& !HasTrackedDescendant(widget, textTargets)) {
@@ -613,6 +639,7 @@ private:
 			}
 			if (_windowOpacityPercent < kMaxOpacityPercent
 				&& (LooksLikeInterfaceContainer(widget) || LooksLikeInterfaceWidget(widget))
+				&& !BelongsToConversationTree(widget)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedAncestor(widget, textTargets)
 				&& !HasTrackedAncestor(widget, interfaceTargets)

@@ -44,7 +44,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"2.0",
+	"2.1",
 	"@etopizdesblin",
 	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
@@ -53,7 +53,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "2.0";
+constexpr auto kPluginVersion = "2.1";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
@@ -442,7 +442,7 @@ private:
 			return;
 		}
 		if (setting.id == Latin1(kOpenSiteSettingId)) {
-			QTimer::singleShot(120, this, [this] {
+			QTimer::singleShot(220, this, [this] {
 				if (!_isUnloading) {
 					openSite();
 				}
@@ -621,7 +621,7 @@ private:
 
 	void scheduleOpenChat(const QString &prefill, QWidget *preferredWindow = nullptr) {
 		const auto normalizedPrefill = NormalizeText(prefill);
-		QTimer::singleShot(120, this, [this, normalizedPrefill, preferredWindow] {
+		QTimer::singleShot(180, this, [this, normalizedPrefill, preferredWindow] {
 			if (_isUnloading) {
 				return;
 			}
@@ -653,7 +653,7 @@ private:
 		void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
 			auto *dialogParent = stableParentWindow(parentWindow);
 			auto dialog = new QDialog(
-				dialogParent,
+				nullptr,
 				Qt::Dialog
 					| Qt::WindowTitleHint
 					| Qt::WindowCloseButtonHint
