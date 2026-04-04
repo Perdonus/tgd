@@ -38,16 +38,16 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 TGD_PLUGIN_PREVIEW(
 	"sosiskibot.ai_chat",
 	"AI Chat",
-	"1.6",
+	"1.7",
 	"@etopizdesblin",
-	"Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api.",
+	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
 	"https://sosiskibot.ru",
 	"")
 
 namespace {
 
 constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "1.6";
+constexpr auto kPluginVersion = "1.7";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kSiteUrl = "https://sosiskibot.ru";
 constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
@@ -319,8 +319,8 @@ private:
 		_info.version = Latin1(kPluginVersion);
 		_info.author = Latin1(kPluginAuthor);
 		_info.description = tr(
-			QStringLiteral("Intercepts /ai, opens an AI chat dialog, and uses sosiskibot.ru/api."),
-			u8"Перехватывает /ai, открывает диалог ИИ-чата и использует sosiskibot.ru/api.");
+			QStringLiteral("Intercepts /ai, opens the built-in Astrogram AI chat, and uses sosiskibot.ru/api."),
+			u8"Перехватывает /ai, открывает встроенный ИИ-чат Astrogram и использует sosiskibot.ru/api.");
 		_info.website = Latin1(kSiteUrl);
 	}
 
@@ -394,8 +394,8 @@ private:
 			QStringLiteral("AI Chat"),
 			u8"ИИ-чат");
 		page.description = tr(
-			QStringLiteral("Configure the built-in AI chat dialog and access to sosiskibot.ru."),
-			u8"Настройте встроенный ИИ-чат и доступ к sosiskibot.ru.");
+			QStringLiteral("Configure the built-in Astrogram AI chat and access to sosiskibot.ru."),
+			u8"Настройте встроенный ИИ-чат Astrogram и доступ к sosiskibot.ru.");
 		page.sections.push_back(section);
 		return page;
 	}
@@ -428,11 +428,19 @@ private:
 			return;
 		}
 		if (setting.id == Latin1(kOpenChatSettingId)) {
-			scheduleOpenChat(QString());
+			QTimer::singleShot(0, this, [this] {
+				if (!_isUnloading) {
+					scheduleOpenChat(QString());
+				}
+			});
 			return;
 		}
 		if (setting.id == Latin1(kOpenSiteSettingId)) {
-			openSite();
+			QTimer::singleShot(0, this, [this] {
+				if (!_isUnloading) {
+					openSite();
+				}
+			});
 			return;
 		}
 	}
@@ -459,7 +467,8 @@ private:
 			}
 		}
 		const auto token = normalized.mid(1, end - 1);
-		if (token.compare(QStringLiteral("ai"), Qt::CaseInsensitive) != 0) {
+		const auto command = token.section(QChar::fromLatin1('@'), 0, 0);
+		if (command.compare(QStringLiteral("ai"), Qt::CaseInsensitive) != 0) {
 			return false;
 		}
 		if (args) {
@@ -513,43 +522,59 @@ private:
 		return *_standaloneState;
 	}
 
-	QWidget *resolveChatWindow(QWidget *preferred = nullptr) const {
-		if (preferred) {
-			if (auto *top = preferred->window();
-				top && top->isWindow() && !top->parentWidget()) {
-				return top;
-			}
+	QWidget *stableParentWindow(QWidget *candidate) const {
+		if (!candidate) {
+			return nullptr;
 		}
-		if (auto *active = _host->activeWindowWidget()) {
-			if (auto *top = active->window();
-				top && top->isWindow() && !top->parentWidget()) {
-				return top;
-			}
+		auto *top = candidate->window();
+		if (!top || !top->isWindow() || top->parentWidget()) {
+			return nullptr;
+		}
+		const auto type = top->windowType();
+		if (type == Qt::Dialog
+			|| type == Qt::Popup
+			|| type == Qt::Tool
+			|| type == Qt::ToolTip
+			|| type == Qt::Sheet
+			|| type == Qt::Drawer
+			|| type == Qt::SplashScreen
+			|| type == Qt::SubWindow
+			|| qobject_cast<QDialog*>(top)) {
+			return nullptr;
+		}
+		if (!top->testAttribute(Qt::WA_WState_Created)
+			|| top->testAttribute(Qt::WA_DontShowOnScreen)
+			|| !top->isVisible()) {
+			return nullptr;
+		}
+		return top;
+	}
+
+	QWidget *resolveChatWindow(QWidget *preferred = nullptr) const {
+		if (auto *stable = stableParentWindow(preferred)) {
+			return stable;
+		}
+		if (auto *stable = stableParentWindow(_host->activeWindowWidget())) {
+			return stable;
 		}
 		auto *hostFallback = static_cast<QWidget*>(nullptr);
 		_host->forEachWindowWidget([&](QWidget *widget) {
 			if (hostFallback || !widget) {
 				return;
 			}
-			if (auto *top = widget->window();
-				top && top->isWindow() && !top->parentWidget()) {
-				hostFallback = top;
+			if (auto *stable = stableParentWindow(widget)) {
+				hostFallback = stable;
 			}
 		});
 		if (hostFallback) {
 			return hostFallback;
 		}
-		if (auto *active = QApplication::activeWindow();
-			active && active->isWindow() && !active->parentWidget()) {
-			return active;
+		if (auto *stable = stableParentWindow(QApplication::activeWindow())) {
+			return stable;
 		}
 		for (auto *widget : QApplication::topLevelWidgets()) {
-			if (widget
-				&& widget->isWindow()
-				&& !widget->parentWidget()
-				&& widget->testAttribute(Qt::WA_WState_Created)
-				&& !widget->testAttribute(Qt::WA_DontShowOnScreen)) {
-				return widget;
+			if (auto *stable = stableParentWindow(widget)) {
+				return stable;
 			}
 		}
 		return nullptr;
@@ -592,8 +617,9 @@ private:
 	}
 
 	void createDialog(QWidget *parentWindow, WindowState &state, QWidget *stateKey) {
+		auto *dialogParent = stableParentWindow(parentWindow);
 		auto dialog = new QDialog(
-			parentWindow,
+			dialogParent,
 			Qt::Dialog
 				| Qt::WindowTitleHint
 				| Qt::WindowCloseButtonHint
@@ -606,8 +632,8 @@ private:
 			QStringLiteral("AI Chat"),
 			u8"ИИ-чат"));
 		dialog->resize(kDialogWidth, kDialogHeight);
-		if (parentWindow) {
-			const auto center = parentWindow->frameGeometry().center();
+		if (dialogParent) {
+			const auto center = dialogParent->frameGeometry().center();
 			dialog->move(center - QPoint(dialog->width() / 2, dialog->height() / 2));
 		}
 

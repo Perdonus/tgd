@@ -29,9 +29,9 @@ Allows scale tuning and loading a custom font from file or URL.
 TGD_PLUGIN_PREVIEW(
 	"astro.font_tuner",
 	"Font Tuner",
-	"1.4",
+	"1.5",
 	"@etopizdesblin",
-	"Tunes Astrogram fonts, loads a custom font from file or URL, and applies a live scale.",
+	"Tunes Astrogram fonts, loads a custom font from file or URL, and applies the changes live.",
 	"https://sosiskibot.ru",
 	"GusTheDuck/11")
 
@@ -124,12 +124,12 @@ public:
 			_host,
 			"Font Tuner",
 			u8"Тюнер шрифтов");
-		_info.version = QStringLiteral("1.4");
+		_info.version = QStringLiteral("1.5");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
-			"Tunes Astrogram fonts, loads a custom font from file or URL, and applies a live scale.",
-			u8"Настраивает шрифты Astrogram, загружает пользовательский шрифт из файла или по ссылке и применяет масштаб вживую.");
+			"Tunes Astrogram fonts, loads a custom font from file or URL, and applies the changes live.",
+			u8"Настраивает шрифты Astrogram, загружает пользовательский шрифт из файла или по ссылке и применяет изменения сразу.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 		_baseFont = QApplication::font();
 		_scalePercent = readScalePercent();

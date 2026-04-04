@@ -25,7 +25,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 TGD_PLUGIN_PREVIEW(
 	"astro.transparent",
 	"AstroTransparent",
-	"2.7",
+	"2.8",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"https://sosiskibot.ru",
@@ -111,10 +111,10 @@ bool LooksLikeMessageContainer(QWidget *widget) {
 	if (widget->width() < 36 || widget->height() < 20) {
 		return false;
 	}
-	if (HasAnyNameToken(widget, {
-			"tooltip",
-			"menu",
-			"button",
+		if (HasAnyNameToken(widget, {
+				"tooltip",
+				"menu",
+				"button",
 			"checkbox",
 			"radio",
 			"slider",
@@ -123,28 +123,36 @@ bool LooksLikeMessageContainer(QWidget *widget) {
 			"input",
 			"editfield",
 			"settings",
-			"controls",
-			"title",
-			"subtitle",
-			"header",
-		})) {
-		return false;
+				"controls",
+				"title",
+				"subtitle",
+				"header",
+				"sidebar",
+				"panel",
+			})) {
+			return false;
+		}
+		if (widget->inherits("QLabel")
+			|| widget->inherits("QAbstractButton")
+			|| widget->inherits("QLineEdit")
+			|| widget->inherits("QTextEdit")
+			|| widget->inherits("QPlainTextEdit")) {
+			return false;
+		}
+		return HasAnyNameToken(widget, {
+			"message",
+			"bubble",
+			"media",
+			"photo",
+			"video",
+			"sticker",
+			"gif",
+			"album",
+			"reply",
+			"webpage",
+			"attachment",
+		});
 	}
-	return HasAnyNameToken(widget, {
-		"history",
-		"message",
-		"bubble",
-		"media",
-		"photo",
-		"video",
-		"overview",
-		"peerlist",
-		"dialogs",
-		"chatlist",
-		"background",
-		"compose",
-	});
-}
 
 bool LooksLikeTextWidget(QWidget *widget) {
 	if (!widget || widget->isWindow() || !IsReadyWidget(widget)) {
@@ -155,12 +163,18 @@ bool LooksLikeTextWidget(QWidget *widget) {
 		|| widget->inherits("QLineEdit")
 		|| widget->inherits("QTextEdit")
 		|| widget->inherits("QPlainTextEdit")
+		|| widget->metaObject()->indexOfProperty("text") >= 0
+		|| widget->metaObject()->indexOfProperty("placeholderText") >= 0
 		|| HasAnyNameToken(widget, {
 			"label",
 			"text",
 			"caption",
 			"title",
 			"subtitle",
+			"name",
+			"status",
+			"hint",
+			"value",
 			"lineedit",
 			"input",
 			"button",
@@ -178,6 +192,32 @@ bool HasTrackedAncestor(
 		}
 	}
 	return false;
+}
+
+bool HasTrackedDescendant(
+		QWidget *widget,
+		const QSet<QWidget*> &tracked) {
+	if (!widget) {
+		return false;
+	}
+	for (auto *trackedWidget : tracked) {
+		if (trackedWidget
+			&& trackedWidget != widget
+			&& widget->isAncestorOf(trackedWidget)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+int WidgetDepth(QWidget *widget) {
+	auto depth = 0;
+	for (auto *parent = widget ? widget->parentWidget() : nullptr;
+		parent;
+		parent = parent->parentWidget()) {
+		++depth;
+	}
+	return depth;
 }
 
 QList<QWidget*> WindowRoots(Plugins::Host *host) {
@@ -212,7 +252,7 @@ public:
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
-		_info.version = QStringLiteral("2.7");
+		_info.version = QStringLiteral("2.8");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -346,7 +386,7 @@ private:
 			return;
 		}
 		_windowOpacityPercent = clamped;
-		scheduleAppearanceApply();
+		applyCurrentAppearance();
 	}
 
 	void setMessageOpacityPercent(int value) {
@@ -355,7 +395,7 @@ private:
 			return;
 		}
 		_messageOpacityPercent = clamped;
-		scheduleAppearanceApply();
+		applyCurrentAppearance();
 	}
 
 	void setTextOpacityPercent(int value) {
@@ -364,7 +404,7 @@ private:
 			return;
 		}
 		_textOpacityPercent = clamped;
-		scheduleAppearanceApply();
+		applyCurrentAppearance();
 	}
 
 	void scheduleAppearanceApply() {
@@ -412,6 +452,12 @@ private:
 		for (auto *child : children) {
 			widgets.push_back(child);
 		}
+		std::sort(
+			widgets.begin(),
+			widgets.end(),
+			[](QWidget *a, QWidget *b) {
+				return WidgetDepth(a) > WidgetDepth(b);
+			});
 
 		for (auto *widget : widgets) {
 			if (!IsReadyWidget(widget) || widget->isWindow()) {
@@ -419,7 +465,8 @@ private:
 			}
 			if (_messageOpacityPercent < kMaxOpacityPercent
 				&& LooksLikeMessageContainer(widget)
-				&& !HasTrackedAncestor(widget, messageTargets)) {
+				&& !HasTrackedAncestor(widget, messageTargets)
+				&& !HasTrackedDescendant(widget, messageTargets)) {
 				messageTargets.insert(widget);
 			}
 		}
@@ -431,7 +478,8 @@ private:
 			if (_textOpacityPercent < kMaxOpacityPercent
 				&& LooksLikeTextWidget(widget)
 				&& !HasTrackedAncestor(widget, messageTargets)
-				&& !HasTrackedAncestor(widget, textTargets)) {
+				&& !HasTrackedAncestor(widget, textTargets)
+				&& !HasTrackedDescendant(widget, textTargets)) {
 				textTargets.insert(widget);
 			}
 		}
