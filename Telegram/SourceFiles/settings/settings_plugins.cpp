@@ -1285,7 +1285,38 @@ private:
 		_title = FormatPluginTitle(*state);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
 
+		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
+
+		if (!actions.empty()) {
+			Ui::AddSubsectionTitle(
+				_content,
+				rpl::single(PluginUiText(u"Actions"_q, u"Действия"_q)));
+			for (const auto &action : actions) {
+				Ui::AddSkip(_content);
+				const auto button = _content->add(object_ptr<Ui::SettingsButton>(
+					_content,
+					rpl::single(action.title.trimmed().isEmpty()
+						? PluginUiText(u"Run action"_q, u"Выполнить действие"_q)
+						: action.title.trimmed()),
+					st::settingsButtonNoIcon));
+				button->setClickedCallback([=] {
+					if (!Core::App().plugins().triggerAction(action.id)) {
+						_controller->window().showToast(PluginUiText(
+							u"Could not run the plugin action."_q,
+							u"Не удалось выполнить действие плагина."_q));
+					}
+				});
+				if (!action.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						_content,
+						rpl::single(action.description.trimmed()));
+				}
+			}
+			if (!settingsPages.empty()) {
+				Ui::AddSkip(_content);
+			}
+		}
 
 		if (!settingsPages.empty()) {
 			Ui::AddSubsectionTitle(

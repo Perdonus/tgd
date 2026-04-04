@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
+#include "plugins/plugins_manager.h"
 #include "settings/settings_advanced.h"
 #include "settings/settings_calls.h"
 #include "settings/settings_information.h"
@@ -748,6 +749,23 @@ void MainMenu::setupMenu() {
 	)->setClickedCallback([=] {
 		controller->showSettings(Settings::Astrogram::Id());
 	});
+	if (const auto logActions = Core::App().plugins().actionsFor(
+			QStringLiteral("astro.show_logs"));
+		!logActions.empty()) {
+		const auto action = logActions.front();
+		addAction(
+			rpl::single(action.title.isEmpty()
+				? RuEn("Показать логи", "Show Logs")
+				: action.title),
+			{ &st::menuIconIpAddress }
+		)->setClickedCallback([=] {
+			if (!Core::App().plugins().triggerAction(action.id)) {
+				controller->window().showToast(RuEn(
+					"Не удалось открыть окно логов.",
+					"Could not open the logs overlay."));
+			}
+		});
+	}
 	addAction(
 		rpl::single(RuEn("Режим призрака", "Ghost mode")),
 		{ &st::menuIconLock }
