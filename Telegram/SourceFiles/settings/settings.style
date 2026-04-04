@@ -32,7 +32,7 @@ settingsButtonLight: SettingsButton(settingsButton) {
 settingsButtonLightNoIcon: SettingsButton(settingsButtonLight, settingsButtonNoIcon) {
 }
 settingsPluginCardHeader: SettingsButton(settingsButtonLightNoIcon) {
-	padding: margins(12px, 8px, 122px, 8px);
+	padding: margins(8px, 8px, 122px, 8px);
 	textBg: transparent;
 	textBgOver: transparent;
 }

@@ -64,12 +64,37 @@ namespace {
 	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
 }
 
+[[nodiscard]] QString NormalizedTelegramHandle(QString value) {
+	value = value.trimmed();
+	if (value.startsWith(QChar::fromLatin1('@'))) {
+		value.remove(0, 1);
+	}
+	if (value.isEmpty()) {
+		return QString();
+	}
+	for (const auto ch : value) {
+		if (!IsTelegramHandleChar(ch)) {
+			return QString();
+		}
+	}
+	return value;
+}
+
 [[nodiscard]] TextWithEntities PluginAuthorText(const QString &author) {
 	const auto trimmed = author.trimmed();
 	auto result = TextWithEntities{
 		PluginUiText(u"Author: "_q, u"Автор: "_q) + trimmed
 	};
 	const auto offset = result.text.size() - trimmed.size();
+	if (const auto handle = NormalizedTelegramHandle(trimmed); !handle.isEmpty()) {
+		result.entities.push_back({
+			EntityType::CustomUrl,
+			offset,
+			trimmed.size(),
+			u"https://t.me/"_q + handle,
+		});
+		return result;
+	}
 	for (auto i = 0; i < trimmed.size();) {
 		if (trimmed[i] != QChar::fromLatin1('@')) {
 			++i;
@@ -113,6 +138,27 @@ void AddPluginAuthorLabel(
 		container,
 		rpl::single(PluginAuthorText(author)));
 	WireExternalLinks(label);
+}
+
+void AddPluginMetaText(
+		not_null<Ui::VerticalLayout*> container,
+		const TextWithEntities &text) {
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(text),
+			st::defaultFlatLabel),
+		style::margins(0, 0, 0, 0),
+		style::al_top);
+}
+
+void AddPluginMetaText(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text) {
+	if (text.trimmed().isEmpty()) {
+		return;
+	}
+	AddPluginMetaText(container, TextWithEntities{ text.trimmed() });
 }
 
 QString FormatPluginTitle(const ::Plugins::PluginState &state) {
@@ -787,14 +833,14 @@ constexpr auto kPluginCardVerticalMargin = 6;
 		const ::Plugins::PluginState &state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(6, 0, 6, 0),
+		style::margins(10, 0, 10, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
-		14,
+		8,
 		10,
-		14,
+		8,
 		12);
 
 	raw->widthValue() | rpl::on_next([=](int width) {
@@ -955,8 +1001,8 @@ void AttachPluginCardActions(
 		}
 		total += std::max(0, int(buttons.size()) - 1) * gap;
 		auto left = std::max(
-			14,
-			width - total - 14);
+			8,
+			width - total - 8);
 		const auto buttonHeight = buttons.empty() ? 0 : buttons.front()->height();
 		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
 		for (const auto current : buttons) {
@@ -1449,13 +1495,13 @@ void Plugins::rebuildList() {
 			_controller,
 			state,
 			crl::guard(this, [=] { rebuildList(); }));
-		Ui::AddDividerText(card, rpl::single(versionBadge));
+		AddPluginMetaText(card, versionBadge);
 		if (!summary.isEmpty()) {
-			Ui::AddDividerText(card, rpl::single(summary));
+			AddPluginMetaText(card, summary);
 		}
 		AddPluginAuthorLabel(card, state.info.author);
 		if (!stateNote.isEmpty()) {
-			Ui::AddDividerText(card, rpl::single(stateNote));
+			AddPluginMetaText(card, stateNote);
 		}
 	}
 

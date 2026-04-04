@@ -183,12 +183,37 @@ QString PluginPackageButtonText(const Plugins::PackagePreviewState &preview) {
 	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
 }
 
+[[nodiscard]] QString NormalizedTelegramHandle(QString value) {
+	value = value.trimmed();
+	if (value.startsWith(QChar::fromLatin1('@'))) {
+		value.remove(0, 1);
+	}
+	if (value.isEmpty()) {
+		return QString();
+	}
+	for (const auto ch : value) {
+		if (!IsTelegramHandleChar(ch)) {
+			return QString();
+		}
+	}
+	return value;
+}
+
 [[nodiscard]] TextWithEntities PluginAuthorText(const QString &author) {
 	const auto trimmed = author.trimmed();
 	auto result = TextWithEntities{
 		PluginUiText(u"Author: "_q, u"Автор: "_q) + trimmed
 	};
 	const auto offset = result.text.size() - trimmed.size();
+	if (const auto handle = NormalizedTelegramHandle(trimmed); !handle.isEmpty()) {
+		result.entities.push_back({
+			EntityType::CustomUrl,
+			offset,
+			trimmed.size(),
+			u"https://t.me/"_q + handle,
+		});
+		return result;
+	}
 	for (auto i = 0; i < trimmed.size();) {
 		if (trimmed[i] != QChar::fromLatin1('@')) {
 			++i;
