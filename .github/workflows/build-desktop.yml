@@ -708,7 +708,27 @@ jobs:
           cp "$stage/README.md" .
           git add Astrogram.exe metadata.json README.md
           git commit -m "publish Astrogram build ${GITHUB_RUN_NUMBER}"
-          git push origin HEAD:builds
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            if git fetch --depth 1 origin builds; then
+              remote_head="$(git rev-parse FETCH_HEAD)"
+              if git push --force-with-lease=refs/heads/builds:"${remote_head}" origin HEAD:builds; then
+                pushed=1
+                break
+              fi
+            else
+              if git push --force origin HEAD:builds; then
+                pushed=1
+                break
+              fi
+            fi
+            echo "publish push attempt ${attempt} failed, retrying in 5s..."
+            sleep 5
+          done
+          if [ "${pushed}" -ne 1 ]; then
+            echo "Failed to publish builds branch after retries." >&2
+            exit 1
+          fi
 
   publish_pages:
     name: Publish GitHub Pages

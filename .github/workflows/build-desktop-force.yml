@@ -646,7 +646,25 @@ jobs:
           git add Astrogram.exe metadata.json README.md
           git commit -m "publish Astrogram build ${{ github.run_number }}"
           git remote add origin "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
-          git push --force origin HEAD:builds
+          $pushed = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            git fetch --depth 1 origin builds *>$null
+            if ($LASTEXITCODE -eq 0) {
+              $remoteHead = (git rev-parse FETCH_HEAD).Trim()
+              git push --force-with-lease=refs/heads/builds:$remoteHead origin HEAD:builds
+            } else {
+              git push --force origin HEAD:builds
+            }
+            if ($LASTEXITCODE -eq 0) {
+              $pushed = $true
+              break
+            }
+            Write-Host "publish push attempt $attempt failed, retrying in 5s..."
+            Start-Sleep -Seconds 5
+          }
+          if (-not $pushed) {
+            throw 'Failed to publish builds branch after retries.'
+          }
           Pop-Location
 
   linux_deb:
