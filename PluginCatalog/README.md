@@ -13,7 +13,4 @@ Rules:
   - `transparent_telegram`
   - `ai_chat`
   - `show_logs`
-  - `ayu_safe`
   - `font_tuner`
-  - `blur_telegram`
-  - `accent_color`
