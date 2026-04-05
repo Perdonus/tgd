@@ -36,6 +36,9 @@ namespace Window {
 class Controller;
 } // namespace Window
 
+class QTcpServer;
+class QTcpSocket;
+
 namespace Plugins {
 
 struct PluginState {
@@ -218,24 +221,24 @@ public:
 	HostInfo hostInfo() const override;
 	SystemInfo systemInfo() const override;
 
-	private:
-		struct WindowHandlerEntry {
-			QString pluginId;
-			std::function<void(Window::Controller*)> handler;
-		};
-		struct WindowWidgetHandlerEntry {
-			QString pluginId;
-			std::function<void(QWidget*)> handler;
-		};
-		struct SessionHandlerEntry {
-			QString pluginId;
-			std::function<void(Main::Session*)> handler;
-		};
-		struct CommandEntry {
-			CommandId id = 0;
-			QString pluginId;
-			CommandDescriptor descriptor;
-			CommandHandler handler;
+private:
+	struct WindowHandlerEntry {
+		QString pluginId;
+		std::function<void(Window::Controller*)> handler;
+	};
+	struct WindowWidgetHandlerEntry {
+		QString pluginId;
+		std::function<void(QWidget*)> handler;
+	};
+	struct SessionHandlerEntry {
+		QString pluginId;
+		std::function<void(Main::Session*)> handler;
+	};
+	struct CommandEntry {
+		CommandId id = 0;
+		QString pluginId;
+		CommandDescriptor descriptor;
+		CommandHandler handler;
 	};
 	struct ActionEntry {
 		ActionId id = 0;
@@ -281,130 +284,141 @@ public:
 		QVector<MessageObserverId> messageObserverIds;
 	};
 
-		void loadConfig();
-		void saveConfig() const;
-		void appendLogLine(const QString &line) const;
-		void appendTraceLine(const QByteArray &line) const;
-		void writeLogRecord(
-			const QString &path,
-			const QByteArray &record,
-			bool jsonLog) const;
-		bool rotateLogFileIfNeeded(
-			const QString &path,
-			qsizetype recordSize,
-			bool jsonLog) const;
-		QJsonObject makeLogEvent(
-			QString phase,
-			QString event,
-			QJsonObject details = {}) const;
-		QString formatLogEventText(const QJsonObject &event) const;
-		void logEvent(
-			QString phase,
-			QString event,
-			QJsonObject details = {}) const;
-		void logLoadFailure(const QString &path, const QString &reason) const;
-		void logOperationStart(
-			const QString &kind,
-			const QStringList &pluginIds,
-			const QString &details);
-		void logOperationFinish(
-			const QString &result = QString(),
-			const QString &reason = QString());
-		quint64 currentOperationId() const;
-		QJsonObject pluginInfoToJson(const PluginInfo &info) const;
-		QJsonObject pluginStateToJson(const PluginState &state) const;
-		QJsonObject commandDescriptorToJson(
-			const CommandDescriptor &descriptor) const;
-		QJsonObject panelDescriptorToJson(
-			const PanelDescriptor &descriptor) const;
-		QJsonObject settingDescriptorToJson(
-			const SettingDescriptor &descriptor) const;
-		QJsonObject settingsPageDescriptorToJson(
-			const SettingsPageDescriptor &descriptor) const;
-		QJsonObject sendOptionsToJson(
-			const Api::SendOptions *options) const;
-		QJsonObject binaryInfoToJson(const BinaryInfo &info) const;
-		QJsonObject fileInfoToJson(const QFileInfo &info) const;
-		QJsonObject messageContextToJson(
-			const MessageEventContext &context) const;
-		QJsonObject commandResultToJson(const CommandResult &result) const;
-		QJsonObject registrationSummaryToJson(
-			const PluginRecord &record) const;
-		QString fileSha256(const QString &path) const;
-		void applyStoredSettings(
-			const QString &pluginId,
-			SettingsPageDescriptor &descriptor) const;
-		void rememberSettingValue(
-			const QString &pluginId,
-			const SettingDescriptor &descriptor);
-		void scanPlugins(bool metadataOnly = false);
-		void loadPluginMetadataOnly(const QString &path);
-		void loadPlugin(const QString &path);
+	void loadConfig();
+	void saveConfig() const;
+	void appendLogLine(const QString &line) const;
+	void appendTraceLine(const QByteArray &line) const;
+	void writeLogRecord(
+		const QString &path,
+		const QByteArray &record,
+		bool jsonLog) const;
+	bool rotateLogFileIfNeeded(
+		const QString &path,
+		qsizetype recordSize,
+		bool jsonLog) const;
+	QJsonObject makeLogEvent(
+		QString phase,
+		QString event,
+		QJsonObject details = {}) const;
+	QString formatLogEventText(const QJsonObject &event) const;
+	void logEvent(
+		QString phase,
+		QString event,
+		QJsonObject details = {}) const;
+	void logLoadFailure(const QString &path, const QString &reason) const;
+	void logOperationStart(
+		const QString &kind,
+		const QStringList &pluginIds,
+		const QString &details);
+	void logOperationFinish(
+		const QString &result = QString(),
+		const QString &reason = QString());
+	quint64 currentOperationId() const;
+	QJsonObject pluginInfoToJson(const PluginInfo &info) const;
+	QJsonObject pluginStateToJson(const PluginState &state) const;
+	QJsonObject commandDescriptorToJson(
+		const CommandDescriptor &descriptor) const;
+	QJsonObject panelDescriptorToJson(
+		const PanelDescriptor &descriptor) const;
+	QJsonObject settingDescriptorToJson(
+		const SettingDescriptor &descriptor) const;
+	QJsonObject settingsPageDescriptorToJson(
+		const SettingsPageDescriptor &descriptor) const;
+	QJsonObject sendOptionsToJson(
+		const Api::SendOptions *options) const;
+	QJsonObject binaryInfoToJson(const BinaryInfo &info) const;
+	QJsonObject fileInfoToJson(const QFileInfo &info) const;
+	QJsonObject messageContextToJson(
+		const MessageEventContext &context) const;
+	QJsonObject commandResultToJson(const CommandResult &result) const;
+	QJsonObject registrationSummaryToJson(
+		const PluginRecord &record) const;
+	QString fileSha256(const QString &path) const;
+	void applyStoredSettings(
+		const QString &pluginId,
+		SettingsPageDescriptor &descriptor) const;
+	void rememberSettingValue(
+		const QString &pluginId,
+		const SettingDescriptor &descriptor);
+	void scanPlugins(bool metadataOnly = false);
+	void loadPluginMetadataOnly(const QString &path);
+	void loadPlugin(const QString &path);
 	void unloadAll();
 	PluginRecord *findRecord(const QString &pluginId);
 	const PluginRecord *findRecord(const QString &pluginId) const;
 	void unregisterPluginCommands(const QString &pluginId);
-		void unregisterPluginActions(const QString &pluginId);
-		void unregisterPluginPanels(const QString &pluginId);
-		void unregisterPluginSettingsPages(const QString &pluginId);
-		void unregisterPluginOutgoingInterceptors(const QString &pluginId);
-		void unregisterPluginMessageObservers(const QString &pluginId);
-		void unregisterPluginWindowHandlers(const QString &pluginId);
-		void unregisterPluginWindowWidgetHandlers(const QString &pluginId);
-		void unregisterPluginSessionHandlers(const QString &pluginId);
-		QString commandKey(const QString &command) const;
-		bool hasPlugin(const QString &pluginId) const;
-		void disablePlugin(const QString &pluginId, const QString &reason);
-		void disablePlugin(
-			const QString &pluginId,
-			const QString &reason,
-			bool disabledByRecovery,
-			const QString &recoveryReason);
-		void loadRecoveryState();
-		void saveRecoveryState() const;
-		void recoverFromPendingState();
-		void startRecoveryOperation(
-			QString kind,
-			QStringList pluginIds = {},
-			QString details = QString());
-		void finishRecoveryOperation();
-		void syncRecoveryFlags(PluginState &state) const;
-		void clearRecoveryDisabled(const QString &pluginId);
-		void queueRecoveryNotice(
-			QString kind,
-			QStringList pluginIds,
-			QString details);
-		void showRecoveryNotice(Window::Controller *window);
-		QStringList describeRecoveryPlugins(
-			const QStringList &pluginIds) const;
-		QString composeRecoveryClipboardText() const;
-		void updateMessageObserverSubscriptions();
-		void handleActiveSessionChanged(Main::Session *session);
-		void dispatchMessageEvent(
-			Main::Session *session,
-			const MessageEventContext &context,
+	void unregisterPluginActions(const QString &pluginId);
+	void unregisterPluginPanels(const QString &pluginId);
+	void unregisterPluginSettingsPages(const QString &pluginId);
+	void unregisterPluginOutgoingInterceptors(const QString &pluginId);
+	void unregisterPluginMessageObservers(const QString &pluginId);
+	void unregisterPluginWindowHandlers(const QString &pluginId);
+	void unregisterPluginWindowWidgetHandlers(const QString &pluginId);
+	void unregisterPluginSessionHandlers(const QString &pluginId);
+	QString commandKey(const QString &command) const;
+	bool hasPlugin(const QString &pluginId) const;
+	void disablePlugin(const QString &pluginId, const QString &reason);
+	void disablePlugin(
+		const QString &pluginId,
+		const QString &reason,
+		bool disabledByRecovery,
+		const QString &recoveryReason);
+	void loadRecoveryState();
+	void saveRecoveryState() const;
+	void recoverFromPendingState();
+	void startRecoveryOperation(
+		QString kind,
+		QStringList pluginIds = {},
+		QString details = QString());
+	void finishRecoveryOperation();
+	void syncRecoveryFlags(PluginState &state) const;
+	void clearRecoveryDisabled(const QString &pluginId);
+	void queueRecoveryNotice(
+		QString kind,
+		QStringList pluginIds,
+		QString details);
+	void showRecoveryNotice(Window::Controller *window);
+	QStringList describeRecoveryPlugins(
+		const QStringList &pluginIds) const;
+	QString composeRecoveryClipboardText() const;
+	void updateMessageObserverSubscriptions();
+	void handleActiveSessionChanged(Main::Session *session);
+	void dispatchMessageEvent(
+		Main::Session *session,
+		const MessageEventContext &context,
 		const MessageObserverOptions &options,
 		const MessageObserverEntry &entry);
 
-		QString _pluginsPath;
-		QString _configPath;
-		QString _logPath;
+	void ensureRuntimeApiServerState();
+	bool startRuntimeApiServer();
+	void stopRuntimeApiServer();
+	void onRuntimeApiNewConnection();
+	void onRuntimeApiSocketReadyRead(QTcpSocket *socket);
+	QByteArray processRuntimeApiRequest(
+		const QByteArray &request,
+		bool &disableRuntimeApiAfterResponse);
+
+	QString _pluginsPath;
+	QString _configPath;
+	QString _logPath;
 	QString _tracePath;
 	QString _safeModePath;
 	QString _recoveryPath;
 	bool _runtimeApiEnabled = false;
 	int _runtimeApiPort = 37080;
+	std::unique_ptr<QTcpServer> _runtimeApiServer;
+	QHash<QTcpSocket*, QByteArray> _runtimeApiBuffers;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;
-		QSet<QString> _disabled;
-		QHash<QString, QJsonObject> _storedSettings;
-		QSet<QString> _disabledByRecovery;
-		RecoveryOperationState _recoveryPending;
-		RecoveryOperationState _recoveryNotice;
-		bool _recoveryNoticeShown = false;
-		QVector<TraceOperationState> _traceOperations;
-		quint64 _nextTraceOperationId = 1;
+	QSet<QString> _disabled;
+	QHash<QString, QJsonObject> _storedSettings;
+	QSet<QString> _disabledByRecovery;
+	RecoveryOperationState _recoveryPending;
+	RecoveryOperationState _recoveryNotice;
+	bool _recoveryNoticeShown = false;
+	QVector<TraceOperationState> _traceOperations;
+	quint64 _nextTraceOperationId = 1;
 
 	QHash<QString, CommandId> _commandIdByName;
 	QHash<CommandId, CommandEntry> _commands;
@@ -423,23 +437,21 @@ public:
 	QHash<QString, QVector<SettingsPageId>> _settingsPagesByPlugin;
 	SettingsPageId _nextSettingsPageId = 1;
 
-	QHash<OutgoingInterceptorId, OutgoingInterceptorEntry>
-		_outgoingInterceptors;
-	QHash<QString, QVector<OutgoingInterceptorId>>
-		_outgoingInterceptorsByPlugin;
+	QHash<OutgoingInterceptorId, OutgoingInterceptorEntry> _outgoingInterceptors;
+	QHash<QString, QVector<OutgoingInterceptorId>> _outgoingInterceptorsByPlugin;
 	OutgoingInterceptorId _nextOutgoingInterceptorId = 1;
 
 	QHash<MessageObserverId, MessageObserverEntry> _messageObservers;
 	QHash<QString, QVector<MessageObserverId>> _messageObserversByPlugin;
 	MessageObserverId _nextMessageObserverId = 1;
 
-		std::vector<WindowHandlerEntry> _windowHandlers;
-		std::vector<WindowWidgetHandlerEntry> _windowWidgetHandlers;
-		std::vector<SessionHandlerEntry> _sessionHandlers;
-		QString _registeringPluginId;
-		rpl::lifetime _sessionLifetime;
-		rpl::lifetime _messageObserverLifetime;
-		Main::Session *_activeSession = nullptr;
-	};
+	std::vector<WindowHandlerEntry> _windowHandlers;
+	std::vector<WindowWidgetHandlerEntry> _windowWidgetHandlers;
+	std::vector<SessionHandlerEntry> _sessionHandlers;
+	QString _registeringPluginId;
+	rpl::lifetime _sessionLifetime;
+	rpl::lifetime _messageObserverLifetime;
+	Main::Session *_activeSession = nullptr;
+};
 
 } // namespace Plugins

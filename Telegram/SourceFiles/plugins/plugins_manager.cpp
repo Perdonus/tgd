@@ -46,7 +46,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QThread>
 #include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 #include <QtGui/QGuiApplication>
+#include <QtNetwork/QHostAddress>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
 
 #include <algorithm>
 #include <exception>
@@ -755,12 +760,175 @@ RecoveryOperationState RecoveryOperationFromJson(
 	return state;
 }
 
+QByteArray RuntimeStatusText(int code) {
+	switch (code) {
+	case 200: return "OK";
+	case 201: return "Created";
+	case 400: return "Bad Request";
+	case 404: return "Not Found";
+	case 405: return "Method Not Allowed";
+	case 409: return "Conflict";
+	case 500: return "Internal Server Error";
+	default: return "OK";
+	}
+}
+
+QByteArray RuntimeJsonResponse(
+		int code,
+		const QJsonDocument &document) {
+	const auto payload = document.toJson(QJsonDocument::Compact);
+	auto response = QByteArray();
+	response.reserve(payload.size() + 256);
+	response += "HTTP/1.1 ";
+	response += QByteArray::number(code);
+	response += ' ';
+	response += RuntimeStatusText(code);
+	response += "\r\nContent-Type: application/json; charset=utf-8";
+	response += "\r\nConnection: close";
+	response += "\r\nContent-Length: ";
+	response += QByteArray::number(payload.size());
+	response += "\r\n\r\n";
+	response += payload;
+	return response;
+}
+
+QByteArray RuntimeErrorResponse(
+		int code,
+		const QString &message) {
+	return RuntimeJsonResponse(
+		code,
+		QJsonDocument(QJsonObject{
+			{ u"ok"_q, false },
+			{ u"error"_q, message },
+		}));
+}
+
+QByteArray RuntimeOkResponse(const QJsonObject &payload) {
+	auto result = payload;
+	if (!result.contains(u"ok"_q)) {
+		result.insert(u"ok"_q, true);
+	}
+	return RuntimeJsonResponse(200, QJsonDocument(result));
+}
+
+bool ParseRuntimeHttpRequest(
+		const QByteArray &buffer,
+		QString &method,
+		QString &target,
+		QHash<QByteArray, QByteArray> &headers,
+		QByteArray &body,
+		qsizetype &consumed,
+		QString &error) {
+	const auto headerEnd = buffer.indexOf("\r\n\r\n");
+	if (headerEnd < 0) {
+		error = u"incomplete"_q;
+		return false;
+	}
+	const auto headersPart = buffer.left(headerEnd);
+	const auto lines = headersPart.split('\n');
+	if (lines.isEmpty()) {
+		error = u"empty request"_q;
+		return false;
+	}
+	const auto requestLine = QByteArray(lines.front()).trimmed();
+	const auto requestParts = requestLine.split(' ');
+	if (requestParts.size() < 2) {
+		error = u"invalid request line"_q;
+		return false;
+	}
+	method = QString::fromLatin1(requestParts[0]).trimmed().toUpper();
+	target = QString::fromLatin1(requestParts[1]).trimmed();
+	headers.clear();
+	for (auto i = 1; i < lines.size(); ++i) {
+		const auto line = QByteArray(lines[i]).trimmed();
+		if (line.isEmpty()) {
+			continue;
+		}
+		const auto colon = line.indexOf(':');
+		if (colon <= 0) {
+			continue;
+		}
+		const auto key = line.left(colon).trimmed().toLower();
+		const auto value = line.mid(colon + 1).trimmed();
+		headers.insert(key, value);
+	}
+	auto contentLength = 0;
+	if (const auto value = headers.value("content-length"); !value.isEmpty()) {
+		contentLength = value.toInt();
+		if (contentLength < 0) {
+			error = u"invalid content-length"_q;
+			return false;
+		}
+	}
+	const auto bodyOffset = headerEnd + 4;
+	if (buffer.size() < (bodyOffset + contentLength)) {
+		error = u"incomplete"_q;
+		return false;
+	}
+	body = buffer.mid(bodyOffset, contentLength);
+	consumed = bodyOffset + contentLength;
+	return true;
+}
+
+QJsonObject RuntimePluginJson(const PluginState &state) {
+	return QJsonObject{
+		{ u"id"_q, state.info.id },
+		{ u"name"_q, state.info.name },
+		{ u"version"_q, state.info.version },
+		{ u"author"_q, state.info.author },
+		{ u"description"_q, state.info.description },
+		{ u"path"_q, state.path },
+		{ u"enabled"_q, state.enabled },
+		{ u"loaded"_q, state.loaded },
+		{ u"error"_q, state.error },
+		{ u"disabledByRecovery"_q, state.disabledByRecovery },
+		{ u"recoverySuspected"_q, state.recoverySuspected },
+		{ u"recoveryReason"_q, state.recoveryReason },
+	};
+}
+
+QStringList RuntimeTailLines(const QString &path, int wantedLines) {
+	if (wantedLines <= 0) {
+		return {};
+	}
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return {};
+	}
+	constexpr auto kBlock = qint64(4096);
+	auto buffer = QByteArray();
+	auto left = file.size();
+	auto lines = 0;
+	while (left > 0 && lines <= wantedLines + 16) {
+		const auto take = std::min(kBlock, left);
+		left -= take;
+		file.seek(left);
+		buffer.prepend(file.read(take));
+		lines = buffer.count('\n');
+	}
+	auto text = QString::fromUtf8(buffer);
+	auto split = text.split(QChar::fromLatin1('\n'));
+	for (auto &line : split) {
+		line = line.trimmed();
+	}
+	split.erase(
+		std::remove_if(split.begin(), split.end(), [](const QString &line) {
+			return line.isEmpty();
+		}),
+		split.end());
+	if (split.size() > wantedLines) {
+		split = split.mid(split.size() - wantedLines);
+	}
+	return split;
+}
+
 } // namespace
 
 Manager::Manager(QObject *parent) : QObject(parent) {
 }
 
 Manager::~Manager() {
+	stopRuntimeApiServer();
 	unloadAll();
 }
 
@@ -1111,6 +1279,7 @@ void Manager::start() {
 			{ u"apiVersion"_q, kApiVersion },
 		});
 	loadConfig();
+	ensureRuntimeApiServerState();
 	loadRecoveryState();
 	recoverFromPendingState();
 	if (safeModeEnabled()) {
@@ -1136,6 +1305,7 @@ void Manager::reload() {
 		});
 	unloadAll();
 	loadConfig();
+	ensureRuntimeApiServerState();
 	loadRecoveryState();
 	FlushPluginUnload();
 	if (safeModeEnabled()) {
@@ -1219,6 +1389,7 @@ bool Manager::setRuntimeApiEnabled(bool enabled) {
 		return true;
 	}
 	_runtimeApiEnabled = enabled;
+	ensureRuntimeApiServerState();
 	saveConfig();
 	logEvent(
 		u"runtime-api"_q,
@@ -1228,6 +1399,348 @@ bool Manager::setRuntimeApiEnabled(bool enabled) {
 			{ u"port"_q, _runtimeApiPort },
 		});
 	return true;
+}
+
+void Manager::ensureRuntimeApiServerState() {
+	if (_runtimeApiEnabled) {
+		startRuntimeApiServer();
+	} else {
+		stopRuntimeApiServer();
+	}
+}
+
+bool Manager::startRuntimeApiServer() {
+	if (_runtimeApiServer && _runtimeApiServer->isListening()) {
+		return true;
+	}
+	if (!_runtimeApiServer) {
+		_runtimeApiServer = std::make_unique<QTcpServer>();
+		_runtimeApiServer->setParent(this);
+		QObject::connect(
+			_runtimeApiServer.get(),
+			&QTcpServer::newConnection,
+			this,
+			&Manager::onRuntimeApiNewConnection);
+	}
+	if (_runtimeApiPort <= 0 || _runtimeApiPort > 65535) {
+		_runtimeApiPort = 37080;
+	}
+	if (!_runtimeApiServer->listen(QHostAddress::LocalHost, quint16(_runtimeApiPort))) {
+		logEvent(
+			u"runtime-api"_q,
+			u"listen-failed"_q,
+			QJsonObject{
+				{ u"port"_q, _runtimeApiPort },
+				{ u"error"_q, _runtimeApiServer->errorString() },
+			});
+		return false;
+	}
+	logEvent(
+		u"runtime-api"_q,
+		u"listening"_q,
+		QJsonObject{
+			{ u"port"_q, _runtimeApiPort },
+			{ u"address"_q, u"127.0.0.1"_q },
+		});
+	return true;
+}
+
+void Manager::stopRuntimeApiServer() {
+	for (auto i = _runtimeApiBuffers.begin(); i != _runtimeApiBuffers.end(); ++i) {
+		const auto socket = i.key();
+		if (socket) {
+			socket->disconnectFromHost();
+			socket->deleteLater();
+		}
+	}
+	_runtimeApiBuffers.clear();
+	if (_runtimeApiServer && _runtimeApiServer->isListening()) {
+		_runtimeApiServer->close();
+		logEvent(
+			u"runtime-api"_q,
+			u"stopped"_q,
+			QJsonObject{
+				{ u"port"_q, _runtimeApiPort },
+			});
+	}
+}
+
+void Manager::onRuntimeApiNewConnection() {
+	if (!_runtimeApiServer) {
+		return;
+	}
+	while (_runtimeApiServer->hasPendingConnections()) {
+		const auto socket = _runtimeApiServer->nextPendingConnection();
+		if (!socket) {
+			continue;
+		}
+		_runtimeApiBuffers.insert(socket, QByteArray());
+		QObject::connect(
+			socket,
+			&QTcpSocket::readyRead,
+			this,
+			[this, socket] { onRuntimeApiSocketReadyRead(socket); });
+		QObject::connect(
+			socket,
+			&QTcpSocket::disconnected,
+			this,
+			[this, socket] {
+				_runtimeApiBuffers.remove(socket);
+				socket->deleteLater();
+			});
+	}
+}
+
+void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
+	if (!socket) {
+		return;
+	}
+	auto &buffer = _runtimeApiBuffers[socket];
+	buffer += socket->readAll();
+	QString method;
+	QString target;
+	QHash<QByteArray, QByteArray> headers;
+	QByteArray body;
+	qsizetype consumed = 0;
+	QString error;
+	if (!ParseRuntimeHttpRequest(
+			buffer,
+			method,
+			target,
+			headers,
+			body,
+			consumed,
+			error)) {
+		if (error == u"incomplete"_q) {
+			return;
+		}
+		socket->write(RuntimeErrorResponse(400, error));
+		socket->disconnectFromHost();
+		_runtimeApiBuffers.remove(socket);
+		return;
+	}
+	buffer.remove(0, consumed);
+	auto disableAfterResponse = false;
+	const auto response = processRuntimeApiRequest(
+		method.toUtf8() + ' ' + target.toUtf8() + "\n" + body,
+		disableAfterResponse);
+	socket->write(response);
+	socket->disconnectFromHost();
+	_runtimeApiBuffers.remove(socket);
+	if (disableAfterResponse) {
+		QTimer::singleShot(0, this, [=] {
+			setRuntimeApiEnabled(false);
+		});
+	}
+}
+
+QByteArray Manager::processRuntimeApiRequest(
+		const QByteArray &request,
+		bool &disableRuntimeApiAfterResponse) {
+	disableRuntimeApiAfterResponse = false;
+	const auto firstLineEnd = request.indexOf('\n');
+	const auto firstLine = (firstLineEnd >= 0)
+		? request.left(firstLineEnd).trimmed()
+		: request.trimmed();
+	const auto parts = firstLine.split(' ');
+	if (parts.size() < 2) {
+		return RuntimeErrorResponse(400, u"invalid request"_q);
+	}
+	const auto method = QString::fromLatin1(parts[0]).toUpper();
+	const auto target = QString::fromLatin1(parts[1]).trimmed();
+	const auto body = (firstLineEnd >= 0) ? request.mid(firstLineEnd + 1) : QByteArray();
+	const auto url = QUrl(u"http://127.0.0.1"_q + target);
+	const auto path = url.path();
+	const auto query = QUrlQuery(url);
+
+	auto parseBodyObject = [&]() -> QJsonObject {
+		if (body.trimmed().isEmpty()) {
+			return QJsonObject();
+		}
+		const auto doc = QJsonDocument::fromJson(body);
+		return doc.isObject() ? doc.object() : QJsonObject();
+	};
+
+	if (method == u"GET"_q && (path == u"/"_q || path == u"/v1"_q)) {
+		return RuntimeOkResponse(QJsonObject{
+			{ u"name"_q, u"Astrogram Runtime API"_q },
+			{ u"version"_q, 1 },
+			{ u"baseUrl"_q, hostInfo().runtimeApiBaseUrl },
+			{ u"endpoints"_q, QJsonArray{
+				u"GET /v1/health"_q,
+				u"GET /v1/host"_q,
+				u"GET /v1/system"_q,
+				u"GET /v1/plugins"_q,
+				u"POST /v1/plugins/reload"_q,
+				u"POST /v1/plugins/<id>/enable"_q,
+				u"POST /v1/plugins/<id>/disable"_q,
+				u"DELETE /v1/plugins/<id>"_q,
+				u"GET /v1/logs?lines=200"_q,
+				u"POST /v1/runtime"_q,
+				u"POST /v1/safe-mode"_q,
+			} },
+		});
+	}
+	if (method == u"GET"_q && path == u"/v1/health"_q) {
+		return RuntimeOkResponse(QJsonObject{
+			{ u"status"_q, u"ok"_q },
+			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
+			{ u"runtimeApiPort"_q, _runtimeApiPort },
+		});
+	}
+	if (method == u"GET"_q && path == u"/v1/host"_q) {
+		const auto host = hostInfo();
+		return RuntimeOkResponse(QJsonObject{
+			{ u"compiler"_q, host.compiler },
+			{ u"platform"_q, host.platform },
+			{ u"workingPath"_q, host.workingPath },
+			{ u"pluginsPath"_q, host.pluginsPath },
+			{ u"appUiLanguage"_q, host.appUiLanguage },
+			{ u"safeModeEnabled"_q, host.safeModeEnabled },
+			{ u"runtimeApiEnabled"_q, host.runtimeApiEnabled },
+			{ u"runtimeApiPort"_q, host.runtimeApiPort },
+			{ u"runtimeApiBaseUrl"_q, host.runtimeApiBaseUrl },
+		});
+	}
+	if (method == u"GET"_q && path == u"/v1/system"_q) {
+		const auto system = systemInfo();
+		return RuntimeOkResponse(QJsonObject{
+			{ u"processId"_q, QString::number(system.processId) },
+			{ u"logicalCpuCores"_q, system.logicalCpuCores },
+			{ u"physicalCpuCores"_q, system.physicalCpuCores },
+			{ u"productType"_q, system.productType },
+			{ u"productVersion"_q, system.productVersion },
+			{ u"prettyProductName"_q, system.prettyProductName },
+			{ u"kernelType"_q, system.kernelType },
+			{ u"kernelVersion"_q, system.kernelVersion },
+			{ u"architecture"_q, system.architecture },
+			{ u"buildAbi"_q, system.buildAbi },
+			{ u"hostName"_q, system.hostName },
+			{ u"userName"_q, system.userName },
+			{ u"locale"_q, system.locale },
+			{ u"uiLanguage"_q, system.uiLanguage },
+			{ u"timeZone"_q, system.timeZone },
+		});
+	}
+	if (method == u"GET"_q && path == u"/v1/plugins"_q) {
+		auto list = QJsonArray();
+		for (const auto &state : plugins()) {
+			auto plugin = RuntimePluginJson(state);
+			plugin.insert(
+				u"actionsCount"_q,
+				int(actionsFor(state.info.id).size()));
+			plugin.insert(
+				u"settingsPagesCount"_q,
+				int(settingsPagesFor(state.info.id).size()));
+			list.push_back(plugin);
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"plugins"_q, list },
+			{ u"count"_q, list.size() },
+		});
+	}
+	if (method == u"POST"_q && path == u"/v1/plugins/reload"_q) {
+		reload();
+		return RuntimeOkResponse(QJsonObject{
+			{ u"message"_q, u"plugins reloaded"_q },
+		});
+	}
+	if (method == u"GET"_q && path == u"/v1/logs"_q) {
+		auto lines = std::max(1, query.queryItemValue(u"lines"_q).toInt());
+		lines = std::min(lines, 5000);
+		auto array = QJsonArray();
+		for (const auto &line : RuntimeTailLines(_logPath, lines)) {
+			array.push_back(line);
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"lines"_q, array },
+			{ u"count"_q, array.size() },
+			{ u"path"_q, _logPath },
+		});
+	}
+	if (method == u"POST"_q && path == u"/v1/safe-mode"_q) {
+		const auto object = parseBodyObject();
+		if (!object.contains(u"enabled"_q) || !object.value(u"enabled"_q).isBool()) {
+			return RuntimeErrorResponse(400, u"body.enabled bool is required"_q);
+		}
+		const auto enabled = object.value(u"enabled"_q).toBool();
+		if (!setSafeModeEnabled(enabled)) {
+			return RuntimeErrorResponse(500, u"failed to change safe mode"_q);
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"safeModeEnabled"_q, enabled },
+		});
+	}
+	if (method == u"POST"_q && path == u"/v1/runtime"_q) {
+		const auto object = parseBodyObject();
+		if (!object.contains(u"enabled"_q) || !object.value(u"enabled"_q).isBool()) {
+			return RuntimeErrorResponse(400, u"body.enabled bool is required"_q);
+		}
+		const auto enabled = object.value(u"enabled"_q).toBool();
+		if (object.value(u"port"_q).isDouble()) {
+			const auto port = object.value(u"port"_q).toInt();
+			if (port > 0 && port <= 65535) {
+				_runtimeApiPort = port;
+			}
+		}
+		if (enabled) {
+			if (!setRuntimeApiEnabled(true)) {
+				return RuntimeErrorResponse(500, u"failed to enable runtime api"_q);
+			}
+			return RuntimeOkResponse(QJsonObject{
+				{ u"runtimeApiEnabled"_q, true },
+				{ u"runtimeApiPort"_q, _runtimeApiPort },
+				{ u"runtimeApiBaseUrl"_q, hostInfo().runtimeApiBaseUrl },
+			});
+		}
+		disableRuntimeApiAfterResponse = true;
+		return RuntimeOkResponse(QJsonObject{
+			{ u"runtimeApiEnabled"_q, false },
+			{ u"runtimeApiPort"_q, _runtimeApiPort },
+			{ u"message"_q, u"runtime api will stop after this response"_q },
+		});
+	}
+
+	const auto prefix = u"/v1/plugins/"_q;
+	if (path.startsWith(prefix)) {
+		auto rest = path.mid(prefix.size());
+		if (rest.endsWith(u"/enable"_q) || rest.endsWith(u"/disable"_q)) {
+			if (method != u"POST"_q) {
+				return RuntimeErrorResponse(405, u"method not allowed"_q);
+			}
+			const auto enable = rest.endsWith(u"/enable"_q);
+			rest.chop(enable ? 7 : 8);
+			const auto id = QUrl::fromPercentEncoding(rest.toUtf8());
+			if (id.isEmpty()) {
+				return RuntimeErrorResponse(400, u"plugin id is required"_q);
+			}
+			if (!setEnabled(id, enable)) {
+				return RuntimeErrorResponse(404, u"plugin not found or state unchanged"_q);
+			}
+			return RuntimeOkResponse(QJsonObject{
+				{ u"id"_q, id },
+				{ u"enabled"_q, enable },
+			});
+		}
+		if (method == u"DELETE"_q) {
+			const auto id = QUrl::fromPercentEncoding(rest.toUtf8());
+			if (id.isEmpty()) {
+				return RuntimeErrorResponse(400, u"plugin id is required"_q);
+			}
+			QString error;
+			if (!removePlugin(id, &error)) {
+				return RuntimeErrorResponse(
+					409,
+					error.isEmpty() ? u"failed to remove plugin"_q : error);
+			}
+			return RuntimeOkResponse(QJsonObject{
+				{ u"id"_q, id },
+				{ u"removed"_q, true },
+			});
+		}
+	}
+
+	return RuntimeErrorResponse(404, u"endpoint not found"_q);
 }
 
 PackagePreviewState Manager::inspectPackage(const QString &path) const {
