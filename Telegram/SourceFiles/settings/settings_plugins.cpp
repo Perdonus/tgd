@@ -159,7 +159,7 @@ void AddPluginMetaText(
 			container,
 			rpl::single(text),
 			st::defaultFlatLabel),
-		style::margins(0, 0, 0, 0),
+		style::margins(10, 0, 6, 0),
 		style::al_top);
 	WireExternalLinks(label);
 }
@@ -776,6 +776,27 @@ void ShowPluginRuntimeBox(not_null<Window::SessionController*> controller) {
 					u"Runtime info copied."_q,
 					u"Информация о рантайме скопирована."_q));
 			});
+		const auto enabled = Core::App().plugins().runtimeApiEnabled();
+		box->addButton(
+			rpl::single(enabled
+				? PluginUiText(u"Disable API"_q, u"Выключить API"_q)
+				: PluginUiText(u"Enable API"_q, u"Включить API"_q)),
+			[=] {
+				if (!Core::App().plugins().setRuntimeApiEnabled(!enabled)) {
+					controller->window().showToast(PluginUiText(
+						u"Could not change runtime API state."_q,
+						u"Не удалось изменить состояние runtime API."_q));
+					return;
+				}
+				controller->window().showToast(!enabled
+					? PluginUiText(
+						u"Runtime API enabled."_q,
+						u"Runtime API включён."_q)
+					: PluginUiText(
+						u"Runtime API disabled."_q,
+						u"Runtime API выключен."_q));
+				box->closeBox();
+			});
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			rpl::single(text),
@@ -795,6 +816,8 @@ void OpenPluginsFolder() {
 
 constexpr auto kPluginCardRadius = 20.;
 constexpr auto kPluginCardVerticalMargin = 4;
+constexpr auto kPluginCardContentInsetLeft = 10;
+constexpr auto kPluginCardContentInsetRight = 6;
 
 [[nodiscard]] QColor PluginCardBackgroundColor(
 		const ::Plugins::PluginState &state) {
@@ -920,7 +943,14 @@ void AddPluginCardActionRow(
 			buttons.push_back(share);
 		}
 		buttons.push_back(remove);
-		auto left = 0;
+		auto buttonsWidth = 0;
+		for (const auto current : buttons) {
+			buttonsWidth += current->width();
+		}
+		buttonsWidth += std::max(0, int(buttons.size()) - 1) * gap;
+		auto left = std::max(
+			kPluginCardContentInsetLeft,
+			width - buttonsWidth - kPluginCardContentInsetRight);
 		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
 		for (const auto current : buttons) {
 			current->move(left, top);
@@ -989,12 +1019,9 @@ void RequestPluginRemoval(
 				return;
 			}
 			if (onRemoved) {
-				QTimer::singleShot(
-					120,
-					context.get(),
-					crl::guard(context, [=] {
-						onRemoved();
-					}));
+				QTimer::singleShot(180, [=] {
+					onRemoved();
+				});
 			}
 		}),
 		.confirmText = PluginUiText(u"Delete"_q, u"Удалить"_q),
@@ -1397,6 +1424,33 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		.handler = [=] { ShowPluginRuntimeBox(_controller); },
 		.icon = &st::menuIconIpAddress,
 	});
+	const auto runtimeEnabled = Core::App().plugins().runtimeApiEnabled();
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = runtimeEnabled
+			? PluginUiText(
+				u"Disable Runtime API"_q,
+				u"Выключить Runtime API"_q)
+			: PluginUiText(
+				u"Enable Runtime API"_q,
+				u"Включить Runtime API"_q),
+		.handler = [=] {
+			if (!Core::App().plugins().setRuntimeApiEnabled(!runtimeEnabled)) {
+				_controller->window().showToast(PluginUiText(
+					u"Could not change runtime API state."_q,
+					u"Не удалось изменить состояние runtime API."_q));
+				return;
+			}
+			_controller->window().showToast(!runtimeEnabled
+				? PluginUiText(
+					u"Runtime API enabled."_q,
+					u"Runtime API включён."_q)
+				: PluginUiText(
+					u"Runtime API disabled."_q,
+					u"Runtime API выключен."_q));
+			scheduleRebuildList(0);
+		},
+		.icon = &st::menuIconIpAddress,
+	});
 	addAction(Ui::Menu::MenuCallback::Args{
 		.text = PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
 		.handler = [=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
@@ -1471,7 +1525,7 @@ void Plugins::scheduleRebuildList(int delayMs) {
 void Plugins::rebuildList() {
 	_list->clear();
 	const auto scheduleRefresh = crl::guard(this, [=] {
-		scheduleRebuildList(0);
+		scheduleRebuildList(180);
 	});
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
@@ -1505,10 +1559,18 @@ void Plugins::rebuildList() {
 		const auto meta = PluginCardMetaText(state);
 		const auto summary = FormatPluginCardSummary(state);
 		const auto card = AddPluginCardContainer(_list, state);
-		const auto header = card->add(object_ptr<Button>(
-			card,
-			rpl::single(title),
-			st::settingsPluginCardHeader));
+		const auto headerWidget = card->add(
+			object_ptr<Button>(
+				card,
+				rpl::single(title),
+				st::settingsPluginCardHeader),
+			style::margins(
+				kPluginCardContentInsetLeft,
+				0,
+				kPluginCardContentInsetRight,
+				0),
+			style::al_top);
+		const auto header = static_cast<Button*>(headerWidget);
 		header->toggleOn(rpl::single(state.enabled));
 		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			header->setToggleLocked(true);

@@ -108,6 +108,9 @@ public:
 	std::vector<PluginState> plugins() const;
 	bool safeModeEnabled() const;
 	bool setSafeModeEnabled(bool enabled);
+	bool runtimeApiEnabled() const;
+	int runtimeApiPort() const;
+	bool setRuntimeApiEnabled(bool enabled);
 	PackagePreviewState inspectPackage(const QString &path) const;
 	bool installPackage(const QString &sourcePath, QString *error = nullptr);
 	bool removePlugin(const QString &pluginId, QString *error = nullptr);
@@ -386,9 +389,11 @@ public:
 		QString _pluginsPath;
 		QString _configPath;
 		QString _logPath;
-		QString _tracePath;
-		QString _safeModePath;
-		QString _recoveryPath;
+	QString _tracePath;
+	QString _safeModePath;
+	QString _recoveryPath;
+	bool _runtimeApiEnabled = false;
+	int _runtimeApiPort = 37080;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;

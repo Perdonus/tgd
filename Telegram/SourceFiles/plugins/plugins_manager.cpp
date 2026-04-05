@@ -1206,6 +1206,30 @@ bool Manager::setSafeModeEnabled(bool enabled) {
 	return true;
 }
 
+bool Manager::runtimeApiEnabled() const {
+	return _runtimeApiEnabled;
+}
+
+int Manager::runtimeApiPort() const {
+	return _runtimeApiPort;
+}
+
+bool Manager::setRuntimeApiEnabled(bool enabled) {
+	if (_runtimeApiEnabled == enabled) {
+		return true;
+	}
+	_runtimeApiEnabled = enabled;
+	saveConfig();
+	logEvent(
+		u"runtime-api"_q,
+		u"set-enabled"_q,
+		QJsonObject{
+			{ u"enabled"_q, enabled },
+			{ u"port"_q, _runtimeApiPort },
+		});
+	return true;
+}
+
 PackagePreviewState Manager::inspectPackage(const QString &path) const {
 	auto result = PackagePreviewState();
 	result.sourcePath = path;
@@ -3005,8 +3029,11 @@ HostInfo Manager::hostInfo() const {
 	info.pluginsPath = _pluginsPath;
 	info.appUiLanguage = Lang::LanguageIdOrDefault(Lang::Id());
 	info.safeModeEnabled = safeModeEnabled();
-	info.runtimeApiEnabled = false;
-	info.runtimeApiPort = 0;
+	info.runtimeApiEnabled = _runtimeApiEnabled;
+	info.runtimeApiPort = _runtimeApiEnabled ? _runtimeApiPort : 0;
+	info.runtimeApiBaseUrl = _runtimeApiEnabled
+		? (u"http://127.0.0.1:%1"_q.arg(_runtimeApiPort))
+		: QString();
 	return info;
 }
 
@@ -3035,6 +3062,8 @@ SystemInfo Manager::systemInfo() const {
 void Manager::loadConfig() {
 	_disabled.clear();
 	_storedSettings.clear();
+	_runtimeApiEnabled = false;
+	_runtimeApiPort = 37080;
 	QFile file(_configPath);
 	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
 		logEvent(
@@ -3069,6 +3098,12 @@ void Manager::loadConfig() {
 			_storedSettings.insert(pluginId, value.toObject());
 		}
 	}
+	if (const auto runtimeValue = object.value(u"runtimeApi"_q); runtimeValue.isObject()) {
+		const auto runtimeObject = runtimeValue.toObject();
+		_runtimeApiEnabled = runtimeObject.value(u"enabled"_q).toBool(false);
+		const auto loadedPort = runtimeObject.value(u"port"_q).toInt(_runtimeApiPort);
+		_runtimeApiPort = std::clamp(loadedPort, 1, 65535);
+	}
 	logEvent(
 		u"config"_q,
 		u"loaded"_q,
@@ -3076,6 +3111,8 @@ void Manager::loadConfig() {
 			{ u"path"_q, _configPath },
 			{ u"disabled"_q, JsonArrayFromStrings(_disabled.values()) },
 			{ u"settingsPlugins"_q, _storedSettings.size() },
+			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
+			{ u"runtimeApiPort"_q, _runtimeApiPort },
 		});
 }
 
@@ -3099,6 +3136,10 @@ void Manager::saveConfig() const {
 	const auto object = QJsonObject{
 		{ u"disabled"_q, array },
 		{ u"settings"_q, settings },
+		{ u"runtimeApi"_q, QJsonObject{
+			{ u"enabled"_q, _runtimeApiEnabled },
+			{ u"port"_q, _runtimeApiPort },
+		} },
 	};
 	const auto document = QJsonDocument(object);
 	QFile file(_configPath);
@@ -3112,6 +3153,8 @@ void Manager::saveConfig() const {
 			{ u"path"_q, _configPath },
 			{ u"disabled"_q, JsonArrayFromStrings(list) },
 			{ u"settingsPlugins"_q, settings.size() },
+			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
+			{ u"runtimeApiPort"_q, _runtimeApiPort },
 		});
 }
 
