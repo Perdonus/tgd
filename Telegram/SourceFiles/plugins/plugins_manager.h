@@ -395,7 +395,9 @@ private:
 	void onRuntimeApiNewConnection();
 	void onRuntimeApiSocketReadyRead(QTcpSocket *socket);
 	QByteArray processRuntimeApiRequest(
-		const QByteArray &request,
+		const QString &method,
+		const QString &target,
+		const QByteArray &body,
 		bool &disableRuntimeApiAfterResponse);
 
 	QString _pluginsPath;

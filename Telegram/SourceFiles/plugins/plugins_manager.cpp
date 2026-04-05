@@ -49,12 +49,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 #include <QtGui/QGuiApplication>
+#include <QtNetwork/QAbstractSocket>
 #include <QtNetwork/QHostAddress>
+#include <QtNetwork/QNetworkInterface>
 #include <QtNetwork/QTcpServer>
 #include <QtNetwork/QTcpSocket>
 
 #include <algorithm>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -769,6 +772,7 @@ QByteArray RuntimeStatusText(int code) {
 	case 405: return "Method Not Allowed";
 	case 409: return "Conflict";
 	case 500: return "Internal Server Error";
+	case 503: return "Service Unavailable";
 	default: return "OK";
 	}
 }
@@ -920,6 +924,60 @@ QStringList RuntimeTailLines(const QString &path, int wantedLines) {
 		split = split.mid(split.size() - wantedLines);
 	}
 	return split;
+}
+
+QString RuntimeApiAdvertisedHost() {
+	const auto interfaces = QNetworkInterface::allInterfaces();
+	for (const auto &iface : interfaces) {
+		if (!(iface.flags() & QNetworkInterface::IsUp)
+			|| !(iface.flags() & QNetworkInterface::IsRunning)
+			|| (iface.flags() & QNetworkInterface::IsLoopBack)) {
+			continue;
+		}
+		for (const auto &entry : iface.addressEntries()) {
+			const auto ip = entry.ip();
+			if (ip.protocol() != QAbstractSocket::IPv4Protocol) {
+				continue;
+			}
+			if (ip.isLoopback()) {
+				continue;
+			}
+			const auto value = ip.toString();
+			if (value.startsWith(u"169.254."_q)) {
+				continue;
+			}
+			return value;
+		}
+	}
+	return u"127.0.0.1"_q;
+}
+
+QHostAddress RuntimeApiListenAddress() {
+	return QHostAddress::AnyIPv4;
+}
+
+std::optional<PeerId> RuntimePeerIdFromString(const QString &text) {
+	bool ok = false;
+	const auto value = text.trimmed().toULongLong(&ok);
+	if (!ok || value == 0) {
+		return std::nullopt;
+	}
+	return PeerId(PeerIdHelper{ value });
+}
+
+QJsonObject RuntimeMessageJson(
+		not_null<HistoryItem*> item,
+		PeerId peerId) {
+	const auto fullId = item->fullId();
+	return QJsonObject{
+		{ u"peerId"_q, QString::number(peerId.value) },
+		{ u"id"_q, item->id },
+		{ u"fullMsgPeerId"_q, QString::number(fullId.peer.value) },
+		{ u"date"_q, item->date() },
+		{ u"out"_q, item->out() },
+		{ u"text"_q, item->notificationText().text },
+		{ u"fromPeerId"_q, QString::number(item->from()->id.value) },
+	};
 }
 
 } // namespace
@@ -1425,11 +1483,13 @@ bool Manager::startRuntimeApiServer() {
 	if (_runtimeApiPort <= 0 || _runtimeApiPort > 65535) {
 		_runtimeApiPort = 37080;
 	}
-	if (!_runtimeApiServer->listen(QHostAddress::LocalHost, quint16(_runtimeApiPort))) {
+	const auto listenAddress = RuntimeApiListenAddress();
+	if (!_runtimeApiServer->listen(listenAddress, quint16(_runtimeApiPort))) {
 		logEvent(
 			u"runtime-api"_q,
 			u"listen-failed"_q,
 			QJsonObject{
+				{ u"address"_q, listenAddress.toString() },
 				{ u"port"_q, _runtimeApiPort },
 				{ u"error"_q, _runtimeApiServer->errorString() },
 			});
@@ -1440,7 +1500,8 @@ bool Manager::startRuntimeApiServer() {
 		u"listening"_q,
 		QJsonObject{
 			{ u"port"_q, _runtimeApiPort },
-			{ u"address"_q, u"127.0.0.1"_q },
+			{ u"address"_q, listenAddress.toString() },
+			{ u"advertisedAddress"_q, RuntimeApiAdvertisedHost() },
 		});
 	return true;
 }
@@ -1522,7 +1583,9 @@ void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
 	buffer.remove(0, consumed);
 	auto disableAfterResponse = false;
 	const auto response = processRuntimeApiRequest(
-		method.toUtf8() + ' ' + target.toUtf8() + "\n" + body,
+		method,
+		target,
+		body,
 		disableAfterResponse);
 	socket->write(response);
 	socket->disconnectFromHost();
@@ -1535,23 +1598,29 @@ void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
 }
 
 QByteArray Manager::processRuntimeApiRequest(
-		const QByteArray &request,
+		const QString &method,
+		const QString &target,
+		const QByteArray &body,
 		bool &disableRuntimeApiAfterResponse) {
 	disableRuntimeApiAfterResponse = false;
-	const auto firstLineEnd = request.indexOf('\n');
-	const auto firstLine = (firstLineEnd >= 0)
-		? request.left(firstLineEnd).trimmed()
-		: request.trimmed();
-	const auto parts = firstLine.split(' ');
-	if (parts.size() < 2) {
+	if (method.isEmpty() || target.isEmpty()) {
 		return RuntimeErrorResponse(400, u"invalid request"_q);
 	}
-	const auto method = QString::fromLatin1(parts[0]).toUpper();
-	const auto target = QString::fromLatin1(parts[1]).trimmed();
-	const auto body = (firstLineEnd >= 0) ? request.mid(firstLineEnd + 1) : QByteArray();
-	const auto url = QUrl(u"http://127.0.0.1"_q + target);
+	const auto url = QUrl(u"http://runtime.local"_q + target);
 	const auto path = url.path();
 	const auto query = QUrlQuery(url);
+	const auto resolvedMethod = method.trimmed().toUpper();
+
+	const auto session = activeSession();
+	if (!session
+		&& path != u"/"_q
+		&& path != u"/v1"_q
+		&& path != u"/v1/health"_q
+		&& path != u"/v1/system"_q
+		&& path != u"/v1/runtime"_q
+		&& path != u"/v1/host"_q) {
+		return RuntimeErrorResponse(503, u"no active telegram session"_q);
+	}
 
 	auto parseBodyObject = [&]() -> QJsonObject {
 		if (body.trimmed().isEmpty()) {
@@ -1561,7 +1630,7 @@ QByteArray Manager::processRuntimeApiRequest(
 		return doc.isObject() ? doc.object() : QJsonObject();
 	};
 
-	if (method == u"GET"_q && (path == u"/"_q || path == u"/v1"_q)) {
+	if (resolvedMethod == u"GET"_q && (path == u"/"_q || path == u"/v1"_q)) {
 		return RuntimeOkResponse(QJsonObject{
 			{ u"name"_q, u"Astrogram Runtime API"_q },
 			{ u"version"_q, 1 },
@@ -1578,17 +1647,21 @@ QByteArray Manager::processRuntimeApiRequest(
 				u"GET /v1/logs?lines=200"_q,
 				u"POST /v1/runtime"_q,
 				u"POST /v1/safe-mode"_q,
+				u"GET /v1/chats?limit=100"_q,
+				u"GET /v1/chats/<peerId>/messages?limit=50"_q,
+				u"POST /v1/messages/send"_q,
 			} },
 		});
 	}
-	if (method == u"GET"_q && path == u"/v1/health"_q) {
+	if (resolvedMethod == u"GET"_q && path == u"/v1/health"_q) {
 		return RuntimeOkResponse(QJsonObject{
 			{ u"status"_q, u"ok"_q },
 			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
 			{ u"runtimeApiPort"_q, _runtimeApiPort },
+			{ u"runtimeApiHost"_q, RuntimeApiAdvertisedHost() },
 		});
 	}
-	if (method == u"GET"_q && path == u"/v1/host"_q) {
+	if (resolvedMethod == u"GET"_q && path == u"/v1/host"_q) {
 		const auto host = hostInfo();
 		return RuntimeOkResponse(QJsonObject{
 			{ u"compiler"_q, host.compiler },
@@ -1602,7 +1675,7 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"runtimeApiBaseUrl"_q, host.runtimeApiBaseUrl },
 		});
 	}
-	if (method == u"GET"_q && path == u"/v1/system"_q) {
+	if (resolvedMethod == u"GET"_q && path == u"/v1/system"_q) {
 		const auto system = systemInfo();
 		return RuntimeOkResponse(QJsonObject{
 			{ u"processId"_q, QString::number(system.processId) },
@@ -1622,7 +1695,7 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"timeZone"_q, system.timeZone },
 		});
 	}
-	if (method == u"GET"_q && path == u"/v1/plugins"_q) {
+	if (resolvedMethod == u"GET"_q && path == u"/v1/plugins"_q) {
 		auto list = QJsonArray();
 		for (const auto &state : plugins()) {
 			auto plugin = RuntimePluginJson(state);
@@ -1639,13 +1712,13 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"count"_q, list.size() },
 		});
 	}
-	if (method == u"POST"_q && path == u"/v1/plugins/reload"_q) {
+	if (resolvedMethod == u"POST"_q && path == u"/v1/plugins/reload"_q) {
 		reload();
 		return RuntimeOkResponse(QJsonObject{
 			{ u"message"_q, u"plugins reloaded"_q },
 		});
 	}
-	if (method == u"GET"_q && path == u"/v1/logs"_q) {
+	if (resolvedMethod == u"GET"_q && path == u"/v1/logs"_q) {
 		auto lines = std::max(1, query.queryItemValue(u"lines"_q).toInt());
 		lines = std::min(lines, 5000);
 		auto array = QJsonArray();
@@ -1658,7 +1731,7 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"path"_q, _logPath },
 		});
 	}
-	if (method == u"POST"_q && path == u"/v1/safe-mode"_q) {
+	if (resolvedMethod == u"POST"_q && path == u"/v1/safe-mode"_q) {
 		const auto object = parseBodyObject();
 		if (!object.contains(u"enabled"_q) || !object.value(u"enabled"_q).isBool()) {
 			return RuntimeErrorResponse(400, u"body.enabled bool is required"_q);
@@ -1671,7 +1744,7 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"safeModeEnabled"_q, enabled },
 		});
 	}
-	if (method == u"POST"_q && path == u"/v1/runtime"_q) {
+	if (resolvedMethod == u"POST"_q && path == u"/v1/runtime"_q) {
 		const auto object = parseBodyObject();
 		if (!object.contains(u"enabled"_q) || !object.value(u"enabled"_q).isBool()) {
 			return RuntimeErrorResponse(400, u"body.enabled bool is required"_q);
@@ -1700,12 +1773,79 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"message"_q, u"runtime api will stop after this response"_q },
 		});
 	}
+	if (resolvedMethod == u"GET"_q && path == u"/v1/chats"_q) {
+		auto limit = query.queryItemValue(u"limit"_q).toInt();
+		if (limit <= 0) {
+			limit = 100;
+		}
+		limit = std::min(limit, 1000);
+		auto result = QJsonArray();
+		auto count = 0;
+		const auto list = session->data().chatsList()->indexed()->all();
+		for (const auto row : list) {
+			if (!row || !row->history()) {
+				continue;
+			}
+			const auto history = row->history();
+			const auto peer = history->peer;
+			if (!peer) {
+				continue;
+			}
+			auto chat = QJsonObject{
+				{ u"peerId"_q, QString::number(peer->id.value) },
+				{ u"type"_q, peerIsUser(peer->id)
+					? u"user"_q
+					: (peerIsChannel(peer->id) ? u"channel"_q : u"chat"_q) },
+				{ u"name"_q, peer->name() },
+				{ u"username"_q, peer->username() },
+				{ u"muted"_q, history->muted() },
+				{ u"unreadCount"_q, history->unreadCountKnown()
+					? history->unreadCount()
+					: -1 },
+			};
+			if (const auto last = history->lastMessage()) {
+				chat.insert(u"lastMessage"_q, RuntimeMessageJson(last, peer->id));
+			}
+			result.push_back(chat);
+			++count;
+			if (count >= limit) {
+				break;
+			}
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"count"_q, result.size() },
+			{ u"chats"_q, result },
+		});
+	}
+	if (resolvedMethod == u"POST"_q && path == u"/v1/messages/send"_q) {
+		const auto object = parseBodyObject();
+		const auto peerText = object.value(u"peerId"_q).toString().trimmed();
+		const auto text = object.value(u"text"_q).toString();
+		if (peerText.isEmpty()) {
+			return RuntimeErrorResponse(400, u"body.peerId string is required"_q);
+		}
+		if (text.trimmed().isEmpty()) {
+			return RuntimeErrorResponse(400, u"body.text string is required"_q);
+		}
+		const auto peerId = RuntimePeerIdFromString(peerText);
+		if (!peerId) {
+			return RuntimeErrorResponse(400, u"invalid peerId"_q);
+		}
+		auto history = session->data().history(*peerId);
+		auto message = Api::MessageToSend(Api::SendAction(history));
+		message.textWithTags.text = text;
+		session->api().sendMessage(std::move(message));
+		return RuntimeOkResponse(QJsonObject{
+			{ u"peerId"_q, QString::number(peerId->value) },
+			{ u"sent"_q, true },
+		});
+	}
 
 	const auto prefix = u"/v1/plugins/"_q;
 	if (path.startsWith(prefix)) {
 		auto rest = path.mid(prefix.size());
 		if (rest.endsWith(u"/enable"_q) || rest.endsWith(u"/disable"_q)) {
-			if (method != u"POST"_q) {
+			if (resolvedMethod != u"POST"_q) {
 				return RuntimeErrorResponse(405, u"method not allowed"_q);
 			}
 			const auto enable = rest.endsWith(u"/enable"_q);
@@ -1722,7 +1862,7 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"enabled"_q, enable },
 			});
 		}
-		if (method == u"DELETE"_q) {
+		if (resolvedMethod == u"DELETE"_q) {
 			const auto id = QUrl::fromPercentEncoding(rest.toUtf8());
 			if (id.isEmpty()) {
 				return RuntimeErrorResponse(400, u"plugin id is required"_q);
@@ -1738,6 +1878,65 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"removed"_q, true },
 			});
 		}
+	}
+	const auto chatPrefix = u"/v1/chats/"_q;
+	if (resolvedMethod == u"GET"_q
+		&& path.startsWith(chatPrefix)
+		&& path.endsWith(u"/messages"_q)) {
+		auto rest = path.mid(chatPrefix.size());
+		rest.chop(QString(u"/messages"_q).size());
+		const auto peerId = RuntimePeerIdFromString(rest);
+		if (!peerId) {
+			return RuntimeErrorResponse(400, u"invalid chat peer id"_q);
+		}
+		auto limit = query.queryItemValue(u"limit"_q).toInt();
+		if (limit <= 0) {
+			limit = 50;
+		}
+		limit = std::min(limit, 200);
+		const auto history = session->data().historyLoaded(*peerId);
+		if (!history) {
+			return RuntimeOkResponse(QJsonObject{
+				{ u"peerId"_q, QString::number(peerId->value) },
+				{ u"loaded"_q, false },
+				{ u"messages"_q, QJsonArray() },
+				{ u"count"_q, 0 },
+			});
+		}
+		const auto lastMessage = history->lastMessage();
+		if (!lastMessage) {
+			return RuntimeOkResponse(QJsonObject{
+				{ u"peerId"_q, QString::number(peerId->value) },
+				{ u"loaded"_q, true },
+				{ u"messages"_q, QJsonArray() },
+				{ u"count"_q, 0 },
+			});
+		}
+		const auto snapshot = history->messages().snapshot(
+			Storage::SparseIdsListQuery(lastMessage->id, limit, 0));
+		auto ids = std::vector<MsgId>();
+		ids.reserve(snapshot.messageIds.size());
+		for (const auto id : snapshot.messageIds) {
+			ids.push_back(id);
+		}
+		std::sort(ids.begin(), ids.end(), std::greater<MsgId>());
+		if (int(ids.size()) > limit) {
+			ids.resize(limit);
+		}
+		auto array = QJsonArray();
+		for (const auto msgId : ids) {
+			const auto item = session->data().message(*peerId, msgId);
+			if (!item) {
+				continue;
+			}
+			array.push_back(RuntimeMessageJson(item, *peerId));
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"peerId"_q, QString::number(peerId->value) },
+			{ u"loaded"_q, true },
+			{ u"messages"_q, array },
+			{ u"count"_q, array.size() },
+		});
 	}
 
 	return RuntimeErrorResponse(404, u"endpoint not found"_q);
@@ -3545,7 +3744,7 @@ HostInfo Manager::hostInfo() const {
 	info.runtimeApiEnabled = _runtimeApiEnabled;
 	info.runtimeApiPort = _runtimeApiEnabled ? _runtimeApiPort : 0;
 	info.runtimeApiBaseUrl = _runtimeApiEnabled
-		? (u"http://127.0.0.1:%1"_q.arg(_runtimeApiPort))
+		? (u"http://%1:%2"_q.arg(RuntimeApiAdvertisedHost()).arg(_runtimeApiPort))
 		: QString();
 	return info;
 }
