@@ -131,10 +131,10 @@ namespace {
 		result.text += author.text;
 		for (const auto &entity : author.entities) {
 			result.entities.push_back(EntityInText(
-				entity.type,
-				entity.offset + offset,
-				entity.length,
-				entity.data));
+				entity.type(),
+				entity.offset() + offset,
+				entity.length(),
+				entity.data()));
 		}
 	}
 	return result;
