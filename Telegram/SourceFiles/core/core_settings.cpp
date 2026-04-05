@@ -242,7 +242,7 @@ QByteArray Settings::serialize() const {
 		+ Serialize::bytearraySize(_tonsiteStorageToken)
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
-		+ sizeof(qint32) * 15; // _notificationsDisplayChecksum + 14 Astrogram overrides
+		+ sizeof(qint32) * 16; // _notificationsDisplayChecksum + 15 Astrogram overrides
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -420,7 +420,8 @@ QByteArray Settings::serialize() const {
 			<< qint32(_disableOpenLinkWarning.current() ? 1 : 0)
 			<< qint32(_showMessageSeconds.current() ? 1 : 0)
 			<< qint32(_collapseSimilarChannels.current() ? 1 : 0)
-			<< qint32(_hideSimilarChannels.current() ? 1 : 0);
+			<< qint32(_hideSimilarChannels.current() ? 1 : 0)
+			<< qint32(_localOnlyDrafts.current() ? 1 : 0);
 	}
 
 	if (result.size() != size) {
@@ -566,6 +567,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 showMessageSeconds = _showMessageSeconds.current() ? 1 : 0;
 	qint32 collapseSimilarChannels = _collapseSimilarChannels.current() ? 1 : 0;
 	qint32 hideSimilarChannels = _hideSimilarChannels.current() ? 1 : 0;
+	qint32 localOnlyDrafts = _localOnlyDrafts.current() ? 1 : 0;
 	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
 	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
 	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
@@ -948,6 +950,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> hideSimilarChannels;
 	}
+	if (!stream.atEnd()) {
+		stream >> localOnlyDrafts;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1183,6 +1188,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_showMessageSeconds = (showMessageSeconds == 1);
 	_collapseSimilarChannels = (collapseSimilarChannels == 1);
 	_hideSimilarChannels = (hideSimilarChannels == 1);
+	_localOnlyDrafts = (localOnlyDrafts == 1);
 	_ghostHideReadMessages = (ghostHideReadMessages == 1);
 	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
 	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);
@@ -1579,6 +1585,7 @@ void Settings::resetOnLastLogout() {
 	_chatFiltersHorizontal = false;
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction::Disabled;
 	_notificationsVolume = 100;
+	_localOnlyDrafts = false;
 
 	_recentEmojiPreload.clear();
 	_recentEmoji.clear();

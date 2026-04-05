@@ -1970,6 +1970,9 @@ void ApiWrap::sendNotifySettingsUpdates() {
 }
 
 void ApiWrap::saveDraftToCloudDelayed(not_null<Data::Thread*> thread) {
+	if (Core::App().settings().localOnlyDrafts()) {
+		return;
+	}
 	_draftsSaveRequestIds.emplace(base::make_weak(thread), 0);
 	if (!_draftsSaveTimer.isActive()) {
 		_draftsSaveTimer.callOnce(kSaveCloudDraftTimeout);
@@ -2143,6 +2146,9 @@ void ApiWrap::applyAffectedMessages(
 }
 
 void ApiWrap::saveCurrentDraftToCloud() {
+	if (Core::App().settings().localOnlyDrafts()) {
+		return;
+	}
 	Core::App().materializeLocalDrafts();
 	for (const auto &controller : _session->windows()) {
 		if (const auto thread = controller->activeChatCurrent().thread()) {
@@ -2170,6 +2176,11 @@ void ApiWrap::saveCurrentDraftToCloud() {
 }
 
 void ApiWrap::saveDraftsToCloud() {
+	if (Core::App().settings().localOnlyDrafts()) {
+		_draftsSaveRequestIds.clear();
+		checkQuitPreventFinished();
+		return;
+	}
 	for (auto i = begin(_draftsSaveRequestIds); i != end(_draftsSaveRequestIds);) {
 		const auto weak = i->first;
 		const auto thread = weak.get();

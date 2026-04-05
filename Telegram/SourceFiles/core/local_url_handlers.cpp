@@ -968,6 +968,8 @@ bool ShowSearchTagsPromo(
 		const QVariant &context) {
 	if (!controller) {
 		return false;
+	} else if (controller->session().premium()) {
+		return true;
 	}
 	ShowPremiumPreviewBox(controller, PremiumFeature::TagsForMessages);
 	return true;

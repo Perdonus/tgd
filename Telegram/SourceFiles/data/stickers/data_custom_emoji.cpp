@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "boxes/peers/edit_forum_topic_box.h" // MakeTopicIconEmoji.
 #include "chat_helpers/stickers_emoji_pack.h"
+#include "core/application.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "data/data_channel.h"
@@ -1040,6 +1041,9 @@ TextWithEntities SingleCustomEmoji(not_null<DocumentData*> document) {
 bool AllowEmojiWithoutPremium(
 		not_null<PeerData*> peer,
 		DocumentData *exactEmoji) {
+	if (Core::App().settings().localPremium()) {
+		return true;
+	}
 	if (peer->isSelf()) {
 		return true;
 	} else if (!exactEmoji) {

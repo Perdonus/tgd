@@ -337,6 +337,19 @@ public:
 		_showMessageSeconds = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool localOnlyDrafts() const {
+		return _localOnlyDrafts.current();
+	}
+	[[nodiscard]] rpl::producer<bool> localOnlyDraftsValue() const {
+		return _localOnlyDrafts.value();
+	}
+	void setLocalOnlyDrafts(bool value) {
+		if (_localOnlyDrafts.current() == value) {
+			return;
+		}
+		_localOnlyDrafts = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool collapseSimilarChannels() const {
 		return _collapseSimilarChannels.current();
 	}
@@ -1185,6 +1198,7 @@ private:
 	rpl::variable<bool> _disableStories = false;
 	rpl::variable<bool> _disableOpenLinkWarning = false;
 	rpl::variable<bool> _showMessageSeconds = false;
+	rpl::variable<bool> _localOnlyDrafts = false;
 	rpl::variable<bool> _collapseSimilarChannels = true;
 	rpl::variable<bool> _hideSimilarChannels = false;
 	rpl::variable<bool> _ghostHideReadMessages = true;

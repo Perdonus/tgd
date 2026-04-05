@@ -357,6 +357,11 @@ void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
 		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
 	AddToggle(
 		container,
+		settings.localOnlyDraftsValue(),
+		RuEn("Локальные черновики (без облака)", "Local drafts only (no cloud sync)"),
+		[&](bool toggled) { settings.setLocalOnlyDrafts(toggled); });
+	AddToggle(
+		container,
 		settings.collapseSimilarChannelsValue(),
 		RuEn("Сворачивать похожие каналы", "Collapse similar channels"),
 		[&](bool toggled) { settings.setCollapseSimilarChannels(toggled); });

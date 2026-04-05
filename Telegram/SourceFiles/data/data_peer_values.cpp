@@ -401,16 +401,24 @@ rpl::producer<bool> CanManageGroupCallValue(not_null<PeerData*> peer) {
 }
 
 rpl::producer<bool> PeerPremiumValue(not_null<PeerData*> peer) {
+	using namespace rpl::mappers;
 	const auto user = peer->asUser();
 	if (!user) {
 		return rpl::single(false);
 	}
-	return user->flagsValue(
+	auto byFlags = user->flagsValue(
 	) | rpl::filter([=](UserData::Flags::Change change) {
 		return (change.diff & UserDataFlag::Premium);
 	}) | rpl::map([=] {
 		return user->isPremium();
 	});
+	if (!user->isSelf()) {
+		return byFlags;
+	}
+	return rpl::combine(
+		std::move(byFlags),
+		Core::App().settings().localPremiumValue(),
+		_1 || _2);
 }
 
 rpl::producer<bool> AmPremiumValue(not_null<Main::Session*> session) {
