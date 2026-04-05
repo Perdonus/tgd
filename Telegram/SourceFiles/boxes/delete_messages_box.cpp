@@ -235,9 +235,7 @@ void DeleteMessagesBox::prepare() {
 			auto count = int(_ids.size());
 			if (hasScheduledMessages() || hasSavedMusicMessages()) {
 			} else if (auto revoke = revokeText(peer)) {
-				const auto &settings = Core::App().settings();
-				const auto revokeByDefault
-					= !settings.rememberedDeleteMessageOnlyForYou();
+				const auto revokeByDefault = true;
 				_revoke.create(
 					this,
 					revoke->checkbox,

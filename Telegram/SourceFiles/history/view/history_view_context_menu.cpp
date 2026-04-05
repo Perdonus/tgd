@@ -8,11 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_context_menu.h"
 
 #include "api/api_attached_stickers.h"
+#include "api/api_common.h"
 #include "api/api_editing.h"
 #include "api/api_global_privacy.h"
 #include "api/api_polls.h"
 #include "api/api_report.h"
 #include "api/api_ringtones.h"
+#include "api/api_sending.h"
 #include "api/api_transcribes.h"
 #include "api/api_who_reacted.h"
 #include "api/api_toggling_media.h" // Api::ToggleFavedSticker
@@ -103,8 +105,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 #include <QtCore/QLocale>
 #include <QtCore/QStringList>
+#include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
 
 namespace HistoryView {
 namespace {
@@ -486,6 +490,44 @@ bool AddForwardSelectedAction(
 			ExtractIdsList(request.selectedItems),
 			callback);
 	}, &st::menuIconForward);
+	menu->addAction(AstrogramUiText("Forward without quote", "Переслать без цитаты"), [=] {
+		const auto weak = base::make_weak(list);
+		Window::ShowForwardMessagesBox(
+			request.navigation,
+			Data::ForwardDraft{
+				.ids = ExtractIdsList(request.selectedItems),
+				.options = Data::ForwardOptions::NoNamesAndCaptions,
+			},
+			[=] {
+				if (const auto strong = weak.get()) {
+					strong->cancelSelection();
+				}
+			});
+	}, &st::menuIconForward);
+	menu->addAction(AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"), [=] {
+		const auto weak = base::make_weak(list);
+		const auto ids = ExtractIdsList(request.selectedItems);
+		if (ids.empty()) {
+			return;
+		}
+		const auto first = request.navigation->session().data().message(ids.front());
+		if (!first) {
+			return;
+		}
+		const auto api = &first->history()->peer->session().api();
+		const auto self = api->session().user()->asUser();
+		auto action = Api::SendAction(first->history()->peer->owner().history(self));
+		action.clearDraft = false;
+		action.generateLocal = false;
+		const auto history = first->history()->peer->owner().history(self);
+		auto resolved = history->resolveForwardDraft(Data::ForwardDraft{ .ids = ids });
+		api->forwardMessages(std::move(resolved), action, [=] {
+			Ui::Toast::Show(AstrogramUiText("Forwarded to Saved Messages.", "Переслано в Избранное."));
+			if (const auto strong = weak.get()) {
+				strong->cancelSelection();
+			}
+		});
+	}, &st::menuIconFave);
 	return true;
 }
 
@@ -518,6 +560,36 @@ bool AddForwardMessageAction(
 					: MessageIdsList{ 1, itemId }));
 		}
 	}, &st::menuIconForward);
+	menu->addAction(AstrogramUiText("Forward without quote", "Переслать без цитаты"), [=] {
+		if (const auto item = owner->message(itemId)) {
+			Window::ShowForwardMessagesBox(
+				request.navigation,
+				Data::ForwardDraft{
+					.ids = (asGroup
+						? owner->itemOrItsGroup(item)
+						: MessageIdsList{ 1, itemId }),
+					.options = Data::ForwardOptions::NoNamesAndCaptions,
+				});
+		}
+	}, &st::menuIconForward);
+	menu->addAction(AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"), [=] {
+		if (const auto item = owner->message(itemId)) {
+			const auto api = &item->history()->peer->session().api();
+			const auto self = api->session().user()->asUser();
+			auto action = Api::SendAction(item->history()->peer->owner().history(self));
+			action.clearDraft = false;
+			action.generateLocal = false;
+			const auto history = item->history()->peer->owner().history(self);
+			auto resolved = history->resolveForwardDraft(Data::ForwardDraft{
+				.ids = (asGroup
+					? owner->itemOrItsGroup(item)
+					: MessageIdsList{ 1, itemId })
+			});
+			api->forwardMessages(std::move(resolved), action, [] {
+				Ui::Toast::Show(AstrogramUiText("Forwarded to Saved Messages.", "Переслано в Избранное."));
+			});
+		}
+	}, &st::menuIconFave);
 	return true;
 }
 
@@ -1161,6 +1233,26 @@ void AddTopMessageActions(
 	AddViewRepliesAction(menu, request, list);
 	AddEditMessageAction(menu, request, list);
 	AddEditHistoryAction(menu, request, list);
+	if (const auto item = request.item; item && request.selectedItems.empty()) {
+		menu->addAction(
+			AstrogramUiText("Copy IDs and time", "Скопировать ID и время"),
+			[=] {
+				const auto peerId = item->history()->peer->id.value;
+				const auto messageId = item->id;
+				const auto dt = QDateTime::fromSecsSinceEpoch(item->date()).toLocalTime();
+				const auto text = AstrogramUiText(
+					"Chat ID: %1\nMessage ID: %2\nService time: %3",
+					"Chat ID: %1\nMessage ID: %2\nСлужебное время: %3"
+				).arg(QString::number(peerId))
+				 .arg(QString::number(messageId))
+				 .arg(dt.toString(Qt::ISODate));
+				TextUtilities::SetClipboardText(text);
+				list->controller()->window().showToast(AstrogramUiText(
+					"IDs copied.",
+					"ID скопированы."));
+			},
+			&st::menuIconCopy);
+	}
 	AddFactcheckAction(menu, request, list);
 	AddPinMessageAction(menu, request, list);
 }
@@ -1455,6 +1547,19 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 					list->hasCopyRestrictionForSelected()));
 			}
 		}, &st::menuIconTranslate);
+	}
+	if (request.overSelection && !list->getSelectedText().text.isEmpty()) {
+		result->addAction(
+			AstrogramUiText("Search selected text", "Искать выделенный текст"),
+			[=] {
+				const auto query = QUrl::toPercentEncoding(
+					list->getSelectedText().text.trimmed());
+				if (!query.isEmpty()) {
+					QDesktopServices::openUrl(QUrl(
+						u"https://www.google.com/search?q="_q + QString::fromLatin1(query)));
+				}
+			},
+			&st::menuIconSearch);
 	}
 
 	AddTopMessageActions(result, request, list);
