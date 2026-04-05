@@ -23,11 +23,9 @@ PLUGIN_CATALOG_DIR = ROOT / "PluginCatalog"
 SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
-    "accent_color.cpp",
     "ai_chat.cpp",
-    "ayu_safe.cpp",
-    "blur_telegram.cpp",
     "font_tuner.cpp",
+    "show_logs.cpp",
     "transparent_telegram.cpp",
 }
 
