@@ -49,6 +49,18 @@ constexpr auto kAvatarSize = 76;
 		: QString::fromUtf8(en);
 }
 
+[[nodiscard]] QString TranslateProviderLabel(Core::TranslateProvider provider) {
+	switch (provider) {
+	case Core::TranslateProvider::Telegram:
+		return RuEn("Telegram (стандартный)", "Telegram (default)");
+	case Core::TranslateProvider::Google:
+		return u"Google"_q;
+	case Core::TranslateProvider::DeepL:
+		return u"DeepL"_q;
+	}
+	return RuEn("Telegram (стандартный)", "Telegram (default)");
+}
+
 [[nodiscard]] QImage AstrogramHeaderImage() {
 	static const auto image = [] {
 		auto result = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
@@ -365,6 +377,38 @@ void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
 		settings.translateChatEnabledValue(),
 		RuEn("Переводить чат целиком", "Translate whole chat"),
 		[&](bool toggled) { settings.setTranslateChatEnabled(toggled); });
+	AddButtonWithLabel(
+		container,
+		rpl::single(RuEn("Провайдер перевода", "Translation provider")),
+		settings.translateProviderValue() | rpl::map([](Core::TranslateProvider provider) {
+			return TranslateProviderLabel(provider);
+		}),
+		st::settingsButton,
+		{ &st::menuIconTranslate }
+	)->addClickHandler([&settings] {
+		const auto next = [&] {
+			switch (settings.translateProvider()) {
+			case Core::TranslateProvider::Telegram:
+				return Core::TranslateProvider::Google;
+			case Core::TranslateProvider::Google:
+				return Core::TranslateProvider::DeepL;
+			case Core::TranslateProvider::DeepL:
+				return Core::TranslateProvider::Telegram;
+			}
+			return Core::TranslateProvider::Telegram;
+		}();
+		settings.setTranslateProvider(next);
+		Core::App().saveSettings();
+	});
+	AddActionButtonWithLabel(
+		container,
+		RuEn("Локальное распознавание речи", "Local speech recognition"),
+		RuEn("Скачать модель", "Download model"),
+		[] {
+			QDesktopServices::openUrl(
+				QUrl(u"https://alphacephei.com/vosk/models"_q));
+		},
+		{ &st::menuIconDownload });
 	AddToggle(
 		container,
 		settings.localOnlyDraftsValue(),

@@ -242,7 +242,7 @@ QByteArray Settings::serialize() const {
 		+ Serialize::bytearraySize(_tonsiteStorageToken)
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
-		+ sizeof(qint32) * 16; // _notificationsDisplayChecksum + 15 Astrogram overrides
+		+ sizeof(qint32) * 17; // _notificationsDisplayChecksum + 16 Astrogram overrides
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -421,7 +421,8 @@ QByteArray Settings::serialize() const {
 			<< qint32(_showMessageSeconds.current() ? 1 : 0)
 			<< qint32(_collapseSimilarChannels.current() ? 1 : 0)
 			<< qint32(_hideSimilarChannels.current() ? 1 : 0)
-			<< qint32(_localOnlyDrafts.current() ? 1 : 0);
+			<< qint32(_localOnlyDrafts.current() ? 1 : 0)
+			<< qint32(_translateProviderRaw.current());
 	}
 
 	if (result.size() != size) {
@@ -568,6 +569,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 collapseSimilarChannels = _collapseSimilarChannels.current() ? 1 : 0;
 	qint32 hideSimilarChannels = _hideSimilarChannels.current() ? 1 : 0;
 	qint32 localOnlyDrafts = _localOnlyDrafts.current() ? 1 : 0;
+	qint32 translateProvider = _translateProviderRaw.current();
 	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
 	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
 	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
@@ -953,6 +955,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> localOnlyDrafts;
 	}
+	if (!stream.atEnd()) {
+		stream >> translateProvider;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1189,6 +1194,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_collapseSimilarChannels = (collapseSimilarChannels == 1);
 	_hideSimilarChannels = (hideSimilarChannels == 1);
 	_localOnlyDrafts = (localOnlyDrafts == 1);
+	_translateProviderRaw = std::clamp(translateProvider, 0, 2);
 	_ghostHideReadMessages = (ghostHideReadMessages == 1);
 	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
 	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);
@@ -1586,6 +1592,7 @@ void Settings::resetOnLastLogout() {
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction::Disabled;
 	_notificationsVolume = 100;
 	_localOnlyDrafts = false;
+	_translateProviderRaw = 0;
 
 	_recentEmojiPreload.clear();
 	_recentEmoji.clear();
@@ -1709,6 +1716,26 @@ rpl::producer<LanguageId> Settings::translateToValue() const {
 		return raw
 			? LanguageId{ QLocale::Language(raw) }
 			: DefaultSkipLanguages().front();
+	}) | rpl::distinct_until_changed();
+}
+
+void Settings::setTranslateProvider(TranslateProvider provider) {
+	_translateProviderRaw = std::clamp(
+		static_cast<int>(provider),
+		0,
+		2);
+}
+
+TranslateProvider Settings::translateProvider() const {
+	return static_cast<TranslateProvider>(std::clamp(
+		_translateProviderRaw.current(),
+		0,
+		2));
+}
+
+rpl::producer<TranslateProvider> Settings::translateProviderValue() const {
+	return _translateProviderRaw.value() | rpl::map([](int raw) {
+		return static_cast<TranslateProvider>(std::clamp(raw, 0, 2));
 	}) | rpl::distinct_until_changed();
 }
 

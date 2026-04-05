@@ -36,6 +36,12 @@ enum class StickedTooltip;
 
 namespace Core {
 
+enum class TranslateProvider {
+	Telegram = 0,
+	Google = 1,
+	DeepL = 2,
+};
+
 struct WindowPosition {
 	int32 moncrc = 0;
 	int maximized = 0;
@@ -1043,6 +1049,9 @@ public:
 	void setTranslateTo(LanguageId id);
 	[[nodiscard]] LanguageId translateTo() const;
 	[[nodiscard]] rpl::producer<LanguageId> translateToValue() const;
+	void setTranslateProvider(TranslateProvider provider);
+	[[nodiscard]] TranslateProvider translateProvider() const;
+	[[nodiscard]] rpl::producer<TranslateProvider> translateProviderValue() const;
 	void setSkipTranslationLanguages(std::vector<LanguageId> languages);
 	[[nodiscard]] std::vector<LanguageId> skipTranslationLanguages() const;
 	[[nodiscard]] auto skipTranslationLanguagesValue() const
@@ -1286,6 +1295,7 @@ private:
 	bool _translateButtonEnabled = false;
 	rpl::variable<bool> _translateChatEnabled = true;
 	rpl::variable<int> _translateToRaw = 0;
+	rpl::variable<int> _translateProviderRaw = 0;
 	rpl::variable<std::vector<LanguageId>> _skipTranslationLanguages;
 	rpl::event_stream<> _skipTranslationLanguagesChanges;
 	bool _rememberedDeleteMessageOnlyForYou = false;

@@ -1712,6 +1712,21 @@ bool ResolveTonSettings(
 	return true;
 }
 
+bool HandleAstrogramSupport(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	Q_UNUSED(match);
+	Q_UNUSED(context);
+	if (!controller) {
+		return false;
+	}
+	controller->showPeerByLink(Window::PeerByLinkInfo{
+		.usernameOrId = QStringLiteral("astrogramchannel"),
+	});
+	return true;
+}
+
 } // namespace
 
 const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
@@ -1823,6 +1838,10 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 		{
 			u"^ton/?(^\\?.*)?(#|$)"_q,
 			ResolveTonSettings
+		},
+		{
+			u"^(support)|(donate)$"_q,
+			HandleAstrogramSupport
 		},
 		{
 			u"^([^\\?]+)(\\?|#|$)"_q,
