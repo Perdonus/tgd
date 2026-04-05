@@ -357,6 +357,16 @@ void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
 		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
 	AddToggle(
 		container,
+		rpl::single(settings.translateButtonEnabled()),
+		RuEn("Показывать кнопку перевода", "Show translate button"),
+		[&](bool toggled) { settings.setTranslateButtonEnabled(toggled); });
+	AddToggle(
+		container,
+		settings.translateChatEnabledValue(),
+		RuEn("Переводить чат целиком", "Translate whole chat"),
+		[&](bool toggled) { settings.setTranslateChatEnabled(toggled); });
+	AddToggle(
+		container,
 		settings.localOnlyDraftsValue(),
 		RuEn("Локальные черновики (без облака)", "Local drafts only (no cloud sync)"),
 		[&](bool toggled) { settings.setLocalOnlyDrafts(toggled); });
