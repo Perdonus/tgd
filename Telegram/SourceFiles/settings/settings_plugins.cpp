@@ -815,7 +815,7 @@ void OpenPluginsFolder() {
 }
 
 constexpr auto kPluginCardRadius = 20.;
-constexpr auto kPluginCardVerticalMargin = 4;
+constexpr auto kPluginCardVerticalMargin = 12;
 constexpr auto kPluginCardContentInsetLeft = 10;
 constexpr auto kPluginCardContentInsetRight = 6;
 
@@ -1019,7 +1019,7 @@ void RequestPluginRemoval(
 				return;
 			}
 			if (onRemoved) {
-				QTimer::singleShot(180, [=] {
+				QTimer::singleShot(0, [=] {
 					onRemoved();
 				});
 			}
@@ -1525,7 +1525,7 @@ void Plugins::scheduleRebuildList(int delayMs) {
 void Plugins::rebuildList() {
 	_list->clear();
 	const auto scheduleRefresh = crl::guard(this, [=] {
-		scheduleRebuildList(180);
+		scheduleRebuildList(0);
 	});
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
@@ -1596,6 +1596,7 @@ void Plugins::rebuildList() {
 			state,
 			scheduleRefresh);
 	}
+	Ui::AddSkip(_list, 2);
 
 	Ui::ResizeFitChild(this, _content);
 }

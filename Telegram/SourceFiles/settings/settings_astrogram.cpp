@@ -149,7 +149,7 @@ void AddToggle(
 	button->toggledChanges(
 	) | rpl::on_next([=](bool toggled) {
 		callback(toggled);
-		Core::App().saveSettingsDelayed();
+		Core::App().saveSettings();
 	}, button->lifetime());
 }
 
@@ -291,6 +291,11 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 		settings.disableAdsValue(),
 		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
 		[&](bool toggled) { settings.setDisableAds(toggled); });
+	AddToggle(
+		container,
+		settings.mainMenuAccountsShownValue(),
+		RuEn("Показывать аккаунты в боковом меню", "Show accounts in side menu"),
+		[&](bool toggled) { settings.setMainMenuAccountsShown(toggled); });
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
@@ -327,6 +332,16 @@ void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
 	Ui::AddSkip(container);
 	AddToggle(
 		container,
+		settings.adaptiveForWideValue(),
+		RuEn("Адаптивный широкий макет", "Adaptive wide layout"),
+		[&](bool toggled) { settings.setAdaptiveForWide(toggled); });
+	AddToggle(
+		container,
+		settings.systemDarkModeEnabledValue(),
+		RuEn("Автоматическая тёмная тема по системе", "Auto dark mode from system"),
+		[&](bool toggled) { settings.setSystemDarkModeEnabled(toggled); });
+	AddToggle(
+		container,
 		settings.disableStoriesValue(),
 		RuEn("Скрыть истории", "Hide stories"),
 		[&](bool toggled) { settings.setDisableStories(toggled); });
@@ -350,6 +365,31 @@ void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
 		settings.hideSimilarChannelsValue(),
 		RuEn("Скрыть похожие каналы", "Hide similar channels"),
 		[&](bool toggled) { settings.setHideSimilarChannels(toggled); });
+	AddToggle(
+		container,
+		settings.largeEmojiValue(),
+		RuEn("Крупные эмодзи", "Large emoji"),
+		[&](bool toggled) { settings.setLargeEmoji(toggled); });
+	AddToggle(
+		container,
+		settings.replaceEmojiValue(),
+		RuEn("Автозамена эмодзи", "Auto replace emoji"),
+		[&](bool toggled) { settings.setReplaceEmoji(toggled); });
+	AddToggle(
+		container,
+		settings.cornerReactionValue(),
+		RuEn("Быстрая реакция в углу", "Corner quick reaction"),
+		[&](bool toggled) { settings.setCornerReaction(toggled); });
+	AddToggle(
+		container,
+		settings.spellcheckerEnabledValue(),
+		RuEn("Проверка орфографии", "Spell checker"),
+		[&](bool toggled) { settings.setSpellcheckerEnabled(toggled); });
+	AddToggle(
+		container,
+		settings.autoDownloadDictionariesValue(),
+		RuEn("Автозагрузка словарей", "Auto download dictionaries"),
+		[&](bool toggled) { settings.setAutoDownloadDictionaries(toggled); });
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
