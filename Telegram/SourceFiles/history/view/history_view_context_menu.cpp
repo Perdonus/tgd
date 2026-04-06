@@ -1238,12 +1238,12 @@ void AddTopMessageActions(
 			AstrogramUiText("Copy IDs and time", "Скопировать ID и время"),
 			[=] {
 				const auto peerId = item->history()->peer->id.value;
-				const auto messageId = item->id;
+				const auto messageId = item->id.bare;
 				const auto dt = QDateTime::fromSecsSinceEpoch(item->date()).toLocalTime();
 				const auto text = AstrogramUiText(
 					"Chat ID: %1\nMessage ID: %2\nService time: %3",
 					"Chat ID: %1\nMessage ID: %2\nСлужебное время: %3"
-				).arg(QString::number(peerId))
+				).arg(QString::number(static_cast<qulonglong>(peerId)))
 				 .arg(QString::number(messageId))
 				 .arg(dt.toString(Qt::ISODate));
 				TextUtilities::SetClipboardText(text);
@@ -1548,12 +1548,12 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 			}
 		}, &st::menuIconTranslate);
 	}
-	if (request.overSelection && !list->getSelectedText().text.isEmpty()) {
+	if (request.overSelection && !list->getSelectedText().rich.text.isEmpty()) {
 		result->addAction(
 			AstrogramUiText("Search selected text", "Искать выделенный текст"),
 			[=] {
 				const auto query = QUrl::toPercentEncoding(
-					list->getSelectedText().text.trimmed());
+					list->getSelectedText().rich.text.trimmed());
 				if (!query.isEmpty()) {
 					QDesktopServices::openUrl(QUrl(
 						u"https://www.google.com/search?q="_q + QString::fromLatin1(query)));
