@@ -17,7 +17,7 @@
   <a href="https://t.me/astroplugin"><img src="https://img.shields.io/badge/plugins-@astroplugin-2CA5E0?style=flat-square&logo=telegram&logoColor=white"></a>
 </p>
 
-![Astrogram Preview](docs/assets/preview.png)
+![Astrogram Preview](docs/assets/photo_2026-04-06_21-59-41.jpg)
 
  ## Что такое Astrogram 
 
