@@ -613,7 +613,7 @@ jobs:
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
           set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-force-target.log"
           set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-force-release.log"
-          set "BUILD_JOBS=2"
+          set "BUILD_JOBS=1"
 
           cmake --build ..\out --config Release --parallel %BUILD_JOBS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok

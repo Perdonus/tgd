@@ -975,7 +975,7 @@ QJsonObject RuntimeMessageJson(
 	const auto fullId = item->fullId();
 	auto result = QJsonObject();
 	result.insert(u"peerId"_q, QString::number(peerId.value));
-	result.insert(u"id"_q, item->id);
+	result.insert(u"id"_q, item->id.bare);
 	result.insert(u"fullMsgPeerId"_q, QString::number(fullId.peer.value));
 	result.insert(u"date"_q, item->date());
 	result.insert(u"out"_q, item->out());

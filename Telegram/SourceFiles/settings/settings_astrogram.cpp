@@ -349,7 +349,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 
 		Ui::AddSkip(container);
 		box->addButton(
-			RuEn("Скачать", "Download"),
+			rpl::single(RuEn("Скачать", "Download")),
 			[=] {
 				if (state->active) {
 					return;
@@ -471,7 +471,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 						reply->deleteLater();
 					});
 			});
-		box->addButton(RuEn("Отмена", "Cancel"), [=] {
+		box->addButton(rpl::single(RuEn("Отмена", "Cancel")), [=] {
 			if (state->reply) {
 				state->reply->abort();
 			}
