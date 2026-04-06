@@ -258,112 +258,29 @@ void SavePersonalChannel(
 	}
 }
 
-[[nodiscard]] QImage AstrogramSupportImage() {
-	static const auto image = [] {
-		auto result = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
-		if (result.isNull()) {
-			result = QImage(u":/gui/art/logo_256_no_margin.png"_q);
-		}
-		return result;
-	}();
-	return image;
-}
-
 void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setWidth(st::boxWideWidth);
-		box->setNoContentMargin(true);
-		box->setTitle(rpl::single(QString()));
-		box->addTopButton(st::boxTitleClose, [=] { box->closeBox(); });
-
-		const auto content = box->verticalLayout();
-		Ui::AddSkip(content);
-		Ui::AddSkip(content);
-
-		const auto top = content->add(object_ptr<Ui::RpWidget>(content));
-		top->setMinimumHeight(170);
-		top->setMaximumHeight(170);
-
-		using MiniStars = Ui::Premium::ColoredMiniStars;
-		const auto stars = top->lifetime().make_state<MiniStars>(
-			top,
-			Ui::Premium::MiniStarsType::BiStars);
-		stars->setColorOverride(QGradientStops{
-			{ 0.0, QColor(0x19, 0xc3, 0x7d) },
-			{ 1.0, QColor(0x35, 0xe0, 0x95) },
-		});
-
-		top->paintRequest(
-		) | rpl::start_with_next([=] {
-			QPainter p(top);
-			PainterHighQualityEnabler hq(p);
-
-			stars->setCenter(top->rect());
-			stars->paint(p);
-
-			const auto side = 86;
-			const auto rect = QRect(
-				(top->width() - side) / 2,
-				(top->height() - side) / 2 + 8,
-				side,
-				side);
-			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(0x13, 0x8d, 0x59));
-			p.drawEllipse(rect.adjusted(-4, -4, 4, 4));
-
-			const auto image = AstrogramSupportImage();
-			if (!image.isNull()) {
-				QPainterPath clip;
-				clip.addEllipse(rect);
-				p.save();
-				p.setClipPath(clip);
-				p.drawImage(rect, image);
-				p.restore();
-			}
-		}, top->lifetime());
-
-		content->add(
-			object_ptr<Ui::FlatLabel>(
-				content,
-				rpl::single(tr::bold(RuEn(
-					"Поддержать разработку Astrogram",
-					"Support Astrogram development"))),
-				st::boxTitle),
-			st::boxRowPadding);
-		content->add(
-			object_ptr<Ui::FlatLabel>(
-				content,
-				rpl::single(RuEn(
-					"Поддержка помогает развивать клиент и даёт серверный значок подписчика.",
-					"Your support helps Astrogram evolve and grants a server-side subscriber badge.")),
-				st::boxDividerLabel),
-			st::boxRowPadding);
-		Ui::AddSkip(content);
-		content->add(
-			object_ptr<Ui::FlatLabel>(
-				content,
-				rpl::single(RuEn(
-					"Стоимость: 50 ₽\n≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN",
-					"Price: 50 RUB\n≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN")),
-				st::defaultFlatLabel),
-			st::boxRowPadding);
-		content->add(
-			object_ptr<Ui::FlatLabel>(
-				content,
-				rpl::single(RuEn(
-					"Кому писать: @astrogram_support",
-					"Contact: @astrogram_support")),
-				st::defaultFlatLabel),
-			st::boxRowPadding);
-		Ui::AddSkip(content);
-
-		box->addButton(RuEn("Написать @astrogram_support", "Message @astrogram_support"), [=] {
+	controller->show(Ui::MakeConfirmBox({
+		.text = TextWithEntities{ RuEn(
+			"Поддержать разработку Astrogram\n\n"
+			"Поддержка даёт серверный значок подписчика.\n"
+			"Стоимость: 50 ₽\n"
+			"≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\n\n"
+			"Кому писать: @astrogram_support",
+			"Support Astrogram development\n\n"
+			"Support grants a server-side subscriber badge.\n"
+			"Price: 50 RUB\n"
+			"≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\n\n"
+			"Contact: @astrogram_support") },
+		.confirmed = [=](Fn<void()> close) {
 			controller->showPeerByLink(Window::PeerByLinkInfo{
 				.usernameOrId = QStringLiteral("astrogram_support"),
 			});
-		});
-		box->addButton(RuEn("Закрыть", "Close"), [=] { box->closeBox(); });
-	}));
+			close();
+		},
+		.confirmText = rpl::single(RuEn(
+			"Написать @astrogram_support",
+			"Message @astrogram_support")),
+	}));	
 }
 
 bool JoinGroupByHash(

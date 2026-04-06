@@ -88,6 +88,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
+
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include "core/application.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -1246,7 +1249,9 @@ void AddTopMessageActions(
 				).arg(QString::number(static_cast<qulonglong>(peerId)))
 				 .arg(QString::number(messageId))
 				 .arg(dt.toString(Qt::ISODate));
-				TextUtilities::SetClipboardText(text);
+				if (const auto clipboard = QGuiApplication::clipboard()) {
+					clipboard->setText(text, QClipboard::Clipboard);
+				}
 				list->controller()->window().showToast(AstrogramUiText(
 					"IDs copied.",
 					"ID скопированы."));
