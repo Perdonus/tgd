@@ -241,6 +241,46 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				u"Vosk EN small (vosk-model-small-en-us-0.15)"_q,
 				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q),
 			},
+			{
+				u"Vosk UK small (vosk-model-small-uk-v3-small)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q),
+			},
+			{
+				u"Vosk DE small (vosk-model-small-de-0.15)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q),
+			},
+			{
+				u"Vosk FR small (vosk-model-small-fr-0.22)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q),
+			},
+			{
+				u"Vosk ES small (vosk-model-small-es-0.42)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q),
+			},
+			{
+				u"Vosk IT small (vosk-model-small-it-0.22)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q),
+			},
+			{
+				u"Vosk PT small (vosk-model-small-pt-0.3)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q),
+			},
+			{
+				u"Vosk TR small (vosk-model-small-tr-0.3)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q),
+			},
+			{
+				u"Vosk PL small (vosk-model-small-pl-0.22)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q),
+			},
+			{
+				u"Vosk JA small (vosk-model-small-ja-0.22)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q),
+			},
+			{
+				u"Vosk KZ small (vosk-model-small-kz-0.42)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q),
+			},
 		};
 		auto modelLabel = box->lifetime().make_state<rpl::variable<QString>>(
 			modelOptions.front().first);
