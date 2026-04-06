@@ -477,8 +477,8 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 			}
 			box->closeBox();
 		});
-	});
-}
+		}));
+	}
 
 void AddLinksSection(
 		not_null<Window::SessionController*> controller,
