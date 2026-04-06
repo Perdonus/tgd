@@ -1,4 +1,6 @@
+<p align="center">
 # Astrogram Desktop
+</p>
 
 <p align="center">
   <img src="Telegram/Resources/art/icon_round512@2x.png" width="160" alt="Astrogram logo">
