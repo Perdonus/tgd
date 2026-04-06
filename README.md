@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Astrogram — десктопный Telegram-клиент с нативной системой плагинов, локальным runtime API и отдельным центром настроек Astrogram.
+  Astrogram — десктопный Telegram-клиент с нативной системой плагинов.
 </p>
 
 <p align="center">
