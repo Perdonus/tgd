@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Telegram Desktop, rebuilt as Astrogram: branded desktop client, native plugins, local runtime API and extra power-user settings.
+  Astrogram — десктопный Telegram-клиент с нативной системой плагинов, локальным runtime API и отдельным центром настроек Astrogram.
 </p>
 
 <p align="center">
@@ -17,68 +17,47 @@
 
 ![Astrogram Preview](docs/assets/preview.png)
 
-## What is Astrogram
+## Что такое Astrogram
 
-Astrogram is a desktop Telegram client based on Telegram Desktop with an extended Astrogram layer on top. The project focuses on a cleaner branded client, deeper customization, a native plugin system, local runtime integration and a dedicated Astrogram settings hub.
+Astrogram — это десктопный Telegram-клиент на базе Telegram Desktop с отдельным слоем возможностей Astrogram поверх него. Проект делает упор на собственный брендинг, более глубокую настройку клиента, нативную систему плагинов, локальные интеграции и единый раздел настроек Astrogram.
 
-## Core Areas
+## Основные направления
 
-### Client
+### Клиент
 
-- Astrogram branding across executable name, icons, metadata and docs.
-- Dedicated Astrogram settings entry inside the client.
-- Extra desktop-focused quality-of-life features, privacy tools and interface tweaks.
-- Windows target shipped as `Astrogram.exe`.
+- Брендинг Astrogram в названии приложения, иконках, метаданных и документации.
+- Отдельный вход в настройки Astrogram прямо внутри клиента.
+- Дополнительные desktop-функции, визуальные улучшения и настройки приватности.
+- Windows-сборка поставляется как `Astrogram.exe`.
 
-### Plugins
+### Плагины
 
-- Native `.tgd` plugin format.
-- In-app plugin manager with safe mode, diagnostics logs and recovery flow.
-- Plugin examples and catalog-oriented repository structure.
-- Runtime-aware plugin architecture for future integrations.
+- Нативный формат плагинов `.tgd`.
+- Встроенный менеджер плагинов с безопасным режимом, логами диагностики и восстановлением после сбоев.
+- Примеры плагинов и структура репозитория, рассчитанная на каталог и версии.
+- Архитектура плагинов, рассчитанная на интеграцию с runtime API.
 
 ### Runtime API
 
-- Local runtime surface for automation, diagnostics and external tooling.
-- Designed for desktop-side integrations instead of cloud dependence.
-- Documented together with the plugin system and Astrogram tooling.
+- Локальная runtime-поверхность для автоматизации, диагностики и внешних инструментов.
+- Упор на локальные десктопные интеграции, а не на облачные прокладки.
+- Документируется вместе с системой плагинов и инфраструктурой Astrogram.
 
-## Community
+## Сообщество
 
-- Documentation: [docs.astrogram.su](https://docs.astrogram.su)
-- Channel: [@astrogramchannel](https://t.me/astrogramchannel)
-- Chat: [@astrogram_chat](https://t.me/astrogram_chat)
+- Документация: [docs.astrogram.su](https://docs.astrogram.su)
+- Канал: [@astrogramchannel](https://t.me/astrogramchannel)
+- Чат: [@astrogram_chat](https://t.me/astrogram_chat)
 
-## Screenshots
+## Скриншоты
 
 | Main Window | Dialogs |
 | --- | --- |
 | ![Slide 1](docs/assets/slide.01.jpg) | ![Slide 2](docs/assets/slide.02.jpg) |
 | ![Slide 3](docs/assets/slide.03.jpg) | ![Slide 4](docs/assets/slide.04.jpg) |
 
-## Repository Layout
+## Лицензия
 
-- `Telegram/` - Astrogram desktop client source tree.
-- `Telegram/Plugins/Examples/` - example `.tgd` plugins.
-- `.github/workflows/` - desktop, plugin and site CI.
-- `site/docs/` - documentation site source.
-- `docs/` - build docs and static assets.
+Проект использует GPLv3 с OpenSSL exception. Подробности смотри в [LICENSE](LICENSE) и [LEGAL](LEGAL).
 
-## Build
-
-- Windows x64: [docs/building-win-x64.md](docs/building-win-x64.md)
-- Windows x86: [docs/building-win.md](docs/building-win.md)
-- macOS: [docs/building-mac.md](docs/building-mac.md)
-- Linux: [docs/building-linux.md](docs/building-linux.md)
-
-## License and Upstream
-
-Astrogram is built on top of Telegram Desktop and keeps the same GPLv3 plus OpenSSL exception licensing model used by the upstream project. See [LICENSE](LICENSE) and [LEGAL](LEGAL).
-
-## Project Status
-
-- Main delivery target: Windows desktop build published as `Astrogram.exe`.
-- GitHub Actions includes cached dependencies and a fast compile precheck before long Windows builds.
-- Client, plugin system, runtime API and docs are developed in the same repository.
-
-Thanks ❤️ Telegram Desktop, AyuGram Desktop, exteraGram, Kotatogram, 64Gram, Forkgram.
+Спасибо ❤️ AyuGram, exteraGram, Kotatogram, 64Gram, Forkgram.
