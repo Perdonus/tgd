@@ -18,6 +18,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "apiwrap.h"
+#include "data/data_session.h"
+#include "storage/storage_sparse_ids_list.h"
 #include "settings.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
@@ -1787,10 +1790,7 @@ QByteArray Manager::processRuntimeApiRequest(
 				continue;
 			}
 			const auto history = row->history();
-			const auto peer = history->peer;
-			if (!peer) {
-				continue;
-			}
+			const auto peer = history->peer.get();
 			auto chat = QJsonObject{
 				{ u"peerId"_q, QString::number(peer->id.value) },
 				{ u"type"_q, peerIsUser(peer->id)
@@ -1803,7 +1803,8 @@ QByteArray Manager::processRuntimeApiRequest(
 					? history->unreadCount()
 					: -1 },
 			};
-			if (const auto last = history->lastMessage()) {
+			const auto last = history->lastMessage();
+			if (last) {
 				chat.insert(u"lastMessage"_q, RuntimeMessageJson(last, peer->id));
 			}
 			result.push_back(chat);

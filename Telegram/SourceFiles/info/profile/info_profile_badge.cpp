@@ -25,10 +25,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
-#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUrlQuery>
+#include <map>
 
 namespace Info::Profile {
 namespace {
@@ -50,8 +50,10 @@ public:
 		const auto key = uint64(user->id.value);
 		auto i = _entries.find(key);
 		if (i == end(_entries)) {
-			i = _entries.emplace(key, std::make_unique<Entry>()).first;
+			_entries.emplace(key, std::make_unique<Entry>());
+			i = _entries.find(key);
 		}
+		Expects(i != end(_entries));
 		const auto entry = i->second.get();
 		requestIfNeeded(key, entry);
 		return rpl::single(entry->emojiStatusId) | rpl::then(
@@ -131,7 +133,7 @@ private:
 			});
 	}
 
-	QHash<uint64, std::unique_ptr<Entry>> _entries;
+	std::map<uint64, std::unique_ptr<Entry>> _entries;
 	QNetworkAccessManager _manager;
 };
 
