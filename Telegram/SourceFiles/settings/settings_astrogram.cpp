@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_plugins.h"
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
@@ -323,8 +324,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		progressWidget->resizeToWidth(st::boxWideWidth - st::boxRowPadding.left() - st::boxRowPadding.right());
 		progressWidget->setMinimumHeight(26);
 		progressWidget->setMaximumHeight(26);
-		progressWidget->paintRequest(
-		) | rpl::start_with_next([=](const QRect &) {
+		progressWidget->paintRequest() | rpl::on_next([=](const QRect &) {
 			const auto ratio = std::clamp(progressRatio->current(), 0., 1.);
 			QPainter p(progressWidget);
 			PainterHighQualityEnabler hq(p);
