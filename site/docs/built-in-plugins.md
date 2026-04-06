@@ -27,21 +27,13 @@ Target behavior:
 - use a user-provided API key
 - point the user to `sosiskibot.ru` to obtain the key
 
-## Blur Telegram
-
-A visual effect plugin focused on blur and frosted layers for the desktop client.
-
-## Accent Color
-
-A theming-oriented plugin for Astrogram-specific accent colors and palette tweaks.
-
 ## Font Tuner
 
 Typography-oriented plugin work. The long-term goal is not just scaling text, but also loading custom fonts from local files or remote sources.
 
-## AyuSafe
+## Show Logs
 
-`AyuSafe` started as a plugin home for Ayu-style privacy and utility ideas. The larger targets are gradually being moved into the Astrogram client itself where deeper functionality belongs.
+`Show Logs` is the diagnostics-oriented plugin reference. It is intended to surface plugin and runtime traces inside Astrogram itself without forcing the user to hunt for files on disk.
 
 ## Why this page matters
 
