@@ -33,9 +33,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QFont>
 #include <QFontMetrics>
 #include <QImage>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
+#include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
 #include <QPainterPath>
 #include <QStandardPaths>
 #include <QTextOption>

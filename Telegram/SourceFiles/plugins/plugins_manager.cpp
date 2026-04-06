@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/launcher.h"
 #include "data/data_changes.h"
+#include "data/data_history_messages.h"
 #include "history/history_item.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
@@ -972,15 +973,17 @@ QJsonObject RuntimeMessageJson(
 		not_null<HistoryItem*> item,
 		PeerId peerId) {
 	const auto fullId = item->fullId();
-	return QJsonObject{
-		{ u"peerId"_q, QString::number(peerId.value) },
-		{ u"id"_q, item->id },
-		{ u"fullMsgPeerId"_q, QString::number(fullId.peer.value) },
-		{ u"date"_q, item->date() },
-		{ u"out"_q, item->out() },
-		{ u"text"_q, item->notificationText().text },
-		{ u"fromPeerId"_q, QString::number(item->from()->id.value) },
-	};
+	auto result = QJsonObject();
+	result.insert(u"peerId"_q, QString::number(peerId.value));
+	result.insert(u"id"_q, item->id);
+	result.insert(u"fullMsgPeerId"_q, QString::number(fullId.peer.value));
+	result.insert(u"date"_q, item->date());
+	result.insert(u"out"_q, item->out());
+	result.insert(u"text"_q, item->notificationText().text);
+	if (const auto from = item->from()) {
+		result.insert(u"fromPeerId"_q, QString::number(from->id.value));
+	}
+	return result;
 }
 
 } // namespace
