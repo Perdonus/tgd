@@ -509,6 +509,98 @@ jobs:
           )
           exit /b 1
 
+      - name: Fast compile precheck (changed units)
+        id: fast_precheck
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path
+          $outDir = Join-Path $workspace 'out'
+          $logDir = Join-Path $workspace 'ci-logs'
+          if (-not (Test-Path -LiteralPath $logDir)) {
+            New-Item -ItemType Directory -Path $logDir | Out-Null
+          }
+          $logFile = Join-Path $logDir 'fast-precheck.log'
+          if (Test-Path -LiteralPath $logFile) {
+            Remove-Item -LiteralPath $logFile -Force
+          }
+
+          $base = '${{ github.event.before }}'
+          $head = '${{ github.sha }}'
+          if ([string]::IsNullOrWhiteSpace($base) -or ($base -match '^0+$')) {
+            $base = "$head~1"
+          }
+
+          $changed = @(git diff --name-only $base $head 2>$null)
+          if (-not $changed -or $changed.Count -eq 0) {
+            $changed = @(git diff --name-only HEAD~1 HEAD 2>$null)
+          }
+
+          $cppSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($path in $changed) {
+            if ($path -match '^Telegram/SourceFiles/.*\.cpp$') {
+              [void]$cppSet.Add($path)
+              continue
+            }
+            if ($path -match '^Telegram/SourceFiles/.*\.h$') {
+              $candidate = [System.IO.Path]::ChangeExtension($path, '.cpp')
+              if (Test-Path -LiteralPath (Join-Path $workspace $candidate)) {
+                [void]$cppSet.Add($candidate)
+              }
+              continue
+            }
+          }
+
+          $cppList = @($cppSet)
+          if ($cppList.Count -eq 0) {
+            "No changed translation units in Telegram/SourceFiles; fast precheck skipped." | Tee-Object -FilePath $logFile -Append
+            exit 0
+          }
+
+          ("Fast precheck units: " + $cppList.Count) | Tee-Object -FilePath $logFile -Append
+          $failed = $false
+
+          foreach ($cpp in $cppList) {
+            $relativeWin = $cpp.Replace('/', '\\')
+            $sourcePath = Join-Path $workspace $relativeWin
+            if (-not (Test-Path -LiteralPath $sourcePath)) {
+              ("[skip] source missing: " + $cpp) | Tee-Object -FilePath $logFile -Append
+              continue
+            }
+            if (-not $relativeWin.StartsWith('Telegram\\SourceFiles\\')) {
+              ("[skip] not in SourceFiles: " + $cpp) | Tee-Object -FilePath $logFile -Append
+              continue
+            }
+
+            $objSuffix = $relativeWin.Substring('Telegram\\SourceFiles\\'.Length)
+            $rsp = Join-Path $outDir ("Telegram\\CMakeFiles\\Telegram.dir\\Release\\SourceFiles\\" + $objSuffix + ".obj.rsp")
+            if (-not (Test-Path -LiteralPath $rsp)) {
+              $leaf = [System.IO.Path]::GetFileName($relativeWin) + '.obj.rsp'
+              $fallback = Get-ChildItem -Path $outDir -Recurse -Filter $leaf -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($fallback) {
+                $rsp = $fallback.FullName
+              }
+            }
+            if (-not (Test-Path -LiteralPath $rsp)) {
+              ("[skip] rsp not found for " + $cpp) | Tee-Object -FilePath $logFile -Append
+              continue
+            }
+
+            ("[check] " + $cpp) | Tee-Object -FilePath $logFile -Append
+            & cl.exe /nologo /TP "@$rsp" /Zs /c $sourcePath *>> $logFile
+            if ($LASTEXITCODE -ne 0) {
+              $failed = $true
+              break
+            }
+          }
+
+          if ($failed) {
+            Write-Host "[precheck] fast compile precheck failed"
+            Get-Content -Path $logFile -Tail 200
+            throw "fast precheck failed"
+          }
+
       - name: Build Telegram target (Release)
         id: build_target
         shell: cmd
