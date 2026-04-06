@@ -18,20 +18,30 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+#include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
+#include "ui/widgets/labels.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
 
 #include <QDesktopServices>
+#include <QDir>
+#include <QFile>
 #include <QFont>
 #include <QFontMetrics>
 #include <QImage>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPainterPath>
+#include <QStandardPaths>
 #include <QTextOption>
 #include <QUrl>
+#include <algorithm>
+#include <cmath>
 
 namespace Settings {
 namespace {
@@ -209,6 +219,227 @@ void AddSectionButton(
 	)->addClickHandler([=] { controller->showSettings(type); });
 }
 
+void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		struct DownloadState {
+			QPointer<QNetworkReply> reply;
+			std::unique_ptr<QFile> output;
+			qint64 ready = 0;
+			qint64 total = 0;
+			QString modelName;
+			bool active = false;
+		};
+		const auto state = box->lifetime().make_state<DownloadState>();
+		const auto manager = box->lifetime().make_state<QNetworkAccessManager>();
+		const auto selectedModelIndex = box->lifetime().make_state<int>(0);
+		const auto modelOptions = std::vector<std::pair<QString, QUrl>>{
+			{
+				u"Vosk RU small (vosk-model-small-ru-0.22)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q),
+			},
+			{
+				u"Vosk EN small (vosk-model-small-en-us-0.15)"_q,
+				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q),
+			},
+		};
+		auto modelLabel = box->lifetime().make_state<rpl::variable<QString>>(
+			modelOptions.front().first);
+		auto progressText = box->lifetime().make_state<rpl::variable<QString>>(
+			RuEn("Ожидание запуска загрузки", "Waiting to start download"));
+		auto progressRatio = box->lifetime().make_state<rpl::variable<float64>>(0.);
+
+		box->setTitle(rpl::single(RuEn(
+			"Локальное распознавание речи",
+			"Local speech recognition")));
+		box->setWidth(st::boxWideWidth);
+		box->addTopButton(st::boxTitleClose, [=] { box->closeBox(); });
+
+		const auto container = box->verticalLayout();
+		Ui::AddSkip(container);
+		container->add(object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(RuEn(
+				"Скачайте модель распознавания речи на устройство. "
+				"Модель хранится локально и используется без отправки аудио в облако.",
+				"Download a speech recognition model to your device. "
+				"The model is stored locally and used without uploading audio to cloud.")),
+			st::boxDividerLabel),
+			st::boxRowPadding);
+		Ui::AddSkip(container);
+
+		AddButtonWithLabel(
+			container,
+			rpl::single(RuEn("Модель", "Model")),
+			modelLabel->value(),
+			st::settingsButton,
+			{ &st::menuIconInfo }
+		)->addClickHandler([=] {
+			*selectedModelIndex = (*selectedModelIndex + 1)
+				% int(modelOptions.size());
+			*modelLabel = modelOptions[*selectedModelIndex].first;
+		});
+
+		const auto progressWidget = container->add(object_ptr<Ui::RpWidget>(container));
+		progressWidget->resizeToWidth(st::boxWideWidth - st::boxRowPadding.left() - st::boxRowPadding.right());
+		progressWidget->setMinimumHeight(26);
+		progressWidget->setMaximumHeight(26);
+		progressWidget->paintRequest(
+		) | rpl::start_with_next([=] {
+			const auto ratio = std::clamp(progressRatio->current(), 0., 1.);
+			QPainter p(progressWidget);
+			PainterHighQualityEnabler hq(p);
+			const auto outer = progressWidget->rect().marginsRemoved(QMargins(0, 8, 0, 8));
+			const auto radius = outer.height() / 2.;
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::windowBgOver->c);
+			p.drawRoundedRect(outer, radius, radius);
+			if (ratio > 0.) {
+				auto filled = outer;
+				filled.setWidth(std::max(1, int(std::round(outer.width() * ratio))));
+				p.setBrush(QColor(0x21, 0xc7, 0x6a));
+				p.drawRoundedRect(filled, radius, radius);
+			}
+		}, progressWidget->lifetime());
+
+		container->add(object_ptr<Ui::FlatLabel>(
+			container,
+			progressText->value(),
+			st::defaultFlatLabel),
+			st::boxRowPadding);
+
+		Ui::AddSkip(container);
+		box->addButton(
+			RuEn("Скачать", "Download"),
+			[=] {
+				if (state->active) {
+					return;
+				}
+				const auto option = modelOptions[*selectedModelIndex];
+				const auto downloads = QStandardPaths::writableLocation(
+					QStandardPaths::DownloadLocation);
+				if (downloads.isEmpty()) {
+					*progressText = RuEn(
+						"Не удалось определить папку Загрузки.",
+						"Failed to resolve Downloads folder.");
+					return;
+				}
+				QDir().mkpath(downloads);
+				const auto fileName = option.second.fileName().isEmpty()
+					? QString(u"speech-model.zip"_q)
+					: option.second.fileName();
+				const auto filePath = QDir(downloads).filePath(fileName);
+				state->output = std::make_unique<QFile>(filePath);
+				if (!state->output->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+					*progressText = RuEn(
+						"Не удалось создать файл в папке Загрузки.",
+						"Failed to create output file in Downloads folder.");
+					state->output.reset();
+					return;
+				}
+
+				state->modelName = option.first;
+				state->ready = 0;
+				state->total = 0;
+				state->active = true;
+				*progressRatio = 0.;
+				*progressText = RuEn("Подключение к серверу...", "Connecting to server...");
+
+				QNetworkRequest request(option.second);
+				request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+				state->reply = manager->get(request);
+
+				QObject::connect(
+					state->reply,
+					&QNetworkReply::readyRead,
+					box,
+					[=] {
+						if (state->output && state->reply) {
+							state->output->write(state->reply->readAll());
+						}
+					});
+
+				QObject::connect(
+					state->reply,
+					&QNetworkReply::downloadProgress,
+					box,
+					[=](qint64 ready, qint64 total) {
+						state->ready = std::max<qint64>(ready, 0);
+						state->total = std::max<qint64>(total, 0);
+						const auto ratio = (state->total > 0)
+							? std::clamp(double(state->ready) / double(state->total), 0., 1.)
+							: 0.;
+						*progressRatio = ratio;
+						const auto mbReady = double(state->ready) / (1024. * 1024.);
+						const auto mbTotal = (state->total > 0)
+							? (double(state->total) / (1024. * 1024.))
+							: 0.;
+						*progressText = (state->total > 0)
+							? RuEn(
+								"Скачивание: %1 / %2 МБ (%3%)",
+								"Downloading: %1 / %2 MB (%3%)"
+							).arg(QString::number(mbReady, 'f', 1))
+							 .arg(QString::number(mbTotal, 'f', 1))
+							 .arg(int(std::round(ratio * 100.)))
+							: RuEn(
+								"Скачивание: %1 МБ",
+								"Downloading: %1 MB"
+							).arg(QString::number(mbReady, 'f', 1));
+						progressWidget->update();
+					});
+
+				QObject::connect(
+					state->reply,
+					&QNetworkReply::finished,
+					box,
+					[=] {
+						const auto reply = state->reply;
+						state->reply = nullptr;
+						state->active = false;
+
+						if (state->output) {
+							state->output->flush();
+							state->output->close();
+						}
+						const auto outputPath = state->output
+							? state->output->fileName()
+							: QString();
+						state->output.reset();
+
+						if (!reply) {
+							*progressText = RuEn(
+								"Загрузка завершилась с неизвестной ошибкой.",
+								"Download finished with unknown error.");
+							return;
+						}
+						if (reply->error() != QNetworkReply::NoError) {
+							if (!outputPath.isEmpty()) {
+								QFile::remove(outputPath);
+							}
+							*progressText = RuEn(
+								"Ошибка загрузки: %1",
+								"Download error: %1"
+							).arg(reply->errorString());
+							reply->deleteLater();
+							return;
+						}
+						*progressRatio = 1.;
+						progressWidget->update();
+						*progressText = RuEn(
+							"Модель скачана: %1",
+							"Model downloaded: %1"
+						).arg(outputPath);
+						reply->deleteLater();
+					});
+			});
+		box->addButton(RuEn("Отмена", "Cancel"), [=] {
+			if (state->reply) {
+				state->reply->abort();
+			}
+			box->closeBox();
+		});
+	});
+}
+
 void AddLinksSection(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -338,7 +569,9 @@ void SetupAstrogramPrivacy(not_null<Ui::VerticalLayout*> container) {
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
-void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
+void SetupAstrogramInterface(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container);
@@ -404,9 +637,8 @@ void SetupAstrogramInterface(not_null<Ui::VerticalLayout*> container) {
 		container,
 		RuEn("Локальное распознавание речи", "Local speech recognition"),
 		RuEn("Скачать модель", "Download model"),
-		[] {
-			QDesktopServices::openUrl(
-				QUrl(u"https://alphacephei.com/vosk/models"_q));
+		[=] {
+			ShowSpeechModelDownloadBox(controller);
 		},
 		{ &st::menuIconDownload });
 	AddToggle(
@@ -558,9 +790,8 @@ rpl::producer<QString> AstrogramInterface::title() {
 
 void AstrogramInterface::setupContent(
 		not_null<Window::SessionController*> controller) {
-	Q_UNUSED(controller);
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-	SetupAstrogramInterface(content);
+	SetupAstrogramInterface(controller, content);
 	Ui::ResizeFitChild(this, content);
 }
 

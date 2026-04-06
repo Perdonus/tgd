@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "lang/lang_cloud_manager.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "core/update_checker.h"
 #include "core/application.h"
@@ -24,7 +25,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/background_preview_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/edit_birthday_box.h"
+#include "ui/effects/premium_stars_colored.h"
 #include "ui/integration.h"
+#include "ui/layers/generic_box.h"
+#include "ui/painter.h"
+#include "ui/widgets/labels.h"
 #include "payments/payments_non_panel_process.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/share_box.h"
@@ -81,11 +86,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 
 #include <QtGui/QGuiApplication>
+#include <QImage>
 
 namespace Core {
 namespace {
 
 using Match = qthelp::RegularExpressionMatch;
+
+[[nodiscard]] bool AstrogramRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return AstrogramRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
 
 class PersonalChannelController final : public PeerListController {
 public:
@@ -240,6 +256,114 @@ void SavePersonalChannel(
 			window->showToast(u"Error: "_q + error.type());
 		})).send();
 	}
+}
+
+[[nodiscard]] QImage AstrogramSupportImage() {
+	static const auto image = [] {
+		auto result = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
+		if (result.isNull()) {
+			result = QImage(u":/gui/art/logo_256_no_margin.png"_q);
+		}
+		return result;
+	}();
+	return image;
+}
+
+void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setNoContentMargin(true);
+		box->setTitle(rpl::single(QString()));
+		box->addTopButton(st::boxTitleClose, [=] { box->closeBox(); });
+
+		const auto content = box->verticalLayout();
+		Ui::AddSkip(content);
+		Ui::AddSkip(content);
+
+		const auto top = content->add(object_ptr<Ui::RpWidget>(content));
+		top->setMinimumHeight(170);
+		top->setMaximumHeight(170);
+
+		using MiniStars = Ui::Premium::ColoredMiniStars;
+		const auto stars = top->lifetime().make_state<MiniStars>(
+			top,
+			Ui::Premium::MiniStarsType::BiStars);
+		stars->setColorOverride(QGradientStops{
+			{ 0.0, QColor(0x19, 0xc3, 0x7d) },
+			{ 1.0, QColor(0x35, 0xe0, 0x95) },
+		});
+
+		top->paintRequest(
+		) | rpl::start_with_next([=] {
+			QPainter p(top);
+			PainterHighQualityEnabler hq(p);
+
+			stars->setCenter(top->rect());
+			stars->paint(p);
+
+			const auto side = 86;
+			const auto rect = QRect(
+				(top->width() - side) / 2,
+				(top->height() - side) / 2 + 8,
+				side,
+				side);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(0x13, 0x8d, 0x59));
+			p.drawEllipse(rect.adjusted(-4, -4, 4, 4));
+
+			const auto image = AstrogramSupportImage();
+			if (!image.isNull()) {
+				QPainterPath clip;
+				clip.addEllipse(rect);
+				p.save();
+				p.setClipPath(clip);
+				p.drawImage(rect, image);
+				p.restore();
+			}
+		}, top->lifetime());
+
+		content->add(
+			object_ptr<Ui::FlatLabel>(
+				content,
+				rpl::single(tr::bold(RuEn(
+					"Поддержать разработку Astrogram",
+					"Support Astrogram development"))),
+				st::boxTitle),
+			st::boxRowPadding);
+		content->add(
+			object_ptr<Ui::FlatLabel>(
+				content,
+				rpl::single(RuEn(
+					"Поддержка помогает развивать клиент и даёт серверный значок подписчика.",
+					"Your support helps Astrogram evolve and grants a server-side subscriber badge.")),
+				st::boxDividerLabel),
+			st::boxRowPadding);
+		Ui::AddSkip(content);
+		content->add(
+			object_ptr<Ui::FlatLabel>(
+				content,
+				rpl::single(RuEn(
+					"Стоимость: 50 ₽\n≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN",
+					"Price: 50 RUB\n≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN")),
+				st::defaultFlatLabel),
+			st::boxRowPadding);
+		content->add(
+			object_ptr<Ui::FlatLabel>(
+				content,
+				rpl::single(RuEn(
+					"Кому писать: @astrogram_support",
+					"Contact: @astrogram_support")),
+				st::defaultFlatLabel),
+			st::boxRowPadding);
+		Ui::AddSkip(content);
+
+		box->addButton(RuEn("Написать @astrogram_support", "Message @astrogram_support"), [=] {
+			controller->showPeerByLink(Window::PeerByLinkInfo{
+				.usernameOrId = QStringLiteral("astrogram_support"),
+			});
+		});
+		box->addButton(RuEn("Закрыть", "Close"), [=] { box->closeBox(); });
+	}));
 }
 
 bool JoinGroupByHash(
@@ -1721,9 +1845,7 @@ bool HandleAstrogramSupport(
 	if (!controller) {
 		return false;
 	}
-	controller->showPeerByLink(Window::PeerByLinkInfo{
-		.usernameOrId = QStringLiteral("astrogramchannel"),
-	});
+	ShowAstrogramSupportBox(controller);
 	return true;
 }
 
