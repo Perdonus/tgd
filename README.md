@@ -9,10 +9,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Perdonus/tgd/actions/workflows/build-desktop.yml"><img alt="Windows Build" src="https://github.com/Perdonus/tgd/actions/workflows/build-desktop.yml/badge.svg"></a>
-  <a href="https://github.com/Perdonus/tgd/actions/workflows/build-desktop-force.yml"><img alt="Force Build" src="https://github.com/Perdonus/tgd/actions/workflows/build-desktop-force.yml/badge.svg"></a>
-  <a href="https://docs.astrogram.su"><img alt="Docs" src="https://img.shields.io/badge/docs-astrogram.su-1f8b4c?style=flat-square"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPLv3-2b2b2b?style=flat-square"></a>
+  <a href="https://t.me/astrogramchannel"><img src="https://img.shields.io/badge/@astrogramchannel-2CA5E0?style=flat-square&logo=telegram&logoColor=white"></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white">
+  <img src="https://img.shields.io/badge/Windows-supported-0078D4?style=flat-square&logo=windows&logoColor=white">
+  <img src="https://img.shields.io/badge/Linux-planned-888888?style=flat-square&logo=linux&logoColor=white">
+  <a href="https://github.com/telegramdesktop/tdesktop"><img src="https://img.shields.io/badge/based_on-Telegram_Desktop-2CA5E0?style=flat-square&logo=telegram&logoColor=white"></a>
+  <a href="https://t.me/astroplugin"><img src="https://img.shields.io/badge/plugins-@astroplugin-2CA5E0?style=flat-square&logo=telegram&logoColor=white"></a>
 </p>
 
 ![Astrogram Preview](docs/assets/preview.png)
