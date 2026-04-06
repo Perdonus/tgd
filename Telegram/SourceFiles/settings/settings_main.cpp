@@ -633,7 +633,7 @@ void SetupSections(
 		});
 	};
 	addSection(
-		rpl::single(u"Astrogram"_q),
+		rpl::single(RuEn("Настройки Astrogram", "Astrogram Settings")),
 		Astrogram::Id(),
 		{ &st::menuIconCustomize });
 	Ui::AddDivider(container);

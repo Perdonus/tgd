@@ -524,7 +524,7 @@ void SetupAstrogramHome(
 	AddSectionButton(
 		controller,
 		container,
-		u"Astrogram"_q,
+		RuEn("Основные", "Core"),
 		AstrogramCore::Id(),
 		{ &st::menuIconPremium });
 	AddSectionButton(
