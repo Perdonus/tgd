@@ -1,5 +1,5 @@
 <p align="center">
-# Astrogram Desktop
+<h1>Astrogram Desktop</h1>
 </p>
 
 <p align="center">
