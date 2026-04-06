@@ -7,7 +7,7 @@ on:
       - Plugins
     paths:
       - ".github/workflows/build-plugin-show-logs.yml"
-      - ".github/workflows/build-plugins.yml"
+      - ".github/workflows/build-plugin-reusable.yml"
       - "PluginCatalog/CMakeLists.txt"
       - "PluginCatalog/show_logs/**"
       - "Telegram/Plugins/Examples/show_logs.cpp"
@@ -22,8 +22,8 @@ permissions:
 
 jobs:
   build:
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-catalog]') }}
-    uses: ./.github/workflows/build-plugins.yml
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-build]') }}
+    uses: ./.github/workflows/build-plugin-reusable.yml
     with:
       plugin_name: show_logs
       allow_commit: ${{ github.event_name == 'push' }}

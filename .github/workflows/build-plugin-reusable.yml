@@ -1,4 +1,4 @@
-name: Build Plugin Catalog Entry
+name: Reusable Plugin Build
 
 on:
   workflow_call:
@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   plugin_sanity:
-    name: Plugin catalog sanity
+    name: Plugin package sanity
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
@@ -84,7 +84,7 @@ jobs:
         id: plugin_toolchain_cache
         uses: actions/cache/restore@v4
         with:
-          key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugins.yml') }}
+          key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugin-reusable.yml') }}
           restore-keys: |
             plugin-toolchain-win64-qt5-
           path: |
@@ -193,7 +193,7 @@ jobs:
         if: ${{ success() && steps.prepare_toolchain.conclusion == 'success' && steps.plugin_toolchain_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
-          key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugins.yml') }}
+          key: plugin-toolchain-win64-qt5-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/prepare/win.bat', 'Telegram/build/qt_version.py', '.github/workflows/build-plugin-reusable.yml') }}
           path: |
             ${{ steps.prepare_paths.outputs.qt_root }}
             ${{ steps.prepare_paths.outputs.win64_root }}/cache_keys
@@ -393,7 +393,7 @@ jobs:
             Copy-Item -LiteralPath $angleLib -Destination (Join-Path $qtLibDir $alias) -Force
           }
 
-      - name: Configure plugin catalog
+      - name: Configure plugin package
         shell: cmd
         run: |
           @echo on
@@ -408,7 +408,7 @@ jobs:
           powershell -NoProfile -Command "Get-Content -Path '%CONFIGURE_LOG%' -Tail 120"
           exit /b 1
 
-      - name: Build plugin catalog
+      - name: Build plugin package
         shell: cmd
         run: |
           @echo on
@@ -475,7 +475,7 @@ jobs:
           set -euo pipefail
           plugin_path="PluginCatalog/${{ inputs.plugin_name }}"
           target_branch="${{ inputs.target_branch }}"
-          commit_message="ci: refresh ${{ inputs.plugin_name }} plugin binary [skip plugin-catalog]"
+          commit_message="ci: refresh ${{ inputs.plugin_name }} plugin binary [skip plugin-build]"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

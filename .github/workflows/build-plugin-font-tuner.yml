@@ -7,7 +7,7 @@ on:
       - Plugins
     paths:
       - ".github/workflows/build-plugin-font-tuner.yml"
-      - ".github/workflows/build-plugins.yml"
+      - ".github/workflows/build-plugin-reusable.yml"
       - "PluginCatalog/CMakeLists.txt"
       - "PluginCatalog/font_tuner/**"
       - "Telegram/Plugins/Examples/font_tuner.cpp"
@@ -26,8 +26,8 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-catalog]') }}
-    uses: ./.github/workflows/build-plugins.yml
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip plugin-build]') }}
+    uses: ./.github/workflows/build-plugin-reusable.yml
     with:
       plugin_name: font_tuner
       allow_commit: ${{ github.event_name == 'push' }}
