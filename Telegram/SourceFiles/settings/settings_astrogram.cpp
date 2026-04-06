@@ -324,7 +324,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		progressWidget->setMinimumHeight(26);
 		progressWidget->setMaximumHeight(26);
 		progressWidget->paintRequest(
-		) | rpl::start_with_next([=] {
+		) | rpl::start_with_next([=](const QRect &) {
 			const auto ratio = std::clamp(progressRatio->current(), 0., 1.);
 			QPainter p(progressWidget);
 			PainterHighQualityEnabler hq(p);

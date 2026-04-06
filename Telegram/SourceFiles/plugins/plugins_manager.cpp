@@ -1787,7 +1787,7 @@ QByteArray Manager::processRuntimeApiRequest(
 		limit = std::min(limit, 1000);
 		auto result = QJsonArray();
 		auto count = 0;
-		const auto list = session->data().chatsList()->indexed()->all();
+		const auto &list = session->data().chatsList()->indexed()->all();
 		for (const auto row : list) {
 			if (!row || !row->history()) {
 				continue;

@@ -1,5 +1,5 @@
 name: Build Astrogram Desktop Force
-# CI touch: rerun Windows pipeline after canceled run.
+# Force workflow mirrors the main Windows pipeline but remains independently rerunnable.
 
 on:
   workflow_dispatch:
@@ -15,7 +15,10 @@ on:
       - 'lib/**'
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -481,12 +484,14 @@ jobs:
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%\\Telegram"
 
+          set "CFG_OK="
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "CFG_LOG=%CI_LOGS_DIR%\\configure-force.log"
+          set "CFG_LOG_1=%CI_LOGS_DIR%\\configure-attempt1.log"
+          set "CFG_LOG_2=%CI_LOGS_DIR%\\configure-attempt2.log"
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
-          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
+          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
 
           where python
           python --version
@@ -494,20 +499,28 @@ jobs:
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
 
-          call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG%" 2>&1
-          if not errorlevel 1 exit /b 0
-          echo [configure] Visual Studio x64 configure failed
-          powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG%' -Tail 30) -join ' | '; Write-Output ('::error title=Force configure failed::' + $tail)"
-          if exist "%GITHUB_WORKSPACE%\\cmake" (
-            echo [configure] cmake helpers files:
-            dir /b "%GITHUB_WORKSPACE%\\cmake"
+          call configure.bat force -G "Ninja Multi-Config" %ACCEL_ARGS% -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
+          if not defined CFG_OK (
+            echo [configure] fast Ninja configure failed, retrying Visual Studio x64 configure
+            powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_1%' -Tail 80"
+            powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_1%' -Tail 20) -join ' | '; Write-Output ('::warning title=Configure attempt1 failed::' + $tail)"
+            call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
           )
-          if exist "%GITHUB_WORKSPACE%\\out" (
-            echo [configure] out directory snapshot:
-            dir /b "%GITHUB_WORKSPACE%\\out"
+          if not defined CFG_OK (
+            echo [configure] all x64 configure attempts failed
+            powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_2%' -Tail 80"
+            powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_2%' -Tail 30) -join ' | '; Write-Output ('::error title=Configure failed::' + $tail)"
+            if exist "%GITHUB_WORKSPACE%\\cmake" (
+              echo [configure] cmake helpers files:
+              dir /b "%GITHUB_WORKSPACE%\\cmake"
+            )
+            if exist "%GITHUB_WORKSPACE%\\out" (
+              echo [configure] out directory snapshot:
+              dir /b "%GITHUB_WORKSPACE%\\out"
+            )
+            exit /b 1
           )
-          exit /b 1
+          exit /b 0
 
       - name: Fast compile precheck (changed units)
         id: fast_precheck
@@ -611,20 +624,44 @@ jobs:
 
           set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
           if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
-          set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-force-target.log"
-          set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-force-release.log"
-          set "BUILD_JOBS=1"
+          set "BUILD_LOG_TARGET=%CI_LOGS_DIR%\\build-target.log"
+          set "BUILD_LOG_RELEASE=%CI_LOGS_DIR%\\build-release.log"
+          set "BUILD_LOG_RECFG=%CI_LOGS_DIR%\\configure-attempt3.log"
+          set "BUILD_LOG_VS_TARGET=%CI_LOGS_DIR%\\build-vs-target.log"
+          set "BUILD_LOG_VS_RELEASE=%CI_LOGS_DIR%\\build-vs-release.log"
+          set "API_ID=17349"
+          set "API_HASH=344583e45741c457fe1862106095a5eb"
+          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
 
-          cmake --build ..\out --config Release --parallel %BUILD_JOBS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
+          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok
-          echo [build] target Telegram failed, retrying default Release build on Visual Studio generator
+          echo [build] target Telegram failed, retrying default Release build on current generator
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Force target build failed::' + $tail)"
-          cmake --build ..\out --config Release --parallel %BUILD_JOBS% > "%BUILD_LOG_RELEASE%" 2>&1
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=Target build failed::' + $tail)"
+          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% > "%BUILD_LOG_RELEASE%" 2>&1
           if not errorlevel 1 goto build_ok
-          echo [build] Visual Studio x64 Release build failed
+          echo [build] default Release build failed, reconfiguring with Visual Studio x64 fallback
           powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 120"
-          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::error title=Force release build failed::' + $tail)"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::warning title=Release build failed::' + $tail)"
+          if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
+          if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
+          call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%BUILD_LOG_RECFG%" 2>&1
+          if errorlevel 1 (
+            echo [build] Visual Studio fallback configure failed
+            powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_RECFG%' -Tail 120"
+            powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_RECFG%' -Tail 40) -join ' | '; Write-Output ('::error title=VS fallback configure failed::' + $tail)"
+            exit /b 1
+          )
+          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% --target Telegram > "%BUILD_LOG_VS_TARGET%" 2>&1
+          if not errorlevel 1 goto build_ok
+          echo [build] Visual Studio fallback target build failed, retrying default Release build
+          powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_VS_TARGET%' -Tail 120"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_VS_TARGET%' -Tail 40) -join ' | '; Write-Output ('::warning title=VS fallback target build failed::' + $tail)"
+          cmake --build ..\out --config Release --parallel %NUMBER_OF_PROCESSORS% > "%BUILD_LOG_VS_RELEASE%" 2>&1
+          if not errorlevel 1 goto build_ok
+          echo [build] Visual Studio fallback Release build failed
+          powershell -NoProfile -Command "Get-Content -Path '%BUILD_LOG_VS_RELEASE%' -Tail 120"
+          powershell -NoProfile -Command "$tail = (Get-Content -Path '%BUILD_LOG_VS_RELEASE%' -Tail 40) -join ' | '; Write-Output ('::error title=VS fallback release build failed::' + $tail)"
           exit /b 1
           :build_ok
           exit /b 0
@@ -699,65 +736,156 @@ jobs:
             dist/Astrogram.exe
           if-no-files-found: error
 
-      - name: Publish public build branch
-        if: ${{ always() && steps.locate_exe.outcome == 'success' }}
-        shell: pwsh
+  publish_branch:
+    name: Publish build branch
+    runs-on: ubuntu-22.04
+    needs: windows
+    if: ${{ needs.windows.outputs.build_ok == 'true' }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: astrogram-windows-release
+          path: public-build
+
+      - name: Publish builds branch
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $publishRoot = Join-Path $env:RUNNER_TEMP 'astrogram-public-build'
-          if (Test-Path -LiteralPath $publishRoot) {
-            Remove-Item -LiteralPath $publishRoot -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $publishRoot | Out-Null
+          set -euo pipefail
 
-          Copy-Item -LiteralPath "$env:GITHUB_WORKSPACE/dist/Astrogram.exe" -Destination (Join-Path $publishRoot 'Astrogram.exe') -Force
+          src="$(find public-build -type f -name 'Astrogram.exe' | head -n 1)"
+          test -n "$src"
 
-          $metadata = [ordered]@{
-            workflow = '${{ github.workflow }}'
-            run_id = '${{ github.run_id }}'
-            run_number = '${{ github.run_number }}'
-            source_sha = '${{ github.sha }}'
-            source_ref = '${{ github.ref }}'
-            built_at_utc = (Get-Date).ToUniversalTime().ToString('o')
-            artifact_name = 'astrogram-windows-release'
-          } | ConvertTo-Json
-          Set-Content -LiteralPath (Join-Path $publishRoot 'metadata.json') -Value $metadata -Encoding utf8
-
-          Set-Content -LiteralPath (Join-Path $publishRoot 'README.md') -Value @'
+          stage="$(mktemp -d)"
+          cp "$src" "$stage/Astrogram.exe"
+          python3 - <<'PY' > "$stage/metadata.json"
+          import json, os
+          print(json.dumps({
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_number": os.environ["GITHUB_RUN_NUMBER"],
+              "source_sha": os.environ["GITHUB_SHA"],
+              "source_ref": os.environ["GITHUB_REF"],
+              "artifact_name": "astrogram-windows-release",
+          }, indent=2))
+          PY
+          cat > "$stage/README.md" <<'EOF'
           # Astrogram public build
 
           Latest Windows binary published by GitHub Actions.
-          '@ -Encoding utf8
+          EOF
 
-          git init $publishRoot
-          Push-Location $publishRoot
-          git checkout --orphan builds
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          publish="$(mktemp -d)"
+          git init "$publish"
+          cd "$publish"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth 1 origin builds; then
+            git checkout -B builds FETCH_HEAD
+          else
+            git checkout --orphan builds
+          fi
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name .git \
+            -exec rm -rf {} +
+          cp "$stage/Astrogram.exe" .
+          cp "$stage/metadata.json" .
+          cp "$stage/README.md" .
           git add Astrogram.exe metadata.json README.md
-          git commit -m "publish Astrogram build ${{ github.run_number }}"
-          git remote add origin "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
-          $pushed = $false
-          for ($attempt = 1; $attempt -le 5; $attempt++) {
-            git fetch --depth 1 origin builds *>$null
-            if ($LASTEXITCODE -eq 0) {
-              $remoteHead = (git rev-parse FETCH_HEAD).Trim()
-              git push --force-with-lease=refs/heads/builds:$remoteHead origin HEAD:builds
-            } else {
-              git push --force origin HEAD:builds
-            }
-            if ($LASTEXITCODE -eq 0) {
-              $pushed = $true
-              break
-            }
-            Write-Host "publish push attempt $attempt failed, retrying in 5s..."
-            Start-Sleep -Seconds 5
-          }
-          if (-not $pushed) {
-            throw 'Failed to publish builds branch after retries.'
-          }
-          Pop-Location
+          git commit -m "publish Astrogram build ${GITHUB_RUN_NUMBER}"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            if git fetch --depth 1 origin builds; then
+              remote_head="$(git rev-parse FETCH_HEAD)"
+              if git push --force-with-lease=refs/heads/builds:"${remote_head}" origin HEAD:builds; then
+                pushed=1
+                break
+              fi
+            else
+              if git push --force origin HEAD:builds; then
+                pushed=1
+                break
+              fi
+            fi
+            echo "publish push attempt ${attempt} failed, retrying in 5s..."
+            sleep 5
+          done
+          if [ "${pushed}" -ne 1 ]; then
+            echo "Failed to publish builds branch after retries." >&2
+            exit 1
+          fi
+
+  publish_pages:
+    name: Publish GitHub Pages
+    runs-on: ubuntu-22.04
+    needs: windows
+    if: ${{ needs.windows.outputs.build_ok == 'true' }}
+    continue-on-error: true
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: astrogram-windows-release
+          path: public-build
+
+      - name: Prepare public site
+        run: |
+          set -euo pipefail
+
+          src="$(find public-build -type f -name 'Astrogram.exe' | head -n 1)"
+          test -n "$src"
+
+          mkdir -p site
+          cp "$src" site/Astrogram.exe
+          python3 - <<'PY' > site/metadata.json
+          import json, os
+          print(json.dumps({
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_number": os.environ["GITHUB_RUN_NUMBER"],
+              "source_sha": os.environ["GITHUB_SHA"],
+              "source_ref": os.environ["GITHUB_REF"],
+              "artifact_name": "astrogram-windows-release",
+          }, indent=2))
+          PY
+          cat > site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Astrogram build</title>
+          </head>
+          <body>
+            <p><a href="./Astrogram.exe">Download Astrogram.exe</a></p>
+            <p><a href="./metadata.json">Build metadata</a></p>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
   linux_deb:
     name: Ubuntu .deb (fallback)
