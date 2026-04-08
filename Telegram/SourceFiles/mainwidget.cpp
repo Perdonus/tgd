@@ -227,6 +227,15 @@ void ClearBotStartToken(PeerData *peer) {
 	return QString();
 }
 
+[[nodiscard]] ChannelId AstrogramChannelBareId(int64 channelId) {
+	constexpr auto kBotApiChannelOffset = 1000000000000LL;
+	if (channelId <= -kBotApiChannelOffset) {
+		const auto bare = (-channelId) - kBotApiChannelOffset;
+		return (bare > 0) ? ChannelId(uint64(bare)) : ChannelId();
+	}
+	return (channelId > 0) ? ChannelId(uint64(channelId)) : ChannelId();
+}
+
 void PrimeAstrogramChannel(
 		not_null<Window::SessionController*> controller,
 		ChannelData *channel) {
@@ -244,14 +253,19 @@ void ResolveAstrogramChannel(
 	if (!channelId) {
 		return;
 	}
-	if (const auto loaded = controller->session().data().channelLoaded(
-			ChannelId(channelId))) {
-		done(loaded);
-		return;
+	const auto bareId = AstrogramChannelBareId(channelId);
+	if (bareId) {
+		if (const auto loaded = controller->session().data().channelLoaded(
+				bareId)) {
+			done(loaded);
+			return;
+		}
 	}
 	const auto username = AstrogramChannelUsername(channelId).trimmed();
 	if (username.isEmpty()) {
-		controller->resolveChannelById(ChannelId(channelId), std::move(done));
+		if (bareId) {
+			controller->resolveChannelById(bareId, std::move(done));
+		}
 		return;
 	}
 	if (const auto peer = controller->session().data().peerByUsername(username)) {
@@ -286,11 +300,13 @@ void ResolveAstrogramChannel(
 			}
 		});
 		if (!resolved) {
-			controller->resolveChannelById(ChannelId(channelId), *sharedDone);
+			if (bareId) {
+				controller->resolveChannelById(bareId, *sharedDone);
+			}
 		}
 	}).fail([=](const MTP::Error &) {
-		if (const auto controller = weak.get()) {
-			controller->resolveChannelById(ChannelId(channelId), *sharedDone);
+		if (const auto controller = weak.get(); controller && bareId) {
+			controller->resolveChannelById(bareId, *sharedDone);
 		}
 	}).send();
 }
@@ -572,12 +588,15 @@ void MaybeShowAstrogramOnboarding(
 			return;
 		}
 		++resolveState->pending;
-		if (const auto loaded = controller->session().data().channelLoaded(
-				ChannelId(channelId))) {
-			assign(loaded);
-			PrimeAstrogramChannel(controller, loaded);
-			resolveDone();
-			return;
+		const auto bareId = AstrogramChannelBareId(channelId);
+		if (bareId) {
+			if (const auto loaded = controller->session().data().channelLoaded(
+					bareId)) {
+				assign(loaded);
+				PrimeAstrogramChannel(controller, loaded);
+				resolveDone();
+				return;
+			}
 		}
 		ResolveAstrogramChannel(controller, channelId, [=](not_null<ChannelData*> channel) {
 			assign(channel);
