@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_values.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "lang/lang_keys.h"
+#include "logs.h"
 #include "ui/widgets/buttons.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
@@ -89,6 +90,9 @@ private:
 		}
 		entry->inFlight = true;
 		entry->nextRequestAt = crl::now() + 5 * 60 * 1000; // 5 min TTL.
+		Logs::writeClient(QString::fromLatin1(
+			"[badge] request started: user=%1")
+			.arg(userId));
 
 		QNetworkRequest request(BuildRequestUrl(userId));
 		request.setAttribute(
@@ -124,6 +128,16 @@ private:
 							next = id;
 						}
 					}
+					Logs::writeClient(QString::fromLatin1(
+						"[badge] request finished: user=%1 enabled=%2 emojiStatusId=%3")
+						.arg(userId)
+						.arg(next.has_value() ? u"true"_q : u"false"_q)
+						.arg(next ? QString::number(next->documentId) : QStringLiteral("0")));
+				} else {
+					Logs::writeClient(QString::fromLatin1(
+						"[badge] request failed: user=%1 reason=%2")
+						.arg(userId)
+						.arg(reply->errorString()));
 				}
 				if (stored->emojiStatusId != next) {
 					stored->emojiStatusId = next;

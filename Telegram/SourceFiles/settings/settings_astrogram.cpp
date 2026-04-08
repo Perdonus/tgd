@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
 #include "core/version.h"
+#include "logs.h"
 #include "lang/lang_instance.h"
 #include "plugins/plugins_manager.h"
 #include "settings/settings_common.h"
@@ -22,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
@@ -31,18 +33,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
 #include <QImage>
+#include <QPointer>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QPainterPath>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QTextOption>
 #include <QUrl>
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <tuple>
+#include <vector>
 
 namespace Settings {
 namespace {
@@ -103,6 +111,58 @@ constexpr auto kAvatarSize = 76;
 [[nodiscard]] QString AstrogramVersionText() {
 	return QString::fromLatin1("Astrogram Desktop %1").arg(
 		QString::fromLatin1(AppVersionStr));
+}
+
+[[nodiscard]] QString SpeechModelArchivePath(
+		const QString &modelsDir,
+		const QString &folderName) {
+	return QDir(modelsDir).filePath(folderName + u".zip"_q);
+}
+
+[[nodiscard]] bool ExtractSpeechModelArchive(
+		const QString &archivePath,
+		const QString &modelsDir,
+		QString *error) {
+	if (!QFileInfo::exists(archivePath)) {
+		if (error) {
+			*error = RuEn("Архив модели не найден", "Model archive was not found");
+		}
+		return false;
+	}
+	QDir().mkpath(modelsDir);
+#ifdef Q_OS_WIN
+	auto escapedArchive = archivePath;
+	auto escapedModelsDir = modelsDir;
+	escapedArchive.replace(u"'"_q, u"''"_q);
+	escapedModelsDir.replace(u"'"_q, u"''"_q);
+	const auto command = QString(
+		u"Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force"_q
+	).arg(escapedArchive, escapedModelsDir);
+	const auto result = QProcess::execute(
+		u"powershell"_q,
+		{
+			u"-NoProfile"_q,
+			u"-NonInteractive"_q,
+			u"-Command"_q,
+			command,
+		});
+#else // Q_OS_WIN
+	const auto result = QProcess::execute(
+		u"unzip"_q,
+		{
+			u"-oq"_q,
+			archivePath,
+			u"-d"_q,
+			modelsDir,
+		});
+#endif // Q_OS_WIN
+	if (result != 0) {
+		if (error) {
+			*error = RuEn("Не удалось распаковать модель", "Could not extract the model");
+		}
+		return false;
+	}
+	return true;
 }
 
 void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
@@ -206,6 +266,33 @@ void AddActionButton(
 	)->addClickHandler(std::move(callback));
 }
 
+void ShowSingleLineTextEditBox(
+		not_null<Window::SessionController*> controller,
+		const QString &title,
+		const QString &placeholder,
+		const QString &current,
+		Fn<void(QString)> save) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(title));
+
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			Ui::InputField::Mode::NoNewlines,
+			placeholder,
+			TextWithTags{ current, {} }));
+
+		box->addButton(tr::lng_settings_save(), [=] {
+			box->closeBox();
+			save(field->getLastText().trimmed());
+		});
+		box->addButton(tr::lng_cancel(), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
 void AddSectionButton(
 			not_null<Window::SessionController*> controller,
 			not_null<Ui::VerticalLayout*> container,
@@ -222,72 +309,57 @@ void AddSectionButton(
 
 void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		struct DownloadState {
+		struct ModelRowState {
+			QString label;
+			QString folderName;
+			QUrl url;
+			bool installed = false;
+			bool downloading = false;
+			float64 progress = 0.;
+			QString status;
 			QPointer<QNetworkReply> reply;
 			std::unique_ptr<QFile> output;
-			qint64 ready = 0;
-			qint64 total = 0;
-			QString modelName;
-			bool active = false;
 		};
-		const auto state = box->lifetime().make_state<DownloadState>();
+
 		const auto manager = box->lifetime().make_state<QNetworkAccessManager>();
-		const auto selectedModelIndex = box->lifetime().make_state<int>(0);
-		const auto modelOptions = std::vector<std::pair<QString, QUrl>>{
-			{
-				u"Vosk RU small (vosk-model-small-ru-0.22)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q),
-			},
-			{
-				u"Vosk EN small (vosk-model-small-en-us-0.15)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q),
-			},
-			{
-				u"Vosk UK small (vosk-model-small-uk-v3-small)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q),
-			},
-			{
-				u"Vosk DE small (vosk-model-small-de-0.15)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q),
-			},
-			{
-				u"Vosk FR small (vosk-model-small-fr-0.22)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q),
-			},
-			{
-				u"Vosk ES small (vosk-model-small-es-0.42)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q),
-			},
-			{
-				u"Vosk IT small (vosk-model-small-it-0.22)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q),
-			},
-			{
-				u"Vosk PT small (vosk-model-small-pt-0.3)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q),
-			},
-			{
-				u"Vosk TR small (vosk-model-small-tr-0.3)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q),
-			},
-			{
-				u"Vosk PL small (vosk-model-small-pl-0.22)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q),
-			},
-			{
-				u"Vosk JA small (vosk-model-small-ja-0.22)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q),
-			},
-			{
-				u"Vosk KZ small (vosk-model-small-kz-0.42)"_q,
-				QUrl(u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q),
-			},
+		auto models = std::vector<std::shared_ptr<ModelRowState>>();
+		auto modelsDir = QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
+		QDir().mkpath(modelsDir);
+
+		const auto addModel = [&](QString label, QString folder, QString url) {
+			auto state = std::make_shared<ModelRowState>();
+			state->label = std::move(label);
+			state->folderName = std::move(folder);
+			state->url = QUrl(std::move(url));
+			state->status = RuEn("Не скачана", "Not downloaded");
+			models.push_back(std::move(state));
 		};
-		auto modelLabel = box->lifetime().make_state<rpl::variable<QString>>(
-			modelOptions.front().first);
-		auto progressText = box->lifetime().make_state<rpl::variable<QString>>(
-			RuEn("Ожидание запуска загрузки", "Waiting to start download"));
-		auto progressRatio = box->lifetime().make_state<rpl::variable<float64>>(0.);
+		addModel(u"Русский · Vosk small"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q);
+		addModel(u"English · Vosk small"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q);
+		addModel(u"Українська · Vosk small"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q);
+		addModel(u"Deutsch · Vosk small"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q);
+		addModel(u"Français · Vosk small"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q);
+		addModel(u"Español · Vosk small"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q);
+		addModel(u"Italiano · Vosk small"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q);
+		addModel(u"Português · Vosk small"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q);
+		addModel(u"Türkçe · Vosk small"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q);
+		addModel(u"Polski · Vosk small"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q);
+		addModel(u"日本語 · Vosk small"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q);
+		addModel(u"Қазақша · Vosk small"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q);
+
+		const auto isInstalled = [&](const std::shared_ptr<ModelRowState> &state) {
+			const auto dir = QDir(modelsDir).filePath(state->folderName);
+			return QFileInfo(dir).isDir();
+		};
+		for (const auto &state : models) {
+			state->installed = isInstalled(state);
+			const auto archivePath = SpeechModelArchivePath(modelsDir, state->folderName);
+			state->status = state->installed
+				? RuEn("Скачана", "Downloaded")
+				: QFileInfo::exists(archivePath)
+				? RuEn("Архив готов к распаковке", "Archive ready to extract")
+				: RuEn("Не скачана", "Not downloaded");
+		}
 
 		box->setTitle(rpl::single(RuEn(
 			"Локальное распознавание речи",
@@ -300,184 +372,186 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		container->add(object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Скачайте модель распознавания речи на устройство. "
-				"Модель хранится локально и используется без отправки аудио в облако.",
-				"Download a speech recognition model to your device. "
-				"The model is stored locally and used without uploading audio to cloud.")),
+				"Скачайте языковые модели локально. Повторная загрузка скрыта после установки, а прогресс показывается прямо на нижней границе строки.",
+				"Download language models locally. Re-download is hidden after install, and progress is shown on the bottom edge of each row.")),
 			st::boxDividerLabel),
 			st::boxRowPadding);
 		Ui::AddSkip(container);
 
-		AddButtonWithLabel(
-			container,
-			rpl::single(RuEn("Модель", "Model")),
-			modelLabel->value(),
-			st::settingsButton,
-			{ &st::menuIconInfo }
-		)->addClickHandler([=] {
-			*selectedModelIndex = (*selectedModelIndex + 1)
-				% int(modelOptions.size());
-			*modelLabel = modelOptions[*selectedModelIndex].first;
-		});
-
-		const auto progressWidget = container->add(object_ptr<Ui::RpWidget>(container));
-		progressWidget->resizeToWidth(st::boxWideWidth - st::boxRowPadding.left() - st::boxRowPadding.right());
-		progressWidget->setMinimumHeight(26);
-		progressWidget->setMaximumHeight(26);
-		progressWidget->paintRequest() | rpl::on_next([=](const QRect &) {
-			const auto ratio = std::clamp(progressRatio->current(), 0., 1.);
-			QPainter p(progressWidget);
-			PainterHighQualityEnabler hq(p);
-			const auto outer = progressWidget->rect().marginsRemoved(QMargins(0, 8, 0, 8));
-			const auto radius = outer.height() / 2.;
-			p.setPen(Qt::NoPen);
-			p.setBrush(st::windowBgOver->c);
-			p.drawRoundedRect(outer, radius, radius);
-			if (ratio > 0.) {
-				auto filled = outer;
-				filled.setWidth(std::max(1, int(std::round(outer.width() * ratio))));
-				p.setBrush(QColor(0x21, 0xc7, 0x6a));
-				p.drawRoundedRect(filled, radius, radius);
-			}
-		}, progressWidget->lifetime());
-
-		container->add(object_ptr<Ui::FlatLabel>(
-			container,
-			progressText->value(),
-			st::defaultFlatLabel),
-			st::boxRowPadding);
-
-		Ui::AddSkip(container);
-		box->addButton(
-			rpl::single(RuEn("Скачать", "Download")),
-			[=] {
-				if (state->active) {
+		for (const auto &state : models) {
+			const auto row = container->add(object_ptr<Ui::RpWidget>(container));
+			row->setMinimumHeight(54);
+			row->setMaximumHeight(54);
+			row->paintRequest() | rpl::on_next([=] {
+				auto p = Painter(row);
+				const auto rect = row->rect();
+				auto hq = PainterHighQualityEnabler(p);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::windowBgOver);
+				p.drawRoundedRect(rect.adjusted(0, 0, 0, -1), 10, 10);
+				if (state->downloading) {
+					auto progressRect = QRect(0, rect.height() - 3, int(rect.width() * std::clamp(state->progress, 0., 1.)), 3);
+					p.setBrush(QColor(0x21, 0xc7, 0x6a));
+					p.drawRoundedRect(progressRect, 2, 2);
+				}
+				p.setPen(st::windowFg);
+				p.setFont(st::semiboldFont->f);
+				p.drawText(QRect(14, 8, rect.width() - 90, 18), Qt::AlignLeft | Qt::AlignVCenter, state->label);
+				p.setPen(st::windowSubTextFg);
+				p.setFont(st::defaultFlatLabel.style.font->f);
+				p.drawText(QRect(14, 28, rect.width() - 90, 16), Qt::AlignLeft | Qt::AlignVCenter, state->status);
+				if (!state->installed && !state->downloading) {
+					st::menuIconDownload.paint(p, rect.width() - 14 - st::menuIconDownload.width(), (rect.height() - st::menuIconDownload.height()) / 2, rect.width(), st::windowSubTextFg->c);
+				} else if (state->installed) {
+					p.setPen(QColor(0x21, 0xc7, 0x6a));
+					p.setFont(st::semiboldFont->f);
+					p.drawText(QRect(rect.width() - 48, 0, 34, rect.height()), Qt::AlignCenter, QString::fromUtf8("✓"));
+				}
+			}, row->lifetime());
+			row->setCursor(style::cur_pointer);
+			row->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
+				if (e->type() != QEvent::MouseButtonRelease) {
 					return;
 				}
-				const auto option = modelOptions[*selectedModelIndex];
-				const auto downloads = QStandardPaths::writableLocation(
-					QStandardPaths::DownloadLocation);
-				if (downloads.isEmpty()) {
-					*progressText = RuEn(
-						"Не удалось определить папку Загрузки.",
-						"Failed to resolve Downloads folder.");
+				if (state->installed || state->downloading) {
 					return;
 				}
-				QDir().mkpath(downloads);
-				const auto fileName = option.second.fileName().isEmpty()
-					? QString(u"speech-model.zip"_q)
-					: option.second.fileName();
-				const auto filePath = QDir(downloads).filePath(fileName);
-				state->output = std::make_unique<QFile>(filePath);
+				for (const auto &other : models) {
+					if (other->downloading) {
+						return;
+					}
+				}
+				const auto archivePath = SpeechModelArchivePath(modelsDir, state->folderName);
+				if (QFileInfo::exists(archivePath)) {
+					Logs::writeClient(QString::fromLatin1(
+						"[speech-models] extract requested: %1")
+						.arg(state->folderName));
+					state->status = RuEn("Распаковка...", "Extracting...");
+					row->update();
+					auto error = QString();
+					if (!ExtractSpeechModelArchive(archivePath, modelsDir, &error)) {
+						Logs::writeClient(QString::fromLatin1(
+							"[speech-models] extract failed: %1 reason=%2")
+							.arg(state->folderName, error));
+						state->status = error;
+						row->update();
+						return;
+					}
+					if (!isInstalled(state)) {
+						Logs::writeClient(QString::fromLatin1(
+							"[speech-models] extract finished without model dir: %1")
+							.arg(state->folderName));
+						state->status = RuEn("Модель не найдена после распаковки", "Model folder not found after extraction");
+						row->update();
+						return;
+					}
+					QFile::remove(archivePath);
+					state->progress = 1.;
+					state->installed = true;
+					state->status = RuEn("Скачана", "Downloaded");
+					Logs::writeClient(QString::fromLatin1(
+						"[speech-models] extract finished: %1")
+						.arg(state->folderName));
+					row->update();
+					return;
+				}
+				QDir().mkpath(modelsDir);
+				const auto targetPath = archivePath;
+				state->output = std::make_unique<QFile>(targetPath);
 				if (!state->output->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-					*progressText = RuEn(
-						"Не удалось создать файл в папке Загрузки.",
-						"Failed to create output file in Downloads folder.");
-					state->output.reset();
+					state->status = RuEn("Не удалось создать файл", "Could not create file");
+					row->update();
 					return;
 				}
-
-				state->modelName = option.first;
-				state->ready = 0;
-				state->total = 0;
-				state->active = true;
-				*progressRatio = 0.;
-				*progressText = RuEn("Подключение к серверу...", "Connecting to server...");
-
-				QNetworkRequest request(option.second);
+				state->progress = 0.;
+				state->downloading = true;
+				state->status = RuEn("Скачивание...", "Downloading...");
+				Logs::writeClient(QString::fromLatin1(
+					"[speech-models] download started: %1 url=%2")
+					.arg(state->folderName, state->url.toString()));
+				row->update();
+				QNetworkRequest request(state->url);
 				request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 				state->reply = manager->get(request);
-
-				QObject::connect(
-					state->reply,
-					&QNetworkReply::readyRead,
-					box,
-					[=] {
-						if (state->output && state->reply) {
-							state->output->write(state->reply->readAll());
+				QObject::connect(state->reply, &QNetworkReply::readyRead, box, [=] {
+					if (state->output && state->reply) {
+						state->output->write(state->reply->readAll());
+					}
+				});
+				QObject::connect(state->reply, &QNetworkReply::downloadProgress, box, [=](qint64 ready, qint64 total) {
+					state->progress = (total > 0) ? std::clamp(double(ready) / double(total), 0., 1.) : 0.;
+					state->status = (total > 0)
+						? RuEn("Скачивание: %1%", "Downloading: %1%").arg(int(std::round(state->progress * 100.)))
+						: RuEn("Скачивание...", "Downloading...");
+					row->update();
+				});
+				QObject::connect(state->reply, &QNetworkReply::finished, box, [=] {
+					const auto reply = state->reply;
+					state->reply = nullptr;
+					state->downloading = false;
+					if (state->output) {
+						state->output->flush();
+						state->output->close();
+					}
+					const auto outputPath = state->output ? state->output->fileName() : QString();
+					state->output.reset();
+					if (!reply) {
+						Logs::writeClient(QString::fromLatin1(
+							"[speech-models] download finished with null reply: %1")
+							.arg(state->folderName));
+						state->status = RuEn("Неизвестная ошибка", "Unknown error");
+						row->update();
+						return;
+					}
+					if (reply->error() != QNetworkReply::NoError) {
+						if (!outputPath.isEmpty()) {
+							QFile::remove(outputPath);
 						}
-					});
-
-				QObject::connect(
-					state->reply,
-					&QNetworkReply::downloadProgress,
-					box,
-					[=](qint64 ready, qint64 total) {
-						state->ready = std::max<qint64>(ready, 0);
-						state->total = std::max<qint64>(total, 0);
-						const auto ratio = (state->total > 0)
-							? std::clamp(double(state->ready) / double(state->total), 0., 1.)
-							: 0.;
-						*progressRatio = ratio;
-						const auto mbReady = double(state->ready) / (1024. * 1024.);
-						const auto mbTotal = (state->total > 0)
-							? (double(state->total) / (1024. * 1024.))
-							: 0.;
-						*progressText = (state->total > 0)
-							? RuEn(
-								"Скачивание: %1 / %2 МБ (%3%)",
-								"Downloading: %1 / %2 MB (%3%)"
-							).arg(QString::number(mbReady, 'f', 1))
-							 .arg(QString::number(mbTotal, 'f', 1))
-							 .arg(int(std::round(ratio * 100.)))
-							: RuEn(
-								"Скачивание: %1 МБ",
-								"Downloading: %1 MB"
-							).arg(QString::number(mbReady, 'f', 1));
-						progressWidget->update();
-					});
-
-				QObject::connect(
-					state->reply,
-					&QNetworkReply::finished,
-					box,
-					[=] {
-						const auto reply = state->reply;
-						state->reply = nullptr;
-						state->active = false;
-
-						if (state->output) {
-							state->output->flush();
-							state->output->close();
-						}
-						const auto outputPath = state->output
-							? state->output->fileName()
-							: QString();
-						state->output.reset();
-
-						if (!reply) {
-							*progressText = RuEn(
-								"Загрузка завершилась с неизвестной ошибкой.",
-								"Download finished with unknown error.");
-							return;
-						}
-						if (reply->error() != QNetworkReply::NoError) {
-							if (!outputPath.isEmpty()) {
-								QFile::remove(outputPath);
-							}
-							*progressText = RuEn(
-								"Ошибка загрузки: %1",
-								"Download error: %1"
-							).arg(reply->errorString());
-							reply->deleteLater();
-							return;
-						}
-						*progressRatio = 1.;
-						progressWidget->update();
-						*progressText = RuEn(
-							"Модель скачана: %1",
-							"Model downloaded: %1"
-						).arg(outputPath);
+						Logs::writeClient(QString::fromLatin1(
+							"[speech-models] download failed: %1 reason=%2")
+							.arg(state->folderName, reply->errorString()));
+						state->status = RuEn("Ошибка загрузки", "Download failed");
 						reply->deleteLater();
-					});
-			});
-		box->addButton(rpl::single(RuEn("Отмена", "Cancel")), [=] {
-			if (state->reply) {
-				state->reply->abort();
-			}
-			box->closeBox();
-		});
-	});
+						row->update();
+						return;
+					}
+					state->status = RuEn("Распаковка...", "Extracting...");
+					row->update();
+					auto error = QString();
+					if (!ExtractSpeechModelArchive(outputPath, modelsDir, &error)) {
+						Logs::writeClient(QString::fromLatin1(
+							"[speech-models] post-download extract failed: %1 reason=%2")
+							.arg(state->folderName, error));
+						state->status = error;
+						reply->deleteLater();
+						row->update();
+						return;
+					}
+					if (!isInstalled(state)) {
+						Logs::writeClient(QString::fromLatin1(
+							"[speech-models] post-download extract missing dir: %1")
+							.arg(state->folderName));
+						state->status = RuEn("Модель не найдена после распаковки", "Model folder not found after extraction");
+						reply->deleteLater();
+						row->update();
+						return;
+					}
+					QFile::remove(outputPath);
+					state->progress = 1.;
+					state->installed = true;
+					state->status = RuEn("Скачана", "Downloaded");
+					Logs::writeClient(QString::fromLatin1(
+						"[speech-models] download finished: %1")
+						.arg(state->folderName));
+					reply->deleteLater();
+					row->update();
+				});
+			}, row->lifetime());
+			container->add(object_ptr<Ui::FixedHeightWidget>(container, st::settingsCheckboxesSkip / 3));
+		}
+
+		box->addButton(rpl::single(RuEn("Готово", "Done")), [=] { box->closeBox(); });
+	}));
 }
 
 void AddLinksSection(
@@ -514,56 +588,74 @@ void AddLinksSection(
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
+void AddSectionGroupTitle(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text) {
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(text),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+}
+
+void AddSectionGroup(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		std::initializer_list<std::tuple<QString, Type, IconDescriptor>> entries) {
+	AddSectionGroupTitle(container, title);
+	auto card = container->add(
+		object_ptr<Ui::VerticalLayout>(container),
+		style::margins(6, 8, 6, 0),
+		style::al_top);
+	card->resizeToWidth(container->width());
+	Ui::AddDivider(card);
+	Ui::AddSkip(card, st::settingsCheckboxesSkip / 2);
+	for (const auto &[entryTitle, type, descriptor] : entries) {
+		AddSectionButton(controller, card, entryTitle, type, descriptor);
+	}
+	Ui::AddSkip(card, st::settingsCheckboxesSkip / 2);
+}
+
 void SetupAstrogramHome(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	AddAstrogramHeader(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddSectionGroup(
+		controller,
+		container,
+		RuEn("Astrogram", "Astrogram"),
+		{
+			{ RuEn("Основные", "General"), AstrogramCore::Id(), { &st::menuIconPremium } },
+			{ RuEn("Приватность", "Privacy"), AstrogramPrivacy::Id(), { &st::menuIconLock } },
+			{ RuEn("Интерфейс", "Interface"), AstrogramInterface::Id(), { &st::menuIconPalette } },
+		});
 	Ui::AddSkip(container);
+	AddSectionGroup(
+		controller,
+		container,
+		RuEn("Модули", "Modules"),
+		{
+			{ RuEn("Плагины", "Plugins"), Plugins::Id(), { &st::menuIconCustomize } },
+			{ RuEn("Защита от удаления", "Anti-recall"), AstrogramAntiRecall::Id(), { &st::menuIconRestore } },
+		});
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Ссылки", "Links"));
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
-	AddSectionButton(
-		controller,
-		container,
-		RuEn("Основные", "General"),
-		AstrogramCore::Id(),
-		{ &st::menuIconPremium });
-	AddSectionButton(
-		controller,
-		container,
-		RuEn("Приватность", "Privacy"),
-		AstrogramPrivacy::Id(),
-		{ &st::menuIconLock });
-	AddSectionButton(
-		controller,
-		container,
-		RuEn("Интерфейс", "Interface"),
-		AstrogramInterface::Id(),
-		{ &st::menuIconPalette });
-	AddSectionButton(
-		controller,
-		container,
-		RuEn("Защита от удаления", "Anti-recall"),
-		AstrogramAntiRecall::Id(),
-		{ &st::menuIconRestore });
-	Ui::AddSkip(container);
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
-	AddSectionButton(
-		controller,
-		container,
-		RuEn("Плагины", "Plugins"),
-		Plugins::Id(),
-		{ &st::menuIconCustomize });
-	Ui::AddSkip(container);
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddLinksSection(controller, container);
 }
 
 void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddSectionGroupTitle(container, RuEn("Основные возможности", "Core features"));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+	AddSectionGroupTitle(container, RuEn("Аккаунт и Premium", "Account & Premium"));
 	AddToggle(
 		container,
 		settings.localPremiumValue(),
@@ -574,6 +666,8 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 		settings.disableAdsValue(),
 		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
 		[&](bool toggled) { settings.setDisableAds(toggled); });
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Боковое меню", "Side menu"));
 	AddToggle(
 		container,
 		settings.mainMenuAccountsShownValue(),
@@ -582,10 +676,13 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
-void SetupAstrogramPrivacy(not_null<Ui::VerticalLayout*> container) {
+void SetupAstrogramPrivacy(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddSectionGroupTitle(container, RuEn("Приватность и следы", "Privacy & traces"));
 	AddToggle(
 		container,
 		settings.ghostModeValue(),
@@ -606,6 +703,87 @@ void SetupAstrogramPrivacy(not_null<Ui::VerticalLayout*> container) {
 		settings.ghostHideTypingProgressValue(),
 		RuEn("Не отправлять набор текста и ход загрузки", "Don't send typing/upload progress"),
 		[&](bool toggled) { settings.setGhostHideTypingProgress(toggled); });
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Удаление и правки", "Deleted & edited messages"));
+	AddToggle(
+		container,
+		settings.saveDeletedMessagesValue(),
+		RuEn("Сохранять удалённые сообщения", "Keep deleted messages"),
+		[&](bool toggled) { settings.setSaveDeletedMessages(toggled); });
+	AddToggle(
+		container,
+		settings.saveMessagesHistoryValue(),
+		RuEn("Сохранять историю правок", "Keep edit history"),
+		[&](bool toggled) { settings.setSaveMessagesHistory(toggled); });
+	AddToggle(
+		container,
+		settings.semiTransparentDeletedMessagesValue(),
+		RuEn("Полупрозрачные удалённые сообщения", "Semi-transparent deleted messages"),
+		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
+	AddToggle(
+		container,
+		settings.editedMarkShowTextValue(),
+		RuEn("Показывать текст у отметки изменения", "Show text on edited tag"),
+		[&](bool toggled) { settings.setEditedMarkShowText(toggled); });
+	AddToggle(
+		container,
+		settings.editedMarkShowIconValue(),
+		RuEn("Показывать значок у отметки изменения", "Show icon on edited tag"),
+		[&](bool toggled) { settings.setEditedMarkShowIcon(toggled); });
+	AddButtonWithLabel(
+		container,
+		rpl::single(RuEn("Текст отметки изменения", "Edited tag text")),
+		settings.editedMarkTextValue() | rpl::map([](const QString &value) {
+			return value.trimmed().isEmpty()
+				? RuEn("Изменено (по умолчанию)", "Edited (default)")
+				: value.trimmed();
+		}),
+		st::settingsButton,
+		{ &st::menuIconEdit }
+	)->addClickHandler([=] {
+		ShowSingleLineTextEditBox(
+			controller,
+			RuEn("Текст отметки изменения", "Edited tag text"),
+			RuEn("Изменено", "Edited"),
+			Core::App().settings().editedMarkText(),
+			[](QString value) {
+				auto &settings = Core::App().settings();
+				settings.setEditedMarkText(std::move(value));
+				Core::App().saveSettings();
+			});
+	});
+	AddToggle(
+		container,
+		settings.deletedMarkShowTextValue(),
+		RuEn("Показывать текст у отметки удаления", "Show text on deleted tag"),
+		[&](bool toggled) { settings.setDeletedMarkShowText(toggled); });
+	AddToggle(
+		container,
+		settings.deletedMarkShowIconValue(),
+		RuEn("Показывать значок у отметки удаления", "Show icon on deleted tag"),
+		[&](bool toggled) { settings.setDeletedMarkShowIcon(toggled); });
+	AddButtonWithLabel(
+		container,
+		rpl::single(RuEn("Текст отметки удаления", "Deleted tag text")),
+		settings.deletedMarkTextValue() | rpl::map([](const QString &value) {
+			return value.trimmed().isEmpty()
+				? RuEn("Удалено (по умолчанию)", "Deleted (default)")
+				: value.trimmed();
+		}),
+		st::settingsButton,
+		{ &st::menuIconDelete }
+	)->addClickHandler([=] {
+		ShowSingleLineTextEditBox(
+			controller,
+			RuEn("Текст отметки удаления", "Deleted tag text"),
+			RuEn("Удалено", "Deleted"),
+			Core::App().settings().deletedMarkText(),
+			[](QString value) {
+				auto &settings = Core::App().settings();
+				settings.setDeletedMarkText(std::move(value));
+				Core::App().saveSettings();
+			});
+	});
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
@@ -614,7 +792,10 @@ void SetupAstrogramInterface(
 		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddSectionGroupTitle(container, RuEn("Интерфейс и поведение", "Interface & behavior"));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+	AddSectionGroupTitle(container, RuEn("Окно и навигация", "Window & navigation"));
 	AddToggle(
 		container,
 		settings.adaptiveForWideValue(),
@@ -640,6 +821,8 @@ void SetupAstrogramInterface(
 		settings.showMessageSecondsValue(),
 		RuEn("Показывать секунды во времени", "Show message seconds"),
 		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Перевод и речь", "Translation & speech"));
 	AddToggle(
 		container,
 		rpl::single(settings.translateButtonEnabled()),
@@ -681,6 +864,8 @@ void SetupAstrogramInterface(
 			ShowSpeechModelDownloadBox(controller);
 		},
 		{ &st::menuIconDownload });
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Текст и ввод", "Text & input"));
 	AddToggle(
 		container,
 		settings.localOnlyDraftsValue(),
@@ -727,7 +912,8 @@ void SetupAstrogramInterface(
 void SetupAstrogramAntiRecall(not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddSectionGroupTitle(container, RuEn("Журнал защиты от удаления", "Anti-recall log"));
 	AddToggle(
 		container,
 		settings.saveDeletedMessagesValue(),
@@ -787,7 +973,7 @@ AstrogramCore::AstrogramCore(
 }
 
 rpl::producer<QString> AstrogramCore::title() {
-	return rpl::single(u"Astrogram"_q);
+	return rpl::single(RuEn("Основные", "General"));
 }
 
 void AstrogramCore::setupContent(
@@ -811,9 +997,8 @@ rpl::producer<QString> AstrogramPrivacy::title() {
 
 void AstrogramPrivacy::setupContent(
 		not_null<Window::SessionController*> controller) {
-	Q_UNUSED(controller);
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-	SetupAstrogramPrivacy(content);
+	SetupAstrogramPrivacy(controller, content);
 	Ui::ResizeFitChild(this, content);
 }
 

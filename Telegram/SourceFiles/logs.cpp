@@ -31,6 +31,7 @@ public:
 
 enum LogDataType {
 	LogDataMain,
+	LogDataClient,
 	LogDataDebug,
 	LogDataMtp,
 
@@ -52,6 +53,7 @@ QString _logsFilePath(LogDataType type, const QString &postfix = QString()) {
 	QString path(cWorkingDir());
 	switch (type) {
 	case LogDataMain: path += u"log"_q + postfix + u".txt"_q; break;
+	case LogDataClient: path += u"client"_q + postfix + u".log"_q; break;
 	case LogDataDebug: path += u"DebugLogs/log"_q + postfix + u".txt"_q; break;
 	case LogDataMtp: path += u"DebugLogs/mtp"_q + postfix + u".txt"_q; break;
 	}
@@ -502,6 +504,11 @@ void writeMain(const QString &v) {
 	_logsWrite(LogDataMain, msg);
 
 	writeDebug(v);
+}
+
+void writeClient(const QString &v) {
+	const auto msg = QString("%1 %2\n").arg(_logsEntryStart(), v);
+	_logsWrite(LogDataClient, msg);
 }
 
 void writeDebug(const QString &v) {

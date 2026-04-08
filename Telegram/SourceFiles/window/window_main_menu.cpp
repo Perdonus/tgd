@@ -130,6 +130,7 @@ constexpr auto kPlayStatusLimit = 2;
 class MainMenu::ToggleAccountsButton final : public Ui::AbstractButton {
 public:
 	ToggleAccountsButton(QWidget *parent, not_null<Main::Account*> current);
+	void setToggled(bool value);
 
 	[[nodiscard]] int rightSkip() const {
 		return _rightSkip.current();
@@ -181,24 +182,23 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(
 		}
 	}, lifetime());
 
-	auto &settings = Core::App().settings();
-	if (Core::App().domain().accounts().size() < 2
-		&& settings.mainMenuAccountsShown()) {
-		settings.setMainMenuAccountsShown(false);
-	}
-	settings.mainMenuAccountsShownValue(
-	) | rpl::filter([=](bool value) {
-		return (_toggled != value);
-	}) | rpl::on_next([=](bool value) {
-		_toggled = value;
-		_toggledAnimation.start(
-			[=] { update(); },
-			_toggled ? 0. : 1.,
-			_toggled ? 1. : 0.,
-			st::slideWrapDuration);
-		validateUnreadBadge();
-	}, lifetime());
+	_toggled = Core::App().settings().mainMenuAccountsShown();
 	_toggledAnimation.stop();
+	validateUnreadBadge();
+}
+
+void MainMenu::ToggleAccountsButton::setToggled(bool value) {
+	if (_toggled == value) {
+		return;
+	}
+	_toggled = value;
+	_toggledAnimation.start(
+		[=] { update(); },
+		_toggled ? 0. : 1.,
+		_toggled ? 1. : 0.,
+		st::slideWrapDuration);
+	validateUnreadBadge();
+	update();
 }
 
 void MainMenu::ToggleAccountsButton::paintEvent(QPaintEvent *e) {
@@ -597,10 +597,9 @@ void MainMenu::setupUserpicButton() {
 }
 
 void MainMenu::toggleAccounts() {
-	auto &settings = Core::App().settings();
-	const auto shown = !settings.mainMenuAccountsShown();
-	settings.setMainMenuAccountsShown(shown);
-	Core::App().saveSettingsDelayed();
+	const auto shown = !_accounts->toggled();
+	_accounts->toggle(shown, anim::type::normal);
+	_toggleAccounts->setToggled(shown);
 }
 
 void MainMenu::setupAccounts() {
@@ -618,6 +617,10 @@ void MainMenu::setupAccounts() {
 
 	_accounts->toggleOn(Core::App().settings().mainMenuAccountsShownValue());
 	_accounts->finishAnimating();
+	_accounts->shownValue(
+	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
+		_toggleAccounts->setToggled(shown);
+	}, inner->lifetime());
 
 	_shadow->setDuration(0)->toggleOn(_accounts->shownValue());
 }
@@ -644,6 +647,11 @@ void MainMenu::parentResized() {
 
 void MainMenu::showFinished() {
 	_showFinished = true;
+	if (Core::App().settings().mainMenuAccountsShown()
+		&& !_accounts->toggled()) {
+		_accounts->toggle(true, anim::type::instant);
+		_toggleAccounts->setToggled(true);
+	}
 }
 
 void MainMenu::setupMenu() {

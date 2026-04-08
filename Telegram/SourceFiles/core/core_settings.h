@@ -460,6 +460,86 @@ public:
 		_semiTransparentDeletedMessages = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool editedMarkShowText() const {
+		return _editedMarkShowText.current();
+	}
+	[[nodiscard]] rpl::producer<bool> editedMarkShowTextValue() const {
+		return _editedMarkShowText.value();
+	}
+	void setEditedMarkShowText(bool value) {
+		if (_editedMarkShowText.current() == value) {
+			return;
+		}
+		_editedMarkShowText = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool editedMarkShowIcon() const {
+		return _editedMarkShowIcon.current();
+	}
+	[[nodiscard]] rpl::producer<bool> editedMarkShowIconValue() const {
+		return _editedMarkShowIcon.value();
+	}
+	void setEditedMarkShowIcon(bool value) {
+		if (_editedMarkShowIcon.current() == value) {
+			return;
+		}
+		_editedMarkShowIcon = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] QString editedMarkText() const {
+		return _editedMarkText.current();
+	}
+	[[nodiscard]] rpl::producer<QString> editedMarkTextValue() const {
+		return _editedMarkText.value();
+	}
+	void setEditedMarkText(QString value) {
+		value = value.trimmed();
+		if (_editedMarkText.current() == value) {
+			return;
+		}
+		_editedMarkText = std::move(value);
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool deletedMarkShowText() const {
+		return _deletedMarkShowText.current();
+	}
+	[[nodiscard]] rpl::producer<bool> deletedMarkShowTextValue() const {
+		return _deletedMarkShowText.value();
+	}
+	void setDeletedMarkShowText(bool value) {
+		if (_deletedMarkShowText.current() == value) {
+			return;
+		}
+		_deletedMarkShowText = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] bool deletedMarkShowIcon() const {
+		return _deletedMarkShowIcon.current();
+	}
+	[[nodiscard]] rpl::producer<bool> deletedMarkShowIconValue() const {
+		return _deletedMarkShowIcon.value();
+	}
+	void setDeletedMarkShowIcon(bool value) {
+		if (_deletedMarkShowIcon.current() == value) {
+			return;
+		}
+		_deletedMarkShowIcon = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] QString deletedMarkText() const {
+		return _deletedMarkText.current();
+	}
+	[[nodiscard]] rpl::producer<QString> deletedMarkTextValue() const {
+		return _deletedMarkText.value();
+	}
+	void setDeletedMarkText(QString value) {
+		value = value.trimmed();
+		if (_deletedMarkText.current() == value) {
+			return;
+		}
+		_deletedMarkText = std::move(value);
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool countUnreadMessages() const {
 		return _countUnreadMessages;
 	}
@@ -1216,6 +1296,12 @@ private:
 	rpl::variable<bool> _saveDeletedMessages = true;
 	rpl::variable<bool> _saveMessagesHistory = true;
 	rpl::variable<bool> _semiTransparentDeletedMessages = false;
+	rpl::variable<bool> _editedMarkShowText = true;
+	rpl::variable<bool> _editedMarkShowIcon = true;
+	rpl::variable<QString> _editedMarkText;
+	rpl::variable<bool> _deletedMarkShowText = true;
+	rpl::variable<bool> _deletedMarkShowIcon = true;
+	rpl::variable<QString> _deletedMarkText;
 	bool _countUnreadMessages = true;
 	rpl::variable<bool> _notifyAboutPinned = true;
 	int _autoLock = 3600;

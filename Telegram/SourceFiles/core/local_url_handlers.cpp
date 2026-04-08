@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "core/update_checker.h"
 #include "core/application.h"
+#include "logs.h"
 #include "core/click_handler_types.h"
 #include "dialogs/ui/dialogs_suggestions.h"
 #include "boxes/background_preview_box.h"
@@ -30,6 +31,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/widgets/labels.h"
+#include "styles/style_info.h"
+#include "styles/style_credits.h"
+#include "styles/style_chat.h"
+#include "ui/widgets/shadow.h"
+#include "ui/widgets/buttons.h"
+#include "ui/effects/ministar_particles.h"
+#include "ui/boxes/about_cocoon_box.h"
+#include "ui/controls/feature_list.h"
 #include "payments/payments_non_panel_process.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/share_box.h"
@@ -86,7 +95,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 
 #include <QtGui/QGuiApplication>
+#include <QFontMetrics>
 #include <QImage>
+#include <QPainterPath>
+
+#include <optional>
+#include <vector>
 
 namespace Core {
 namespace {
@@ -259,28 +273,120 @@ void SavePersonalChannel(
 }
 
 void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
-	controller->show(Ui::MakeConfirmBox({
-		.text = TextWithEntities{ RuEn(
-			"Поддержать разработку Astrogram\n\n"
-			"Поддержка даёт серверный значок подписчика.\n"
-			"Стоимость: 50 ₽\n"
-			"≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\n\n"
-			"Кому писать: @astrogram_support",
-			"Support Astrogram development\n\n"
-			"Support grants a server-side subscriber badge.\n"
-			"Price: 50 RUB\n"
-			"≈ $0.55 USD • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\n\n"
-			"Contact: @astrogram_support") },
-		.confirmed = [=](Fn<void()> close) {
+	Logs::writeClient(u"[support] open astrogram support box"_q);
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setStyle(st::stakeBox);
+		box->setNoContentMargin(true);
+
+		const auto container = box->verticalLayout();
+		const auto cover = container->add(object_ptr<Ui::RpWidget>(container));
+		Ui::AddUniqueCloseButton(box);
+
+		struct CoverState {
+			QImage logo;
+			Ui::Animations::Basic animation;
+			std::optional<Ui::StarParticles> particles;
+		};
+		const auto state = cover->lifetime().make_state<CoverState>();
+		state->logo = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
+		if (state->logo.isNull()) {
+			state->logo = QImage(u":/gui/art/logo_256_no_margin.png"_q);
+		}
+		state->particles.emplace(Ui::StarParticles::Type::RadialInside, 44, st::cocoonLogoSize / 12);
+		state->particles->setSpeed(0.05);
+		state->particles->setColors({
+			QColor(0x17, 0x9f, 0x62),
+			QColor(0x21, 0xc7, 0x6a),
+			QColor(0x59, 0xe0, 0x94),
+			QColor(0x9a, 0xff, 0xc4),
+		});
+		state->animation.init([=] {
+			cover->update();
+			if (anim::Disabled()) {
+				state->animation.stop();
+			}
+		});
+
+		const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
+			cover,
+			rpl::single(TextWithEntities{ RuEn(
+				"Серверный значок подписчика и поддержка клиента.\n50 ₽ • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN",
+				"Server-side subscriber badge and support for the client.\n50 RUB • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN") }),
+			st::cocoonSubtitle);
+		subtitle->setTryMakeSimilarLines(true);
+
+		cover->widthValue() | rpl::on_next([=](int width) {
+			const auto logoTop = st::cocoonLogoTop;
+			const auto logoSize = st::cocoonLogoSize;
+			const auto titleTop = logoTop + logoSize + st::cocoonTitleTop;
+			const auto subtitleTop = titleTop + st::cocoonTitleFont->height + st::cocoonSubtitleTop;
+			const auto available = width - st::boxRowPadding.left() - st::boxRowPadding.right();
+			subtitle->resizeToWidth(available);
+			subtitle->moveToLeft(st::boxRowPadding.left(), subtitleTop);
+			cover->resize(width, subtitle->y() + subtitle->height() + st::cocoonSubtitleBottom);
+		}, cover->lifetime());
+
+		cover->paintRequest() | rpl::on_next([=] {
+			auto p = Painter(cover);
+			p.fillRect(cover->rect(), QColor(0x08, 0x14, 0x0f));
+			const auto width = cover->width();
+			const auto logoRect = QRect((width - st::cocoonLogoSize) / 2, st::cocoonLogoTop, st::cocoonLogoSize, st::cocoonLogoSize);
+			const auto particlesRect = logoRect.marginsAdded(QMargins(30, 30, 30, 30));
+			state->particles->paint(p, particlesRect, crl::now(), false);
+			if (!anim::Disabled() && !state->animation.animating()) {
+				state->animation.start();
+			}
+			auto titleFont = st::cocoonTitleFont->f;
+			titleFont.setWeight(QFont::Bold);
+			const auto titleMetrics = QFontMetrics(titleFont);
+			p.setPen(st::windowFg);
+			p.setFont(titleFont);
+			p.drawText(
+				QRect(
+					st::boxRowPadding.left(),
+					st::cocoonLogoTop + st::cocoonLogoSize + st::cocoonTitleTop,
+					width - st::boxRowPadding.left() - st::boxRowPadding.right(),
+					titleMetrics.height()),
+				Qt::AlignHCenter | Qt::AlignTop | Qt::TextSingleLine,
+				RuEn("Поддержать разработку Astrogram", "Support Astrogram development"));
+			if (!state->logo.isNull()) {
+				auto hq = PainterHighQualityEnabler(p);
+				QPainterPath path;
+				path.addEllipse(QRectF(logoRect));
+				p.save();
+				p.setClipPath(path);
+				p.drawImage(logoRect, state->logo);
+				p.restore();
+			}
+		}, cover->lifetime());
+
+		auto context = Ui::Text::MarkedContext();
+		const auto features = std::vector<Ui::FeatureListEntry>{
+			{ st::menuIconGiftPremium, RuEn("Серверный значок", "Server badge"), TextWithEntities{ RuEn("Выдаётся после поддержки и виден другим пользователям Astrogram.", "Granted after support and visible to other Astrogram users.") } },
+			{ st::menuIconUsername, RuEn("Как получить", "How to get it"), TextWithEntities{ RuEn("Напишите @astrogram_support и отправьте свой Telegram ID для выдачи.", "Message @astrogram_support and send your Telegram ID for activation.") } },
+			{ st::menuIconInfo, RuEn("Что это даёт", "What you get"), TextWithEntities{ RuEn("Поддержка разработки клиента и кастомный подписочный бейдж на сервере Astrogram.", "You support development and get a custom subscriber badge on the Astrogram server.") } },
+		};
+		auto margin = QMargins(0, st::defaultVerticalListSkip, 0, 0);
+		for (const auto &feature : features) {
+			box->addRow(Ui::MakeFeatureListEntry(box, feature, context), st::boxRowPadding + margin);
+			margin = {};
+		}
+
+		box->addRow(object_ptr<Ui::PlainShadow>(box), st::cocoonJoinSeparatorPadding);
+
+		auto button = box->addButton(rpl::single(QString()), [=] {
+			Logs::writeClient(u"[support] open @astrogram_support from support box"_q);
 			controller->showPeerByLink(Window::PeerByLinkInfo{
 				.usernameOrId = QStringLiteral("astrogram_support"),
 			});
-			close();
-		},
-		.confirmText = rpl::single(RuEn(
-			"Написать @astrogram_support",
-			"Message @astrogram_support")),
-	}));	
+			box->closeBox();
+		});
+		button->setText(rpl::single(
+			Ui::Text::IconEmoji(&st::infoStarsUnderstood)
+				.append(' ')
+				.append(RuEn("Написать @astrogram_support", "Message @astrogram_support"))));
+	}));
 }
 
 bool JoinGroupByHash(
