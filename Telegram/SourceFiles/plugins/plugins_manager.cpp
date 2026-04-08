@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "apiwrap.h"
 #include "data/data_session.h"
+#include "logs.h"
 #include "storage/storage_sparse_ids_list.h"
 #include "settings.h"
 #include "ui/layers/generic_box.h"
@@ -39,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
@@ -1360,6 +1362,9 @@ void Manager::start() {
 }
 
 void Manager::reload() {
+	Logs::writeClient(QString::fromLatin1("[plugins] reload requested: safeMode=%1 knownPlugins=%2")
+		.arg(safeModeEnabled() ? u"true"_q : u"false"_q)
+		.arg(_plugins.size()));
 	logEvent(
 		u"manager"_q,
 		u"reload-requested"_q,
@@ -2300,6 +2305,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 }
 
 bool Manager::removePlugin(const QString &pluginId, QString *error) {
+	Logs::writeClient(QString::fromLatin1("[plugins] remove requested: %1").arg(pluginId));
 	const auto *record = findRecord(pluginId);
 	if (!record) {
 		if (error) {
@@ -2368,9 +2374,14 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 		}
 		removeError = file.errorString();
 		FlushPluginUnload();
+		QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		QThread::msleep(20);
 	}
 
 	if (!removed) {
+		Logs::writeClient(QString::fromLatin1(
+			"[plugins] remove failed: %1 reason=%2")
+			.arg(pluginId, removeError));
 		logEvent(
 			u"package"_q,
 			u"remove-file-failed"_q,
@@ -2395,6 +2406,7 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	saveConfig();
 	saveRecoveryState();
 	rescanNow();
+	Logs::writeClient(QString::fromLatin1("[plugins] remove finished: %1").arg(pluginId));
 	finishRecoveryOperation();
 
 	if (error) {
@@ -2788,6 +2800,9 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 }
 
 bool Manager::setEnabled(const QString &pluginId, bool enabled) {
+	Logs::writeClient(QString::fromLatin1("[plugins] toggle requested: %1 -> %2")
+		.arg(pluginId)
+		.arg(enabled ? u"enabled"_q : u"disabled"_q));
 	if (!_pluginIndexById.contains(pluginId)) {
 		logEvent(
 			u"plugin"_q,
@@ -2817,6 +2832,9 @@ bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 		{ pluginId });
 	reload();
 	finishRecoveryOperation();
+	Logs::writeClient(QString::fromLatin1("[plugins] toggle applied: %1 -> %2")
+		.arg(pluginId)
+		.arg(enabled ? u"enabled"_q : u"disabled"_q));
 	return true;
 }
 

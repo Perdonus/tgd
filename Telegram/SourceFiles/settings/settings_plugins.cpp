@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "logs.h"
 #include "lang/lang_keys.h"
 #include "lang/lang_text_entity.h"
 #include "plugins/plugins_manager.h"
@@ -59,6 +60,11 @@ namespace {
 [[nodiscard]] QString PluginUiText(QString en, QString ru) {
 	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
 }
+
+constexpr auto kPluginCardRadius = 20.;
+constexpr auto kPluginCardVerticalMargin = 12;
+constexpr auto kPluginCardContentInsetLeft = 14;
+constexpr auto kPluginCardContentInsetRight = 10;
 
 [[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
 	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
@@ -159,7 +165,7 @@ void AddPluginMetaText(
 			container,
 			rpl::single(text),
 			st::defaultFlatLabel),
-		style::margins(10, 0, 6, 0),
+		style::margins(kPluginCardContentInsetLeft, 0, kPluginCardContentInsetRight, 0),
 		style::al_top);
 	WireExternalLinks(label);
 }
@@ -171,6 +177,26 @@ void AddPluginMetaText(
 		return;
 	}
 	AddPluginMetaText(container, TextWithEntities{ text.trimmed() });
+}
+
+void AddPluginDescriptionText(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text) {
+	if (text.trimmed().isEmpty()) {
+		return;
+	}
+	const auto label = container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(TextWithEntities{ text.trimmed() }),
+			st::defaultFlatLabel),
+		style::margins(
+			kPluginCardContentInsetLeft + 4,
+			0,
+			kPluginCardContentInsetRight,
+			0),
+		style::al_top);
+	WireExternalLinks(label);
 }
 
 QString FormatPluginTitle(const ::Plugins::PluginState &state) {
@@ -814,11 +840,6 @@ void OpenPluginsFolder() {
 	File::ShowInFolder(Core::App().plugins().pluginsPath());
 }
 
-constexpr auto kPluginCardRadius = 20.;
-constexpr auto kPluginCardVerticalMargin = 12;
-constexpr auto kPluginCardContentInsetLeft = 10;
-constexpr auto kPluginCardContentInsetRight = 6;
-
 [[nodiscard]] QColor PluginCardBackgroundColor(
 		const ::Plugins::PluginState &state) {
 	auto color = st::windowBgOver->c;
@@ -849,15 +870,15 @@ constexpr auto kPluginCardContentInsetRight = 6;
 		const ::Plugins::PluginState &state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(18, 0, 18, 0),
+		style::margins(20, 0, 20, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
-		3,
+		2,
 		8,
-		5,
-		10);
+		2,
+		8);
 
 	raw->widthValue() | rpl::on_next([=](int width) {
 		const auto innerWidth = std::max(0, width - margins.left() - margins.right());
@@ -907,7 +928,7 @@ void AddPluginCardActionRow(
 		Fn<void()> onChanged) {
 	const auto row = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(0, 4, 0, 0),
+		style::margins(kPluginCardContentInsetLeft, 6, kPluginCardContentInsetRight, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(row);
 	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
@@ -936,22 +957,15 @@ void AddPluginCardActionRow(
 	raw->setMinimumHeight(buttonHeight);
 	raw->setMaximumHeight(buttonHeight);
 
-	raw->widthValue() | rpl::on_next([=](int width) {
+	raw->widthValue() | rpl::on_next([=](int) {
 		const auto gap = 8;
 		auto buttons = std::vector<Ui::IconButton*>{ settings };
 		if (share) {
 			buttons.push_back(share);
 		}
 		buttons.push_back(remove);
-		auto buttonsWidth = 0;
-		for (const auto current : buttons) {
-			buttonsWidth += current->width();
-		}
-		buttonsWidth += std::max(0, int(buttons.size()) - 1) * gap;
-		auto left = std::max(
-			kPluginCardContentInsetLeft,
-			width - buttonsWidth - kPluginCardContentInsetRight);
-		const auto top = std::max(0, (raw->height() - buttonHeight) / 2);
+		auto left = 0;
+		const auto top = std::max(0, raw->height() - buttonHeight - 1);
 		for (const auto current : buttons) {
 			current->move(left, top);
 			left += current->width() + gap;
@@ -1003,11 +1017,18 @@ void RequestPluginRemoval(
 		not_null<QWidget*> context,
 		const ::Plugins::PluginState &state,
 		Fn<void()> onRemoved) {
-	controller->show(Ui::MakeConfirmBox({
-		.text = PluginUiText(
-			u"Delete plugin \"%1\"?"_q,
-			u"Удалить плагин \"%1\"?"_q).arg(FormatPluginTitle(state)),
-		.confirmed = crl::guard(context, [=] {
+	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(PluginUiText(u"Delete plugin"_q, u"Удалить плагин"_q)));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(PluginUiText(
+				u"Delete plugin \"%1\"?"_q,
+				u"Удалить плагин \"%1\"?"_q).arg(FormatPluginTitle(state))),
+			st::boxLabel),
+			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
+			style::al_top);
+		box->addButton(rpl::single(PluginUiText(u"Delete"_q, u"Удалить"_q)), [=] {
 			QString error;
 			if (!Core::App().plugins().removePlugin(state.info.id, &error)) {
 				controller->window().showToast(
@@ -1018,13 +1039,16 @@ void RequestPluginRemoval(
 						: error);
 				return;
 			}
+			box->closeBox();
 			if (onRemoved) {
-				QTimer::singleShot(0, [=] {
+				QTimer::singleShot(0, controller, [=] {
 					onRemoved();
 				});
 			}
-		}),
-		.confirmText = PluginUiText(u"Delete"_q, u"Удалить"_q),
+		});
+		box->addButton(rpl::single(tr::lng_cancel()), [=] {
+			box->closeBox();
+		});
 	}));
 }
 
@@ -1424,33 +1448,6 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		.handler = [=] { ShowPluginRuntimeBox(_controller); },
 		.icon = &st::menuIconIpAddress,
 	});
-	const auto runtimeEnabled = Core::App().plugins().runtimeApiEnabled();
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = runtimeEnabled
-			? PluginUiText(
-				u"Disable Runtime API"_q,
-				u"Выключить Runtime API"_q)
-			: PluginUiText(
-				u"Enable Runtime API"_q,
-				u"Включить Runtime API"_q),
-		.handler = [=] {
-			if (!Core::App().plugins().setRuntimeApiEnabled(!runtimeEnabled)) {
-				_controller->window().showToast(PluginUiText(
-					u"Could not change runtime API state."_q,
-					u"Не удалось изменить состояние runtime API."_q));
-				return;
-			}
-			_controller->window().showToast(!runtimeEnabled
-				? PluginUiText(
-					u"Runtime API enabled."_q,
-					u"Runtime API включён."_q)
-				: PluginUiText(
-					u"Runtime API disabled."_q,
-					u"Runtime API выключен."_q));
-			scheduleRebuildList(0);
-		},
-		.icon = &st::menuIconIpAddress,
-	});
 	addAction(Ui::Menu::MenuCallback::Args{
 		.text = PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
 		.handler = [=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
@@ -1465,20 +1462,6 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 				PluginUiText(
 					u"plugins.log was not found."_q,
 					u"Файл plugins.log не найден."_q));
-		},
-		.icon = &st::menuIconSettings,
-	});
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = PluginUiText(
-			u"Open plugins.trace.jsonl"_q,
-			u"Открыть plugins.trace.jsonl"_q),
-		.handler = [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/plugins.trace.jsonl"_q,
-				PluginUiText(
-					u"plugins.trace.jsonl was not found."_q,
-					u"Файл plugins.trace.jsonl не найден."_q));
 		},
 		.icon = &st::menuIconSettings,
 	});
@@ -1516,15 +1499,26 @@ void Plugins::scheduleRebuildList(int delayMs) {
 	_rebuildScheduled = true;
 	QTimer::singleShot(delayMs, this, [=] {
 		_rebuildScheduled = false;
-		rebuildList();
+		refreshPending();
 		Ui::ResizeFitChild(this, _content);
 		update();
 	});
 }
 
+void Plugins::refreshPending() {
+	if (!_listRefreshPending) {
+		return;
+	}
+	_listRefreshPending = false;
+	rebuildList();
+}
+
 void Plugins::rebuildList() {
+	_listRefreshPending = false;
 	_list->clear();
 	const auto scheduleRefresh = crl::guard(this, [=] {
+		Logs::writeClient(u"[plugins-ui] scheduled list refresh"_q);
+		_listRefreshPending = true;
 		scheduleRebuildList(0);
 	});
 	if (Core::App().plugins().safeModeEnabled()) {
@@ -1538,6 +1532,10 @@ void Plugins::rebuildList() {
 	}
 
 	const auto plugins = Core::App().plugins().plugins();
+	Logs::writeClient(QString::fromLatin1(
+		"[plugins-ui] rebuild list: safeMode=%1 pluginCount=%2")
+		.arg(Core::App().plugins().safeModeEnabled() ? u"true"_q : u"false"_q)
+		.arg(plugins.size()));
 	if (plugins.empty()) {
 		Ui::AddDividerText(
 			_list,
@@ -1576,7 +1574,9 @@ void Plugins::rebuildList() {
 			header->setToggleLocked(true);
 		}
 		header->toggledChanges(
-		) | rpl::on_next([=](bool value) {
+		) | rpl::filter([=](bool value) {
+			return (value != state.enabled);
+		}) | rpl::on_next([=](bool value) {
 			if (!Core::App().plugins().setEnabled(state.info.id, value)) {
 				_controller->window().showToast(PluginUiText(
 					u"Could not change state."_q,
@@ -1588,7 +1588,7 @@ void Plugins::rebuildList() {
 			AddPluginMetaText(card, meta);
 		}
 		if (!summary.isEmpty()) {
-			AddPluginMetaText(card, summary);
+			AddPluginDescriptionText(card, summary);
 		}
 		AddPluginCardActionRow(
 			card,
@@ -1596,7 +1596,6 @@ void Plugins::rebuildList() {
 			state,
 			scheduleRefresh);
 	}
-	Ui::AddSkip(_list, 2);
 
 	Ui::ResizeFitChild(this, _content);
 }

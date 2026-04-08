@@ -27,6 +27,7 @@ void multipleInstances();
 void closeMain();
 
 void writeMain(const QString &v);
+void writeClient(const QString &v);
 void writeDebug(const QString &v);
 void writeMtp(int32 dc, const QString &v);
 

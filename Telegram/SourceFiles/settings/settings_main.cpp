@@ -608,7 +608,7 @@ void SetupSections(
 		not_null<Ui::VerticalLayout*> container,
 		Fn<void(Type)> showOther) {
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 
 	SetupValidatePhoneNumberSuggestion(
 		controller,
@@ -637,7 +637,7 @@ void SetupSections(
 		Astrogram::Id(),
 		{ &st::menuIconCustomize });
 	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 
 	if (controller->session().supportMode()) {
 		SetupSupport(controller, container);

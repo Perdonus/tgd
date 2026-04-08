@@ -31,12 +31,14 @@ public:
 private:
 	void setupContent();
 	void rebuildList();
+	void refreshPending();
 	void scheduleRebuildList(int delayMs = 0);
 
 	const not_null<Window::SessionController*> _controller;
 	not_null<Ui::VerticalLayout*> _content;
 	not_null<Ui::VerticalLayout*> _list;
 	bool _rebuildScheduled = false;
+	bool _listRefreshPending = true;
 };
 
 class PluginsDocumentation : public Section<PluginsDocumentation> {

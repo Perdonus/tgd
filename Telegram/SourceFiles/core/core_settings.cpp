@@ -422,7 +422,13 @@ QByteArray Settings::serialize() const {
 			<< qint32(_collapseSimilarChannels.current() ? 1 : 0)
 			<< qint32(_hideSimilarChannels.current() ? 1 : 0)
 			<< qint32(_localOnlyDrafts.current() ? 1 : 0)
-			<< qint32(_translateProviderRaw.current());
+			<< qint32(_translateProviderRaw.current())
+			<< qint32(_editedMarkShowText.current() ? 1 : 0)
+			<< qint32(_editedMarkShowIcon.current() ? 1 : 0)
+			<< _editedMarkText.current()
+			<< qint32(_deletedMarkShowText.current() ? 1 : 0)
+			<< qint32(_deletedMarkShowIcon.current() ? 1 : 0)
+			<< _deletedMarkText.current();
 	}
 
 	if (result.size() != size) {
@@ -570,6 +576,12 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 hideSimilarChannels = _hideSimilarChannels.current() ? 1 : 0;
 	qint32 localOnlyDrafts = _localOnlyDrafts.current() ? 1 : 0;
 	qint32 translateProvider = _translateProviderRaw.current();
+	qint32 editedMarkShowText = _editedMarkShowText.current() ? 1 : 0;
+	qint32 editedMarkShowIcon = _editedMarkShowIcon.current() ? 1 : 0;
+	QString editedMarkText = _editedMarkText.current();
+	qint32 deletedMarkShowText = _deletedMarkShowText.current() ? 1 : 0;
+	qint32 deletedMarkShowIcon = _deletedMarkShowIcon.current() ? 1 : 0;
+	QString deletedMarkText = _deletedMarkText.current();
 	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
 	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
 	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
@@ -958,6 +970,24 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> translateProvider;
 	}
+	if (!stream.atEnd()) {
+		stream >> editedMarkShowText;
+	}
+	if (!stream.atEnd()) {
+		stream >> editedMarkShowIcon;
+	}
+	if (!stream.atEnd()) {
+		stream >> editedMarkText;
+	}
+	if (!stream.atEnd()) {
+		stream >> deletedMarkShowText;
+	}
+	if (!stream.atEnd()) {
+		stream >> deletedMarkShowIcon;
+	}
+	if (!stream.atEnd()) {
+		stream >> deletedMarkText;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1195,6 +1225,12 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_hideSimilarChannels = (hideSimilarChannels == 1);
 	_localOnlyDrafts = (localOnlyDrafts == 1);
 	_translateProviderRaw = std::clamp(translateProvider, 0, 2);
+	_editedMarkShowText = (editedMarkShowText == 1);
+	_editedMarkShowIcon = (editedMarkShowIcon == 1);
+	_editedMarkText = editedMarkText.trimmed();
+	_deletedMarkShowText = (deletedMarkShowText == 1);
+	_deletedMarkShowIcon = (deletedMarkShowIcon == 1);
+	_deletedMarkText = deletedMarkText.trimmed();
 	_ghostHideReadMessages = (ghostHideReadMessages == 1);
 	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
 	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);

@@ -83,6 +83,24 @@ QString AstrogramMessageTime(const QTime &time) {
 			: QStringLiteral("HH:mm:ss"));
 }
 
+QString AstrogramBottomTag(
+		bool showIcon,
+		bool showText,
+		const QString &icon,
+		const QString &text) {
+	auto result = QString();
+	if (showIcon && !icon.isEmpty()) {
+		result += icon;
+	}
+	if (showText && !text.trimmed().isEmpty()) {
+		if (!result.isEmpty()) {
+			result += u' ';
+		}
+		result += text.trimmed();
+	}
+	return result.isEmpty() ? QString() : (result + u' ');
+}
+
 } // namespace
 
 struct BottomInfo::Effect {
@@ -460,11 +478,24 @@ void BottomInfo::layout() {
 }
 
 void BottomInfo::layoutDateText() {
+	const auto &settings = Core::App().settings();
 	const auto deleted = (_data.flags & Data::Flag::AyuDeleted)
-		? (tr::lng_deleted_message(tr::now) + ' ')
+		? AstrogramBottomTag(
+			settings.deletedMarkShowIcon(),
+			settings.deletedMarkShowText(),
+			QString::fromUtf8("\xE2\x9C\x95"),
+			settings.deletedMarkText().trimmed().isEmpty()
+				? tr::lng_deleted(tr::now)
+				: settings.deletedMarkText())
 		: QString();
 	const auto edited = (_data.flags & Data::Flag::Edited)
-		? (tr::lng_edited(tr::now) + ' ')
+		? AstrogramBottomTag(
+			settings.editedMarkShowIcon(),
+			settings.editedMarkShowText(),
+			QString::fromUtf8("\xE2\x9C\x8E"),
+			settings.editedMarkText().trimmed().isEmpty()
+				? tr::lng_edited(tr::now)
+				: settings.editedMarkText())
 		: (_data.flags & Data::Flag::EstimateDate)
 		? (tr::lng_approximate(tr::now) + ' ')
 		: _data.scheduleRepeatPeriod
