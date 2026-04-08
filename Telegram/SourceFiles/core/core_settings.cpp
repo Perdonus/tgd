@@ -242,7 +242,9 @@ QByteArray Settings::serialize() const {
 		+ Serialize::bytearraySize(_tonsiteStorageToken)
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
-		+ sizeof(qint32) * 17; // _notificationsDisplayChecksum + 16 Astrogram overrides
+		+ sizeof(qint32) * 22
+		+ Serialize::stringSize(_editedMarkText.current())
+		+ Serialize::stringSize(_deletedMarkText.current());
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -419,6 +421,7 @@ QByteArray Settings::serialize() const {
 			<< qint32(_disableStories.current() ? 1 : 0)
 			<< qint32(_disableOpenLinkWarning.current() ? 1 : 0)
 			<< qint32(_showMessageSeconds.current() ? 1 : 0)
+			<< qint32(_showPollResultsBeforeVoting.current() ? 1 : 0)
 			<< qint32(_collapseSimilarChannels.current() ? 1 : 0)
 			<< qint32(_hideSimilarChannels.current() ? 1 : 0)
 			<< qint32(_localOnlyDrafts.current() ? 1 : 0)
@@ -572,6 +575,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 disableStories = _disableStories.current() ? 1 : 0;
 	qint32 disableOpenLinkWarning = _disableOpenLinkWarning.current() ? 1 : 0;
 	qint32 showMessageSeconds = _showMessageSeconds.current() ? 1 : 0;
+	qint32 showPollResultsBeforeVoting
+		= _showPollResultsBeforeVoting.current() ? 1 : 0;
 	qint32 collapseSimilarChannels = _collapseSimilarChannels.current() ? 1 : 0;
 	qint32 hideSimilarChannels = _hideSimilarChannels.current() ? 1 : 0;
 	qint32 localOnlyDrafts = _localOnlyDrafts.current() ? 1 : 0;
@@ -959,6 +964,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		stream >> showMessageSeconds;
 	}
 	if (!stream.atEnd()) {
+		stream >> showPollResultsBeforeVoting;
+	}
+	if (!stream.atEnd()) {
 		stream >> collapseSimilarChannels;
 	}
 	if (!stream.atEnd()) {
@@ -1221,6 +1229,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_disableStories = (disableStories == 1);
 	_disableOpenLinkWarning = (disableOpenLinkWarning == 1);
 	_showMessageSeconds = (showMessageSeconds == 1);
+	_showPollResultsBeforeVoting = (showPollResultsBeforeVoting == 1);
 	_collapseSimilarChannels = (collapseSimilarChannels == 1);
 	_hideSimilarChannels = (hideSimilarChannels == 1);
 	_localOnlyDrafts = (localOnlyDrafts == 1);

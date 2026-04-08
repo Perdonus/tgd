@@ -76,7 +76,9 @@ private:
 	QSize countOptimalSize() override;
 	QSize countCurrentSize(int newWidth) override;
 
+	[[nodiscard]] bool votesFinalized() const;
 	[[nodiscard]] bool showVotes() const;
+	[[nodiscard]] bool showResultsAction() const;
 	[[nodiscard]] bool canVote() const;
 	[[nodiscard]] bool canSendVotes() const;
 

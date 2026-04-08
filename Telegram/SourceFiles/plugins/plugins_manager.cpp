@@ -2155,6 +2155,7 @@ std::vector<PluginState> Manager::plugins() const {
 	for (const auto &plugin : _plugins) {
 		auto state = plugin.state;
 		syncRecoveryFlags(state);
+		syncSourceTrustState(state);
 		result.push_back(std::move(state));
 	}
 	return result;
@@ -5281,12 +5282,18 @@ QJsonObject Manager::pluginInfoToJson(const PluginInfo &info) const {
 QJsonObject Manager::pluginStateToJson(const PluginState &state) const {
 	auto result = pluginInfoToJson(state.info);
 	result.insert(u"path"_q, state.path);
+	result.insert(u"sha256"_q, state.sha256);
 	result.insert(u"enabled"_q, state.enabled);
 	result.insert(u"loaded"_q, state.loaded);
 	result.insert(u"error"_q, state.error);
 	result.insert(u"disabledByRecovery"_q, state.disabledByRecovery);
 	result.insert(u"recoverySuspected"_q, state.recoverySuspected);
 	result.insert(u"recoveryReason"_q, state.recoveryReason);
+	result.insert(u"sourceVerified"_q, state.sourceVerified);
+	result.insert(u"sourceTrustText"_q, state.sourceTrustText);
+	result.insert(u"sourceTrustDetails"_q, state.sourceTrustDetails);
+	result.insert(u"sourceChannelId"_q, QString::number(state.sourceChannelId));
+	result.insert(u"sourceMessageId"_q, QString::number(state.sourceMessageId));
 	return result;
 }
 
@@ -5462,10 +5469,108 @@ QString Manager::fileSha256(const QString &path) const {
 	if (!file.open(QIODevice::ReadOnly)) {
 		return QString();
 	}
-	return QString::fromLatin1(
-		QCryptographicHash::hash(
-			file.readAll(),
-			QCryptographicHash::Sha256).toHex());
+	auto hash = QCryptographicHash(QCryptographicHash::Sha256);
+	while (!file.atEnd()) {
+		hash.addData(file.read(256 * 1024));
+	}
+	return QString::fromLatin1(hash.result().toHex());
+}
+
+void Manager::syncSourceTrustState(PluginState &state) const {
+	const auto normalizeHash = [](QString value) {
+		value = value.trimmed().toLower();
+		if (value.startsWith(u"sha256:"_q)) {
+			value = value.mid(7);
+		}
+		return value;
+	};
+	struct ParsedRecord {
+		QString sha256;
+		int64 channelId = 0;
+		int64 messageId = 0;
+		QString label;
+	};
+	const auto parseRecord = [&](QString raw) -> ParsedRecord {
+		raw = raw.trimmed();
+		if (raw.isEmpty()) {
+			return {};
+		}
+		auto delimiter = u'|';
+		auto parts = raw.split(delimiter, Qt::KeepEmptyParts);
+		if (parts.size() < 3) {
+			delimiter = u';';
+			parts = raw.split(delimiter, Qt::KeepEmptyParts);
+		}
+		if (parts.size() < 3) {
+			return {};
+		}
+		auto result = ParsedRecord();
+		result.sha256 = normalizeHash(parts[0]);
+		result.channelId = parts[1].trimmed().toLongLong();
+		result.messageId = parts[2].trimmed().toLongLong();
+		if (parts.size() > 3) {
+			result.label = parts.mid(3).join(delimiter).trimmed();
+		}
+		return result;
+	};
+
+	state.sha256 = normalizeHash(fileSha256(state.path));
+	state.sourceVerified = false;
+	state.sourceTrustText = u"unverified"_q;
+	state.sourceTrustDetails.clear();
+	state.sourceChannelId = 0;
+	state.sourceMessageId = 0;
+
+	if (state.sha256.isEmpty()) {
+		state.sourceTrustDetails = u"sha256-unavailable"_q;
+		return;
+	}
+	const auto session = activeSession();
+	if (!session) {
+		state.sourceTrustDetails = u"no-active-session"_q;
+		return;
+	}
+	const auto trustedChannels = session->appConfig().astrogramTrustedPluginChannelIds();
+	const auto trustedRecords = session->appConfig().astrogramTrustedPluginRecords();
+	auto matchedHashInUntrustedChannel = false;
+	auto matchedHashWithoutOrigin = false;
+	for (const auto &rawRecord : trustedRecords) {
+		const auto record = parseRecord(rawRecord);
+		if (record.sha256.isEmpty() || record.sha256 != state.sha256) {
+			continue;
+		}
+		if (!record.channelId || (record.messageId <= 0)) {
+			matchedHashWithoutOrigin = true;
+			continue;
+		}
+		if (record.channelId
+			&& !trustedChannels.empty()
+			&& (std::find(
+				trustedChannels.begin(),
+				trustedChannels.end(),
+				record.channelId) == trustedChannels.end())) {
+			matchedHashInUntrustedChannel = true;
+			continue;
+		}
+		state.sourceVerified = true;
+		state.sourceTrustText = u"verified"_q;
+		state.sourceChannelId = record.channelId;
+		state.sourceMessageId = record.messageId;
+		state.sourceTrustDetails = !record.label.isEmpty()
+			? record.label
+			: (record.channelId
+				? (QString::number(record.channelId)
+					+ u":"_q
+					+ QString::number(record.messageId))
+				: QString());
+		return;
+	}
+
+	state.sourceTrustDetails = matchedHashInUntrustedChannel
+		? u"hash-found-in-untrusted-channel"_q
+		: matchedHashWithoutOrigin
+		? u"matching-record-missing-origin"_q
+		: u"hash-not-in-trusted-records"_q;
 }
 
 QJsonValue Manager::storedSettingValue(

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_poll.h"
 
+#include "core/application.h"
 #include "core/ui_integration.h" // TextContext
 #include "lang/lang_keys.h"
 #include "history/history.h"
@@ -290,11 +291,22 @@ QSize Poll::countOptimalSize() {
 }
 
 bool Poll::showVotes() const {
+	return votesFinalized()
+		|| (!votesFinalized()
+			&& !_poll->quiz()
+			&& Core::App().settings().showPollResultsBeforeVoting());
+}
+
+bool Poll::votesFinalized() const {
 	return _voted || (_flags & PollData::Flag::Closed);
 }
 
+bool Poll::showResultsAction() const {
+	return showVotes();
+}
+
 bool Poll::canVote() const {
-	return !showVotes() && _parent->data()->isRegular();
+	return !votesFinalized() && _parent->data()->isRegular();
 }
 
 bool Poll::canSendVotes() const {
@@ -302,7 +314,7 @@ bool Poll::canSendVotes() const {
 }
 
 bool Poll::showVotersCount() const {
-	return showVotes()
+	return showResultsAction()
 		? (!_totalVotes || !(_flags & PollData::Flag::PublicVotes))
 		: !(_flags & PollData::Flag::MultiChoice);
 }
@@ -841,7 +853,7 @@ void Poll::paintBottom(
 		p.setPen(stm->msgDateFg);
 		_totalVotesLabel.draw(p, left, stringtop, paintw, style::al_top);
 	} else {
-		const auto link = showVotes()
+		const auto link = showResultsAction()
 			? _showResultsLink
 			: canSendVotes()
 			? _sendVotesLink
@@ -862,7 +874,7 @@ void Poll::paintBottom(
 		}
 		p.setFont(st::semiboldFont);
 		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
-		const auto string = showVotes()
+		const auto string = showResultsAction()
 			? tr::lng_polls_view_results(tr::now, tr::upper)
 			: tr::lng_polls_submit_votes(tr::now, tr::upper);
 		const auto stringw = st::semiboldFont->width(string);
@@ -1444,7 +1456,7 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 		tshift += height;
 	}
 	if (!showVotersCount()) {
-		const auto link = showVotes()
+		const auto link = showResultsAction()
 			? _showResultsLink
 			: canSendVotes()
 			? _sendVotesLink
@@ -1558,7 +1570,7 @@ void Poll::toggleRipple(Answer &answer, bool pressed) {
 }
 
 bool Poll::canShowSolution() const {
-	return showVotes() && !_poll->solution.text.isEmpty();
+	return showResultsAction() && !_poll->solution.text.isEmpty();
 }
 
 bool Poll::inShowSolution(

@@ -44,12 +44,18 @@ namespace Plugins {
 struct PluginState {
 	PluginInfo info;
 	QString path;
+	QString sha256;
 	bool enabled = false;
 	bool loaded = false;
 	QString error;
 	bool disabledByRecovery = false;
 	bool recoverySuspected = false;
 	QString recoveryReason;
+	bool sourceVerified = false;
+	QString sourceTrustText;
+	QString sourceTrustDetails;
+	int64 sourceChannelId = 0;
+	int64 sourceMessageId = 0;
 };
 
 struct ActionState {
@@ -343,6 +349,7 @@ private:
 	int findRecordIndex(const QString &pluginId) const;
 	void rebuildPluginIndex();
 	void moveLastPluginRecordToIndex(int index);
+	void syncSourceTrustState(PluginState &state) const;
 	void scanPlugins(bool metadataOnly = false);
 	void loadPluginMetadataOnly(const QString &path);
 	void loadPlugin(const QString &path);

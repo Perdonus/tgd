@@ -13,20 +13,83 @@ ADMIN_IDS = {
     if x.strip().isdigit()
 }
 DEFAULT_EMOJI_STATUS_ID = int(os.environ.get("ASTRO_BADGE_EMOJI_ID", "0"))
+CHAT_TYPE_MASK = (1 << 48) - 1
+BOT_API_CHANNEL_OFFSET = 10**12
+
+
+def make_peer_id(shift: int, bare: int) -> int:
+    if bare <= 0:
+        raise ValueError("bare peer id must be positive")
+    return int((shift << 48) | bare)
+
+
+def normalize_peer_id(value: int) -> int:
+    if value > CHAT_TYPE_MASK:
+        return int(value)
+    if value <= -BOT_API_CHANNEL_OFFSET:
+        bare = abs(value) - BOT_API_CHANNEL_OFFSET
+        return make_peer_id(2, bare)
+    if value < 0:
+        return make_peer_id(1, abs(value))
+    return make_peer_id(0, value)
+
+
+def describe_peer_id(peer_id: int) -> str:
+    shift = (int(peer_id) >> 48) & 0xFF
+    bare = int(peer_id) & CHAT_TYPE_MASK
+    if shift == 2:
+        return f"channel(-100{bare})"
+    if shift == 1:
+        return f"chat(-{bare})"
+    return f"user({bare})"
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    columns = [
+        row[1]
+        for row in conn.execute("PRAGMA table_info(subscribers)").fetchall()
+    ]
+    if not columns:
+        conn.execute(
+            """
+            CREATE TABLE subscribers (
+                peer_id INTEGER PRIMARY KEY,
+                emoji_status_id INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.commit()
+        return
+    if "peer_id" in columns:
+        return
+    if "user_id" in columns:
+        conn.execute("ALTER TABLE subscribers RENAME TO subscribers_legacy")
+        conn.execute(
+            """
+            CREATE TABLE subscribers (
+                peer_id INTEGER PRIMARY KEY,
+                emoji_status_id INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO subscribers(peer_id, emoji_status_id, updated_at)
+            SELECT user_id, emoji_status_id, updated_at
+            FROM subscribers_legacy
+            """
+        )
+        conn.execute("DROP TABLE subscribers_legacy")
+        conn.commit()
+        return
+    raise RuntimeError("Unsupported subscribers schema")
 
 
 def db_conn():
     conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS subscribers (
-            user_id INTEGER PRIMARY KEY,
-            emoji_status_id INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL
-        )
-        """
-    )
-    conn.commit()
+    ensure_schema(conn)
     return conn
 
 
@@ -38,9 +101,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Astrogram Badge Bot.\n"
         "Commands:\n"
-        "/grant <user_id> [emoji_status_id]\n"
-        "/revoke <user_id>\n"
-        "/check <user_id>"
+        "/grant <peer_or_chat_id> [emoji_status_id]\n"
+        "/revoke <peer_or_chat_id>\n"
+        "/check <peer_or_chat_id>\n"
+        "\n"
+        "Examples:\n"
+        "/grant 6603471853\n"
+        "/grant -1003814280064"
     )
 
 
@@ -51,11 +118,11 @@ async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /grant <user_id> [emoji_status_id]")
+        await update.message.reply_text("Usage: /grant <peer_or_chat_id> [emoji_status_id]")
         return
 
     try:
-        user_id = int(context.args[0])
+        peer_id = normalize_peer_id(int(context.args[0]))
         emoji_id = int(context.args[1]) if len(context.args) > 1 else DEFAULT_EMOJI_STATUS_ID
     except ValueError:
         await update.message.reply_text("Invalid ids")
@@ -64,15 +131,17 @@ async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = db_conn()
     try:
         conn.execute(
-            "INSERT INTO subscribers(user_id, emoji_status_id, updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(user_id) DO UPDATE SET emoji_status_id=excluded.emoji_status_id, updated_at=excluded.updated_at",
-            (user_id, emoji_id, int(time.time())),
+            "INSERT INTO subscribers(peer_id, emoji_status_id, updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(peer_id) DO UPDATE SET emoji_status_id=excluded.emoji_status_id, updated_at=excluded.updated_at",
+            (peer_id, emoji_id, int(time.time())),
         )
         conn.commit()
     finally:
         conn.close()
 
-    await update.message.reply_text(f"Granted badge for {user_id}, emoji_status_id={emoji_id}")
+    await update.message.reply_text(
+        f"Granted badge for {describe_peer_id(peer_id)} / peer_id={peer_id}, emoji_status_id={emoji_id}"
+    )
 
 
 async def revoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,23 +151,25 @@ async def revoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /revoke <user_id>")
+        await update.message.reply_text("Usage: /revoke <peer_or_chat_id>")
         return
 
     try:
-        user_id = int(context.args[0])
+        peer_id = normalize_peer_id(int(context.args[0]))
     except ValueError:
-        await update.message.reply_text("Invalid user_id")
+        await update.message.reply_text("Invalid peer/chat id")
         return
 
     conn = db_conn()
     try:
-        conn.execute("DELETE FROM subscribers WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM subscribers WHERE peer_id = ?", (peer_id,))
         conn.commit()
     finally:
         conn.close()
 
-    await update.message.reply_text(f"Revoked badge for {user_id}")
+    await update.message.reply_text(
+        f"Revoked badge for {describe_peer_id(peer_id)} / peer_id={peer_id}"
+    )
 
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,18 +179,21 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /check <user_id>")
+        await update.message.reply_text("Usage: /check <peer_or_chat_id>")
         return
 
     try:
-        user_id = int(context.args[0])
+        peer_id = normalize_peer_id(int(context.args[0]))
     except ValueError:
-        await update.message.reply_text("Invalid user_id")
+        await update.message.reply_text("Invalid peer/chat id")
         return
 
     conn = db_conn()
     try:
-        row = conn.execute("SELECT emoji_status_id, updated_at FROM subscribers WHERE user_id = ?", (user_id,)).fetchone()
+        row = conn.execute(
+            "SELECT emoji_status_id, updated_at FROM subscribers WHERE peer_id = ?",
+            (peer_id,),
+        ).fetchone()
     finally:
         conn.close()
 
@@ -127,7 +201,10 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No badge")
         return
 
-    await update.message.reply_text(f"Badge enabled: emoji_status_id={row[0]}, updated_at={row[1]}")
+    await update.message.reply_text(
+        f"Badge enabled for {describe_peer_id(peer_id)} / peer_id={peer_id}: "
+        f"emoji_status_id={row[0]}, updated_at={row[1]}"
+    )
 
 
 def main():

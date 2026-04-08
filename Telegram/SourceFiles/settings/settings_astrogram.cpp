@@ -994,6 +994,13 @@ void SetupAstrogramInterface(
 		settings.showMessageSecondsValue(),
 		RuEn("Показывать секунды во времени", "Show message seconds"),
 		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
+	AddToggle(
+		container,
+		settings.showPollResultsBeforeVotingValue(),
+		RuEn(
+			"Показывать голоса в опросах до голосования",
+			"Show poll votes before voting"),
+		[&](bool toggled) { settings.setShowPollResultsBeforeVoting(toggled); });
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Перевод и речь", "Translation & speech"));
 	AddToggle(

@@ -209,6 +209,163 @@ QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 			: PluginUiText(u"Plugin"_q, u"Плагин"_q));
 }
 
+enum class PluginSourceBadgeMode {
+	Card,
+	Details,
+};
+
+QString PluginSourceBadgeText(const ::Plugins::PluginState &state) {
+	return state.sourceVerified
+		? PluginUiText(
+			u"Verified source"_q,
+			u"Подтверждённый источник"_q)
+		: PluginUiText(
+			u"Unverified source"_q,
+			u"Неподтверждённый источник"_q);
+}
+
+QString PluginSourceOriginText(const ::Plugins::PluginState &state) {
+	if (!state.sourceChannelId || (state.sourceMessageId <= 0)) {
+		return QString();
+	}
+	return PluginUiText(
+		u"Trusted channel %1 · post %2"_q,
+		u"Доверенный канал %1 · пост %2"_q)
+		.arg(QString::number(state.sourceChannelId))
+		.arg(QString::number(state.sourceMessageId));
+}
+
+QString PluginSourceHashText(const ::Plugins::PluginState &state) {
+	return state.sha256.isEmpty()
+		? QString()
+		: (PluginUiText(u"SHA-256: "_q, u"SHA-256: "_q) + state.sha256);
+}
+
+QString PluginSourceBadgeDetailText(
+		const ::Plugins::PluginState &state,
+		PluginSourceBadgeMode mode) {
+	const auto addLine = [](QString base, const QString &line) {
+		if (line.trimmed().isEmpty()) {
+			return base;
+		}
+		return base.isEmpty() ? line.trimmed() : (base + u"\n"_q + line.trimmed());
+	};
+	if (state.sourceVerified) {
+		if (mode == PluginSourceBadgeMode::Card) {
+			return !state.sourceTrustDetails.trimmed().isEmpty()
+				? (PluginUiText(
+					u"Trusted record: "_q,
+					u"Доверенная запись: "_q)
+					+ state.sourceTrustDetails.trimmed())
+				: PluginUiText(
+					u"Exact SHA-256 matched a trusted Astrogram source."_q,
+					u"Точный SHA-256 совпал с доверенным источником Astrogram."_q);
+		}
+		auto result = !state.sourceTrustDetails.trimmed().isEmpty()
+			? (PluginUiText(
+				u"Trusted record: "_q,
+				u"Доверенная запись: "_q)
+				+ state.sourceTrustDetails.trimmed())
+			: PluginUiText(
+				u"Exact SHA-256 matched a trusted Astrogram source."_q,
+				u"Точный SHA-256 совпал с доверенным источником Astrogram."_q);
+		result = addLine(
+			result,
+			PluginUiText(
+				u"This exact plugin binary is present in trusted Astrogram source records."_q,
+				u"Точный бинарник этого плагина присутствует в доверенных записях источников Astrogram."_q));
+		if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
+			result = addLine(result, origin);
+		}
+		return result;
+	}
+	if (state.sourceTrustDetails == u"sha256-unavailable"_q) {
+		return PluginUiText(
+			u"Could not compute the plugin SHA-256 hash."_q,
+			u"Не удалось вычислить SHA-256 хеш плагина."_q);
+	}
+	if (state.sourceTrustDetails == u"no-active-session"_q) {
+		return PluginUiText(
+			u"Trusted source records will become available after the active session finishes loading."_q,
+			u"Доверенные записи источников станут доступны после полной загрузки активной сессии."_q);
+	}
+	if (state.sourceTrustDetails == u"hash-found-in-untrusted-channel"_q) {
+		return (mode == PluginSourceBadgeMode::Card)
+			? PluginUiText(
+				u"Matching hash exists, but only outside the trusted source channel list."_q,
+				u"Совпадающий хеш найден, но только вне списка доверенных каналов-источников."_q)
+			: PluginUiText(
+				u"A matching SHA-256 record exists, but it points to a channel that is not in the trusted source allowlist."_q,
+				u"Совпадающая запись SHA-256 существует, но указывает на канал вне списка доверенных источников."_q);
+	}
+	if (state.sourceTrustDetails == u"matching-record-missing-origin"_q) {
+		return mode == PluginSourceBadgeMode::Card
+			? PluginUiText(
+				u"Matching hash record exists, but its source metadata is incomplete."_q,
+				u"Совпадающая запись хеша есть, но у неё неполные метаданные источника."_q)
+			: PluginUiText(
+				u"A matching SHA-256 record exists, but it does not contain a valid trusted channel and post id."_q,
+				u"Совпадающая запись SHA-256 существует, но в ней нет корректных идентификаторов доверенного канала и поста."_q);
+	}
+	return PluginUiText(
+		u"This exact plugin binary SHA-256 was not found in trusted Astrogram source records."_q,
+		u"Точный SHA-256 этого бинарника не найден в доверенных записях источников Astrogram."_q);
+}
+
+void AddPluginSourceBadge(
+		not_null<Ui::VerticalLayout*> container,
+		const ::Plugins::PluginState &state,
+		PluginSourceBadgeMode mode = PluginSourceBadgeMode::Card) {
+	const auto badge = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		style::margins(
+			kPluginCardContentInsetLeft,
+			(mode == PluginSourceBadgeMode::Card) ? 4 : 0,
+			kPluginCardContentInsetRight,
+			0),
+		style::al_top);
+	const auto text = PluginSourceBadgeText(state);
+	const auto fill = state.sourceVerified
+		? QColor(0x2e, 0xa4, 0xff, 36)
+		: QColor(0xeb, 0x57, 0x57, 30);
+	const auto border = state.sourceVerified
+		? QColor(0x5c, 0xba, 0xff)
+		: QColor(0xeb, 0x57, 0x57);
+	const auto fg = state.sourceVerified
+		? QColor(0x37, 0x8e, 0xff)
+		: QColor(0xd8, 0x48, 0x48);
+	const auto badgeHeight = st::semiboldFont->height + 12;
+	container->widthValue() | rpl::on_next([=](int width) {
+		badge->resize(std::max(0, width), badgeHeight);
+	}, badge->lifetime());
+	badge->resize(std::max(0, container->width()), badgeHeight);
+	badge->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(badge);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setFont(st::semiboldFont);
+		const auto pillWidth = std::min(
+			badge->width(),
+			st::semiboldFont->width(text) + 22);
+		const auto rect = QRectF(0, 0, pillWidth, badge->height() - 1)
+			.adjusted(0.5, 0.5, -0.5, -0.5);
+		p.setPen(QPen(border, 1.));
+		p.setBrush(fill);
+		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
+		p.setPen(fg);
+		p.drawText(
+			QRect(0, 0, pillWidth, badge->height()),
+			Qt::AlignCenter,
+			text);
+	}, badge->lifetime());
+
+	AddPluginDescriptionText(
+		container,
+		PluginSourceBadgeDetailText(state, mode));
+	if (mode == PluginSourceBadgeMode::Details) {
+		AddPluginMetaText(container, PluginSourceHashText(state));
+	}
+}
+
 QString PluginDocsText() {
 	return UseRussianPluginUi()
 		? QString::fromUtf8(R"PLUGIN(Плагины Astrogram Desktop (техническая документация)
@@ -1336,6 +1493,9 @@ private:
 		_title = FormatPluginTitle(*state);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
 
+		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
+		Ui::AddSkip(_content);
+
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
 
@@ -1614,6 +1774,7 @@ void Plugins::rebuildList() {
 			}
 			scheduleRefresh();
 		}, header->lifetime());
+		AddPluginSourceBadge(card, state, PluginSourceBadgeMode::Card);
 		if (!meta.text.isEmpty()) {
 			AddPluginMetaText(card, meta);
 		}

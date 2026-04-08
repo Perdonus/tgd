@@ -3,9 +3,13 @@
 Server-side badge flow for Astrogram client.
 
 ## What it does
-- Telegram bot grants/revokes badge by `user_id`.
+- Telegram bot grants/revokes badge by peer:
+  - user id: `6603471853`
+  - basic group chat id: `-123456789`
+  - channel/supergroup Bot API id: `-1001234567890`
 - FastAPI endpoint returns badge status for client:
-  - `GET /api/astrogram/subscriber-badge?user_id=<id>`
+  - `GET /api/astrogram/subscriber-badge?peer_id=<internal_peer_id>`
+  - backward-compatible: `GET /api/astrogram/subscriber-badge?user_id=<id>`
 
 Client-side expects JSON:
 ```json
@@ -39,8 +43,8 @@ python bot.py
 ```
 
 ## Bot commands
-- `/grant <user_id> [emoji_status_id]`
-- `/revoke <user_id>`
-- `/check <user_id>`
+- `/grant <peer_or_chat_id> [emoji_status_id]`
+- `/revoke <peer_or_chat_id>`
+- `/check <peer_or_chat_id>`
 
 Use reverse proxy to expose `/api/astrogram/subscriber-badge` on your production domain.

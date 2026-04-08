@@ -121,6 +121,14 @@ public:
 	[[nodiscard]] int ageVerifyMinAge() const;
 	[[nodiscard]] QString ageVerifyBotUsername() const;
 
+	[[nodiscard]] int64 astrogramPluginsChannelId() const;
+	[[nodiscard]] int64 astrogramOfficialChannelId() const;
+	[[nodiscard]] std::vector<int64> astrogramOnboardingPluginPostIds() const;
+	[[nodiscard]] std::vector<QString> astrogramOnboardingPluginTitles() const;
+	[[nodiscard]] std::vector<QString> astrogramOnboardingPluginDescriptions() const;
+	[[nodiscard]] std::vector<int64> astrogramTrustedPluginChannelIds() const;
+	[[nodiscard]] std::vector<QString> astrogramTrustedPluginRecords() const;
+
 	[[nodiscard]] int storiesAlbumsLimit() const;
 	[[nodiscard]] int storiesAlbumLimit() const;
 

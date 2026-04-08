@@ -117,6 +117,7 @@ base::options::toggle ShowPeerIdBelowAbout({
 	.name = "Show Peer IDs in Profile",
 	.description = "Show peer IDs from API below their Bio / Description."
 		" Add contact IDs to exported data.",
+	.defaultValue = true,
 });
 
 base::options::toggle ShowChannelJoinedBelowAbout({
@@ -203,6 +204,10 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 		st::infoProfileSkip);
 	result->setDuration(st::infoSlideDuration);
 	return result;
+}
+
+[[nodiscard]] QString PeerIdRawText(not_null<PeerData*> peer) {
+	return QString::number(peer->id.value & PeerId::kChatTypeMask);
 }
 
 [[nodiscard]] rpl::producer<TextWithEntities> AboutWithAdvancedValue(
@@ -1376,6 +1381,19 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 	auto tracker = Ui::MultiSlideTracker();
 	add(CreateSlideSkipWidget(wrap))->toggleOn(
 		tracker.atLeastOneShownValueLater());
+	const auto controller = _controller->parentController();
+	const auto weak = base::make_weak(controller);
+	const auto peerIdRaw = PeerIdRawText(_peer);
+	const auto copyPeerId = [=](const QString &raw = QString()) {
+		const auto value = raw.isEmpty() ? peerIdRaw : raw;
+		if (value.isEmpty()) {
+			return;
+		}
+		TextUtilities::SetClipboardText({ value });
+		if (const auto strong = weak.get()) {
+			strong->showToast(tr::lng_text_copied(tr::now));
+		}
+	};
 
 	// Fill context for a mention / hashtag / bot command link.
 	const auto infoClickFilter = [=,
@@ -1398,6 +1416,14 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			return false;
 		} else if (SetClickContext<CashtagClickHandler>(handler, context)) {
 			return false;
+		} else if (handler->url().startsWith(u"internal:~peer_id~:"_q)) {
+			const auto raw = handler->url().split(
+				u"copy:"_q,
+				Qt::SkipEmptyParts).last();
+			if (!raw.isEmpty()) {
+				copyPeerId(raw);
+				return false;
+			}
 		} else if (handler->url().startsWith(u"internal:~join_date~:"_q)) {
 			const auto joinDate = handler->url().split(
 				u"show:"_q,
@@ -1436,13 +1462,11 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			if (request.link) {
 				const auto &url = request.link->url();
 				if (url.startsWith(u"internal:~peer_id~:"_q)) {
-					const auto weak = base::make_weak(controller);
-					request.menu->addAction(u"Copy ID"_q, [=] {
-						Core::App().openInternalUrl(
-							url,
-							QVariant::fromValue(ClickHandlerContext{
-								.sessionWindow = weak,
-							}));
+					const auto raw = url.split(
+						u"copy:"_q,
+						Qt::SkipEmptyParts).last();
+					request.menu->addAction(tr::lng_context_copy(tr::now), [=] {
+						copyPeerId(raw);
 					});
 					return;
 				}
@@ -1538,9 +1562,6 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			label->resizeToWidth(s - x);
 		}, button->lifetime());
 	};
-	const auto controller = _controller->parentController();
-	const auto weak = base::make_weak(controller);
-	const auto peerIdRaw = QString::number(_peer->id.value);
 	const auto lnkHook = [=](Ui::FlatLabel::ContextMenuRequest request) {
 		const auto strong = weak.get();
 		if (!strong || !request.link) {
@@ -1596,6 +1617,30 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 				}
 			});
 	};
+	const auto addPeerIdLine = [&] {
+		if (ShowPeerIdBelowAbout.value()) {
+			return;
+		}
+		auto line = addInfoOneLine(
+			v::text::take_marked(TextWithEntities{ .text = u"ID"_q }),
+			rpl::single(tr::link(
+				TextWithEntities{ peerIdRaw },
+				u"internal:~peer_id~:copy:"_q + peerIdRaw)),
+			peerIdRaw);
+		line.text->overrideLinkClickHandler([=](const QString &) {
+			copyPeerId();
+		});
+		line.text->setContextMenuHook(
+			[=](Ui::FlatLabel::ContextMenuRequest request) {
+				if (request.selection.empty()) {
+					request.menu->addAction(tr::lng_context_copy(tr::now), [=] {
+						copyPeerId();
+					});
+				} else {
+					line.text->fillContextMenu(request);
+				}
+			});
+	};
 	if (const auto user = _peer->asUser()) {
 		if (user->session().supportMode()) {
 			addInfoLineGeneric(
@@ -1626,6 +1671,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			};
 			phoneLabel->setContextMenuHook(hook);
 		}
+		addPeerIdLine();
 		auto label = user->isBot()
 			? tr::lng_info_about_label()
 			: tr::lng_info_bio_label();
@@ -1763,6 +1809,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 				QString()
 			).text->setLinksTrusted();
 		}
+		addPeerIdLine();
 
 		const auto about = addInfoLine(tr::lng_info_about_label(), _topic
 			? rpl::single(TextWithEntities())
