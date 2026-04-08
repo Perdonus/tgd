@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_box_controller.h"
 #include "calls/calls_instance.h"
 #include "core/application.h"
+#include "core/update_checker.h"
 #include "core/click_handler_types.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
@@ -658,6 +659,7 @@ void MainMenu::setupMenu() {
 	using namespace Settings;
 
 	const auto controller = _controller;
+	Core::UpdateChecker checker;
 	const auto addAction = [&](
 			rpl::producer<QString> text,
 			IconDescriptor &&descriptor) {
@@ -751,6 +753,34 @@ void MainMenu::setupMenu() {
 	)->setClickedCallback([=] {
 		controller->showSettings();
 	});
+	const auto updateButton = addAction(
+		rpl::single(RuEn(
+			"Доступно обновление Astrogram",
+			"Astrogram update available")),
+		{ &st::menuIconRestore });
+	updateButton->setVisible(
+		!Core::UpdaterDisabled()
+		&& (checker.state() == Core::UpdateChecker::State::Ready));
+	updateButton->setClickedCallback([=] {
+		if (!Core::UpdaterDisabled()) {
+			Core::checkReadyUpdate();
+		}
+		Core::Restart();
+	});
+	const auto hideUpdateButton = [=] {
+		updateButton->setVisible(false);
+		updateInnerControlsGeometry();
+	};
+	checker.ready() | rpl::on_next([=] {
+		updateButton->setVisible(true);
+		updateInnerControlsGeometry();
+	}, updateButton->lifetime());
+	checker.checking() | rpl::on_next(hideUpdateButton, updateButton->lifetime());
+	checker.isLatest() | rpl::on_next(hideUpdateButton, updateButton->lifetime());
+	checker.failed() | rpl::on_next(hideUpdateButton, updateButton->lifetime());
+	checker.progress() | rpl::on_next([=](Core::UpdateChecker::Progress) {
+		hideUpdateButton();
+	}, updateButton->lifetime());
 	if (const auto logActions = Core::App().plugins().actionsFor(
 			QStringLiteral("astro.show_logs"));
 		!logActions.empty()) {

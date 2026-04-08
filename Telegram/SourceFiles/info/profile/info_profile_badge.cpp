@@ -39,6 +39,33 @@ namespace {
 		|| (content.badge == BadgeType::Verified && content.emojiStatusId);
 }
 
+[[nodiscard]] bool JsonTruthy(const QJsonValue &value) {
+	if (value.isBool()) {
+		return value.toBool();
+	} else if (value.isDouble()) {
+		return (value.toInt() != 0);
+	} else if (value.isString()) {
+		const auto lowered = value.toString().trimmed().toLower();
+		return (lowered == u"1"_q
+			|| lowered == u"true"_q
+			|| lowered == u"yes"_q
+			|| lowered == u"on"_q);
+	}
+	return false;
+}
+
+[[nodiscard]] uint64 JsonToUint64(const QJsonValue &value) {
+	if (value.isDouble()) {
+		const auto asInt = value.toVariant().toULongLong();
+		return asInt;
+	} else if (value.isString()) {
+		auto ok = false;
+		const auto parsed = value.toString().trimmed().toULongLong(&ok);
+		return ok ? parsed : 0;
+	}
+	return 0;
+}
+
 class ServerSubscriberBadge final {
 public:
 	[[nodiscard]] static ServerSubscriberBadge &Instance() {
@@ -117,14 +144,15 @@ private:
 					const auto parsed = QJsonDocument::fromJson(reply->readAll());
 					if (parsed.isObject()) {
 						const auto object = parsed.object();
-						const auto enabled = object.value(u"badge"_q).toBool()
-							|| object.value(u"subscriber"_q).toBool()
-							|| object.value(u"enabled"_q).toBool();
+						const auto enabled = JsonTruthy(object.value(u"badge"_q))
+							|| JsonTruthy(object.value(u"subscriber"_q))
+							|| JsonTruthy(object.value(u"enabled"_q));
 						if (enabled) {
 							EmojiStatusId id;
-							id.documentId = object.value(u"emoji_status_id"_q)
-								.toVariant()
-								.toULongLong();
+							id.documentId = JsonToUint64(
+								object.contains(u"emoji_status_id"_q)
+									? object.value(u"emoji_status_id"_q)
+									: object.value(u"emojiStatusId"_q));
 							next = id;
 						}
 					}

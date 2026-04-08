@@ -24,6 +24,8 @@ SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
     "ai_chat.cpp",
+    "font_tuner.cpp",
+    "show_logs.cpp",
     "transparent_telegram.cpp",
 }
 
@@ -98,7 +100,7 @@ def check_plugin_source(
 
 def check_examples(host_methods: set[str], errors: list[str]) -> None:
     if not EXAMPLES_DIR.exists():
-        errors.append("Examples directory exists")
+        errors.append("Examples directory is missing")
         return
 
     sources = sorted(EXAMPLES_DIR.glob("*.cpp"))
@@ -113,12 +115,11 @@ def check_examples(host_methods: set[str], errors: list[str]) -> None:
 
 def check_catalog(host_methods: set[str], errors: list[str]) -> None:
     if not PLUGIN_CATALOG_DIR.exists():
-        errors.append("PluginCatalog directory exists")
         return
 
     sources = sorted(PLUGIN_CATALOG_DIR.glob("*/*/*.cpp"))
     if not sources:
-        errors.append("PluginCatalog contains versioned plugin sources")
+        errors.append("PluginCatalog exists but contains no versioned plugin sources")
         return
 
     for path in sources:

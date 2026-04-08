@@ -320,11 +320,15 @@ bool Session::premium() const {
 }
 
 bool Session::premiumPossible() const {
-	return premium() || premiumCanBuy();
+	return premium()
+		|| premiumCanBuy()
+		|| Core::App().settings().localPremium();
 }
 
 bool Session::premiumBadgesShown() const {
-	return supportMode() || premiumPossible();
+	return supportMode()
+		|| premiumPossible()
+		|| Core::App().settings().localPremium();
 }
 
 rpl::producer<bool> Session::premiumPossibleValue() const {

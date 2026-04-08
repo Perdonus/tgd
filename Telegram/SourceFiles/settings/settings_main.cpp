@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_credits.h"
 #include "core/application.h"
+#include "core/update_checker.h"
 #include "core/click_handler_types.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
 #include "settings/settings_advanced.h"
@@ -94,6 +95,26 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] rpl::producer<QString> AdvancedLabelWithUpdateBadge() {
+	auto checker = Core::UpdateChecker();
+	const auto makeLabel = [] {
+		const auto ready = !Core::UpdaterDisabled()
+			&& (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready);
+		return ready
+			? RuEn("Расширенные • Обновление доступно", "Advanced • Update available")
+			: tr::lng_settings_advanced(tr::now);
+	};
+	return rpl::single(makeLabel()) | rpl::then(
+		rpl::merge(
+			checker.ready(),
+			checker.checking(),
+			checker.isLatest(),
+			checker.failed(),
+			checker.progress() | rpl::to_empty
+		)
+	) | rpl::map(makeLabel);
 }
 
 class Cover final : public Ui::FixedHeightWidget {
@@ -708,7 +729,7 @@ void SetupSections(
 	});
 
 	addSection(
-		tr::lng_settings_advanced(),
+		AdvancedLabelWithUpdateBadge(),
 		Advanced::Id(),
 		{ &st::menuIconManage });
 	addSection(

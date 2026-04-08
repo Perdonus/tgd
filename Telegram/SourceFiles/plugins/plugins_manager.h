@@ -388,6 +388,7 @@ private:
 		const MessageEventContext &context,
 		const MessageObserverOptions &options,
 		const MessageObserverEntry &entry);
+	void ensureRuntimeApiCliHelper();
 
 	void ensureRuntimeApiServerState();
 	bool startRuntimeApiServer();

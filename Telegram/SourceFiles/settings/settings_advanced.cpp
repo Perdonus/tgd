@@ -114,6 +114,12 @@ bool HasUpdate() {
 }
 
 void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
+	SetupUpdate(nullptr, container);
+}
+
+void SetupUpdate(
+		Window::SessionController *controller,
+		not_null<Ui::VerticalLayout*> container) {
 	if (!HasUpdate()) {
 		return;
 	}
@@ -140,12 +146,23 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 			container,
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto inner = options->entity();
-	const auto install = cAlphaVersion()
+	const auto channelChanges = Ui::CreateChild<rpl::event_stream<>>(
+		container.get());
+	const auto channelText = [] {
+		return cInstallBetaVersion()
+			? RuEn("Dev (beta)", "Dev (beta)")
+			: RuEn("Stable", "Stable");
+	};
+	const auto channelButton = cAlphaVersion()
 		? nullptr
-		: inner->add(object_ptr<Button>(
+		: AddButtonWithLabel(
 			inner,
-			tr::lng_settings_install_beta(),
-			st::settingsButtonNoIcon));
+			rpl::single(RuEn(
+				"Канал обновлений Astrogram",
+				"Astrogram update channel")),
+			rpl::single(channelText()) | rpl::then(
+				channelChanges->events() | rpl::map(channelText)),
+			st::settingsButtonNoIcon);
 
 	const auto check = inner->add(object_ptr<Button>(
 		inner,
@@ -212,22 +229,41 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		}
 	}, toggle->lifetime());
 
-	if (install) {
-		install->toggleOn(rpl::single(cInstallBetaVersion()));
-		install->toggledValue(
-		) | rpl::filter([](bool toggled) {
-			return (toggled != cInstallBetaVersion());
-		}) | rpl::on_next([=](bool toggled) {
-			cSetInstallBetaVersion(toggled);
-			Core::Launcher::Instance().writeInstallBetaVersionsSetting();
-
-			Core::UpdateChecker checker;
-			checker.stop();
-			if (toggled) {
+	if (channelButton) {
+		channelButton->addClickHandler([=] {
+			const auto applyChannel = [=](bool devChannel) {
+				if (devChannel == cInstallBetaVersion()) {
+					return;
+				}
+				cSetInstallBetaVersion(devChannel);
+				Core::Launcher::Instance().writeInstallBetaVersionsSetting();
+				Core::UpdateChecker checker;
+				checker.stop();
 				cSetLastUpdateCheck(0);
+				checker.start();
+				channelChanges->fire({});
+			};
+			if (!controller) {
+				applyChannel(!cInstallBetaVersion());
+				return;
 			}
-			checker.start();
-		}, toggle->lifetime());
+			const auto initialSelection = cInstallBetaVersion() ? 1 : 0;
+			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+				SingleChoiceBox(box, {
+					.title = rpl::single(RuEn(
+						"Канал обновлений Astrogram",
+						"Astrogram update channel")),
+					.options = {
+						rpl::single(RuEn("Stable", "Stable")),
+						rpl::single(RuEn("Dev (beta)", "Dev (beta)")),
+					},
+					.initialSelection = initialSelection,
+					.callback = [=](int index) {
+						applyChannel(index == 1);
+					},
+				});
+			}));
+		});
 	}
 
 	Core::UpdateChecker checker;
@@ -1069,7 +1105,7 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 			addDivider();
 			AddSkip(content);
 			AddSubsectionTitle(content, tr::lng_settings_version_info());
-			SetupUpdate(content);
+			SetupUpdate(controller, content);
 			AddSkip(content);
 		}
 	};

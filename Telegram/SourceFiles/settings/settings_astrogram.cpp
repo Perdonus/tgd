@@ -109,8 +109,9 @@ constexpr auto kAvatarSize = 76;
 }
 
 [[nodiscard]] QString AstrogramVersionText() {
-	return QString::fromLatin1("Astrogram Desktop %1").arg(
-		QString::fromLatin1(AppVersionStr));
+	return QString::fromLatin1("Astrogram Desktop %1 (%2)").arg(
+		QString::fromLatin1(AppVersionStr),
+		QString::number(AppVersion));
 }
 
 [[nodiscard]] QString SpeechModelArchivePath(

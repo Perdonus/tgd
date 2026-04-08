@@ -65,6 +65,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <exception>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -88,6 +89,490 @@ constexpr auto kNoPluginsArgument = "-noplugins";
 constexpr auto kRecoveryDuckSize = 72;
 constexpr auto kMaxPluginLogBytes = qsizetype(25 * 1024 * 1024);
 constexpr auto kMaxPluginLogBackups = 5;
+
+#if defined(_WIN32)
+constexpr auto kRuntimeCliFolder = "tdata/bin";
+constexpr auto kRuntimeCliHelperName = "astro.bat";
+
+[[nodiscard]] QString NormalizePathForComparison(QString path) {
+	path = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
+	while (path.endsWith(u'/')) {
+		path.chop(1);
+	}
+	return path.toLower();
+}
+
+[[nodiscard]] QString RuntimeCliDirectoryPath() {
+	return QDir(cWorkingDir()).filePath(QString::fromLatin1(kRuntimeCliFolder));
+}
+
+[[nodiscard]] QString RuntimeCliHelperPath() {
+	return QDir(RuntimeCliDirectoryPath()).filePath(
+		QString::fromLatin1(kRuntimeCliHelperName));
+}
+
+[[nodiscard]] QString ReadUserEnvironmentPath() {
+	HKEY key = nullptr;
+	const auto status = RegOpenKeyExW(
+		HKEY_CURRENT_USER,
+		L"Environment",
+		0,
+		KEY_QUERY_VALUE,
+		&key);
+	if (status != ERROR_SUCCESS || !key) {
+		return QString();
+	}
+	DWORD type = 0;
+	DWORD size = 0;
+	auto result = QString();
+	const auto query = RegQueryValueExW(
+		key,
+		L"Path",
+		nullptr,
+		&type,
+		nullptr,
+		&size);
+	if ((query == ERROR_SUCCESS)
+		&& (type == REG_SZ || type == REG_EXPAND_SZ)
+		&& (size >= sizeof(wchar_t))) {
+		auto buffer = std::wstring(size / sizeof(wchar_t), L'\0');
+		if (RegQueryValueExW(
+				key,
+				L"Path",
+				nullptr,
+				&type,
+				reinterpret_cast<LPBYTE>(buffer.data()),
+				&size) == ERROR_SUCCESS) {
+			while (!buffer.empty() && buffer.back() == L'\0') {
+				buffer.pop_back();
+			}
+			result = QString::fromStdWString(buffer);
+		}
+	}
+	RegCloseKey(key);
+	return result;
+}
+
+bool WriteUserEnvironmentPath(const QString &value) {
+	HKEY key = nullptr;
+	const auto status = RegCreateKeyExW(
+		HKEY_CURRENT_USER,
+		L"Environment",
+		0,
+		nullptr,
+		0,
+		KEY_SET_VALUE,
+		nullptr,
+		&key,
+		nullptr);
+	if (status != ERROR_SUCCESS || !key) {
+		return false;
+	}
+	const auto wide = value.toStdWString();
+	const auto ok = (RegSetValueExW(
+		key,
+		L"Path",
+		0,
+		REG_EXPAND_SZ,
+		reinterpret_cast<const BYTE*>(wide.c_str()),
+		DWORD((wide.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS);
+	RegCloseKey(key);
+	return ok;
+}
+
+[[nodiscard]] bool PathContainsDirectory(
+		const QString &pathValue,
+		const QString &directory) {
+	const auto wanted = NormalizePathForComparison(directory);
+	for (const auto &entry : pathValue.split(u';', Qt::SkipEmptyParts)) {
+		if (NormalizePathForComparison(entry) == wanted) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool EnsureUserPathContainsDirectory(const QString &directory) {
+	const auto absolute = QDir(directory).absolutePath();
+	const auto native = QDir::toNativeSeparators(absolute);
+	auto registryPath = ReadUserEnvironmentPath();
+	auto changed = false;
+	if (!PathContainsDirectory(registryPath, absolute)) {
+		if (!registryPath.trimmed().isEmpty() && !registryPath.endsWith(u';')) {
+			registryPath += u';';
+		}
+		registryPath += native;
+		if (!WriteUserEnvironmentPath(registryPath)) {
+			return false;
+		}
+		changed = true;
+	}
+
+	auto processPath = qEnvironmentVariable("PATH");
+	if (!PathContainsDirectory(processPath, absolute)) {
+		if (!processPath.trimmed().isEmpty() && !processPath.endsWith(u';')) {
+			processPath += u';';
+		}
+		processPath += native;
+		qputenv("PATH", processPath.toUtf8());
+	}
+
+	if (changed) {
+		SendMessageTimeoutW(
+			HWND_BROADCAST,
+			WM_SETTINGCHANGE,
+			0,
+			reinterpret_cast<LPARAM>(L"Environment"),
+			SMTO_ABORTIFHUNG,
+			2000,
+			nullptr);
+	}
+	return true;
+}
+
+[[nodiscard]] QString RuntimeApiCliScript() {
+	auto script = QString::fromLatin1(R"BATCH(@echo off
+setlocal EnableExtensions
+
+set "TDATA=%~dp0.."
+for %%I in ("%TDATA%") do set "TDATA=%%~fI"
+set "CFG=%TDATA%\plugins.json"
+set "DEFAULT_PORT=37080"
+set "ENABLED=False"
+set "PORT=%DEFAULT_PORT%"
+set "BASE=http://127.0.0.1:%DEFAULT_PORT%"
+
+if "%~1"=="" goto :help
+set "CMD=%~1"
+shift
+
+if /I "%CMD%"=="help" goto :help
+if /I "%CMD%"=="status" goto :status
+if /I "%CMD%"=="enable" goto :enable
+if /I "%CMD%"=="disable" goto :disable
+if /I "%CMD%"=="health" goto :health
+if /I "%CMD%"=="host" goto :host
+if /I "%CMD%"=="system" goto :system
+if /I "%CMD%"=="plugins" goto :plugins
+if /I "%CMD%"=="actions" goto :actions
+if /I "%CMD%"=="panels" goto :panels
+if /I "%CMD%"=="action" goto :action
+if /I "%CMD%"=="panel" goto :panel
+if /I "%CMD%"=="reload" goto :reload
+if /I "%CMD%"=="logs" goto :logs
+if /I "%CMD%"=="chats" goto :chats
+if /I "%CMD%"=="messages" goto :messages
+if /I "%CMD%"=="send" goto :send
+if /I "%CMD%"=="plugin-enable" goto :plugin_enable
+if /I "%CMD%"=="plugin-disable" goto :plugin_disable
+if /I "%CMD%"=="plugin-remove" goto :plugin_remove
+if /I "%CMD%"=="safe-mode" goto :safe_mode
+if /I "%CMD%"=="runtime" goto :runtime
+
+echo Unknown command: %CMD%
+echo Run: astro help
+exit /b 2
+
+:help
+echo Astrogram Runtime API CLI
+echo.
+echo Usage:
+echo   astro status
+echo   astro enable
+echo   astro disable
+echo   astro health
+echo   astro host
+echo   astro system
+echo   astro plugins
+echo   astro actions
+echo   astro panels
+echo   astro action ^<id^>
+echo   astro panel ^<id^>
+echo   astro reload
+echo   astro logs [lines]
+echo   astro chats [limit]
+echo   astro messages ^<peerId^> [limit]
+echo   astro send ^<peerId^> ^<text...^>
+echo   astro plugin-enable ^<pluginId^>
+echo   astro plugin-disable ^<pluginId^>
+echo   astro plugin-remove ^<pluginId^>
+echo   astro safe-mode on^|off
+echo   astro runtime on^|off [port]
+exit /b 0
+
+:status
+call :detect_config || exit /b 1
+echo config=%CFG%
+echo runtimeApi.enabled=%ENABLED%
+echo runtimeApi.port=%PORT%
+echo runtimeApi.baseUrl=%BASE%
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$uri = $env:BASE + '/v1/health';" ^
+  "try { $result = Invoke-RestMethod -Method Get -Uri $uri -TimeoutSec 3; Write-Host 'runtimeApi.live=true'; $result | ConvertTo-Json -Depth 20 } catch { Write-Host 'runtimeApi.live=false' }"
+exit /b 0
+
+:enable
+call :set_config true || exit /b 1
+call :detect_config >nul 2>nul
+call :invoke POST "/v1/runtime" "{\"enabled\":true,\"port\":%PORT%}" >nul 2>nul
+echo Runtime API enabled in plugins.json.
+echo If Astrogram is already running with Runtime API disabled, reopen Settings ^> Runtime API or restart the client once.
+exit /b 0
+
+:disable
+call :detect_config >nul 2>nul
+call :invoke POST "/v1/runtime" "{\"enabled\":false}" >nul 2>nul
+call :set_config false || exit /b 1
+echo Runtime API disabled.
+exit /b 0
+
+:health
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/health" "" || exit /b 1
+exit /b 0
+
+:host
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/host" "" || exit /b 1
+exit /b 0
+
+:system
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/system" "" || exit /b 1
+exit /b 0
+
+:plugins
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/plugins" "" || exit /b 1
+exit /b 0
+
+:actions
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/actions" "" || exit /b 1
+exit /b 0
+
+:panels
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/panels" "" || exit /b 1
+exit /b 0
+
+:action
+if "%~1"=="" (
+  echo Usage: astro action ^<id^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+call :invoke POST "/v1/actions/%~1/trigger" "{}" || exit /b 1
+exit /b 0
+
+:panel
+if "%~1"=="" (
+  echo Usage: astro panel ^<id^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+call :invoke POST "/v1/panels/%~1/open" "{}" || exit /b 1
+exit /b 0
+
+:reload
+call :ensure_online || exit /b 1
+call :invoke POST "/v1/plugins/reload" "{}" || exit /b 1
+exit /b 0
+
+:logs
+set "LINES=%~1"
+if "%LINES%"=="" set "LINES=200"
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/logs?lines=%LINES%" "" || exit /b 1
+exit /b 0
+
+:chats
+set "LIMIT=%~1"
+if "%LIMIT%"=="" set "LIMIT=100"
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/chats?limit=%LIMIT%" "" || exit /b 1
+exit /b 0
+
+:messages
+if "%~1"=="" (
+  echo Usage: astro messages ^<peerId^> [limit]
+  exit /b 2
+)
+set "PEER=%~1"
+set "LIMIT=%~2"
+if "%LIMIT%"=="" set "LIMIT=50"
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/chats/%PEER%/messages?limit=%LIMIT%" "" || exit /b 1
+exit /b 0
+
+:send
+if "%~1"=="" (
+  echo Usage: astro send ^<peerId^> ^<text...^>
+  exit /b 2
+)
+set "PEER=%~1"
+shift
+if "%~1"=="" (
+  echo Usage: astro send ^<peerId^> ^<text...^>
+  exit /b 2
+)
+set "ASTRO_TEXT=%*"
+call :ensure_online || exit /b 1
+set "ASTRO_PEER=%PEER%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$payload = @{ peerId = $env:ASTRO_PEER; text = $env:ASTRO_TEXT } | ConvertTo-Json -Compress;" ^
+  "$uri = $env:BASE + '/v1/messages/send';" ^
+  "try { $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 20 -ContentType 'application/json' -Body $payload; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:plugin_enable
+if "%~1"=="" (
+  echo Usage: astro plugin-enable ^<pluginId^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+set "ASTRO_PLUGIN_ID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
+  "$uri = $env:BASE + '/v1/plugins/' + $id + '/enable';" ^
+  "try { $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:plugin_disable
+if "%~1"=="" (
+  echo Usage: astro plugin-disable ^<pluginId^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+set "ASTRO_PLUGIN_ID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
+  "$uri = $env:BASE + '/v1/plugins/' + $id + '/disable';" ^
+  "try { $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:plugin_remove
+if "%~1"=="" (
+  echo Usage: astro plugin-remove ^<pluginId^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+set "ASTRO_PLUGIN_ID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
+  "$uri = $env:BASE + '/v1/plugins/' + $id;" ^
+  "try { $result = Invoke-RestMethod -Method Delete -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:safe_mode
+if "%~1"=="" (
+  echo Usage: astro safe-mode on^|off
+  exit /b 2
+)
+if /I "%~1"=="on" set "ASTRO_SAFE=true"
+if /I "%~1"=="off" set "ASTRO_SAFE=false"
+if not defined ASTRO_SAFE (
+  echo Usage: astro safe-mode on^|off
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+call :invoke POST "/v1/safe-mode" "{\"enabled\":%ASTRO_SAFE%}" || exit /b 1
+exit /b 0
+
+:runtime
+if "%~1"=="" (
+  echo Usage: astro runtime on^|off [port]
+  exit /b 2
+)
+if /I "%~1"=="on" set "ASTRO_RUNTIME=true"
+if /I "%~1"=="off" set "ASTRO_RUNTIME=false"
+if not defined ASTRO_RUNTIME (
+  echo Usage: astro runtime on^|off [port]
+  exit /b 2
+)
+if not "%~2"=="" set "PORT=%~2"
+if /I "%ASTRO_RUNTIME%"=="true" (
+  call :set_config true || exit /b 1
+  call :invoke POST "/v1/runtime" "{\"enabled\":true,\"port\":%PORT%}" >nul 2>nul
+  echo Runtime API requested on port %PORT%.
+  exit /b 0
+)
+call :invoke POST "/v1/runtime" "{\"enabled\":false}" >nul 2>nul
+call :set_config false || exit /b 1
+echo Runtime API disabled.
+exit /b 0
+
+:detect_config
+for /f "usebackq tokens=1,* delims==" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$cfgPath = $env:CFG;" ^
+  "$enabled = $false; $port = [int]$env:DEFAULT_PORT;" ^
+  "if (Test-Path $cfgPath) { try { $cfg = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json; if ($cfg.runtimeApi) { $enabled = [bool]$cfg.runtimeApi.enabled; if ($cfg.runtimeApi.port) { $port = [int]$cfg.runtimeApi.port } } } catch {} }" ^
+  "Write-Output ('ENABLED=' + $enabled);" ^
+  "Write-Output ('PORT=' + $port);" ^
+  "Write-Output ('BASE=http://127.0.0.1:' + $port);"`) do set "%%A=%%B"
+exit /b 0
+
+:set_config
+set "ASTRO_ENABLED=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$path = $env:CFG;" ^
+  "$enabled = ($env:ASTRO_ENABLED -eq 'true');" ^
+  "$defaultPort = [int]$env:DEFAULT_PORT;" ^
+  "if (Test-Path $path) { try { $cfg = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json } catch { $cfg = [pscustomobject]@{} } } else { $cfg = [pscustomobject]@{} }" ^
+  "if (-not $cfg.PSObject.Properties['runtimeApi']) { $cfg | Add-Member -NotePropertyName runtimeApi -NotePropertyValue ([pscustomobject]@{ enabled = $enabled; port = $defaultPort }) }" ^
+  "if (-not $cfg.runtimeApi.PSObject.Properties['port']) { $cfg.runtimeApi | Add-Member -NotePropertyName port -NotePropertyValue $defaultPort }" ^
+  "$cfg.runtimeApi.enabled = $enabled;" ^
+  "if (-not $cfg.runtimeApi.port) { $cfg.runtimeApi.port = $defaultPort }" ^
+  "$cfg | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8"
+exit /b %errorlevel%
+
+:ensure_online
+call :detect_config >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$uri = $env:BASE + '/v1/health';" ^
+  "try { Invoke-RestMethod -Method Get -Uri $uri -TimeoutSec 3 | Out-Null; exit 0 } catch { exit 1 }"
+if errorlevel 1 (
+  echo Runtime API is not reachable at %BASE%.
+  echo Enable it in Astrogram settings or run: astro enable
+  exit /b 1
+)
+exit /b 0
+
+:invoke
+set "ASTRO_METHOD=%~1"
+set "ASTRO_ENDPOINT=%~2"
+set "ASTRO_BODY=%~3"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$uri = $env:BASE + $env:ASTRO_ENDPOINT;" ^
+  "$method = $env:ASTRO_METHOD;" ^
+  "$body = $env:ASTRO_BODY;" ^
+  "try {" ^
+  "  if ($method -eq 'GET' -or [string]::IsNullOrWhiteSpace($body)) { $result = Invoke-RestMethod -Method $method -Uri $uri -TimeoutSec 20 }" ^
+  "  else { $result = Invoke-RestMethod -Method $method -Uri $uri -TimeoutSec 20 -ContentType 'application/json' -Body $body }" ^
+  "  $result | ConvertTo-Json -Depth 100" ^
+  "} catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+)BATCH");
+	script.replace(u"\n"_q, u"\r\n"_q);
+	return script;
+}
+
+bool EnsureTextFileContent(const QString &path, const QString &text) {
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	const auto bytes = text.toUtf8();
+	auto existing = QFile(path);
+	if (existing.open(QIODevice::ReadOnly) && existing.readAll() == bytes) {
+		return true;
+	}
+	existing.close();
+	if (!existing.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		return false;
+	}
+	const auto written = existing.write(bytes);
+	existing.close();
+	return (written == bytes.size());
+}
+#endif // _WIN32
 
 [[nodiscard]] bool UseRussianPluginUi() {
 	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
@@ -1332,6 +1817,7 @@ void Manager::start() {
 	_tracePath = cWorkingDir() + QString::fromLatin1(kTraceFile);
 	_safeModePath = cWorkingDir() + QString::fromLatin1(kSafeModeFile);
 	_recoveryPath = cWorkingDir() + QString::fromLatin1(kRecoveryFile);
+	ensureRuntimeApiCliHelper();
 	logEvent(
 		u"manager"_q,
 		u"start"_q,
@@ -1359,6 +1845,32 @@ void Manager::start() {
 	) | rpl::on_next([=](Main::Session *session) {
 		handleActiveSessionChanged(session);
 	}, _sessionLifetime);
+}
+
+void Manager::ensureRuntimeApiCliHelper() {
+#if defined(_WIN32)
+	const auto helperDir = RuntimeCliDirectoryPath();
+	const auto helperPath = RuntimeCliHelperPath();
+	const auto helperWritten = EnsureTextFileContent(
+		helperPath,
+		RuntimeApiCliScript());
+	const auto pathRegistered = helperWritten
+		&& EnsureUserPathContainsDirectory(helperDir);
+	Logs::writeClient(QString::fromLatin1(
+		"[runtime-api] cli helper: path=%1 written=%2 pathRegistered=%3")
+		.arg(QDir::toNativeSeparators(helperPath))
+		.arg(helperWritten ? u"true"_q : u"false"_q)
+		.arg(pathRegistered ? u"true"_q : u"false"_q));
+	logEvent(
+		u"runtime-api"_q,
+		u"cli-helper"_q,
+		QJsonObject{
+			{ u"path"_q, helperPath },
+			{ u"directory"_q, helperDir },
+			{ u"written"_q, helperWritten },
+			{ u"pathRegistered"_q, pathRegistered },
+		});
+#endif // _WIN32
 }
 
 void Manager::reload() {
@@ -1651,7 +2163,11 @@ QByteArray Manager::processRuntimeApiRequest(
 				u"GET /v1/host"_q,
 				u"GET /v1/system"_q,
 				u"GET /v1/plugins"_q,
+				u"GET /v1/actions"_q,
+				u"GET /v1/panels"_q,
 				u"POST /v1/plugins/reload"_q,
+				u"POST /v1/actions/<id>/trigger"_q,
+				u"POST /v1/panels/<id>/open"_q,
 				u"POST /v1/plugins/<id>/enable"_q,
 				u"POST /v1/plugins/<id>/disable"_q,
 				u"DELETE /v1/plugins/<id>"_q,
@@ -1720,6 +2236,42 @@ QByteArray Manager::processRuntimeApiRequest(
 		}
 		return RuntimeOkResponse(QJsonObject{
 			{ u"plugins"_q, list },
+			{ u"count"_q, list.size() },
+		});
+	}
+	if (resolvedMethod == u"GET"_q && path == u"/v1/actions"_q) {
+		auto ids = _actions.keys();
+		std::sort(ids.begin(), ids.end());
+		auto list = QJsonArray();
+		for (const auto id : ids) {
+			const auto &entry = _actions[id];
+			list.push_back(QJsonObject{
+				{ u"id"_q, int(id) },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"title"_q, entry.title },
+				{ u"description"_q, entry.description },
+			});
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"actions"_q, list },
+			{ u"count"_q, list.size() },
+		});
+	}
+	if (resolvedMethod == u"GET"_q && path == u"/v1/panels"_q) {
+		auto ids = _panels.keys();
+		std::sort(ids.begin(), ids.end());
+		auto list = QJsonArray();
+		for (const auto id : ids) {
+			const auto &entry = _panels[id];
+			list.push_back(QJsonObject{
+				{ u"id"_q, int(id) },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"title"_q, entry.descriptor.title },
+				{ u"description"_q, entry.descriptor.description },
+			});
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"panels"_q, list },
 			{ u"count"_q, list.size() },
 		});
 	}
@@ -1887,6 +2439,44 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"removed"_q, true },
 			});
 		}
+	}
+	const auto actionPrefix = u"/v1/actions/"_q;
+	if (resolvedMethod == u"POST"_q
+		&& path.startsWith(actionPrefix)
+		&& path.endsWith(u"/trigger"_q)) {
+		auto rest = path.mid(actionPrefix.size());
+		rest.chop(QString(u"/trigger"_q).size());
+		auto ok = false;
+		const auto id = rest.toULongLong(&ok);
+		if (!ok || !id) {
+			return RuntimeErrorResponse(400, u"action id is required"_q);
+		}
+		if (!triggerAction(ActionId(id))) {
+			return RuntimeErrorResponse(404, u"action not found or trigger failed"_q);
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"triggered"_q, true },
+		});
+	}
+	const auto panelPrefix = u"/v1/panels/"_q;
+	if (resolvedMethod == u"POST"_q
+		&& path.startsWith(panelPrefix)
+		&& path.endsWith(u"/open"_q)) {
+		auto rest = path.mid(panelPrefix.size());
+		rest.chop(QString(u"/open"_q).size());
+		auto ok = false;
+		const auto id = rest.toULongLong(&ok);
+		if (!ok || !id) {
+			return RuntimeErrorResponse(400, u"panel id is required"_q);
+		}
+		if (!openPanel(PanelId(id))) {
+			return RuntimeErrorResponse(404, u"panel not found or open failed"_q);
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"id"_q, QString::number(id) },
+			{ u"opened"_q, true },
+		});
 	}
 	const auto chatPrefix = u"/v1/chats/"_q;
 	if (resolvedMethod == u"GET"_q

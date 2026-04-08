@@ -65,6 +65,7 @@ constexpr auto kPluginCardRadius = 20.;
 constexpr auto kPluginCardVerticalMargin = 12;
 constexpr auto kPluginCardContentInsetLeft = 14;
 constexpr auto kPluginCardContentInsetRight = 10;
+constexpr auto kPluginListRefreshDelayMs = 180;
 
 [[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
 	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
@@ -191,7 +192,7 @@ void AddPluginDescriptionText(
 			rpl::single(TextWithEntities{ text.trimmed() }),
 			st::defaultFlatLabel),
 		style::margins(
-			kPluginCardContentInsetLeft + 4,
+			kPluginCardContentInsetLeft + 8,
 			0,
 			kPluginCardContentInsetRight,
 			0),
@@ -716,6 +717,12 @@ QString PluginRuntimeText() {
 			PluginUiText(u"Runtime base URL: "_q, u"Base URL runtime: "_q)
 			+ host.runtimeApiBaseUrl);
 	}
+#if defined(_WIN32)
+	lines.push_back(
+		PluginUiText(
+			u"Runtime CLI: astro (installed to PATH on startup)"_q,
+			u"Runtime CLI: astro (добавляется в PATH при запуске)"_q));
+#endif // _WIN32
 
 	lines.push_back(QString());
 	lines.push_back(PluginUiText(
@@ -867,7 +874,7 @@ void OpenPluginsFolder() {
 
 [[nodiscard]] not_null<Ui::VerticalLayout*> AddPluginCardContainer(
 		not_null<Ui::VerticalLayout*> container,
-		const ::Plugins::PluginState &state) {
+		::Plugins::PluginState state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
 		style::margins(20, 0, 20, 0),
@@ -913,22 +920,22 @@ QString FormatPluginCardSummary(const ::Plugins::PluginState &state) {
 
 void SharePluginPackage(
 		not_null<Window::SessionController*> controller,
-		const ::Plugins::PluginState &state);
+		::Plugins::PluginState state);
 
 void RequestPluginRemoval(
 		not_null<Window::SessionController*> controller,
 		not_null<QWidget*> context,
-		const ::Plugins::PluginState &state,
+		::Plugins::PluginState state,
 		Fn<void()> onRemoved);
 
 void AddPluginCardActionRow(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<Window::SessionController*> controller,
-		const ::Plugins::PluginState &state,
+		::Plugins::PluginState state,
 		Fn<void()> onChanged) {
 	const auto row = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(kPluginCardContentInsetLeft, 6, kPluginCardContentInsetRight, 0),
+		style::margins(kPluginCardContentInsetLeft, 8, kPluginCardContentInsetRight, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(row);
 	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
@@ -996,7 +1003,7 @@ std::optional<::Plugins::PluginState> LookupPluginState(
 
 void SharePluginPackage(
 		not_null<Window::SessionController*> controller,
-		const ::Plugins::PluginState &state) {
+		::Plugins::PluginState state) {
 	if (state.path.trimmed().isEmpty()) {
 		controller->window().showToast(PluginUiText(
 			u"Plugin file path is unavailable."_q,
@@ -1015,7 +1022,7 @@ void SharePluginPackage(
 void RequestPluginRemoval(
 		not_null<Window::SessionController*> controller,
 		not_null<QWidget*> context,
-		const ::Plugins::PluginState &state,
+		::Plugins::PluginState state,
 		Fn<void()> onRemoved) {
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
@@ -1479,7 +1486,10 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 				_controller,
 				this,
 				!safeModeEnabled,
-				crl::guard(this, [=] { scheduleRebuildList(0); }));
+				crl::guard(this, [=] {
+					_listRefreshPending = true;
+					scheduleRebuildList(kPluginListRefreshDelayMs);
+				}));
 		},
 		.icon = &st::menuIconSettings,
 	});
@@ -1519,7 +1529,7 @@ void Plugins::rebuildList() {
 	const auto scheduleRefresh = crl::guard(this, [=] {
 		Logs::writeClient(u"[plugins-ui] scheduled list refresh"_q);
 		_listRefreshPending = true;
-		scheduleRebuildList(0);
+		scheduleRebuildList(kPluginListRefreshDelayMs);
 	});
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(

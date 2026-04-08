@@ -9,6 +9,8 @@ Requirements
 
 Examples
 - ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to `sosiskibot.ru`.
+- font_tuner.cpp: tunes Astrogram fonts, loads a local font file and applies changes live.
+- show_logs.cpp: opens a translucent log overlay with filtering, copy and clear actions.
 - transparent_telegram.cpp: adds a transparency slider for Telegram windows.
 
 Build (Linux)
@@ -17,10 +19,18 @@ Build (Linux)
      -o ai_chat.so ai_chat.cpp \
      $(pkg-config --cflags --libs Qt6Core Qt6Widgets Qt6Network)
    g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
+     -o font_tuner.so font_tuner.cpp \
+     $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
+   g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
+     -o show_logs.so show_logs.cpp \
+     $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
+   g++ -std=c++20 -fPIC -shared -I../../SourceFiles \
      -o transparent_telegram.so transparent_telegram.cpp \
      $(pkg-config --cflags --libs Qt6Core Qt6Widgets)
 2) Rename the shared library to .tgd:
    mv ai_chat.so ai_chat.tgd
+   mv font_tuner.so font_tuner.tgd
+   mv show_logs.so show_logs.tgd
    mv transparent_telegram.so transparent_telegram.tgd
 3) Copy the .tgd file into:
    <working dir>/tdata/plugins
