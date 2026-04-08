@@ -326,9 +326,8 @@ bool Session::premiumPossible() const {
 }
 
 bool Session::premiumBadgesShown() const {
-	return supportMode()
-		|| premiumPossible()
-		|| Core::App().settings().localPremium();
+	// Badge rendering should not depend on purchase gates or local unlock state.
+	return true;
 }
 
 rpl::producer<bool> Session::premiumPossibleValue() const {
@@ -344,7 +343,7 @@ rpl::producer<bool> Session::premiumPossibleValue() const {
 		std::move(premium),
 		_premiumPossible.value(),
 		Core::App().settings().localPremiumValue(),
-		_1 || _2 || _3);
+		_1 || _2 || _3) | rpl::distinct_until_changed();
 }
 
 bool Session::premiumCanBuy() const {

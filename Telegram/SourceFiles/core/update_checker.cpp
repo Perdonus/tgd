@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/box_content.h"
 
 #include <QtCore/QJsonDocument>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 
 #include <ksandbox.h>
@@ -58,6 +59,11 @@ namespace {
 
 constexpr auto kUpdaterTimeout = 10 * crl::time(1000);
 constexpr auto kMaxResponseSize = 1024 * 1024;
+constexpr auto kGitHubReleasesApi
+	= "https://api.github.com/repos/Perdonus/tgd/releases?per_page=20";
+constexpr auto kGitHubReleasesPage
+	= "https://github.com/Perdonus/tgd/releases";
+constexpr auto kGitHubUserAgent = "AstrogramDesktop";
 
 #ifdef TDESKTOP_DISABLE_AUTOUPDATE
 bool UpdaterIsDisabled = true;
@@ -69,6 +75,17 @@ std::weak_ptr<Updater> UpdaterInstance;
 
 using Progress = UpdateChecker::Progress;
 using State = UpdateChecker::State;
+
+struct ReleaseCandidate {
+	int version = 0;
+	UpdateChannel channel = UpdateChannel::Stable;
+};
+
+struct GitHubReleaseData {
+	QString title;
+	QString url;
+	QString changelog;
+};
 
 #ifdef Q_OS_WIN
 using VersionInt = DWORD;
@@ -100,6 +117,7 @@ public:
 
 	rpl::producer<std::shared_ptr<Loader>> ready() const;
 	rpl::producer<> failed() const;
+	std::optional<ReleaseCandidate> candidate() const;
 
 	rpl::lifetime &lifetime();
 
@@ -109,11 +127,14 @@ protected:
 	bool testing() const;
 	void done(std::shared_ptr<Loader> result);
 	void fail();
+	void clearCandidate();
+	void setCandidate(ReleaseCandidate candidate);
 
 private:
 	bool _testing = false;
 	rpl::event_stream<std::shared_ptr<Loader>> _ready;
 	rpl::event_stream<> _failed;
+	std::optional<ReleaseCandidate> _candidate;
 
 	rpl::lifetime _lifetime;
 
@@ -122,6 +143,7 @@ private:
 struct Implementation {
 	std::unique_ptr<Checker> checker;
 	std::shared_ptr<Loader> loader;
+	std::optional<ReleaseCandidate> candidate;
 	bool failed = false;
 
 };
@@ -139,9 +161,8 @@ private:
 	void gotFailure(QNetworkReply::NetworkError e);
 	void clearSentRequest();
 	bool handleResponse(const QByteArray &response);
-	std::optional<QString> parseOldResponse(
-		const QByteArray &response) const;
-	std::optional<QString> parseResponse(const QByteArray &response) const;
+	std::optional<QString> parseOldResponse(const QByteArray &response);
+	std::optional<QString> parseResponse(const QByteArray &response);
 	QString validateLatestUrl(
 		uint64 availableVersion,
 		bool isAvailableAlpha,
@@ -206,9 +227,8 @@ private:
 	Fn<void(const MTP::Error &error)> failHandler();
 
 	void gotMessage(const MTPmessages_Messages &result);
-	std::optional<FileLocation> parseMessage(
-		const MTPmessages_Messages &result) const;
-	std::optional<FileLocation> parseText(const QByteArray &text) const;
+	std::optional<FileLocation> parseMessage(const MTPmessages_Messages &result);
+	std::optional<FileLocation> parseText(const QByteArray &text);
 	FileLocation validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const;
@@ -267,6 +287,159 @@ QString ExtractFilename(const QString &url) {
 			QString());
 	}
 	return QString();
+}
+
+QString GenericReleaseUrl() {
+	return QString::fromLatin1(kGitHubReleasesPage);
+}
+
+QString NormalizeReleaseMarkdown(QString text) {
+	text.replace("\r\n", "\n");
+	text.replace('\r', '\n');
+	text.replace(
+		QRegularExpression(u"```[A-Za-z0-9_+-]*\\n"_q),
+		QString());
+	text.replace(QRegularExpression(u"\n```"_q), "\n");
+	text.replace(
+		QRegularExpression(u"\\[(.*?)\\]\\((.*?)\\)"_q),
+		u"\\1"_q);
+	text.replace(QRegularExpression(u"`([^`]*)`"_q), u"\\1"_q);
+	text.replace(
+		QRegularExpression(
+			u"^#{1,6}\\s*"_q,
+			QRegularExpression::MultilineOption),
+		QString());
+	text.replace(
+		QRegularExpression(
+			u"^\\s*[-*+]\\s+"_q,
+			QRegularExpression::MultilineOption),
+		QString::fromUtf8("\xE2\x80\xA2 "));
+	text.replace(
+		QRegularExpression(
+			u"^\\s*\\d+[.)]\\s+"_q,
+			QRegularExpression::MultilineOption),
+		QString::fromUtf8("\xE2\x80\xA2 "));
+	text.replace(
+		QRegularExpression(
+			u"^>\\s*"_q,
+			QRegularExpression::MultilineOption),
+		QString());
+	text.replace(
+		QRegularExpression(u"\n{3,}"_q),
+		u"\n\n"_q);
+	return text.trimmed();
+}
+
+QString ReleaseSearchText(const QJsonObject &release) {
+	return (
+		release.value(u"name"_q).toString()
+		+ u'\n'
+		+ release.value(u"tag_name"_q).toString()
+		+ u'\n'
+		+ release.value(u"body"_q).toString()).toLower();
+}
+
+int ReleaseMatchScore(
+		const QJsonObject &release,
+		const ReleaseCandidate &candidate) {
+	const auto expectsPrerelease = (candidate.channel != UpdateChannel::Stable);
+	const auto prerelease = release.value(u"prerelease"_q).toBool();
+	auto score = expectsPrerelease == prerelease ? 40 : 0;
+	const auto tag = release.value(u"tag_name"_q).toString();
+	const auto name = release.value(u"name"_q).toString();
+	const auto precise = FormatVersionPrecise(candidate.version);
+	const auto display = FormatVersionDisplay(candidate.version);
+	const auto build = QString::number(candidate.version);
+	const auto haystack = ReleaseSearchText(release);
+	const auto exactMatches = {
+		precise,
+		u"v"_q + precise,
+		display,
+		u"v"_q + display,
+		build,
+		u"v"_q + build,
+	};
+	for (const auto &match : exactMatches) {
+		if (tag.compare(match, Qt::CaseInsensitive) == 0
+			|| name.compare(match, Qt::CaseInsensitive) == 0) {
+			score += 100;
+		}
+	}
+	if (haystack.contains(precise.toLower())) {
+		score += 60;
+	}
+	if (haystack.contains(display.toLower())) {
+		score += 40;
+	}
+	if (haystack.contains(build)) {
+		score += 20;
+	}
+	return score;
+}
+
+std::optional<GitHubReleaseData> FindGitHubRelease(
+		const QByteArray &response,
+		const ReleaseCandidate &candidate) {
+	auto error = QJsonParseError{ 0, QJsonParseError::NoError };
+	const auto document = QJsonDocument::fromJson(response, &error);
+	if (error.error != QJsonParseError::NoError) {
+		return std::nullopt;
+	}
+	auto releases = QJsonArray();
+	if (document.isArray()) {
+		releases = document.array();
+	} else if (document.isObject()) {
+		releases.push_back(document.object());
+	} else {
+		return std::nullopt;
+	}
+	auto bestScore = -1;
+	auto fallbackScore = -1;
+	auto best = QJsonObject();
+	auto fallback = QJsonObject();
+	const auto expectsPrerelease = (candidate.channel != UpdateChannel::Stable);
+	for (const auto &entry : releases) {
+		if (!entry.isObject()) {
+			continue;
+		}
+		const auto release = entry.toObject();
+		const auto score = ReleaseMatchScore(release, candidate);
+		if (score > bestScore) {
+			bestScore = score;
+			best = release;
+		}
+		const auto prerelease = release.value(u"prerelease"_q).toBool();
+		if (expectsPrerelease == prerelease && score >= fallbackScore) {
+			fallbackScore = score;
+			fallback = release;
+		}
+	}
+	const auto chosen = (bestScore > 0)
+		? best
+		: (!fallback.isEmpty() ? fallback : best);
+	if (chosen.isEmpty()) {
+		return std::nullopt;
+	}
+	return GitHubReleaseData{
+		.title = chosen.value(u"name"_q).toString().trimmed(),
+		.url = chosen.value(u"html_url"_q).toString().trimmed(),
+		.changelog = NormalizeReleaseMarkdown(
+			chosen.value(u"body"_q).toString()),
+	};
+}
+
+bool SameReleaseInfo(
+		const UpdateReleaseInfo &a,
+		const UpdateReleaseInfo &b) {
+	return (a.available == b.available)
+		&& (a.channel == b.channel)
+		&& (a.version == b.version)
+		&& (a.versionText == b.versionText)
+		&& (a.title == b.title)
+		&& (a.url == b.url)
+		&& (a.changelog == b.changelog)
+		&& (a.changelogLoading == b.changelogLoading)
+		&& (a.changelogFailed == b.changelogFailed);
 }
 
 bool UnpackUpdate(const QString &filepath) {
@@ -609,7 +782,7 @@ bool ParseCommonMap(
 		if (compare > bestCompare) {
 			bestAvailableVersion = availableVersion;
 			bestIsAvailableAlpha = isAvailableAlpha;
-			if (!callback(availableVersion, isAvailableAlpha, map)) {
+			if (!callback(availableVersion, isAvailableAlpha, type, map)) {
 				return false;
 			}
 		}
@@ -633,6 +806,10 @@ rpl::producer<> Checker::failed() const {
 	return _failed.events();
 }
 
+std::optional<ReleaseCandidate> Checker::candidate() const {
+	return _candidate;
+}
+
 bool Checker::testing() const {
 	return _testing;
 }
@@ -643,6 +820,14 @@ void Checker::done(std::shared_ptr<Loader> result) {
 
 void Checker::fail() {
 	_failed.fire({});
+}
+
+void Checker::clearCandidate() {
+	_candidate.reset();
+}
+
+void Checker::setCandidate(ReleaseCandidate candidate) {
+	_candidate = candidate;
 }
 
 rpl::lifetime &Checker::lifetime() {
@@ -686,6 +871,7 @@ void HttpChecker::gotResponse() {
 }
 
 bool HttpChecker::handleResponse(const QByteArray &response) {
+	clearCandidate();
 	const auto handle = [&](const QString &url) {
 		done(url.isEmpty() ? nullptr : std::make_shared<HttpLoader>(url));
 		return true;
@@ -721,7 +907,7 @@ void HttpChecker::gotFailure(QNetworkReply::NetworkError e) {
 }
 
 std::optional<QString> HttpChecker::parseOldResponse(
-		const QByteArray &response) const {
+		const QByteArray &response) {
 	const auto string = QString::fromLatin1(response);
 	const auto old = QRegularExpression(
 		u"^\\s*(\\d+)\\s*:\\s*([\\x21-\\x7f]+)\\s*$"_q
@@ -732,23 +918,39 @@ std::optional<QString> HttpChecker::parseOldResponse(
 	const auto availableVersion = old.captured(1).toULongLong();
 	const auto url = old.captured(2);
 	const auto isAvailableAlpha = url.startsWith(qstr("beta_"));
-	return validateLatestUrl(
+	const auto finalUrl = validateLatestUrl(
 		availableVersion,
 		isAvailableAlpha,
 		isAvailableAlpha ? url.mid(5) + "_{signature}" : url);
+	if (!finalUrl.isEmpty()) {
+		setCandidate(ReleaseCandidate{
+			.version = int(availableVersion),
+			.channel = isAvailableAlpha
+				? UpdateChannel::Alpha
+				: UpdateChannel::Stable,
+		});
+	}
+	return finalUrl;
 }
 
 std::optional<QString> HttpChecker::parseResponse(
-		const QByteArray &response) const {
+		const QByteArray &response) {
 	auto bestAvailableVersion = 0ULL;
 	auto bestIsAvailableAlpha = false;
+	auto bestChannel = UpdateChannel::Stable;
 	auto bestLink = QString();
 	const auto accumulate = [&](
 			uint64 version,
 			bool isAlpha,
+			const QString &type,
 			const QJsonObject &map) {
 		bestAvailableVersion = version;
 		bestIsAvailableAlpha = isAlpha;
+		bestChannel = isAlpha
+			? UpdateChannel::Alpha
+			: (type == u"beta"_q
+				? UpdateChannel::DevBeta
+				: UpdateChannel::Stable);
 		const auto link = map.constFind("link");
 		if (link == map.constEnd()) {
 			LOG(("Update Error: Link not found for version %1."
@@ -766,10 +968,17 @@ std::optional<QString> HttpChecker::parseResponse(
 	if (!result) {
 		return std::nullopt;
 	}
-	return validateLatestUrl(
+	const auto finalUrl = validateLatestUrl(
 		bestAvailableVersion,
 		bestIsAvailableAlpha,
 		Local::readAutoupdatePrefix() + bestLink);
+	if (!finalUrl.isEmpty()) {
+		setCandidate(ReleaseCandidate{
+			.version = int(bestAvailableVersion),
+			.channel = bestChannel,
+		});
+	}
+	return finalUrl;
 }
 
 QString HttpChecker::validateLatestUrl(
@@ -975,8 +1184,9 @@ void MtpChecker::gotMessage(const MTPmessages_Messages &result) {
 	MTP::StartDedicatedLoader(&_mtp, *location, UpdatesFolder(), ready);
 }
 
-auto MtpChecker::parseMessage(const MTPmessages_Messages &result) const
+auto MtpChecker::parseMessage(const MTPmessages_Messages &result)
 -> std::optional<FileLocation> {
+	clearCandidate();
 	const auto message = MTP::GetMessagesElement(result);
 	if (!message || message->type() != mtpc_message) {
 		LOG(("Update Error: MTP feed message not found."));
@@ -985,19 +1195,24 @@ auto MtpChecker::parseMessage(const MTPmessages_Messages &result) const
 	return parseText(message->c_message().vmessage().v);
 }
 
-auto MtpChecker::parseText(const QByteArray &text) const
+auto MtpChecker::parseText(const QByteArray &text)
 -> std::optional<FileLocation> {
 	auto bestAvailableVersion = 0ULL;
+	auto bestChannel = UpdateChannel::Stable;
 	auto bestLocation = FileLocation();
 	const auto accumulate = [&](
 			uint64 version,
 			bool isAlpha,
+			const QString &type,
 			const QJsonObject &map) {
 		if (isAlpha) {
 			LOG(("Update Error: MTP closed alpha found."));
 			return false;
 		}
 		bestAvailableVersion = version;
+		bestChannel = (type == u"beta"_q)
+			? UpdateChannel::DevBeta
+			: UpdateChannel::Stable;
 		const auto key = testing() ? "testing" : "released";
 		const auto entry = map.constFind(key);
 		if (entry == map.constEnd()) {
@@ -1032,7 +1247,14 @@ auto MtpChecker::parseText(const QByteArray &text) const
 	if (!result) {
 		return std::nullopt;
 	}
-	return validateLatestLocation(bestAvailableVersion, bestLocation);
+	const auto final = validateLatestLocation(bestAvailableVersion, bestLocation);
+	if (!final.username.isEmpty()) {
+		setCandidate(ReleaseCandidate{
+			.version = int(bestAvailableVersion),
+			.channel = bestChannel,
+		});
+	}
+	return final;
 }
 
 auto MtpChecker::validateLatestLocation(
@@ -1071,6 +1293,7 @@ public:
 	rpl::producer<Progress> progress() const;
 	rpl::producer<> failed() const;
 	rpl::producer<> ready() const;
+	rpl::producer<> releaseInfoChanged() const;
 
 	void start(bool forceWait);
 	void stop();
@@ -1079,6 +1302,7 @@ public:
 	State state() const;
 	int already() const;
 	int size() const;
+	UpdateReleaseInfo releaseInfo() const;
 
 	void setMtproto(base::weak_ptr<Main::Session> session);
 
@@ -1111,6 +1335,13 @@ private:
 	void handleFailed();
 	void handleReady();
 	void scheduleNext();
+	void applyReleaseCandidate(const std::optional<ReleaseCandidate> &candidate);
+	void setReleaseInfo(UpdateReleaseInfo info);
+	void clearReleaseInfo();
+	void requestReleaseNotes(ReleaseCandidate candidate);
+	void cancelReleaseNotesRequest();
+	void releaseNotesDone(int requestId, ReleaseCandidate candidate, QByteArray response);
+	void releaseNotesFailed(int requestId);
 
 	bool _testing = false;
 	Action _action = Action::Waiting;
@@ -1121,11 +1352,16 @@ private:
 	rpl::event_stream<Progress> _progress;
 	rpl::event_stream<> _failed;
 	rpl::event_stream<> _ready;
+	rpl::event_stream<> _releaseInfoChanged;
 	Implementation _httpImplementation;
 	Implementation _mtpImplementation;
 	std::shared_ptr<Loader> _activeLoader;
 	bool _usingMtprotoLoader = (cAlphaVersion() != 0);
 	base::weak_ptr<Main::Session> _session;
+	UpdateReleaseInfo _releaseInfo;
+	std::unique_ptr<QNetworkAccessManager> _releaseNotesManager;
+	QNetworkReply *_releaseNotesReply = nullptr;
+	int _releaseNotesRequestId = 0;
 
 	rpl::lifetime _lifetime;
 
@@ -1172,6 +1408,10 @@ rpl::producer<> Updater::ready() const {
 	return _ready.events();
 }
 
+rpl::producer<> Updater::releaseInfoChanged() const {
+	return _releaseInfoChanged.events();
+}
+
 void Updater::check() {
 	start(false);
 }
@@ -1186,6 +1426,7 @@ void Updater::handleReady() {
 }
 
 void Updater::handleFailed() {
+	clearReleaseInfo();
 	scheduleNext();
 }
 
@@ -1193,11 +1434,13 @@ void Updater::handleLatest() {
 	if (const auto update = FindUpdateFile(); !update.isEmpty()) {
 		QFile(update).remove();
 	}
+	clearReleaseInfo();
 	scheduleNext();
 }
 
 void Updater::handleChecking() {
 	_action = Action::Checking;
+	clearReleaseInfo();
 	_retryTimer.callOnce(kUpdaterTimeout);
 }
 
@@ -1231,11 +1474,135 @@ int Updater::already() const {
 	return _activeLoader ? _activeLoader->alreadySize() : 0;
 }
 
+UpdateReleaseInfo Updater::releaseInfo() const {
+	return _releaseInfo;
+}
+
 void Updater::stop() {
 	_httpImplementation = Implementation();
 	_mtpImplementation = Implementation();
 	_activeLoader = nullptr;
 	_action = Action::Waiting;
+}
+
+void Updater::setReleaseInfo(UpdateReleaseInfo info) {
+	if (info.url.isEmpty() && info.available) {
+		info.url = GenericReleaseUrl();
+	}
+	if (SameReleaseInfo(_releaseInfo, info)) {
+		return;
+	}
+	_releaseInfo = std::move(info);
+	_releaseInfoChanged.fire({});
+}
+
+void Updater::cancelReleaseNotesRequest() {
+	++_releaseNotesRequestId;
+	if (!(_releaseNotesReply)) {
+		return;
+	}
+	const auto reply = base::take(_releaseNotesReply);
+	reply->disconnect(reply, &QNetworkReply::finished, nullptr, nullptr);
+	reply->abort();
+	reply->deleteLater();
+}
+
+void Updater::clearReleaseInfo() {
+	cancelReleaseNotesRequest();
+	setReleaseInfo(UpdateReleaseInfo());
+}
+
+void Updater::applyReleaseCandidate(
+		const std::optional<ReleaseCandidate> &candidate) {
+	if (!candidate || (candidate->version <= 0)) {
+		clearReleaseInfo();
+		return;
+	}
+	auto info = UpdateReleaseInfo{
+		.available = true,
+		.channel = candidate->channel,
+		.version = candidate->version,
+		.versionText = FormatVersionWithBuild(candidate->version),
+		.title = FormatVersionWithBuild(candidate->version),
+		.url = GenericReleaseUrl(),
+		.changelogLoading = true,
+	};
+	setReleaseInfo(std::move(info));
+	requestReleaseNotes(*candidate);
+}
+
+void Updater::requestReleaseNotes(ReleaseCandidate candidate) {
+	cancelReleaseNotesRequest();
+	if (!_releaseNotesManager) {
+		_releaseNotesManager = std::make_unique<QNetworkAccessManager>();
+	}
+	const auto requestId = _releaseNotesRequestId;
+	auto request = QNetworkRequest(QUrl(QString::fromLatin1(kGitHubReleasesApi)));
+	request.setRawHeader("Accept", "application/vnd.github+json");
+	request.setRawHeader("User-Agent", kGitHubUserAgent);
+	_releaseNotesReply = _releaseNotesManager->get(request);
+	_releaseNotesReply->connect(
+		_releaseNotesReply,
+		&QNetworkReply::finished,
+		[this, requestId, candidate] {
+			const auto reply = base::take(_releaseNotesReply);
+			if (!reply) {
+				return;
+			}
+			const auto error = reply->error();
+			const auto data = reply->readAll();
+			reply->deleteLater();
+			if (requestId != _releaseNotesRequestId) {
+				return;
+			}
+			if (error == QNetworkReply::NoError) {
+				releaseNotesDone(requestId, candidate, data);
+			} else {
+				releaseNotesFailed(requestId);
+			}
+		});
+}
+
+void Updater::releaseNotesDone(
+		int requestId,
+		ReleaseCandidate candidate,
+		QByteArray response) {
+	if (requestId != _releaseNotesRequestId) {
+		return;
+	}
+	auto info = _releaseInfo;
+	if (!info.available || (info.version != candidate.version)) {
+		return;
+	}
+	if (const auto release = FindGitHubRelease(response, candidate)) {
+		if (!release->title.isEmpty()) {
+			info.title = release->title;
+		}
+		if (!release->url.isEmpty()) {
+			info.url = release->url;
+		}
+		info.changelog = release->changelog;
+		info.changelogFailed = info.changelog.isEmpty();
+	} else {
+		info.changelog.clear();
+		info.changelogFailed = true;
+	}
+	info.changelogLoading = false;
+	setReleaseInfo(std::move(info));
+}
+
+void Updater::releaseNotesFailed(int requestId) {
+	if (requestId != _releaseNotesRequestId) {
+		return;
+	}
+	auto info = _releaseInfo;
+	if (!info.available) {
+		return;
+	}
+	info.changelogLoading = false;
+	info.changelogFailed = true;
+	info.changelog.clear();
+	setReleaseInfo(std::move(info));
 }
 
 void Updater::start(bool forceWait) {
@@ -1317,6 +1684,7 @@ void Updater::startImplementation(
 void Updater::checkerDone(
 		not_null<Implementation*> which,
 		std::shared_ptr<Loader> loader) {
+	which->candidate = which->checker->candidate();
 	which->checker = nullptr;
 	which->loader = std::move(loader);
 
@@ -1325,6 +1693,7 @@ void Updater::checkerDone(
 
 void Updater::checkerFail(not_null<Implementation*> which) {
 	which->checker = nullptr;
+	which->candidate.reset();
 	which->failed = true;
 
 	tryLoaders();
@@ -1368,6 +1737,7 @@ bool Updater::tryLoaders() {
 	const auto tryOne = [&](Implementation &which) {
 		_activeLoader = std::move(which.loader);
 		if (const auto loader = _activeLoader.get()) {
+			applyReleaseCandidate(which.candidate);
 			_action = Action::Loading;
 
 			loader->progress(
@@ -1385,6 +1755,7 @@ bool Updater::tryLoaders() {
 			loader->wipeFolder();
 			loader->start();
 		} else {
+			clearReleaseInfo();
 			_isLatest.fire({});
 		}
 	};
@@ -1429,6 +1800,7 @@ void Updater::unpackDone(bool ready) {
 }
 
 Updater::~Updater() {
+	cancelReleaseNotesRequest();
 	stop();
 }
 
@@ -1462,6 +1834,10 @@ rpl::producer<> UpdateChecker::ready() const {
 	return _updater->ready();
 }
 
+rpl::producer<> UpdateChecker::releaseInfoChanged() const {
+	return _updater->releaseInfoChanged();
+}
+
 void UpdateChecker::start(bool forceWait) {
 	_updater->start(forceWait);
 }
@@ -1489,6 +1865,16 @@ int UpdateChecker::already() const {
 
 int UpdateChecker::size() const {
 	return _updater->size();
+}
+
+UpdateReleaseInfo UpdateChecker::releaseInfo() const {
+	return _updater->releaseInfo();
+}
+
+QString FormatVersionWithBuild(int version) {
+	return u"%1 (%2)"_q
+		.arg(FormatVersionPrecise(version))
+		.arg(version);
 }
 
 //QString winapiErrorWrap() {

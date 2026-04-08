@@ -159,7 +159,7 @@ int PeerBadge::drawGetWidth(Painter &p, Descriptor &&descriptor) {
 		&& peer->session().premiumBadgesShown();
 	const auto emojiStatus = premiumMark
 		&& peer->emojiStatusId()
-		&& (peer->isPremium() || peer->isChannel());
+		&& (peer->isUser() || peer->isChannel());
 	const auto premiumStar = premiumMark
 		&& !emojiStatus
 		&& peer->isPremium();

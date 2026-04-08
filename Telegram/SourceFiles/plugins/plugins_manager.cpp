@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QSaveFile>
 #include <QtCore/QSysInfo>
 #include <QtCore/QThread>
 #include <QtCore/QTimeZone>
@@ -256,6 +257,7 @@ if /I "%CMD%"=="system" goto :system
 if /I "%CMD%"=="plugins" goto :plugins
 if /I "%CMD%"=="actions" goto :actions
 if /I "%CMD%"=="panels" goto :panels
+if /I "%CMD%"=="settings-pages" goto :settings_pages
 if /I "%CMD%"=="action" goto :action
 if /I "%CMD%"=="panel" goto :panel
 if /I "%CMD%"=="reload" goto :reload
@@ -266,8 +268,15 @@ if /I "%CMD%"=="send" goto :send
 if /I "%CMD%"=="plugin-enable" goto :plugin_enable
 if /I "%CMD%"=="plugin-disable" goto :plugin_disable
 if /I "%CMD%"=="plugin-remove" goto :plugin_remove
+if /I "%CMD%"=="plugin-actions" goto :plugin_actions
+if /I "%CMD%"=="plugin-panels" goto :plugin_panels
+if /I "%CMD%"=="plugin-settings" goto :plugin_settings
+if /I "%CMD%"=="setting-bool" goto :setting_bool
+if /I "%CMD%"=="setting-int" goto :setting_int
+if /I "%CMD%"=="setting-text" goto :setting_text
 if /I "%CMD%"=="safe-mode" goto :safe_mode
 if /I "%CMD%"=="runtime" goto :runtime
+if /I "%CMD%"=="raw" goto :raw
 
 echo Unknown command: %CMD%
 echo Run: astro help
@@ -286,18 +295,26 @@ echo   astro system
 echo   astro plugins
 echo   astro actions
 echo   astro panels
+echo   astro settings-pages
 echo   astro action ^<id^>
 echo   astro panel ^<id^>
 echo   astro reload
-echo   astro logs [lines]
+echo   astro logs [plugins^|client^|trace] [lines]
 echo   astro chats [limit]
 echo   astro messages ^<peerId^> [limit]
 echo   astro send ^<peerId^> ^<text...^>
 echo   astro plugin-enable ^<pluginId^>
 echo   astro plugin-disable ^<pluginId^>
 echo   astro plugin-remove ^<pluginId^>
+echo   astro plugin-actions ^<pluginId^>
+echo   astro plugin-panels ^<pluginId^>
+echo   astro plugin-settings ^<pluginId^>
+echo   astro setting-bool ^<pageId^> ^<settingId^> on^|off
+echo   astro setting-int ^<pageId^> ^<settingId^> ^<value^>
+echo   astro setting-text ^<pageId^> ^<settingId^> ^<text...^>
 echo   astro safe-mode on^|off
 echo   astro runtime on^|off [port]
+echo   astro raw ^<GET^|POST^|DELETE^> ^</v1/...^> [jsonBody]
 exit /b 0
 
 :status
@@ -356,6 +373,11 @@ call :ensure_online || exit /b 1
 call :invoke GET "/v1/panels" "" || exit /b 1
 exit /b 0
 
+:settings_pages
+call :ensure_online || exit /b 1
+call :invoke GET "/v1/settings-pages" "" || exit /b 1
+exit /b 0
+
 :action
 if "%~1"=="" (
   echo Usage: astro action ^<id^>
@@ -380,10 +402,20 @@ call :invoke POST "/v1/plugins/reload" "{}" || exit /b 1
 exit /b 0
 
 :logs
-set "LINES=%~1"
+set "SOURCE=%~1"
+set "LINES=%~2"
+if "%SOURCE%"=="" set "SOURCE=plugins"
+if /I "%SOURCE%"=="plugins" goto :logs_ready
+if /I "%SOURCE%"=="client" goto :logs_ready
+if /I "%SOURCE%"=="trace" goto :logs_ready
+if "%LINES%"=="" (
+  set "LINES=%SOURCE%"
+  set "SOURCE=plugins"
+)
+:logs_ready
 if "%LINES%"=="" set "LINES=200"
 call :ensure_online || exit /b 1
-call :invoke GET "/v1/logs?lines=%LINES%" "" || exit /b 1
+call :invoke GET "/v1/logs?source=%SOURCE%&lines=%LINES%" "" || exit /b 1
 exit /b 0
 
 :chats
@@ -464,6 +496,108 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "try { $result = Invoke-RestMethod -Method Delete -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
 exit /b %errorlevel%
 
+:plugin_actions
+if "%~1"=="" (
+  echo Usage: astro plugin-actions ^<pluginId^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+set "ASTRO_PLUGIN_ID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
+  "$uri = $env:BASE + '/v1/plugins/' + $id + '/actions';" ^
+  "try { $result = Invoke-RestMethod -Method Get -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:plugin_panels
+if "%~1"=="" (
+  echo Usage: astro plugin-panels ^<pluginId^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+set "ASTRO_PLUGIN_ID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
+  "$uri = $env:BASE + '/v1/plugins/' + $id + '/panels';" ^
+  "try { $result = Invoke-RestMethod -Method Get -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:plugin_settings
+if "%~1"=="" (
+  echo Usage: astro plugin-settings ^<pluginId^>
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+set "ASTRO_PLUGIN_ID=%~1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
+  "$uri = $env:BASE + '/v1/plugins/' + $id + '/settings-pages';" ^
+  "try { $result = Invoke-RestMethod -Method Get -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 80 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:setting_bool
+if "%~3"=="" (
+  echo Usage: astro setting-bool ^<pageId^> ^<settingId^> on^|off
+  exit /b 2
+)
+set "ASTRO_PAGE_ID=%~1"
+set "ASTRO_SETTING_ID=%~2"
+set "ASTRO_SETTING_BOOL=%~3"
+if /I "%ASTRO_SETTING_BOOL%"=="on" set "ASTRO_SETTING_BOOL_JSON=true"
+if /I "%ASTRO_SETTING_BOOL%"=="off" set "ASTRO_SETTING_BOOL_JSON=false"
+if not defined ASTRO_SETTING_BOOL_JSON (
+  echo Usage: astro setting-bool ^<pageId^> ^<settingId^> on^|off
+  exit /b 2
+)
+call :ensure_online || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$page = $env:ASTRO_PAGE_ID;" ^
+  "$setting = [uri]::EscapeDataString($env:ASTRO_SETTING_ID);" ^
+  "$uri = $env:BASE + '/v1/settings-pages/' + $page + '/settings/' + $setting;" ^
+  "$payload = '{\"value\":' + $env:ASTRO_SETTING_BOOL_JSON + '}';" ^
+  "try { $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 20 -ContentType 'application/json' -Body $payload; $result | ConvertTo-Json -Depth 80 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:setting_int
+if "%~3"=="" (
+  echo Usage: astro setting-int ^<pageId^> ^<settingId^> ^<value^>
+  exit /b 2
+)
+set "ASTRO_PAGE_ID=%~1"
+set "ASTRO_SETTING_ID=%~2"
+set "ASTRO_SETTING_INT=%~3"
+call :ensure_online || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$page = $env:ASTRO_PAGE_ID;" ^
+  "$setting = [uri]::EscapeDataString($env:ASTRO_SETTING_ID);" ^
+  "$uri = $env:BASE + '/v1/settings-pages/' + $page + '/settings/' + $setting;" ^
+  "$payload = @{ value = [int]$env:ASTRO_SETTING_INT } | ConvertTo-Json -Compress;" ^
+  "try { $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 20 -ContentType 'application/json' -Body $payload; $result | ConvertTo-Json -Depth 80 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
+:setting_text
+if "%~2"=="" (
+  echo Usage: astro setting-text ^<pageId^> ^<settingId^> ^<text...^>
+  exit /b 2
+)
+set "ASTRO_PAGE_ID=%~1"
+set "ASTRO_SETTING_ID=%~2"
+shift
+shift
+if "%~1"=="" (
+  echo Usage: astro setting-text ^<pageId^> ^<settingId^> ^<text...^>
+  exit /b 2
+)
+set "ASTRO_SETTING_TEXT=%*"
+call :ensure_online || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$page = $env:ASTRO_PAGE_ID;" ^
+  "$setting = [uri]::EscapeDataString($env:ASTRO_SETTING_ID);" ^
+  "$uri = $env:BASE + '/v1/settings-pages/' + $page + '/settings/' + $setting;" ^
+  "$payload = @{ value = $env:ASTRO_SETTING_TEXT } | ConvertTo-Json -Compress;" ^
+  "try { $result = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 20 -ContentType 'application/json' -Body $payload; $result | ConvertTo-Json -Depth 80 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
+exit /b %errorlevel%
+
 :safe_mode
 if "%~1"=="" (
   echo Usage: astro safe-mode on^|off
@@ -500,6 +634,20 @@ if /I "%ASTRO_RUNTIME%"=="true" (
 call :invoke POST "/v1/runtime" "{\"enabled\":false}" >nul 2>nul
 call :set_config false || exit /b 1
 echo Runtime API disabled.
+exit /b 0
+
+:raw
+if "%~2"=="" (
+  echo Usage: astro raw ^<GET^|POST^|DELETE^> ^</v1/...^> [jsonBody]
+  exit /b 2
+)
+set "ASTRO_RAW_METHOD=%~1"
+set "ASTRO_RAW_ENDPOINT=%~2"
+shift
+shift
+set "ASTRO_RAW_BODY=%*"
+call :ensure_online || exit /b 1
+call :invoke %ASTRO_RAW_METHOD% "%ASTRO_RAW_ENDPOINT%" "%ASTRO_RAW_BODY%" || exit /b 1
 exit /b 0
 
 :detect_config
@@ -571,6 +719,84 @@ bool EnsureTextFileContent(const QString &path, const QString &text) {
 	const auto written = existing.write(bytes);
 	existing.close();
 	return (written == bytes.size());
+}
+#endif // _WIN32
+
+void FlushPluginUnload();
+
+[[nodiscard]] QString ClientLogPath() {
+	return cWorkingDir() + u"client.log"_q;
+}
+
+bool RemoveFileWithRetries(const QString &path, QString *error) {
+	for (auto attempt = 0; attempt != 16; ++attempt) {
+		QFile file(path);
+		if (file.remove() || !QFileInfo::exists(path)) {
+			if (error) {
+				error->clear();
+			}
+			return true;
+		}
+		if (error) {
+			*error = file.errorString();
+		}
+		FlushPluginUnload();
+		QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		QThread::msleep(20);
+	}
+	return !QFileInfo::exists(path);
+}
+
+bool RenameFileWithRetries(
+		const QString &from,
+		const QString &to,
+		QString *error) {
+	if (from == to) {
+		if (error) {
+			error->clear();
+		}
+		return true;
+	}
+	if (QFileInfo::exists(to)) {
+		QFile::remove(to);
+	}
+	for (auto attempt = 0; attempt != 16; ++attempt) {
+		if (QFile::rename(from, to)) {
+			if (error) {
+				error->clear();
+			}
+			return true;
+		}
+		auto file = QFile(from);
+		if (!QFileInfo::exists(from)) {
+			if (error) {
+				error->clear();
+			}
+			return true;
+		}
+		if (error) {
+			*error = file.errorString();
+		}
+		FlushPluginUnload();
+		QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		QThread::msleep(20);
+	}
+	return !QFileInfo::exists(from);
+}
+
+[[nodiscard]] QString PluginDeleteStagingPath(const QString &path) {
+	const auto stamp = QDateTime::currentDateTimeUtc().toString(
+		u"yyyyMMddHHmmsszzz"_q);
+	return path + u".delete."_q + stamp;
+}
+
+#if defined(_WIN32)
+bool ScheduleDeleteOnReboot(const QString &path) {
+	const auto native = QDir::toNativeSeparators(path);
+	return MoveFileExW(
+		reinterpret_cast<LPCWSTR>(native.utf16()),
+		nullptr,
+		MOVEFILE_DELAY_UNTIL_REBOOT);
 }
 #endif // _WIN32
 
@@ -1545,9 +1771,10 @@ void Manager::saveRecoveryState() const {
 		object.insert(u"notice"_q, RecoveryOperationToJson(_recoveryNotice));
 	}
 
-	QFile file(_recoveryPath);
+	QSaveFile file(_recoveryPath);
 	if (file.open(QIODevice::WriteOnly)) {
 		file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+		file.commit();
 	}
 	logEvent(
 		u"recovery"_q,
@@ -1874,34 +2101,52 @@ void Manager::ensureRuntimeApiCliHelper() {
 }
 
 void Manager::reload() {
-	Logs::writeClient(QString::fromLatin1("[plugins] reload requested: safeMode=%1 knownPlugins=%2")
-		.arg(safeModeEnabled() ? u"true"_q : u"false"_q)
-		.arg(_plugins.size()));
-	logEvent(
-		u"manager"_q,
-		u"reload-requested"_q,
-		QJsonObject{
-			{ u"safeMode"_q, safeModeEnabled() },
-			{ u"knownPlugins"_q, int(_plugins.size()) },
-		});
-	unloadAll();
-	loadConfig();
-	ensureRuntimeApiServerState();
-	loadRecoveryState();
-	FlushPluginUnload();
-	if (safeModeEnabled()) {
-		logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
-		scanPlugins(true);
+	if (_reloadInProgress) {
+		_reloadQueued = true;
+		Logs::writeClient(u"[plugins] reload queued while another reload is running"_q);
+		logEvent(
+			u"manager"_q,
+			u"reload-queued"_q,
+			QJsonObject{
+				{ u"safeMode"_q, safeModeEnabled() },
+				{ u"knownPlugins"_q, int(_plugins.size()) },
+			});
 		return;
 	}
-	const auto ownsRecovery = !_recoveryPending.active;
-	if (ownsRecovery) {
-		startRecoveryOperation(u"reload"_q);
-	}
-	scanPlugins();
-	if (ownsRecovery) {
-		finishRecoveryOperation();
-	}
+	_reloadInProgress = true;
+	do {
+		_reloadQueued = false;
+		Logs::writeClient(QString::fromLatin1(
+			"[plugins] reload requested: safeMode=%1 knownPlugins=%2")
+			.arg(safeModeEnabled() ? u"true"_q : u"false"_q)
+			.arg(_plugins.size()));
+		logEvent(
+			u"manager"_q,
+			u"reload-requested"_q,
+			QJsonObject{
+				{ u"safeMode"_q, safeModeEnabled() },
+				{ u"knownPlugins"_q, int(_plugins.size()) },
+			});
+		unloadAll();
+		loadConfig();
+		ensureRuntimeApiServerState();
+		loadRecoveryState();
+		FlushPluginUnload();
+		if (safeModeEnabled()) {
+			logEvent(u"safe-mode"_q, u"reload-scan-metadata-only"_q);
+			scanPlugins(true);
+			continue;
+		}
+		const auto ownsRecovery = !_recoveryPending.active;
+		if (ownsRecovery) {
+			startRecoveryOperation(u"reload"_q);
+		}
+		scanPlugins();
+		if (ownsRecovery) {
+			finishRecoveryOperation();
+		}
+	} while (_reloadQueued);
+	_reloadInProgress = false;
 }
 
 std::vector<PluginState> Manager::plugins() const {
@@ -2030,8 +2275,8 @@ bool Manager::startRuntimeApiServer() {
 }
 
 void Manager::stopRuntimeApiServer() {
-	for (auto i = _runtimeApiBuffers.begin(); i != _runtimeApiBuffers.end(); ++i) {
-		const auto socket = i.key();
+	const auto sockets = _runtimeApiBuffers.keys();
+	for (const auto socket : sockets) {
 		if (socket) {
 			socket->disconnectFromHost();
 			socket->deleteLater();
@@ -2079,7 +2324,11 @@ void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
 	if (!socket) {
 		return;
 	}
-	auto &buffer = _runtimeApiBuffers[socket];
+	const auto it = _runtimeApiBuffers.find(socket);
+	if (it == _runtimeApiBuffers.end()) {
+		return;
+	}
+	auto &buffer = it.value();
 	buffer += socket->readAll();
 	QString method;
 	QString target;
@@ -2105,11 +2354,39 @@ void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
 	}
 	buffer.remove(0, consumed);
 	auto disableAfterResponse = false;
+	Logs::writeClient(QString::fromLatin1(
+		"[runtime-api] request %1 %2 bodyBytes=%3")
+		.arg(method, target)
+		.arg(body.size()));
+	logEvent(
+		u"runtime-api"_q,
+		u"request"_q,
+		QJsonObject{
+			{ u"method"_q, method },
+			{ u"target"_q, target },
+			{ u"bodyBytes"_q, body.size() },
+			{ u"peerAddress"_q, socket->peerAddress().toString() },
+			{ u"peerPort"_q, socket->peerPort() },
+		});
 	const auto response = processRuntimeApiRequest(
 		method,
 		target,
 		body,
 		disableAfterResponse);
+	Logs::writeClient(QString::fromLatin1(
+		"[runtime-api] response %1 %2 bytes=%3 disableAfterResponse=%4")
+		.arg(method, target)
+		.arg(response.size())
+		.arg(disableAfterResponse ? u"true"_q : u"false"_q));
+	logEvent(
+		u"runtime-api"_q,
+		u"response"_q,
+		QJsonObject{
+			{ u"method"_q, method },
+			{ u"target"_q, target },
+			{ u"responseBytes"_q, response.size() },
+			{ u"disableAfterResponse"_q, disableAfterResponse },
+		});
 	socket->write(response);
 	socket->disconnectFromHost();
 	_runtimeApiBuffers.remove(socket);
@@ -2152,6 +2429,93 @@ QByteArray Manager::processRuntimeApiRequest(
 		const auto doc = QJsonDocument::fromJson(body);
 		return doc.isObject() ? doc.object() : QJsonObject();
 	};
+	auto runtimeSettingsPageJson = [&](const SettingsPageEntry &entry) {
+		auto object = settingsPageDescriptorToJson(entry.descriptor);
+		auto settingsCount = 0;
+		for (const auto &section : entry.descriptor.sections) {
+			settingsCount += section.settings.size();
+		}
+		object.insert(u"pageId"_q, QString::number(entry.id));
+		object.insert(u"pluginId"_q, entry.pluginId);
+		object.insert(u"settingsCount"_q, settingsCount);
+		return object;
+	};
+	auto runtimeSettingUpdate = [&](SettingsPageId pageId,
+			const QString &settingId,
+			const QJsonObject &object,
+			SettingDescriptor &updated,
+			QString &failure) {
+		const auto page = _settingsPages.find(pageId);
+		if (page == _settingsPages.end()) {
+			failure = u"settings page not found"_q;
+			return false;
+		}
+		auto found = false;
+		for (const auto &section : page->descriptor.sections) {
+			for (const auto &candidate : section.settings) {
+				if (candidate.id == settingId) {
+					updated = candidate;
+					found = true;
+					break;
+				}
+			}
+			if (found) {
+				break;
+			}
+		}
+		if (!found) {
+			failure = u"setting not found"_q;
+			return false;
+		}
+		switch (updated.type) {
+		case SettingControl::Toggle:
+			if (object.value(u"value"_q).isBool()) {
+				updated.boolValue = object.value(u"value"_q).toBool();
+			} else if (object.value(u"boolValue"_q).isBool()) {
+				updated.boolValue = object.value(u"boolValue"_q).toBool();
+			} else {
+				failure = u"body.value bool is required"_q;
+				return false;
+			}
+			break;
+		case SettingControl::IntSlider:
+			if (object.value(u"value"_q).isDouble()) {
+				updated.intValue = object.value(u"value"_q).toInt();
+			} else if (object.value(u"intValue"_q).isDouble()) {
+				updated.intValue = object.value(u"intValue"_q).toInt();
+			} else {
+				failure = u"body.value int is required"_q;
+				return false;
+			}
+			break;
+		case SettingControl::TextInput:
+			if (object.value(u"value"_q).isString()) {
+				updated.textValue = object.value(u"value"_q).toString();
+			} else if (object.value(u"textValue"_q).isString()) {
+				updated.textValue = object.value(u"textValue"_q).toString();
+			} else {
+				failure = u"body.value string is required"_q;
+				return false;
+			}
+			break;
+		case SettingControl::ActionButton:
+		case SettingControl::InfoText:
+			failure = u"setting type is read-only"_q;
+			return false;
+		}
+		return true;
+	};
+	auto runtimeLogPath = [&](QString source) {
+		source = source.trimmed().toLower();
+		if (source.isEmpty() || source == u"plugins"_q || source == u"plugin"_q) {
+			return std::pair<QString, QString>(_logPath, u"plugins"_q);
+		} else if (source == u"trace"_q) {
+			return std::pair<QString, QString>(_tracePath, u"trace"_q);
+		} else if (source == u"client"_q) {
+			return std::pair<QString, QString>(ClientLogPath(), u"client"_q);
+		}
+		return std::pair<QString, QString>(QString(), QString());
+	};
 
 	if (resolvedMethod == u"GET"_q && (path == u"/"_q || path == u"/v1"_q)) {
 		return RuntimeOkResponse(QJsonObject{
@@ -2165,15 +2529,20 @@ QByteArray Manager::processRuntimeApiRequest(
 				u"GET /v1/plugins"_q,
 				u"GET /v1/actions"_q,
 				u"GET /v1/panels"_q,
+				u"GET /v1/settings-pages"_q,
 				u"POST /v1/plugins/reload"_q,
 				u"POST /v1/actions/<id>/trigger"_q,
 				u"POST /v1/panels/<id>/open"_q,
 				u"POST /v1/plugins/<id>/enable"_q,
 				u"POST /v1/plugins/<id>/disable"_q,
+				u"GET /v1/plugins/<id>/actions"_q,
+				u"GET /v1/plugins/<id>/panels"_q,
+				u"GET /v1/plugins/<id>/settings-pages"_q,
 				u"DELETE /v1/plugins/<id>"_q,
-				u"GET /v1/logs?lines=200"_q,
+				u"GET /v1/logs?source=plugins&lines=200"_q,
 				u"POST /v1/runtime"_q,
 				u"POST /v1/safe-mode"_q,
+				u"POST /v1/settings-pages/<pageId>/settings/<settingId>"_q,
 				u"GET /v1/chats?limit=100"_q,
 				u"GET /v1/chats/<peerId>/messages?limit=50"_q,
 				u"POST /v1/messages/send"_q,
@@ -2275,6 +2644,18 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"count"_q, list.size() },
 		});
 	}
+	if (resolvedMethod == u"GET"_q && path == u"/v1/settings-pages"_q) {
+		auto ids = _settingsPages.keys();
+		std::sort(ids.begin(), ids.end());
+		auto list = QJsonArray();
+		for (const auto id : ids) {
+			list.push_back(runtimeSettingsPageJson(_settingsPages[id]));
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"settingsPages"_q, list },
+			{ u"count"_q, list.size() },
+		});
+	}
 	if (resolvedMethod == u"POST"_q && path == u"/v1/plugins/reload"_q) {
 		reload();
 		return RuntimeOkResponse(QJsonObject{
@@ -2284,14 +2665,20 @@ QByteArray Manager::processRuntimeApiRequest(
 	if (resolvedMethod == u"GET"_q && path == u"/v1/logs"_q) {
 		auto lines = std::max(1, query.queryItemValue(u"lines"_q).toInt());
 		lines = std::min(lines, 5000);
+		const auto [pathForLogs, sourceForLogs] = runtimeLogPath(
+			query.queryItemValue(u"source"_q));
+		if (pathForLogs.isEmpty()) {
+			return RuntimeErrorResponse(400, u"unsupported log source"_q);
+		}
 		auto array = QJsonArray();
-		for (const auto &line : RuntimeTailLines(_logPath, lines)) {
+		for (const auto &line : RuntimeTailLines(pathForLogs, lines)) {
 			array.push_back(line);
 		}
 		return RuntimeOkResponse(QJsonObject{
 			{ u"lines"_q, array },
 			{ u"count"_q, array.size() },
-			{ u"path"_q, _logPath },
+			{ u"source"_q, sourceForLogs },
+			{ u"path"_q, pathForLogs },
 		});
 	}
 	if (resolvedMethod == u"POST"_q && path == u"/v1/safe-mode"_q) {
@@ -2405,6 +2792,75 @@ QByteArray Manager::processRuntimeApiRequest(
 	const auto prefix = u"/v1/plugins/"_q;
 	if (path.startsWith(prefix)) {
 		auto rest = path.mid(prefix.size());
+		if (resolvedMethod == u"GET"_q
+			&& (rest.endsWith(u"/actions"_q)
+				|| rest.endsWith(u"/panels"_q)
+				|| rest.endsWith(u"/settings-pages"_q))) {
+			auto suffix = QString();
+			if (rest.endsWith(u"/actions"_q)) {
+				suffix = u"/actions"_q;
+			} else if (rest.endsWith(u"/panels"_q)) {
+				suffix = u"/panels"_q;
+			} else {
+				suffix = u"/settings-pages"_q;
+			}
+			rest.chop(suffix.size());
+			const auto id = QUrl::fromPercentEncoding(rest.toUtf8());
+			if (id.isEmpty()) {
+				return RuntimeErrorResponse(400, u"plugin id is required"_q);
+			}
+			if (suffix == u"/actions"_q) {
+				auto list = QJsonArray();
+				for (const auto &action : actionsFor(id)) {
+					list.push_back(QJsonObject{
+						{ u"id"_q, QString::number(action.id) },
+						{ u"title"_q, action.title },
+						{ u"description"_q, action.description },
+					});
+				}
+				return RuntimeOkResponse(QJsonObject{
+					{ u"pluginId"_q, id },
+					{ u"actions"_q, list },
+					{ u"count"_q, list.size() },
+				});
+			} else if (suffix == u"/panels"_q) {
+				auto list = QJsonArray();
+				for (const auto &panel : panelsFor(id)) {
+					list.push_back(QJsonObject{
+						{ u"id"_q, QString::number(panel.id) },
+						{ u"title"_q, panel.title },
+						{ u"description"_q, panel.description },
+					});
+				}
+				return RuntimeOkResponse(QJsonObject{
+					{ u"pluginId"_q, id },
+					{ u"panels"_q, list },
+					{ u"count"_q, list.size() },
+				});
+			}
+			auto list = QJsonArray();
+			for (const auto &page : settingsPagesFor(id)) {
+				auto descriptor = SettingsPageDescriptor();
+				descriptor.id = QString::number(page.id);
+				descriptor.title = page.title;
+				descriptor.description = page.description;
+				descriptor.sections = page.sections;
+				auto object = settingsPageDescriptorToJson(descriptor);
+				auto settingsCount = 0;
+				for (const auto &section : page.sections) {
+					settingsCount += section.settings.size();
+				}
+				object.insert(u"pageId"_q, QString::number(page.id));
+				object.insert(u"pluginId"_q, id);
+				object.insert(u"settingsCount"_q, settingsCount);
+				list.push_back(object);
+			}
+			return RuntimeOkResponse(QJsonObject{
+				{ u"pluginId"_q, id },
+				{ u"settingsPages"_q, list },
+				{ u"count"_q, list.size() },
+			});
+		}
 		if (rest.endsWith(u"/enable"_q) || rest.endsWith(u"/disable"_q)) {
 			if (resolvedMethod != u"POST"_q) {
 				return RuntimeErrorResponse(405, u"method not allowed"_q);
@@ -2439,6 +2895,46 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"removed"_q, true },
 			});
 		}
+	}
+	const auto settingPrefix = u"/v1/settings-pages/"_q;
+	if (resolvedMethod == u"POST"_q
+		&& path.startsWith(settingPrefix)
+		&& path.contains(u"/settings/"_q)) {
+		auto rest = path.mid(settingPrefix.size());
+		const auto split = rest.indexOf(u"/settings/"_q);
+		if (split <= 0) {
+			return RuntimeErrorResponse(400, u"invalid settings endpoint"_q);
+		}
+		const auto pageText = rest.left(split);
+		const auto settingText = rest.mid(split + QString(u"/settings/"_q).size());
+		auto ok = false;
+		const auto pageId = pageText.toULongLong(&ok);
+		if (!ok || !pageId) {
+			return RuntimeErrorResponse(400, u"settings page id is required"_q);
+		}
+		const auto settingId = QUrl::fromPercentEncoding(settingText.toUtf8());
+		if (settingId.isEmpty()) {
+			return RuntimeErrorResponse(400, u"setting id is required"_q);
+		}
+		auto updated = SettingDescriptor();
+		auto failure = QString();
+		if (!runtimeSettingUpdate(
+				SettingsPageId(pageId),
+				settingId,
+				parseBodyObject(),
+				updated,
+				failure)) {
+			return RuntimeErrorResponse(
+				400,
+				failure.isEmpty() ? u"invalid setting update"_q : failure);
+		}
+		if (!updateSetting(SettingsPageId(pageId), updated)) {
+			return RuntimeErrorResponse(409, u"failed to update setting"_q);
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"pageId"_q, QString::number(pageId) },
+			{ u"setting"_q, settingDescriptorToJson(updated) },
+		});
 	}
 	const auto actionPrefix = u"/v1/actions/"_q;
 	if (resolvedMethod == u"POST"_q
@@ -2896,10 +3392,10 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 
 bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	Logs::writeClient(QString::fromLatin1("[plugins] remove requested: %1").arg(pluginId));
-	const auto *record = findRecord(pluginId);
-	if (!record) {
+	const auto index = findRecordIndex(pluginId);
+	if (index < 0) {
 		if (error) {
-			*error = u"Plugin was not found."_q;
+			*error = u"Plugin was not found or plugin id is ambiguous."_q;
 		}
 		logEvent(
 			u"package"_q,
@@ -2910,16 +3406,11 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 		return false;
 	}
 
-	const auto pluginInfo = record->state.info;
-	const auto pluginPath = record->state.path;
-	const auto rescanNow = [this] {
-		if (safeModeEnabled()) {
-			logEvent(u"safe-mode"_q, u"remove-rescan-metadata-only"_q);
-			scanPlugins(true);
-		} else {
-			scanPlugins();
-		}
-	};
+	const auto &record = _plugins[index];
+	const auto pluginInfo = record.state.info;
+	const auto pluginPath = record.state.path;
+	const auto restoreIndex = index;
+	const auto wasEnabled = record.state.enabled;
 
 	startRecoveryOperation(
 		u"remove"_q,
@@ -2934,40 +3425,15 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
 		});
 
-	unloadAll();
-	loadConfig();
-	loadRecoveryState();
-
-	if (pluginPath.trimmed().isEmpty() || !QFileInfo::exists(pluginPath)) {
-		logEvent(
-			u"package"_q,
-			u"remove-missing-file"_q,
-			QJsonObject{
-				{ u"pluginId"_q, pluginId },
-				{ u"path"_q, pluginPath },
-			});
-		rescanNow();
-		if (error) {
-			*error = u"Plugin package file was not found."_q;
-		}
-		finishRecoveryOperation();
-		return false;
-	}
-
-	auto removed = false;
+	unloadPluginRecord(_plugins[restoreIndex], true);
+	auto removedPath = pluginPath;
+	auto scheduledOnReboot = false;
 	auto removeError = QString();
-	for (auto attempt = 0; attempt != 16; ++attempt) {
-		QFile file(pluginPath);
-		if (file.remove() || !QFileInfo::exists(pluginPath)) {
-			removed = true;
-			break;
-		}
-		removeError = file.errorString();
-		FlushPluginUnload();
-		QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-		QThread::msleep(20);
-	}
-
+	const auto removed = removePluginFileReliable(
+		pluginPath,
+		&removedPath,
+		&removeError,
+		&scheduledOnReboot);
 	if (!removed) {
 		Logs::writeClient(QString::fromLatin1(
 			"[plugins] remove failed: %1 reason=%2")
@@ -2978,9 +3444,25 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 			QJsonObject{
 				{ u"pluginId"_q, pluginId },
 				{ u"path"_q, pluginPath },
+				{ u"failedPath"_q, removedPath },
 				{ u"reason"_q, removeError },
 			});
-		rescanNow();
+		if (wasEnabled && QFileInfo::exists(pluginPath)) {
+			_plugins.erase(_plugins.begin() + restoreIndex);
+			rebuildPluginIndex();
+			loadPlugin(pluginPath);
+			moveLastPluginRecordToIndex(restoreIndex);
+			Logs::writeClient(QString::fromLatin1(
+				"[plugins] remove rollback reload: %1")
+				.arg(pluginId));
+		} else if (restoreIndex >= 0 && restoreIndex < int(_plugins.size())) {
+			auto &failedRecord = _plugins[restoreIndex];
+			failedRecord.state.enabled = wasEnabled;
+			failedRecord.state.loaded = false;
+			if (!removeError.trimmed().isEmpty()) {
+				failedRecord.state.error = removeError.trimmed();
+			}
+		}
 		if (error) {
 			*error = removeError.isEmpty()
 				? u"Could not delete the plugin package file."_q
@@ -2993,9 +3475,16 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	_disabled.remove(pluginId);
 	_disabledByRecovery.remove(pluginId);
 	_storedSettings.remove(pluginId);
+	if (_recoveryNotice.active) {
+		_recoveryNotice.pluginIds.removeAll(pluginId);
+		if (_recoveryNotice.pluginIds.isEmpty()) {
+			_recoveryNotice = RecoveryOperationState();
+		}
+	}
 	saveConfig();
 	saveRecoveryState();
-	rescanNow();
+	_plugins.erase(_plugins.begin() + restoreIndex);
+	rebuildPluginIndex();
 	Logs::writeClient(QString::fromLatin1("[plugins] remove finished: %1").arg(pluginId));
 	finishRecoveryOperation();
 
@@ -3008,6 +3497,8 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 		QJsonObject{
 			{ u"pluginId"_q, pluginId },
 			{ u"path"_q, pluginPath },
+			{ u"removedPath"_q, removedPath },
+			{ u"scheduledOnReboot"_q, scheduledOnReboot },
 			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
 		});
 	return true;
@@ -3393,7 +3884,8 @@ bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 	Logs::writeClient(QString::fromLatin1("[plugins] toggle requested: %1 -> %2")
 		.arg(pluginId)
 		.arg(enabled ? u"enabled"_q : u"disabled"_q));
-	if (!_pluginIndexById.contains(pluginId)) {
+	const auto index = findRecordIndex(pluginId);
+	if (index < 0) {
 		logEvent(
 			u"plugin"_q,
 			u"toggle-missing"_q,
@@ -3403,13 +3895,32 @@ bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 			});
 		return false;
 	}
-	if (enabled) {
-		_disabled.remove(pluginId);
-		clearRecoveryDisabled(pluginId);
-	} else {
-		_disabled.insert(pluginId);
+	const auto current = _plugins[index].state;
+	const auto alreadyEnabled = current.enabled && current.loaded;
+	const auto alreadyDisabled = !current.enabled && !current.loaded;
+	if (enabled && alreadyEnabled && current.error.trimmed().isEmpty()) {
+		logEvent(
+			u"plugin"_q,
+			u"toggle-noop"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"enabled"_q, enabled },
+				{ u"reason"_q, u"already-enabled"_q },
+			});
+		return true;
 	}
-	saveConfig();
+	if (!enabled && alreadyDisabled) {
+		logEvent(
+			u"plugin"_q,
+			u"toggle-noop"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"enabled"_q, enabled },
+				{ u"reason"_q, u"already-disabled"_q },
+			});
+		return true;
+	}
+
 	logEvent(
 		u"plugin"_q,
 		u"toggle"_q,
@@ -3417,15 +3928,93 @@ bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 			{ u"pluginId"_q, pluginId },
 			{ u"enabled"_q, enabled },
 		});
-	startRecoveryOperation(
-		enabled ? u"enable"_q : u"disable"_q,
-		{ pluginId });
-	reload();
-	finishRecoveryOperation();
+
+	if (!enabled) {
+		startRecoveryOperation(u"disable"_q, { pluginId });
+		auto &record = _plugins[index];
+		unloadPluginRecord(record, true);
+		record.state.enabled = false;
+		record.state.loaded = false;
+		record.state.disabledByRecovery = false;
+		record.state.recoverySuspected = false;
+		record.state.recoveryReason.clear();
+		_disabled.insert(pluginId);
+		_disabledByRecovery.remove(pluginId);
+		if (_recoveryNotice.active) {
+			_recoveryNotice.pluginIds.removeAll(pluginId);
+			if (_recoveryNotice.pluginIds.isEmpty()) {
+				_recoveryNotice = RecoveryOperationState();
+			}
+		}
+		saveConfig();
+		saveRecoveryState();
+		finishRecoveryOperation();
+		Logs::writeClient(QString::fromLatin1(
+			"[plugins] toggle applied: %1 -> disabled")
+			.arg(pluginId));
+		return true;
+	}
+
+	const auto restoreIndex = index;
+	const auto pluginPath = current.path;
+	if (pluginPath.trimmed().isEmpty() || !QFileInfo::exists(pluginPath)) {
+		auto &record = _plugins[index];
+		record.state.enabled = false;
+		record.state.loaded = false;
+		record.state.error = u"Plugin package file was not found."_q;
+		_disabled.insert(pluginId);
+		saveConfig();
+		logEvent(
+			u"plugin"_q,
+			u"toggle-enable-missing-file"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"path"_q, pluginPath },
+			});
+		return false;
+	}
+
+	logEvent(
+		u"plugin"_q,
+		u"toggle-enable-begin"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"path"_q, pluginPath },
+		});
+	_disabled.remove(pluginId);
+	clearRecoveryDisabled(pluginId);
+	saveConfig();
+	unloadPluginRecord(_plugins[restoreIndex], true);
+	_plugins.erase(_plugins.begin() + restoreIndex);
+	rebuildPluginIndex();
+	loadPlugin(pluginPath);
+	moveLastPluginRecordToIndex(restoreIndex);
+	auto reloadedIndex = findRecordIndex(pluginId);
+	if (reloadedIndex < 0) {
+		for (auto i = 0, count = int(_plugins.size()); i != count; ++i) {
+			if (_plugins[i].state.path == pluginPath) {
+				reloadedIndex = i;
+				break;
+			}
+		}
+	}
+	const auto success = (reloadedIndex >= 0)
+		&& _plugins[reloadedIndex].state.enabled
+		&& _plugins[reloadedIndex].state.loaded
+		&& _plugins[reloadedIndex].state.error.trimmed().isEmpty();
+	if (!success) {
+		logEvent(
+			u"plugin"_q,
+			u"toggle-enable-failed"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"path"_q, pluginPath },
+			});
+	}
 	Logs::writeClient(QString::fromLatin1("[plugins] toggle applied: %1 -> %2")
 		.arg(pluginId)
-		.arg(enabled ? u"enabled"_q : u"disabled"_q));
-	return true;
+		.arg(success ? u"enabled"_q : u"enable-failed"_q));
+	return success;
 }
 
 CommandResult Manager::interceptOutgoingText(
@@ -4466,9 +5055,10 @@ void Manager::saveConfig() const {
 		} },
 	};
 	const auto document = QJsonDocument(object);
-	QFile file(_configPath);
+	QSaveFile file(_configPath);
 	if (file.open(QIODevice::WriteOnly)) {
 		file.write(document.toJson(QJsonDocument::Indented));
+		file.commit();
 	}
 	logEvent(
 		u"config"_q,
@@ -4953,6 +5543,211 @@ void Manager::rememberSettingValue(
 	}
 }
 
+int Manager::findRecordIndex(const QString &pluginId) const {
+	const auto key = pluginId.trimmed();
+	if (key.isEmpty()) {
+		return -1;
+	}
+	const auto indexed = _pluginIndexById.constFind(key);
+	if (indexed != _pluginIndexById.cend()) {
+		const auto index = indexed.value();
+		if (index >= 0
+			&& index < int(_plugins.size())
+			&& _plugins[index].state.info.id == key) {
+			return index;
+		}
+	}
+	auto fallback = -1;
+	for (auto i = 0, count = int(_plugins.size()); i != count; ++i) {
+		if (_plugins[i].state.info.id != key) {
+			continue;
+		}
+		if (fallback >= 0) {
+			return -1;
+		}
+		fallback = i;
+	}
+	return fallback;
+}
+
+void Manager::rebuildPluginIndex() {
+	_pluginIndexById.clear();
+	for (auto i = 0, count = int(_plugins.size()); i != count; ++i) {
+		const auto id = _plugins[i].state.info.id.trimmed();
+		if (!id.isEmpty() && !_pluginIndexById.contains(id)) {
+			_pluginIndexById.insert(id, i);
+		}
+	}
+}
+
+void Manager::moveLastPluginRecordToIndex(int index) {
+	if (_plugins.empty()) {
+		return;
+	}
+	const auto lastIndex = int(_plugins.size()) - 1;
+	if (index < 0 || index >= lastIndex) {
+		rebuildPluginIndex();
+		return;
+	}
+	auto moved = std::move(_plugins.back());
+	_plugins.pop_back();
+	_plugins.insert(_plugins.begin() + index, std::move(moved));
+	rebuildPluginIndex();
+}
+
+void Manager::unloadPluginRecord(
+		PluginRecord &record,
+		bool preserveLoadError) {
+	const auto pluginId = record.state.info.id.trimmed();
+	const auto hadInstance = (record.state.loaded && record.instance != nullptr);
+	const auto hadLibrary = (record.library != nullptr);
+	const auto hadRegistrations = !record.commandIds.isEmpty()
+		|| !record.actionIds.isEmpty()
+		|| !record.panelIds.isEmpty()
+		|| !record.settingsPageIds.isEmpty()
+		|| !record.outgoingInterceptorIds.isEmpty()
+		|| !record.messageObserverIds.isEmpty();
+	if (!pluginId.isEmpty()) {
+		logEvent(
+			u"unload"_q,
+			u"single-begin"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"path"_q, record.state.path },
+				{ u"hadInstance"_q, hadInstance },
+				{ u"hadLibrary"_q, hadLibrary },
+				{ u"hadRegistrations"_q, hadRegistrations },
+				{ u"registrations"_q, registrationSummaryToJson(record) },
+			});
+	}
+	unregisterPluginCommands(pluginId);
+	unregisterPluginActions(pluginId);
+	unregisterPluginPanels(pluginId);
+	unregisterPluginSettingsPages(pluginId);
+	unregisterPluginOutgoingInterceptors(pluginId);
+	unregisterPluginMessageObservers(pluginId);
+	unregisterPluginWindowHandlers(pluginId);
+	unregisterPluginWindowWidgetHandlers(pluginId);
+	unregisterPluginSessionHandlers(pluginId);
+	if (record.instance) {
+		_registeringPluginId = pluginId;
+		try {
+			InvokePluginCallbackOrThrow([&] {
+				record.instance->onUnload();
+			});
+		} catch (...) {
+			if (!preserveLoadError || record.state.error.trimmed().isEmpty()) {
+				record.state.error = u"onUnload failed: "_q + CurrentExceptionText();
+			}
+			logEvent(
+				u"unload"_q,
+				u"single-onunload-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, pluginId },
+					{ u"path"_q, record.state.path },
+					{ u"reason"_q, CurrentExceptionText() },
+				});
+		}
+		_registeringPluginId.clear();
+		record.instance.reset();
+	}
+	record.commandIds.clear();
+	record.actionIds.clear();
+	record.panelIds.clear();
+	record.settingsPageIds.clear();
+	record.outgoingInterceptorIds.clear();
+	record.messageObserverIds.clear();
+	record.state.loaded = false;
+	if (record.library) {
+		record.library->unload();
+		record.library.reset();
+	}
+	FlushPluginUnload();
+	if (!pluginId.isEmpty()) {
+		logEvent(
+			u"unload"_q,
+			u"single-finish"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"path"_q, record.state.path },
+				{ u"loaded"_q, record.state.loaded },
+				{ u"error"_q, record.state.error },
+			});
+	}
+}
+
+bool Manager::removePluginFileReliable(
+		const QString &path,
+		QString *finalPath,
+		QString *error,
+		bool *scheduledOnReboot) {
+	if (finalPath) {
+		*finalPath = path;
+	}
+	if (scheduledOnReboot) {
+		*scheduledOnReboot = false;
+	}
+	if (path.trimmed().isEmpty() || !QFileInfo::exists(path)) {
+		if (error) {
+			error->clear();
+		}
+		return true;
+	}
+	auto effectivePath = path;
+	auto removeError = QString();
+	if (RemoveFileWithRetries(effectivePath, &removeError)) {
+		if (finalPath) {
+			*finalPath = effectivePath;
+		}
+		if (error) {
+			error->clear();
+		}
+		return true;
+	}
+
+	const auto stagedPath = PluginDeleteStagingPath(path);
+	auto renameError = QString();
+	if (RenameFileWithRetries(path, stagedPath, &renameError)) {
+		effectivePath = stagedPath;
+		removeError.clear();
+		if (RemoveFileWithRetries(effectivePath, &removeError)) {
+			if (finalPath) {
+				*finalPath = effectivePath;
+			}
+			if (error) {
+				error->clear();
+			}
+			return true;
+		}
+#if defined(_WIN32)
+		if (ScheduleDeleteOnReboot(effectivePath)) {
+			if (finalPath) {
+				*finalPath = effectivePath;
+			}
+			if (scheduledOnReboot) {
+				*scheduledOnReboot = true;
+			}
+			if (error) {
+				error->clear();
+			}
+			return true;
+		}
+#endif // _WIN32
+	} else if (!renameError.trimmed().isEmpty()) {
+		removeError = renameError;
+	}
+
+	if (finalPath) {
+		*finalPath = effectivePath;
+	}
+	if (error) {
+		*error = removeError.trimmed().isEmpty()
+			? u"Could not delete the plugin package file."_q
+			: removeError.trimmed();
+	}
+	return false;
+}
+
 void Manager::logLoadFailure(const QString &path, const QString &reason) const {
 	logEvent(
 		u"load"_q,
@@ -5418,44 +6213,12 @@ void Manager::unloadAll() {
 			{ u"count"_q, int(_plugins.size()) },
 		});
 	for (auto &plugin : _plugins) {
-		if (plugin.state.loaded && plugin.instance) {
+		if (plugin.state.loaded || plugin.instance || plugin.library) {
 			startRecoveryOperation(
 				u"unload"_q,
 				{ plugin.state.info.id },
 				plugin.state.path);
-			unregisterPluginCommands(plugin.state.info.id);
-			unregisterPluginActions(plugin.state.info.id);
-			unregisterPluginPanels(plugin.state.info.id);
-			unregisterPluginSettingsPages(plugin.state.info.id);
-			unregisterPluginOutgoingInterceptors(plugin.state.info.id);
-			unregisterPluginMessageObservers(plugin.state.info.id);
-			unregisterPluginWindowHandlers(plugin.state.info.id);
-			unregisterPluginWindowWidgetHandlers(plugin.state.info.id);
-			unregisterPluginSessionHandlers(plugin.state.info.id);
-			_registeringPluginId = plugin.state.info.id;
-			try {
-				logEvent(
-					u"unload"_q,
-					u"onunload-call"_q,
-					QJsonObject{
-						{ u"pluginId"_q, plugin.state.info.id },
-						{ u"path"_q, plugin.state.path },
-						{ u"registrations"_q, registrationSummaryToJson(plugin) },
-					});
-				InvokePluginCallbackOrThrow([&] {
-					plugin.instance->onUnload();
-				});
-			} catch (...) {
-				plugin.state.error = u"onUnload failed: "_q + CurrentExceptionText();
-				logEvent(
-					u"unload"_q,
-					u"onunload-failed"_q,
-					QJsonObject{
-						{ u"pluginId"_q, plugin.state.info.id },
-						{ u"reason"_q, plugin.state.error },
-					});
-			}
-			_registeringPluginId.clear();
+			unloadPluginRecord(plugin, false);
 			finishRecoveryOperation();
 		}
 	}
@@ -5492,22 +6255,15 @@ void Manager::unloadAll() {
 		plugin.messageObserverIds.clear();
 		plugin.state.loaded = false;
 		plugin.instance.reset();
-			if (plugin.library) {
-				plugin.library->unload();
-				plugin.library.reset();
-			}
-		}
+		plugin.library.reset();
+	}
 	_plugins.clear();
 	_pluginIndexById.clear();
 	logEvent(u"unload"_q, u"finish"_q);
 }
 
 Manager::PluginRecord *Manager::findRecord(const QString &pluginId) {
-	const auto it = _pluginIndexById.find(pluginId);
-	if (it == _pluginIndexById.end()) {
-		return nullptr;
-	}
-	const auto index = it.value();
+	const auto index = findRecordIndex(pluginId);
 	if (index < 0 || index >= int(_plugins.size())) {
 		return nullptr;
 	}
@@ -5516,11 +6272,7 @@ Manager::PluginRecord *Manager::findRecord(const QString &pluginId) {
 
 const Manager::PluginRecord *Manager::findRecord(
 		const QString &pluginId) const {
-	const auto it = _pluginIndexById.find(pluginId);
-	if (it == _pluginIndexById.end()) {
-		return nullptr;
-	}
-	const auto index = it.value();
+	const auto index = findRecordIndex(pluginId);
 	if (index < 0 || index >= int(_plugins.size())) {
 		return nullptr;
 	}
@@ -5610,7 +6362,7 @@ bool Manager::hasPlugin(const QString &pluginId) const {
 	if (pluginId.trimmed().isEmpty()) {
 		return false;
 	}
-	return _pluginIndexById.contains(pluginId);
+	return (findRecordIndex(pluginId) >= 0);
 }
 
 void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
@@ -5651,31 +6403,7 @@ void Manager::disablePlugin(
 	record->state.disabledByRecovery = disabledByRecovery;
 	record->state.recoverySuspected = disabledByRecovery;
 	record->state.recoveryReason = recoveryReason;
-	unregisterPluginCommands(pluginId);
-	unregisterPluginActions(pluginId);
-	unregisterPluginPanels(pluginId);
-	unregisterPluginSettingsPages(pluginId);
-	unregisterPluginOutgoingInterceptors(pluginId);
-	unregisterPluginMessageObservers(pluginId);
-	unregisterPluginWindowHandlers(pluginId);
-	unregisterPluginWindowWidgetHandlers(pluginId);
-	unregisterPluginSessionHandlers(pluginId);
-	if (record->instance) {
-		_registeringPluginId = pluginId;
-		try {
-			InvokePluginCallbackOrThrow([&] {
-				record->instance->onUnload();
-			});
-		} catch (...) {
-			// Keep the original failure reason.
-		}
-		_registeringPluginId.clear();
-		record->instance.reset();
-	}
-	if (record->library) {
-		record->library->unload();
-		record->library.reset();
-	}
+	unloadPluginRecord(*record, true);
 	_disabled.insert(pluginId);
 	if (disabledByRecovery) {
 		_disabledByRecovery.insert(pluginId);

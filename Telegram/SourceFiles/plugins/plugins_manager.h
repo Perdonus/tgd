@@ -340,12 +340,23 @@ private:
 	void rememberSettingValue(
 		const QString &pluginId,
 		const SettingDescriptor &descriptor);
+	int findRecordIndex(const QString &pluginId) const;
+	void rebuildPluginIndex();
+	void moveLastPluginRecordToIndex(int index);
 	void scanPlugins(bool metadataOnly = false);
 	void loadPluginMetadataOnly(const QString &path);
 	void loadPlugin(const QString &path);
+	void unloadPluginRecord(
+		PluginRecord &record,
+		bool preserveLoadError = false);
 	void unloadAll();
 	PluginRecord *findRecord(const QString &pluginId);
 	const PluginRecord *findRecord(const QString &pluginId) const;
+	bool removePluginFileReliable(
+		const QString &path,
+		QString *finalPath,
+		QString *error,
+		bool *scheduledOnReboot);
 	void unregisterPluginCommands(const QString &pluginId);
 	void unregisterPluginActions(const QString &pluginId);
 	void unregisterPluginPanels(const QString &pluginId);
@@ -411,6 +422,8 @@ private:
 	int _runtimeApiPort = 37080;
 	std::unique_ptr<QTcpServer> _runtimeApiServer;
 	QHash<QTcpSocket*, QByteArray> _runtimeApiBuffers;
+	bool _reloadInProgress = false;
+	bool _reloadQueued = false;
 
 	std::vector<PluginRecord> _plugins;
 	QHash<QString, int> _pluginIndexById;

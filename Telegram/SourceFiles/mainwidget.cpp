@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/dropdown_menu.h"
 #include "ui/focus_persister.h"
@@ -36,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/ui_utility.h"
+#include "ui/layers/generic_box.h"
 #include "window/window_connecting_widget.h"
 #include "window/window_top_bar_wrap.h"
 #include "window/notifications_manager.h"
@@ -75,6 +77,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/shortcuts.h"
 #include "core/application.h"
 #include "core/changelogs.h"
+#include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "calls/calls_call.h"
 #include "calls/calls_instance.h"
@@ -87,15 +90,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/main_app_config.h"
+#include "settings/settings_advanced.h"
 #include "settings/settings_premium.h"
 #include "support/support_helper.h"
 #include "storage/storage_user_photos.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
+#include "styles/style_layers.h"
 #include "styles/style_window.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
+#include <QtCore/QSet>
 
 namespace {
 
@@ -103,6 +109,119 @@ void ClearBotStartToken(PeerData *peer) {
 	if (peer && peer->isUser() && peer->asUser()->isBot()) {
 		peer->asUser()->botInfo->startToken = QString();
 	}
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString UpdateChannelText(Core::UpdateChannel channel) {
+	switch (channel) {
+	case Core::UpdateChannel::DevBeta:
+		return RuEn("Dev (beta)", "Dev (beta)");
+	case Core::UpdateChannel::Alpha:
+		return RuEn("Alpha", "Alpha");
+	case Core::UpdateChannel::Stable:
+	default:
+		return RuEn("Stable", "Stable");
+	}
+}
+
+[[nodiscard]] QString AstrogramUpdateNoticeKey(
+		const Core::UpdateReleaseInfo &info) {
+	if (!info.available || (info.version <= 0)) {
+		return QString();
+	}
+	return QString::number(info.version)
+		+ u':' + QString::number(int(info.channel))
+		+ u':' + info.url;
+}
+
+void ShowAstrogramUpdateNotice(
+		not_null<Window::SessionController*> controller,
+		const Core::UpdateReleaseInfo &info) {
+	const auto ready = (Core::UpdateChecker().state()
+		== Core::UpdateChecker::State::Ready);
+	const auto summary = [&] {
+		auto text = info.versionText.isEmpty()
+			? Core::FormatVersionWithBuild(info.version)
+			: info.versionText;
+		text += u" · "_q + UpdateChannelText(info.channel);
+		if (!info.title.isEmpty() && info.title != info.versionText) {
+			text += u'\n' + info.title;
+		}
+		return text;
+	}();
+	const auto changelog = !info.changelog.trimmed().isEmpty()
+		? info.changelog.trimmed()
+		: RuEn(
+			"GitHub release body для этой сборки пустой или ещё недоступен.",
+			"GitHub release body for this build is empty or unavailable.");
+
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(RuEn(
+			"Доступно обновление Astrogram",
+			"Astrogram update available")));
+		box->setWidth(st::boxWideWidth);
+		const auto content = box->verticalLayout();
+		const auto addText = [&](const QString &text) {
+			const auto label = content->add(
+				object_ptr<Ui::FlatLabel>(
+					content,
+					rpl::single(text),
+					st::boxLabel),
+				st::boxRowPadding);
+			label->setSelectable(true);
+			label->setBreakEverywhere(true);
+		};
+		addText(summary);
+		addText(changelog);
+
+		box->addButton(rpl::single(
+			ready
+				? RuEn("Установить и перезапустить", "Install and restart")
+				: RuEn(
+					"Открыть настройки обновлений",
+					"Open update settings")), [=] {
+			box->closeBox();
+			if (ready) {
+				Core::checkReadyUpdate();
+				Core::Restart();
+			} else {
+				controller->showSettings(Settings::Advanced::Id());
+			}
+		});
+		if (!info.url.isEmpty()) {
+			box->addButton(rpl::single(RuEn(
+				"Открыть релиз на GitHub",
+				"Open release on GitHub")), [=] {
+				box->closeBox();
+				File::OpenUrl(info.url);
+			});
+		}
+		box->addButton(rpl::single(tr::lng_cancel(tr::now)), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
+void MaybeShowAstrogramUpdateNotice(
+		not_null<Window::SessionController*> controller) {
+	static auto shown = QSet<QString>();
+
+	const auto checker = Core::UpdateChecker();
+	const auto info = checker.releaseInfo();
+	if (!info.available || info.changelogLoading) {
+		return;
+	}
+	const auto key = AstrogramUpdateNoticeKey(info);
+	if (key.isEmpty() || shown.contains(key)) {
+		return;
+	}
+	shown.insert(key);
+	ShowAstrogramUpdateNotice(controller, info);
 }
 
 } // namespace
@@ -422,6 +541,15 @@ MainWidget::MainWidget(
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
 		checker.start();
+		const auto maybeShowUpdateNotice = [=] {
+			MaybeShowAstrogramUpdateNotice(_controller);
+		};
+		checker.releaseInfoChanged() | rpl::on_next(
+			maybeShowUpdateNotice,
+			lifetime());
+		checker.ready() | rpl::on_next(
+			maybeShowUpdateNotice,
+			lifetime());
 	}
 
 	cSetOtherOnline(0);

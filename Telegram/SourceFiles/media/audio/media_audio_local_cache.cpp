@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ffmpeg/ffmpeg_bytes_io_wrap.h"
 #include "ffmpeg/ffmpeg_utility.h"
 
+#include <limits>
+
 namespace Media::Audio {
 namespace {
 
@@ -17,7 +19,11 @@ constexpr auto kMaxDuration = 3 * crl::time(1000);
 constexpr auto kMaxStreams = 2;
 constexpr auto kFrameSize = 4096;
 
-[[nodiscard]] QByteArray ConvertAndCut(const QByteArray &bytes) {
+[[nodiscard]] QByteArray ConvertToWav(
+		const QByteArray &bytes,
+		int maxDurationMs,
+		int outputSampleRate,
+		bool outputMono) {
 	using namespace FFmpeg;
 
 	if (bytes.isEmpty()) {
@@ -101,16 +107,20 @@ constexpr auto kFrameSize = 4096;
 		return {};
 	}
 
-	auto mono = AVChannelLayout(AV_CHANNEL_LAYOUT_MONO);
-	auto stereo = AVChannelLayout(AV_CHANNEL_LAYOUT_STEREO);
-	const auto in = &inCodecContext->ch_layout;
-	if (!av_channel_layout_compare(in, &mono)
-		|| !av_channel_layout_compare(in, &stereo)) {
-		av_channel_layout_copy(&outCodecContext->ch_layout, in);
+	if (outputMono) {
+		outCodecContext->ch_layout = AV_CHANNEL_LAYOUT_MONO;
 	} else {
-		outCodecContext->ch_layout = AV_CHANNEL_LAYOUT_STEREO;
+		auto mono = AVChannelLayout(AV_CHANNEL_LAYOUT_MONO);
+		auto stereo = AVChannelLayout(AV_CHANNEL_LAYOUT_STEREO);
+		const auto in = &inCodecContext->ch_layout;
+		if (!av_channel_layout_compare(in, &mono)
+			|| !av_channel_layout_compare(in, &stereo)) {
+			av_channel_layout_copy(&outCodecContext->ch_layout, in);
+		} else {
+			outCodecContext->ch_layout = AV_CHANNEL_LAYOUT_STEREO;
+		}
 	}
-	const auto rate = 44'100;
+	const auto rate = outputSampleRate;
 	outCodecContext->sample_fmt = AV_SAMPLE_FMT_S16;
 	outCodecContext->time_base = AVRational{ 1, rate };
 	outCodecContext->sample_rate = rate;
@@ -175,7 +185,10 @@ constexpr auto kFrameSize = 4096;
 	}
 
 	auto pts = int64_t(0);
-	auto maxPts = int64_t(kMaxDuration) * rate / 1000;
+	const auto maxPts = (maxDurationMs > 0)
+		? (int64_t(maxDurationMs) * rate / 1000)
+		: std::numeric_limits<int64_t>::max();
+	const auto unlimited = (maxDurationMs <= 0);
 	const auto writeFrame = [&](AVFrame *frame) { // nullptr to flush
 		error = avcodec_send_frame(outCodecContext.get(), frame);
 		if (error) {
@@ -208,7 +221,7 @@ constexpr auto kFrameSize = 4096;
 		}
 	};
 
-	while (pts < maxPts) {
+	while (unlimited || (pts < maxPts)) {
 		error = av_read_frame(input.get(), packet);
 		const auto finished = (error.code() == AVERROR_EOF);
 		if (!finished) {
@@ -258,7 +271,7 @@ constexpr auto kFrameSize = 4096;
 			outFrame->nb_samples = samples;
 			outFrame->pts = pts;
 			pts += samples;
-			if (pts > maxPts) {
+			if (!unlimited && (pts > maxPts)) {
 				break;
 			}
 
@@ -286,6 +299,14 @@ constexpr auto kFrameSize = 4096;
 
 } // namespace
 
+QByteArray ToWav(const QByteArray &bytes, int maxDurationMs) {
+	return ConvertToWav(bytes, maxDurationMs, 44'100, false);
+}
+
+QByteArray ToSpeechWav(const QByteArray &bytes) {
+	return ConvertToWav(bytes, 0, 16'000, true);
+}
+
 LocalSound LocalCache::sound(
 		DocumentId id,
 		Fn<QByteArray()> resolveOriginalBytes,
@@ -294,7 +315,7 @@ LocalSound LocalCache::sound(
 	if (!result.isEmpty()) {
 		return { id, result };
 	}
-	result = ConvertAndCut(resolveOriginalBytes());
+	result = ToWav(resolveOriginalBytes(), int(kMaxDuration));
 	return !result.isEmpty()
 		? LocalSound{ id, result }
 		: fallbackOriginalBytes

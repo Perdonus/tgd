@@ -160,6 +160,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/item_text_options.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/session/send_as_peers.h"
@@ -217,6 +218,118 @@ const auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 		const auto history = key.history();
 		return history ? history->peer.get() : nullptr;
 	});
+}
+
+[[nodiscard]] PeerData *DeletedReplySender(not_null<HistoryItem*> item) {
+	if (const auto from = item->displayFrom()) {
+		return from;
+	}
+	return item->author().get();
+}
+
+[[nodiscard]] TextWithEntities DeletedReplyAuthorText(
+		not_null<HistoryItem*> item,
+		Main::Session &session) {
+	const auto hidden = item->displayHiddenSenderInfo();
+	const auto sender = DeletedReplySender(item);
+	auto result = TextWithEntities{
+		hidden ? hidden->name : sender->shortName()
+	};
+	if (hidden || result.text.isEmpty()) {
+		return result;
+	}
+	if (const auto user = sender->asUser()) {
+		result.entities.push_back({
+			EntityType::MentionName,
+			0,
+			int(result.text.size()),
+			TextUtilities::MentionNameDataFromFields({
+				.selfId = session.userId().bare,
+				.userId = peerToUser(user->id).bare,
+				.accessHash = user->accessHash(),
+			}),
+		});
+	} else if (const auto username = sender->username(); !username.isEmpty()) {
+		result.entities.push_back({
+			EntityType::CustomUrl,
+			0,
+			int(result.text.size()),
+			u"https://t.me/"_q + username,
+		});
+	}
+	return result;
+}
+
+[[nodiscard]] QString DeletedReplyFallbackText(not_null<HistoryItem*> item) {
+	const auto media = item->media();
+	if (!media) {
+		return tr::lng_deleted_message(tr::now);
+	}
+	if (media->photo()) {
+		return tr::lng_in_dlg_photo(tr::now);
+	}
+	if (const auto document = media->document()) {
+		if (document->isVideoMessage()) {
+			return tr::lng_in_dlg_video_message(tr::now);
+		} else if (document->sticker()) {
+			return tr::lng_in_dlg_sticker(tr::now);
+		} else if (document->isAnimation() || document->isGifv()) {
+			return u"GIF"_q;
+		} else if (document->isVideoFile()) {
+			return tr::lng_in_dlg_video(tr::now);
+		} else if (document->isVoiceMessage()) {
+			return tr::lng_in_dlg_audio(tr::now);
+		} else if (document->isSong() || document->isSharedMediaMusic()) {
+			return tr::lng_all_music(tr::now);
+		} else if (document->isAudioFile()) {
+			return tr::lng_in_dlg_audio_file(tr::now);
+		}
+		return tr::lng_in_dlg_file(tr::now);
+	}
+	if (media->sharedContact()) {
+		return tr::lng_in_dlg_contact(tr::now);
+	}
+	if (media->location()) {
+		return tr::lng_maps_point(tr::now);
+	}
+	if (media->poll()) {
+		return tr::lng_in_dlg_poll(tr::now);
+	}
+	const auto fallback = media->notificationText().text.trimmed();
+	return fallback.isEmpty() ? tr::lng_deleted_message(tr::now) : fallback;
+}
+
+[[nodiscard]] QString DeletedReplyBodyText(
+		not_null<HistoryItem*> item,
+		const FullReplyTo &fields) {
+	const auto quoted = fields.quote.text.trimmed();
+	if (!quoted.isEmpty()) {
+		return quoted;
+	}
+	const auto original = item->originalText().text.trimmed();
+	return !original.isEmpty() ? original : DeletedReplyFallbackText(item);
+}
+
+[[nodiscard]] FullReplyTo ApplyDeletedReplyQuote(
+		not_null<HistoryItem*> item,
+		FullReplyTo fields,
+		Main::Session &session) {
+	auto quote = DeletedReplyAuthorText(item, session);
+	auto body = DeletedReplyBodyText(item, fields);
+	const auto limit = session.appConfig().quoteLengthMax();
+	const auto available = limit - int(quote.text.size()) - 1;
+	if (!body.isEmpty() && available > 0) {
+		if (body.size() > available) {
+			body = (available > 3)
+				? (body.left(available - 3) + u"..."_q)
+				: body.left(available);
+		}
+		quote.text += u"\n"_q;
+		quote.text += body;
+	}
+	fields.quote = std::move(quote);
+	fields.quoteOffset = 0;
+	return fields;
 }
 
 [[nodiscard]] QString FirstEmoji(const QString &s) {
@@ -8692,6 +8805,9 @@ void HistoryWidget::replyToMessage(
 		FullReplyTo fields) {
 	if (isJoinChannel()) {
 		return;
+	}
+	if (item->isDeleted()) {
+		fields = ApplyDeletedReplyQuote(item, std::move(fields), session());
 	}
 	fields.messageId = item->fullId();
 	_processingReplyTo = fields;

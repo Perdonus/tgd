@@ -33,6 +33,7 @@ private:
 	void rebuildList();
 	void refreshPending();
 	void scheduleRebuildList(int delayMs = 0);
+	void setListInteractive(bool enabled);
 
 	const not_null<Window::SessionController*> _controller;
 	not_null<Ui::VerticalLayout*> _content;

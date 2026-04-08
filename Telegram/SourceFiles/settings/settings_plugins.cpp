@@ -192,7 +192,7 @@ void AddPluginDescriptionText(
 			rpl::single(TextWithEntities{ text.trimmed() }),
 			st::defaultFlatLabel),
 		style::margins(
-			kPluginCardContentInsetLeft + 8,
+			kPluginCardContentInsetLeft,
 			0,
 			kPluginCardContentInsetRight,
 			0),
@@ -924,9 +924,17 @@ void SharePluginPackage(
 
 void RequestPluginRemoval(
 		not_null<Window::SessionController*> controller,
-		not_null<QWidget*> context,
 		::Plugins::PluginState state,
 		Fn<void()> onRemoved);
+
+void DestroyLayoutChildrenSynchronously(not_null<Ui::VerticalLayout*> layout) {
+	const auto children = layout->findChildren<QWidget*>(
+		QString(),
+		Qt::FindDirectChildrenOnly);
+	for (const auto child : children) {
+		delete child;
+	}
+}
 
 void AddPluginCardActionRow(
 		not_null<Ui::VerticalLayout*> container,
@@ -935,7 +943,7 @@ void AddPluginCardActionRow(
 		Fn<void()> onChanged) {
 	const auto row = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(kPluginCardContentInsetLeft, 8, kPluginCardContentInsetRight, 0),
+		style::margins(kPluginCardContentInsetLeft, 10, kPluginCardContentInsetRight, 2),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(row);
 	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
@@ -952,7 +960,7 @@ void AddPluginCardActionRow(
 		});
 	}
 	remove->setClickedCallback([=] {
-		RequestPluginRemoval(controller, raw, state, onChanged);
+		RequestPluginRemoval(controller, state, onChanged);
 	});
 
 	const auto buttonHeight = std::max({
@@ -1021,7 +1029,6 @@ void SharePluginPackage(
 
 void RequestPluginRemoval(
 		not_null<Window::SessionController*> controller,
-		not_null<QWidget*> context,
 		::Plugins::PluginState state,
 		Fn<void()> onRemoved) {
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
@@ -1515,6 +1522,11 @@ void Plugins::scheduleRebuildList(int delayMs) {
 	});
 }
 
+void Plugins::setListInteractive(bool enabled) {
+	_list->setEnabled(enabled);
+	_list->setAttribute(Qt::WA_TransparentForMouseEvents, !enabled);
+}
+
 void Plugins::refreshPending() {
 	if (!_listRefreshPending) {
 		return;
@@ -1525,12 +1537,20 @@ void Plugins::refreshPending() {
 
 void Plugins::rebuildList() {
 	_listRefreshPending = false;
-	_list->clear();
+	setListInteractive(false);
+	_list->setUpdatesEnabled(false);
+	DestroyLayoutChildrenSynchronously(_list);
 	const auto scheduleRefresh = crl::guard(this, [=] {
 		Logs::writeClient(u"[plugins-ui] scheduled list refresh"_q);
+		setListInteractive(false);
 		_listRefreshPending = true;
 		scheduleRebuildList(kPluginListRefreshDelayMs);
 	});
+	const auto finishRebuild = [=] {
+		_list->setUpdatesEnabled(true);
+		setListInteractive(true);
+		Ui::ResizeFitChild(this, _content);
+	};
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
 			_list,
@@ -1553,7 +1573,7 @@ void Plugins::rebuildList() {
 				u"No plugins found in tdata/plugins. Use the top bar menu for the plugins folder and diagnostics."_q,
 				u"В tdata/plugins плагины не найдены. Для папки плагинов и диагностики используйте меню в верхней панели."_q)));
 		Ui::AddSkip(_list);
-		Ui::ResizeFitChild(this, _content);
+		finishRebuild();
 		return;
 	}
 	auto first = true;
@@ -1607,7 +1627,7 @@ void Plugins::rebuildList() {
 			scheduleRefresh);
 	}
 
-	Ui::ResizeFitChild(this, _content);
+	finishRebuild();
 }
 
 PluginsDocumentation::PluginsDocumentation(

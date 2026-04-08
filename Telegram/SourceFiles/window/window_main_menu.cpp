@@ -753,31 +753,62 @@ void MainMenu::setupMenu() {
 	)->setClickedCallback([=] {
 		controller->showSettings();
 	});
-	const auto updateButton = addAction(
-		rpl::single(RuEn(
-			"Доступно обновление Astrogram",
-			"Astrogram update available")),
-		{ &st::menuIconRestore });
-	updateButton->setVisible(
-		!Core::UpdaterDisabled()
-		&& (checker.state() == Core::UpdateChecker::State::Ready));
-	updateButton->setClickedCallback([=] {
-		if (!Core::UpdaterDisabled()) {
-			Core::checkReadyUpdate();
+	const auto updateButtonText = [=] {
+		return (!Core::UpdaterDisabled()
+				&& (checker.state() == Core::UpdateChecker::State::Ready))
+			? RuEn(
+				"Установить обновление Astrogram",
+				"Install Astrogram update")
+			: RuEn(
+				"Посмотреть обновление Astrogram",
+				"View Astrogram update");
+	};
+	const auto updateButtonVisible = [=] {
+		if (Core::UpdaterDisabled()) {
+			return false;
 		}
-		Core::Restart();
+		const auto info = checker.releaseInfo();
+		return (checker.state() == Core::UpdateChecker::State::Ready)
+			|| info.available
+			|| info.changelogLoading
+			|| !info.changelog.isEmpty()
+			|| info.changelogFailed;
+	};
+	const auto updateButton = addAction(
+		rpl::single(updateButtonText()) | rpl::then(
+			rpl::merge(
+				checker.ready(),
+				checker.checking(),
+				checker.isLatest(),
+				checker.failed(),
+				checker.progress() | rpl::to_empty,
+				checker.releaseInfoChanged()
+			) | rpl::map(updateButtonText)),
+		{ &st::menuIconRestore });
+	updateButton->setVisible(updateButtonVisible());
+	updateButton->setClickedCallback([=] {
+		if (!Core::UpdaterDisabled()
+			&& (checker.state() == Core::UpdateChecker::State::Ready)) {
+			Core::checkReadyUpdate();
+			Core::Restart();
+			return;
+		}
+		controller->showSettings(Settings::Advanced::Id());
 	});
 	const auto hideUpdateButton = [=] {
-		updateButton->setVisible(false);
+		updateButton->setVisible(updateButtonVisible());
 		updateInnerControlsGeometry();
 	};
 	checker.ready() | rpl::on_next([=] {
-		updateButton->setVisible(true);
+		updateButton->setVisible(updateButtonVisible());
 		updateInnerControlsGeometry();
 	}, updateButton->lifetime());
 	checker.checking() | rpl::on_next(hideUpdateButton, updateButton->lifetime());
 	checker.isLatest() | rpl::on_next(hideUpdateButton, updateButton->lifetime());
 	checker.failed() | rpl::on_next(hideUpdateButton, updateButton->lifetime());
+	checker.releaseInfoChanged() | rpl::on_next(
+		hideUpdateButton,
+		updateButton->lifetime());
 	checker.progress() | rpl::on_next([=](Core::UpdateChecker::Progress) {
 		hideUpdateButton();
 	}, updateButton->lifetime());
@@ -893,6 +924,11 @@ void MainMenu::chooseEmojiStatus() {
 		return;
 	} else if (const auto widget = _badge->widget()) {
 		_emojiStatusPanel->show(_controller, widget, _badge->sizeTag());
+	} else if (_controller->session().premiumPossible()) {
+		_emojiStatusPanel->show(
+			_controller,
+			not_null{ _setEmojiStatus.data() },
+			_badge->sizeTag());
 	} else {
 		ShowPremiumPreviewBox(_controller, PremiumFeature::EmojiStatus);
 	}

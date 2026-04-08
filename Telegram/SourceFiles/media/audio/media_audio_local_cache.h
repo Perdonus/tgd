@@ -9,6 +9,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Media::Audio {
 
+[[nodiscard]] QByteArray ToWav(
+	const QByteArray &bytes,
+	int maxDurationMs = 0);
+[[nodiscard]] QByteArray ToSpeechWav(const QByteArray &bytes);
+
 struct LocalSound {
     DocumentId id = 0;
     QByteArray wav;

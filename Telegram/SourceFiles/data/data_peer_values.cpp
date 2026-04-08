@@ -413,21 +413,16 @@ rpl::producer<bool> PeerPremiumValue(not_null<PeerData*> peer) {
 		return user->isPremium();
 	});
 	if (!user->isSelf()) {
-		return byFlags;
+		return std::move(byFlags) | rpl::distinct_until_changed();
 	}
 	return rpl::combine(
 		std::move(byFlags),
 		Core::App().settings().localPremiumValue(),
-		_1 || _2);
+		_1 || _2) | rpl::distinct_until_changed();
 }
 
 rpl::producer<bool> AmPremiumValue(not_null<Main::Session*> session) {
-	using namespace rpl::mappers;
-
-	return rpl::combine(
-		PeerPremiumValue(session->user()),
-		Core::App().settings().localPremiumValue(),
-		_1 || _2);
+	return PeerPremiumValue(session->user()) | rpl::distinct_until_changed();
 }
 
 TimeId SortByOnlineValue(not_null<UserData*> user, TimeId now) {

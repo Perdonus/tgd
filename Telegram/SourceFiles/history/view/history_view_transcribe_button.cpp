@@ -282,6 +282,9 @@ bool TranscribeButton::hasLock() const {
 		return false;
 	}
 	const auto transcribes = &session->api().transcribes();
+	if (!_summarize && transcribes->localAvailable(_item)) {
+		return false;
+	}
 	if (_summarize) {
 		return transcribes->summary(_item).premiumRequired;
 	}
@@ -347,7 +350,11 @@ ClickHandlerPtr TranscribeButton::link() {
 			const auto doc = _item->media()
 				? _item->media()->document()
 				: nullptr;
-			if (doc && (doc->isVoiceMessage() || doc->isVideoMessage())) {
+			const auto localAvailable = !summarize
+				&& session->api().transcribes().localAvailable(item);
+			if (!localAvailable
+				&& doc
+				&& (doc->isVoiceMessage() || doc->isVideoMessage())) {
 				if (doc->duration() > max) {
 					if (const auto controller = my.sessionWindow.get()) {
 						controller->uiShow()->showToast(

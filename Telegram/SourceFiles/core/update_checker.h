@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/dedicated_file_loader.h"
 
+#include <QtCore/QString>
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -17,6 +19,25 @@ namespace Core {
 
 bool UpdaterDisabled();
 void SetUpdaterDisabledAtStartup();
+[[nodiscard]] QString FormatVersionWithBuild(int version);
+
+enum class UpdateChannel {
+	Stable,
+	DevBeta,
+	Alpha,
+};
+
+struct UpdateReleaseInfo {
+	bool available = false;
+	UpdateChannel channel = UpdateChannel::Stable;
+	int version = 0;
+	QString versionText;
+	QString title;
+	QString url;
+	QString changelog;
+	bool changelogLoading = false;
+	bool changelogFailed = false;
+};
 
 class Updater;
 
@@ -36,6 +57,7 @@ public:
 	rpl::producer<Progress> progress() const;
 	rpl::producer<> failed() const;
 	rpl::producer<> ready() const;
+	rpl::producer<> releaseInfoChanged() const;
 
 	void start(bool forceWait = false);
 	void stop();
@@ -46,6 +68,7 @@ public:
 	State state() const;
 	int already() const;
 	int size() const;
+	[[nodiscard]] UpdateReleaseInfo releaseInfo() const;
 
 private:
 	const std::shared_ptr<Updater> _updater;

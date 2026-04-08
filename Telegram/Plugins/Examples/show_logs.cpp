@@ -12,8 +12,11 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QHideEvent>
 #include <QtGui/QScreen>
+#include <QtGui/QShowEvent>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QDialog>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
@@ -29,7 +32,7 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.2",
+	"1.3",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
 	"https://sosiskibot.ru",
@@ -38,7 +41,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.2";
+constexpr auto kPluginVersion = "1.3";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
@@ -84,6 +87,24 @@ QString PluginLogsPath(const Plugins::Host *host) {
 	return QDir(WorkingRoot(host)).filePath(QStringLiteral("tdata/plugins.log"));
 }
 
+QString ClientLogsPath(const Plugins::Host *host) {
+	return QDir(WorkingRoot(host)).filePath(QStringLiteral("tdata/client.log"));
+}
+
+QStringList AvailableLogPaths(const Plugins::Host *host) {
+	auto result = QStringList{
+		ClientLogsPath(host),
+		PluginLogsPath(host),
+	};
+	result.erase(
+		std::remove_if(result.begin(), result.end(), [](const QString &path) {
+			return path.trimmed().isEmpty();
+		}),
+		result.end());
+	result.removeDuplicates();
+	return result;
+}
+
 QStringList TailLines(const QString &path, int wantedLines) {
 	if (wantedLines <= 0) {
 		return {};
@@ -119,6 +140,27 @@ QStringList TailLines(const QString &path, int wantedLines) {
 	return lines;
 }
 
+QString PathShortLabel(const QString &path) {
+	const auto name = QFileInfo(path).fileName().trimmed();
+	return name.isEmpty() ? path : name;
+}
+
+QStringList TailMergedLines(const Plugins::Host *host, int wantedLines) {
+	auto result = QStringList();
+	const auto paths = AvailableLogPaths(host);
+	const auto perFile = std::max(wantedLines, 1);
+	for (const auto &path : paths) {
+		const auto prefix = QStringLiteral("[%1] ").arg(PathShortLabel(path));
+		for (const auto &line : TailLines(path, perFile)) {
+			result.push_back(prefix + line);
+		}
+	}
+	if (result.size() > wantedLines) {
+		result = result.mid(result.size() - wantedLines);
+	}
+	return result;
+}
+
 QStringList ApplyFilter(QStringList lines, const QString &filter) {
 	const auto trimmed = filter.trimmed();
 	if (trimmed.isEmpty()) {
@@ -142,9 +184,15 @@ void CenterOver(QWidget *anchor, QWidget *widget) {
 	if (!widget) {
 		return;
 	}
-	const auto geometry = anchor
-		? QRect(QPoint(0, 0), anchor->size())
-		: QApplication::primaryScreen()->availableGeometry();
+	auto geometry = QRect();
+	if (anchor) {
+		geometry = anchor->frameGeometry();
+	} else if (const auto screen = QApplication::primaryScreen()) {
+		geometry = screen->availableGeometry();
+	}
+	if (!geometry.isValid()) {
+		geometry = QRect(0, 0, 960, 720);
+	}
 	const auto size = widget->size();
 	widget->move(
 		geometry.center().x() - (size.width() / 2),
@@ -175,7 +223,7 @@ QWidget *StableAnchorWindow(QWidget *candidate) {
 	return window;
 }
 
-class LogsOverlay final : public QWidget {
+class LogsOverlay final : public QDialog {
 public:
 	using ReadHandler = std::function<QStringList(int, const QString &)>;
 	using ClearHandler = std::function<bool()>;
@@ -186,20 +234,24 @@ public:
 		ReadHandler readHandler,
 		ClearHandler clearHandler,
 		ToastHandler toastHandler,
-		QWidget *parent)
-		: QWidget(parent)
+		QWidget *anchor)
+		: QDialog(
+			nullptr,
+			Qt::Dialog
+				| Qt::Tool
+				| Qt::FramelessWindowHint
+				| Qt::NoDropShadowWindowHint)
 	, _host(host)
 	, _readHandler(std::move(readHandler))
 	, _clearHandler(std::move(clearHandler))
-		, _toastHandler(std::move(toastHandler)) {
-			setWindowFlags(
-				Qt::Widget
-				| Qt::FramelessWindowHint
-				| Qt::NoDropShadowWindowHint);
-			setAttribute(Qt::WA_DeleteOnClose, false);
-			setAttribute(Qt::WA_TranslucentBackground, true);
-			setAttribute(Qt::WA_StyledBackground, true);
-			resize(760, 560);
+	, _toastHandler(std::move(toastHandler))
+	, _anchor(anchor) {
+		setModal(false);
+		setAttribute(Qt::WA_DeleteOnClose, false);
+		setAttribute(Qt::WA_QuitOnClose, false);
+		setAttribute(Qt::WA_TranslucentBackground, true);
+		setAttribute(Qt::WA_StyledBackground, true);
+		resize(820, 580);
 		setObjectName(QStringLiteral("showLogsOverlay"));
 		setStyleSheet(QStringLiteral(
 			"#showLogsOverlay {"
@@ -302,10 +354,14 @@ public:
 			}
 		});
 		connect(closeButton, &QPushButton::clicked, this, [this] {
-			hide();
+			close();
 		});
 		connect(applyFilterButton, &QPushButton::clicked, this, [this] {
 			_filter = _filterEdit->text().trimmed();
+			refreshNow();
+		});
+		connect(_filterEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+			_filter = text.trimmed();
 			refreshNow();
 		});
 		connect(_filterEdit, &QLineEdit::returnPressed, this, [this] {
@@ -315,7 +371,6 @@ public:
 		connect(&_refreshTimer, &QTimer::timeout, this, [this] {
 			refreshNow();
 		});
-		_refreshTimer.start(kRefreshIntervalMs);
 	}
 
 	void setMaxLines(int maxLines) {
@@ -323,16 +378,41 @@ public:
 		refreshNow();
 	}
 
+	void setAnchor(QWidget *anchor) {
+		_anchor = StableAnchorWindow(anchor);
+		CenterOver(_anchor.data(), this);
+	}
+
 	void refreshNow() {
 		const auto fetchCount = std::max(_maxLines * 6, 240);
 		auto lines = _readHandler(fetchCount, _filter);
+		auto sourceLabels = QStringList();
+		for (const auto &path : AvailableLogPaths(_host)) {
+			sourceLabels.push_back(PathShortLabel(path));
+		}
 		if (lines.size() > _maxLines) {
 			lines = lines.mid(lines.size() - _maxLines);
 		}
 		_view->setPlainText(lines.join(QChar::fromLatin1('\n')));
 		_statusLabel->setText(
 			Tr(_host, "Shown lines:", u8"Показано строк:")
-			+ QStringLiteral(" %1").arg(lines.size()));
+			+ QStringLiteral(" %1 • ").arg(lines.size())
+			+ Tr(_host, "Sources:", u8"Источники:")
+			+ QStringLiteral(" %1").arg(sourceLabels.join(QStringLiteral(", "))));
+		CenterOver(_anchor.data(), this);
+	}
+
+protected:
+	void showEvent(QShowEvent *event) override {
+		QDialog::showEvent(event);
+		refreshNow();
+		_refreshTimer.start(kRefreshIntervalMs);
+		CenterOver(_anchor.data(), this);
+	}
+
+	void hideEvent(QHideEvent *event) override {
+		_refreshTimer.stop();
+		QDialog::hideEvent(event);
 	}
 
 private:
@@ -340,6 +420,7 @@ private:
 	ReadHandler _readHandler;
 	ClearHandler _clearHandler;
 	ToastHandler _toastHandler;
+	QPointer<QWidget> _anchor;
 	QLineEdit *_filterEdit = nullptr;
 	QLabel *_statusLabel = nullptr;
 	QPlainTextEdit *_view = nullptr;
@@ -396,7 +477,7 @@ public:
 			_actionId = 0;
 		}
 		if (_overlay) {
-			_overlay->hide();
+			_overlay->close();
 			_overlay->deleteLater();
 			_overlay = nullptr;
 		}
@@ -410,8 +491,8 @@ private:
 		_info.author = Latin1(kPluginAuthor);
 		_info.description = Tr(
 			_host,
-			"Opens a semi-transparent overlay with plugin logs, filtering and copy/clear actions.",
-			u8"Открывает полупрозрачное overlay-окно с логами плагинов, фильтром и кнопками копирования/очистки.");
+			"Opens a semi-transparent overlay with client and plugin logs, filtering and copy/clear actions.",
+			u8"Открывает полупрозрачное overlay-окно с клиентскими логами и логами плагинов, фильтром и кнопками копирования/очистки.");
 		_info.website = QStringLiteral("https://sosiskibot.ru");
 	}
 
@@ -444,8 +525,8 @@ private:
 		info.title = Tr(_host, "Source", u8"Источник");
 		info.description = Tr(
 			_host,
-			"Reads Astrogram plugin logs from tdata/plugins.log. Use the filter field inside the overlay to show only one plugin.",
-			u8"Читает логи плагинов Astrogram из tdata/plugins.log. Фильтр внутри overlay позволяет оставить только один плагин.");
+			"Reads tdata/client.log and tdata/plugins.log. Use the filter field inside the overlay to show only one plugin or subsystem.",
+			u8"Читает tdata/client.log и tdata/plugins.log. Фильтр внутри overlay позволяет оставить только один плагин или подсистему.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -474,21 +555,22 @@ private:
 			kMaxMaxLines);
 	}
 
-	QString logsPath() const {
-		return PluginLogsPath(_host);
-	}
-
 	QStringList readLogs(int fetchCount, const QString &filter) const {
-		return ApplyFilter(TailLines(logsPath(), fetchCount), filter);
+		return ApplyFilter(TailMergedLines(_host, fetchCount), filter);
 	}
 
 	bool clearLogs() const {
-		QFile file(logsPath());
-		if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-			return false;
+		auto clearedAny = false;
+		for (const auto &path : AvailableLogPaths(_host)) {
+			QDir().mkpath(QFileInfo(path).absolutePath());
+			QFile file(path);
+			if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+				continue;
+			}
+			file.close();
+			clearedAny = true;
 		}
-		file.close();
-		return true;
+		return clearedAny;
 	}
 
 	QWidget *resolveOverlayAnchor() const {
@@ -535,11 +617,6 @@ private:
 				u8"Не удалось найти окно Astrogram для overlay с логами."));
 			return;
 		}
-		if (_overlay && _overlay->parentWidget() != anchor) {
-			_overlay->hide();
-			_overlay->deleteLater();
-			_overlay = nullptr;
-		}
 		if (!_overlay) {
 			_overlay = new LogsOverlay(
 				_host,
@@ -555,14 +632,13 @@ private:
 					anchor);
 			_overlay->setMaxLines(_maxLines);
 		}
+		_overlay->setAnchor(anchor);
 		_overlay->setMaxLines(_maxLines);
 		CenterOver(anchor, _overlay);
-		if (_overlay->isHidden()) {
-			_overlay->show();
-		} else {
-			_overlay->showNormal();
-		}
+		_overlay->show();
+		_overlay->showNormal();
 		_overlay->raise();
+		_overlay->activateWindow();
 	}
 
 	void handleSetting(const Plugins::SettingDescriptor &setting) {

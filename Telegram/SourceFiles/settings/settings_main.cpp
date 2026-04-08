@@ -100,9 +100,15 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 [[nodiscard]] rpl::producer<QString> AdvancedLabelWithUpdateBadge() {
 	auto checker = Core::UpdateChecker();
 	const auto makeLabel = [] {
+		const auto checker = Core::UpdateChecker();
 		const auto ready = !Core::UpdaterDisabled()
-			&& (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready);
-		return ready
+			&& (checker.state() == Core::UpdateChecker::State::Ready);
+		const auto info = checker.releaseInfo();
+		return (ready
+			|| info.available
+			|| info.changelogLoading
+			|| !info.changelog.isEmpty()
+			|| info.changelogFailed)
 			? RuEn("Расширенные • Обновление доступно", "Advanced • Update available")
 			: tr::lng_settings_advanced(tr::now);
 	};
@@ -112,9 +118,66 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			checker.checking(),
 			checker.isLatest(),
 			checker.failed(),
-			checker.progress() | rpl::to_empty
+			checker.progress() | rpl::to_empty,
+			checker.releaseInfoChanged()
 		)
 	) | rpl::map(makeLabel);
+}
+
+[[nodiscard]] rpl::producer<QString> UpdateSectionLabel() {
+	auto checker = Core::UpdateChecker();
+	const auto makeLabel = [] {
+		const auto ready = !Core::UpdaterDisabled()
+			&& (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready);
+		const auto info = Core::UpdateChecker().releaseInfo();
+		if (ready) {
+			return RuEn(
+				"Установить обновление Astrogram",
+				"Install Astrogram update");
+		} else if (info.available) {
+			return RuEn(
+				"Посмотреть обновление Astrogram",
+				"View Astrogram update");
+		}
+		return RuEn(
+			"Обновление Astrogram",
+			"Astrogram update");
+	};
+	return rpl::single(makeLabel()) | rpl::then(
+		rpl::merge(
+			checker.ready(),
+			checker.checking(),
+			checker.isLatest(),
+			checker.failed(),
+			checker.progress() | rpl::to_empty,
+			checker.releaseInfoChanged()
+		)
+	) | rpl::map(makeLabel);
+}
+
+[[nodiscard]] rpl::producer<bool> UpdateSectionVisible() {
+	auto checker = Core::UpdateChecker();
+	const auto makeVisible = [] {
+		if (Core::UpdaterDisabled()) {
+			return false;
+		}
+		const auto info = Core::UpdateChecker().releaseInfo();
+		return (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready)
+			|| info.available
+			|| info.changelogLoading
+			|| !info.changelog.isEmpty()
+			|| info.changelogFailed;
+	};
+	return rpl::single(makeVisible()) | rpl::then(
+		rpl::merge(
+			checker.ready(),
+			checker.checking(),
+			checker.isLatest(),
+			checker.failed(),
+			checker.progress() | rpl::to_empty,
+			checker.releaseInfoChanged()
+		)
+	) | rpl::map(makeVisible);
 }
 
 class Cover final : public Ui::FixedHeightWidget {
@@ -644,7 +707,7 @@ void SetupSections(
 			rpl::producer<QString> label,
 			Type type,
 			IconDescriptor &&descriptor) {
-		AddButtonWithIcon(
+		return AddButtonWithIcon(
 			container,
 			std::move(label),
 			st::settingsButton,
@@ -684,6 +747,27 @@ void SetupSections(
 		tr::lng_settings_section_chat_settings(),
 		Chat::Id(),
 		{ &st::menuIconChatBubble });
+
+	const auto updateWrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+			container,
+			CreateButtonWithIcon(
+				container,
+				UpdateSectionLabel(),
+				st::settingsButton,
+				{ &st::menuIconRestore })))
+		->setDuration(0);
+	updateWrap->toggleOn(UpdateSectionVisible());
+	updateWrap->entity()->setClickedCallback([=] {
+		if (!Core::UpdaterDisabled()
+			&& (Core::UpdateChecker().state()
+				== Core::UpdateChecker::State::Ready)) {
+			Core::checkReadyUpdate();
+			Core::Restart();
+			return;
+		}
+		showOther(Advanced::Id());
+	});
 
 	const auto preload = [=] {
 		controller->session().data().chatsFilters().requestSuggested();

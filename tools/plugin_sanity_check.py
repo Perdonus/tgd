@@ -35,6 +35,25 @@ def require(pattern: str, text: str, name: str, errors: list[str]) -> None:
         errors.append(name)
 
 
+def extract_method_body(text: str, signature_pattern: str) -> str:
+    match = re.search(signature_pattern, text, flags=re.MULTILINE | re.DOTALL)
+    if match is None:
+        return ""
+    start = text.find("{", match.start())
+    if start < 0:
+        return ""
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
+
+
 def extract_host_method_names(api_text: str) -> list[str]:
     host_block = re.search(
         r"class Host\s*\{(?P<body>[\s\S]*?)\n\};",
@@ -203,7 +222,16 @@ def main() -> int:
         errors,
     )
 
-    # Ensure disable path unregisters every registry.
+    disable_body = extract_method_body(
+        cpp,
+        r"void Manager::disablePlugin\(\s*const QString &pluginId,\s*const QString &reason,\s*bool disabledByRecovery,\s*const QString &recoveryReason\s*\)",
+    )
+    if not disable_body:
+        errors.append("extract disablePlugin(pluginId, reason, disabledByRecovery, recoveryReason) body")
+
+    unloads_single_plugin = "unloadPluginRecord(*record, true)" in disable_body
+
+    # Ensure disable path unregisters every registry directly or via single-plugin unload.
     for call in (
         "unregisterPluginCommands",
         "unregisterPluginActions",
@@ -215,12 +243,9 @@ def main() -> int:
         "unregisterPluginWindowWidgetHandlers",
         "unregisterPluginSessionHandlers",
     ):
-        require(
-            rf"disablePlugin\([^)]*\)\s*\{{[\s\S]*{call}\(",
-            cpp,
-            f"disablePlugin() calls {call}()",
-            errors,
-        )
+        if unloads_single_plugin or (f"{call}(" in disable_body):
+            continue
+        errors.append(f"disablePlugin() calls {call}()")
 
     # Registration guards by plugin ownership.
     for guard in (

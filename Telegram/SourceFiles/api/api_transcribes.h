@@ -34,6 +34,7 @@ public:
 
 	struct Entry {
 		QString result;
+		QString error;
 		bool shown = false;
 		bool failed = false;
 		bool toolong = false;
@@ -55,6 +56,7 @@ public:
 	void apply(const MTPDupdateTranscribedAudio &update);
 
 	[[nodiscard]] bool freeFor(not_null<HistoryItem*> item) const;
+	[[nodiscard]] bool localAvailable(not_null<HistoryItem*> item) const;
 	[[nodiscard]] bool isRated(not_null<HistoryItem*> item) const;
 	void rate(not_null<HistoryItem*> item, bool isGood);
 
@@ -65,6 +67,7 @@ public:
 
 private:
 	void load(not_null<HistoryItem*> item);
+	void loadLocal(not_null<HistoryItem*> item);
 	void summarize(not_null<HistoryItem*> item);
 
 	const not_null<Main::Session*> _session;
@@ -73,6 +76,7 @@ private:
 	int _trialsCount = -1;
 	std::optional<bool> _trialsSupport;
 	TimeId _trialsRefreshAt = -1;
+	mtpRequestId _nextLocalRequestId = 0;
 
 	base::flat_map<FullMsgId, Entry> _map;
 	base::flat_map<uint64, FullMsgId> _ids;
