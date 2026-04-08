@@ -144,8 +144,6 @@ PRIVATE
 
     ui/boxes/about_cocoon_box.h
     ui/boxes/about_cocoon_box.cpp
-    ui/boxes/astrogram_onboarding_box.h
-    ui/boxes/astrogram_onboarding_box.cpp
 
     history/admin_log/history_admin_log_filter_value.h
     history/history_view_top_toast.cpp
