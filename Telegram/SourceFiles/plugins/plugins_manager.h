@@ -54,6 +54,7 @@ struct PluginState {
 	bool sourceVerified = false;
 	QString sourceTrustText;
 	QString sourceTrustDetails;
+	QString sourceTrustReason;
 	int64 sourceChannelId = 0;
 	int64 sourceMessageId = 0;
 };

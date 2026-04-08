@@ -5292,6 +5292,7 @@ QJsonObject Manager::pluginStateToJson(const PluginState &state) const {
 	result.insert(u"sourceVerified"_q, state.sourceVerified);
 	result.insert(u"sourceTrustText"_q, state.sourceTrustText);
 	result.insert(u"sourceTrustDetails"_q, state.sourceTrustDetails);
+	result.insert(u"sourceTrustReason"_q, state.sourceTrustReason);
 	result.insert(u"sourceChannelId"_q, QString::number(state.sourceChannelId));
 	result.insert(u"sourceMessageId"_q, QString::number(state.sourceMessageId));
 	return result;
@@ -5482,6 +5483,17 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		if (value.startsWith(u"sha256:"_q)) {
 			value = value.mid(7);
 		}
+		if (value.size() != 64) {
+			return QString();
+		}
+		for (const auto ch : value) {
+			const auto hex = ch.unicode();
+			const auto digit = (hex >= '0' && hex <= '9');
+			const auto lower = (hex >= 'a' && hex <= 'f');
+			if (!digit && !lower) {
+				return QString();
+			}
+		}
 		return value;
 	};
 	struct ParsedRecord {
@@ -5518,15 +5530,18 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 	state.sourceVerified = false;
 	state.sourceTrustText = u"unverified"_q;
 	state.sourceTrustDetails.clear();
+	state.sourceTrustReason.clear();
 	state.sourceChannelId = 0;
 	state.sourceMessageId = 0;
 
 	if (state.sha256.isEmpty()) {
+		state.sourceTrustReason = u"sha256-unavailable"_q;
 		state.sourceTrustDetails = u"sha256-unavailable"_q;
 		return;
 	}
 	const auto session = activeSession();
 	if (!session) {
+		state.sourceTrustReason = u"no-active-session"_q;
 		state.sourceTrustDetails = u"no-active-session"_q;
 		return;
 	}
@@ -5534,8 +5549,12 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 	const auto trustedRecords = session->appConfig().astrogramTrustedPluginRecords();
 	auto matchedHashInUntrustedChannel = false;
 	auto matchedHashWithoutOrigin = false;
+	auto hasValidTrustedRecord = false;
 	for (const auto &rawRecord : trustedRecords) {
 		const auto record = parseRecord(rawRecord);
+		if (!record.sha256.isEmpty()) {
+			hasValidTrustedRecord = true;
+		}
 		if (record.sha256.isEmpty() || record.sha256 != state.sha256) {
 			continue;
 		}
@@ -5554,6 +5573,7 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		}
 		state.sourceVerified = true;
 		state.sourceTrustText = u"verified"_q;
+		state.sourceTrustReason = u"exact-sha256-trusted-record"_q;
 		state.sourceChannelId = record.channelId;
 		state.sourceMessageId = record.messageId;
 		state.sourceTrustDetails = !record.label.isEmpty()
@@ -5566,11 +5586,16 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		return;
 	}
 
-	state.sourceTrustDetails = matchedHashInUntrustedChannel
+	state.sourceTrustReason = trustedRecords.empty()
+		? u"no-trusted-records"_q
+		: !hasValidTrustedRecord
+		? u"no-valid-trusted-records"_q
+		: matchedHashInUntrustedChannel
 		? u"hash-found-in-untrusted-channel"_q
 		: matchedHashWithoutOrigin
 		? u"matching-record-missing-origin"_q
 		: u"hash-not-in-trusted-records"_q;
+	state.sourceTrustDetails = state.sourceTrustReason;
 }
 
 QJsonValue Manager::storedSettingValue(

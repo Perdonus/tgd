@@ -8,11 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_astrogram.h"
 
 #include "core/application.h"
+#include "base/options.h"
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
 #include "core/launcher.h"
 #include "core/update_checker.h"
 #include "core/version.h"
+#include "info/profile/info_profile_actions.h"
 #include "logs.h"
 #include "lang/lang_instance.h"
 #include "plugins/plugins_manager.h"
@@ -369,6 +371,22 @@ void AddActionButton(
 		st::settingsButton,
 		std::move(descriptor)
 	)->addClickHandler(std::move(callback));
+}
+
+void AddOptionToggle(
+		not_null<Ui::VerticalLayout*> container,
+		base::options::option<bool> &option,
+		const QString &label) {
+	const auto button = container->add(object_ptr<Button>(
+		container,
+		rpl::single(label),
+		st::settingsButtonNoIcon));
+	button->toggleOn(rpl::single(option.value()));
+	button->toggledChanges(
+	) | rpl::on_next([&option](bool toggled) {
+		option.set(toggled);
+		Core::App().saveSettings();
+	}, button->lifetime());
 }
 
 void ShowSingleLineTextEditBox(
@@ -1001,6 +1019,12 @@ void SetupAstrogramInterface(
 			"Показывать голоса в опросах до голосования",
 			"Show poll votes before voting"),
 		[&](bool toggled) { settings.setShowPollResultsBeforeVoting(toggled); });
+	AddOptionToggle(
+		container,
+		base::options::lookup<bool>(Info::Profile::kOptionShowPeerIdBelowAbout),
+		RuEn(
+			"Показывать ID пользователей, чатов и каналов",
+			"Show user, chat and channel IDs in profiles"));
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Перевод и речь", "Translation & speech"));
 	AddToggle(
