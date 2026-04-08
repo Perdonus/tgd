@@ -619,9 +619,10 @@ void MainMenu::setupAccounts() {
 	_accounts->toggleOn(Core::App().settings().mainMenuAccountsShownValue());
 	_accounts->finishAnimating();
 	_accounts->shownValue(
-	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
+	) | rpl::distinct_until_changed() | rpl::on_next([=](bool shown) {
 		_toggleAccounts->setToggled(shown);
 	}, inner->lifetime());
+	_toggleAccounts->setToggled(_accounts->toggled());
 
 	_shadow->setDuration(0)->toggleOn(_accounts->shownValue());
 }

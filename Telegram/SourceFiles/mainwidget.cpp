@@ -60,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_service_message.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "lang/lang_cloud_manager.h"
 #include "inline_bots/inline_bot_layout_item.h"

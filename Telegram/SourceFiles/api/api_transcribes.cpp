@@ -676,11 +676,11 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 		return;
 	}
 
-	Logs::writeClient(QString::fromLatin1(
-		"[local-transcribe] started item=%1:%2 cultures=%3")
-		.arg(QString::number(id.peer.value))
-		.arg(id.msg)
-		.arg(cultures.join(u","_q)));
+		Logs::writeClient(QString::fromLatin1(
+			"[local-transcribe] started item=%1:%2 cultures=%3")
+			.arg(QString::number(id.peer.value))
+			.arg(QString::number(id.msg.bare))
+			.arg(cultures.join(u","_q)));
 
 	crl::async([=, session = _session] {
 		auto result = LocalSpeechRunResult();
@@ -742,12 +742,12 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 				}
 				session->data().requestItemResize(current);
 			}
-			Logs::writeClient(QString::fromLatin1(
-				"[local-transcribe] finished item=%1:%2 success=%3 culture=%4 recognizer=%5 error=%6")
-				.arg(QString::number(id.peer.value))
-				.arg(id.msg)
-				.arg(result.success ? u"true"_q : u"false"_q)
-				.arg(result.culture)
+				Logs::writeClient(QString::fromLatin1(
+					"[local-transcribe] finished item=%1:%2 success=%3 culture=%4 recognizer=%5 error=%6")
+					.arg(QString::number(id.peer.value))
+					.arg(QString::number(id.msg.bare))
+					.arg(result.success ? u"true"_q : u"false"_q)
+					.arg(result.culture)
 				.arg(result.recognizer)
 				.arg(entry.error));
 		});

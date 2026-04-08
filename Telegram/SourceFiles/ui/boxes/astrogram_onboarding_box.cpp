@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/effects/ministar_particles.h"
