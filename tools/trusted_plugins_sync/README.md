@@ -48,6 +48,8 @@ export ASTROGRAM_TRUST_OUTPUT="/srv/astrogram/trusted_plugins.export.json"
 python3 tools/trusted_plugins_sync/bot.py
 ```
 
+`ASTROGRAM_TRUST_CHANNEL_LABELS` попадает в клиентский UI как человекочитаемая метка доверенной записи. Лучше указывать там короткое нормальное имя источника, например `AstroPlugins`.
+
 ## Формат экспорта
 
 Бот пишет JSON, который можно почти напрямую подставить в серверный `appConfig`:

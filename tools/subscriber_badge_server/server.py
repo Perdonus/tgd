@@ -1,105 +1,122 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import os
-import sqlite3
+
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
+from peer_ids import describe_peer_ref, parse_peer_ref
+from store import db_conn
+
+
 DB_PATH = os.environ.get("ASTRO_BADGE_DB", "./badge.db")
 DEFAULT_EMOJI_STATUS_ID = int(os.environ.get("ASTRO_BADGE_EMOJI_ID", "0"))
-CHAT_TYPE_MASK = (1 << 48) - 1
-BOT_API_CHANNEL_OFFSET = 10**12
 
 app = FastAPI(title="Astrogram Subscriber Badge API")
 
 
-def make_peer_id(shift: int, bare: int) -> int:
-    if bare <= 0:
-        raise ValueError("bare peer id must be positive")
-    return int((shift << 48) | bare)
-
-
-def normalize_peer_id(value: int) -> int:
-    if value > CHAT_TYPE_MASK:
-        return int(value)
-    if value <= -BOT_API_CHANNEL_OFFSET:
-        bare = abs(value) - BOT_API_CHANNEL_OFFSET
-        return make_peer_id(2, bare)
-    if value < 0:
-        return make_peer_id(1, abs(value))
-    return make_peer_id(0, value)
-
-
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    columns = [
-        row[1]
-        for row in conn.execute("PRAGMA table_info(subscribers)").fetchall()
-    ]
-    if not columns:
-        conn.execute(
-            """
-            CREATE TABLE subscribers (
-                peer_id INTEGER PRIMARY KEY,
-                emoji_status_id INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL
-            )
-            """
-        )
-        conn.commit()
-        return
-    if "peer_id" in columns:
-        return
-    if "user_id" in columns:
-        conn.execute("ALTER TABLE subscribers RENAME TO subscribers_legacy")
-        conn.execute(
-            """
-            CREATE TABLE subscribers (
-                peer_id INTEGER PRIMARY KEY,
-                emoji_status_id INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO subscribers(peer_id, emoji_status_id, updated_at)
-            SELECT user_id, emoji_status_id, updated_at
-            FROM subscribers_legacy
-            """
-        )
-        conn.execute("DROP TABLE subscribers_legacy")
-        conn.commit()
-        return
-    raise RuntimeError("Unsupported subscribers schema")
-
-
-def db_conn():
-    conn = sqlite3.connect(DB_PATH)
-    ensure_schema(conn)
-    return conn
+def resolve_lookup(
+    *,
+    peer_ref: str | None,
+    peer_id: str | None,
+    user_id: int | None,
+    peer_type: str | None,
+    bare_id: int | None,
+):
+    if peer_ref:
+        return parse_peer_ref(peer_ref)
+    if peer_type and bare_id is not None:
+        return parse_peer_ref(f"{peer_type}:{bare_id}")
+    if peer_id:
+        return parse_peer_ref(peer_id)
+    if user_id is not None:
+        return parse_peer_ref(f"user:{int(user_id)}")
+    return None
 
 
 @app.get("/api/astrogram/subscriber-badge")
 def subscriber_badge(
-    peer_id: int | None = Query(None),
+    peer_ref: str | None = Query(
+        None,
+        description="Explicit peer reference: user:123, chat:123, channel:381..., peer:5629...",
+    ),
+    peer_id: str | None = Query(
+        None,
+        description="Client/internal peer id or any supported peer reference string.",
+    ),
     user_id: int | None = Query(None, gt=0),
+    peer_type: str | None = Query(
+        None,
+        description="Optional explicit type for bare_id: user, chat or channel.",
+    ),
+    bare_id: int | None = Query(
+        None,
+        gt=0,
+        description="Positive bare profile id used together with peer_type.",
+    ),
+    debug: bool = Query(False),
 ):
-    lookup = peer_id if peer_id is not None else user_id
+    try:
+        lookup = resolve_lookup(
+            peer_ref=peer_ref,
+            peer_id=peer_id,
+            user_id=user_id,
+            peer_type=peer_type,
+            bare_id=bare_id,
+        )
+    except ValueError as e:
+        return JSONResponse(
+            {"badge": False, "emoji_status_id": 0, "error": str(e)},
+            status_code=400,
+        )
     if lookup is None:
-        return JSONResponse({"badge": False, "emoji_status_id": 0}, status_code=400)
-    normalized = normalize_peer_id(int(lookup))
-    conn = db_conn()
+        return JSONResponse(
+            {"badge": False, "emoji_status_id": 0, "error": "missing peer reference"},
+            status_code=400,
+        )
+
+    conn = db_conn(DB_PATH)
     try:
         row = conn.execute(
-            "SELECT emoji_status_id FROM subscribers WHERE peer_id = ?",
-            (normalized,),
+            """
+            SELECT peer_id, peer_type, bare_id, emoji_status_id, updated_at
+            FROM subscribers
+            WHERE peer_id = ?
+            """,
+            (lookup.peer_id,),
         ).fetchone()
     finally:
         conn.close()
 
     if not row:
-        return JSONResponse({"badge": False, "emoji_status_id": 0})
+        payload = {"badge": False, "emoji_status_id": 0}
+        if debug:
+            payload.update(
+                {
+                    "peer_id": lookup.peer_id,
+                    "peer_type": lookup.peer_type,
+                    "bare_id": lookup.bare_id,
+                    "display_peer": lookup.display,
+                    "canonical_ref": lookup.canonical_ref,
+                }
+            )
+        return JSONResponse(payload)
 
-    emoji_id = int(row[0]) if row[0] is not None else 0
+    emoji_id = int(row["emoji_status_id"]) if row["emoji_status_id"] is not None else 0
     if emoji_id <= 0:
         emoji_id = DEFAULT_EMOJI_STATUS_ID
-    return JSONResponse({"badge": True, "emoji_status_id": emoji_id})
+
+    payload = {"badge": True, "emoji_status_id": emoji_id}
+    if debug:
+        payload.update(
+            {
+                "peer_id": int(row["peer_id"]),
+                "peer_type": str(row["peer_type"]),
+                "bare_id": int(row["bare_id"]),
+                "display_peer": describe_peer_ref(lookup),
+                "canonical_ref": lookup.canonical_ref,
+                "updated_at": int(row["updated_at"]),
+            }
+        )
+    return JSONResponse(payload)

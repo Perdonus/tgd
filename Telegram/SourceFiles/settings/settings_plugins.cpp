@@ -231,14 +231,57 @@ QString PluginSourceOriginText(const ::Plugins::PluginState &state) {
 	return PluginUiText(
 		u"Trusted channel %1 · post %2"_q,
 		u"Доверенный канал %1 · пост %2"_q)
-		.arg(QString::number(state.sourceChannelId))
-		.arg(QString::number(state.sourceMessageId));
+			.arg(QString::number(state.sourceChannelId))
+			.arg(QString::number(state.sourceMessageId));
+}
+
+QString PluginSourceOriginKey(const ::Plugins::PluginState &state) {
+	if (!state.sourceChannelId || (state.sourceMessageId <= 0)) {
+		return QString();
+	}
+	return QString::number(state.sourceChannelId)
+		+ u":"_q
+		+ QString::number(state.sourceMessageId);
 }
 
 QString PluginSourceHashText(const ::Plugins::PluginState &state) {
 	return state.sha256.isEmpty()
 		? QString()
-		: (PluginUiText(u"SHA-256: "_q, u"SHA-256: "_q) + state.sha256);
+		: (PluginUiText(
+			u"Exact SHA-256: "_q,
+			u"Точный SHA-256: "_q) + state.sha256);
+}
+
+QString PluginSourceReasonCode(const ::Plugins::PluginState &state) {
+	if (!state.sourceTrustReason.trimmed().isEmpty()) {
+		return state.sourceTrustReason.trimmed();
+	}
+	return state.sourceVerified
+		? QString()
+		: state.sourceTrustDetails.trimmed();
+}
+
+QString PluginSourceRecordLabelText(const ::Plugins::PluginState &state) {
+	if (!state.sourceVerified) {
+		return QString();
+	}
+	const auto label = state.sourceTrustDetails.trimmed();
+	if (label.isEmpty() || (label == PluginSourceOriginKey(state))) {
+		return QString();
+	}
+	return PluginUiText(
+		u"Trusted record label: %1"_q,
+		u"Метка доверенной записи: %1"_q).arg(label);
+}
+
+QString PluginSourceExactMatchText(PluginSourceBadgeMode mode) {
+	return (mode == PluginSourceBadgeMode::Card)
+		? PluginUiText(
+			u"Exact SHA-256 matches a trusted Astrogram source record."_q,
+			u"Точный SHA-256 совпал с доверенной записью источника Astrogram."_q)
+		: PluginUiText(
+			u"This exact plugin binary matches a trusted Astrogram source record by SHA-256."_q,
+			u"Точный бинарник этого плагина совпал с доверенной записью источника Astrogram по SHA-256."_q);
 }
 
 QString PluginSourceBadgeDetailText(
@@ -248,68 +291,83 @@ QString PluginSourceBadgeDetailText(
 		if (line.trimmed().isEmpty()) {
 			return base;
 		}
-		return base.isEmpty() ? line.trimmed() : (base + u"\n"_q + line.trimmed());
+		return base.isEmpty()
+			? line.trimmed()
+			: (base + u"\n"_q + line.trimmed());
 	};
 	if (state.sourceVerified) {
-		if (mode == PluginSourceBadgeMode::Card) {
-			return !state.sourceTrustDetails.trimmed().isEmpty()
-				? (PluginUiText(
-					u"Trusted record: "_q,
-					u"Доверенная запись: "_q)
-					+ state.sourceTrustDetails.trimmed())
-				: PluginUiText(
-					u"Exact SHA-256 matched a trusted Astrogram source."_q,
-					u"Точный SHA-256 совпал с доверенным источником Astrogram."_q);
+		auto result = PluginSourceExactMatchText(mode);
+		if (const auto label = PluginSourceRecordLabelText(state); !label.isEmpty()) {
+			result = addLine(result, label);
 		}
-		auto result = !state.sourceTrustDetails.trimmed().isEmpty()
-			? (PluginUiText(
-				u"Trusted record: "_q,
-				u"Доверенная запись: "_q)
-				+ state.sourceTrustDetails.trimmed())
-			: PluginUiText(
-				u"Exact SHA-256 matched a trusted Astrogram source."_q,
-				u"Точный SHA-256 совпал с доверенным источником Astrogram."_q);
-		result = addLine(
-			result,
-			PluginUiText(
-				u"This exact plugin binary is present in trusted Astrogram source records."_q,
-				u"Точный бинарник этого плагина присутствует в доверенных записях источников Astrogram."_q));
 		if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
 			result = addLine(result, origin);
 		}
 		return result;
 	}
-	if (state.sourceTrustDetails == u"sha256-unavailable"_q) {
+	const auto reason = PluginSourceReasonCode(state);
+	if (reason == u"sha256-unavailable"_q) {
 		return PluginUiText(
 			u"Could not compute the plugin SHA-256 hash."_q,
 			u"Не удалось вычислить SHA-256 хеш плагина."_q);
 	}
-	if (state.sourceTrustDetails == u"no-active-session"_q) {
+	if (reason == u"no-active-session"_q) {
 		return PluginUiText(
 			u"Trusted source records will become available after the active session finishes loading."_q,
 			u"Доверенные записи источников станут доступны после полной загрузки активной сессии."_q);
 	}
-	if (state.sourceTrustDetails == u"hash-found-in-untrusted-channel"_q) {
+	if (reason == u"no-trusted-records"_q) {
 		return (mode == PluginSourceBadgeMode::Card)
+			? PluginUiText(
+				u"The trusted source record list is still empty."_q,
+				u"Список доверенных записей источников пока пуст."_q)
+			: PluginUiText(
+				u"No trusted Astrogram source records have been published yet, so this plugin cannot be verified."_q,
+				u"Доверенные записи источников Astrogram ещё не опубликованы, поэтому этот плагин пока нельзя подтвердить."_q);
+	}
+	if (reason == u"no-valid-trusted-records"_q) {
+		return (mode == PluginSourceBadgeMode::Card)
+			? PluginUiText(
+				u"Trusted source records exist, but they are malformed."_q,
+				u"Доверенные записи источников существуют, но они повреждены."_q)
+			: PluginUiText(
+				u"Trusted source records were loaded, but none of them contain a valid exact SHA-256 entry."_q,
+				u"Доверенные записи источников загрузились, но ни одна из них не содержит корректный exact SHA-256."_q);
+	}
+	if (reason == u"hash-found-in-untrusted-channel"_q) {
+		auto result = (mode == PluginSourceBadgeMode::Card)
 			? PluginUiText(
 				u"Matching hash exists, but only outside the trusted source channel list."_q,
 				u"Совпадающий хеш найден, но только вне списка доверенных каналов-источников."_q)
 			: PluginUiText(
 				u"A matching SHA-256 record exists, but it points to a channel that is not in the trusted source allowlist."_q,
 				u"Совпадающая запись SHA-256 существует, но указывает на канал вне списка доверенных источников."_q);
+		if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
+			result = addLine(result, origin);
+		}
+		return result;
 	}
-	if (state.sourceTrustDetails == u"matching-record-missing-origin"_q) {
+	if (reason == u"matching-record-missing-origin"_q) {
 		return mode == PluginSourceBadgeMode::Card
 			? PluginUiText(
 				u"Matching hash record exists, but its source metadata is incomplete."_q,
 				u"Совпадающая запись хеша есть, но у неё неполные метаданные источника."_q)
 			: PluginUiText(
-				u"A matching SHA-256 record exists, but it does not contain a valid trusted channel and post id."_q,
-				u"Совпадающая запись SHA-256 существует, но в ней нет корректных идентификаторов доверенного канала и поста."_q);
+					u"A matching SHA-256 record exists, but it does not contain a valid trusted channel and post id."_q,
+					u"Совпадающая запись SHA-256 существует, но в ней нет корректных идентификаторов доверенного канала и поста."_q);
 	}
-	return PluginUiText(
+	if (mode == PluginSourceBadgeMode::Card) {
+		return PluginUiText(
+			u"This exact SHA-256 was not found in trusted Astrogram source records."_q,
+			u"Точный SHA-256 не найден в доверенных записях источников Astrogram."_q);
+	}
+	auto result = PluginUiText(
 		u"This exact plugin binary SHA-256 was not found in trusted Astrogram source records."_q,
 		u"Точный SHA-256 этого бинарника не найден в доверенных записях источников Astrogram."_q);
+	if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
+		result = addLine(result, origin);
+	}
+	return result;
 }
 
 void AddPluginSourceBadge(

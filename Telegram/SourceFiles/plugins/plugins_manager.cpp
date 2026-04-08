@@ -5550,6 +5550,8 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 	auto matchedHashInUntrustedChannel = false;
 	auto matchedHashWithoutOrigin = false;
 	auto hasValidTrustedRecord = false;
+	auto matchedChannelId = int64(0);
+	auto matchedMessageId = int64(0);
 	for (const auto &rawRecord : trustedRecords) {
 		const auto record = parseRecord(rawRecord);
 		if (!record.sha256.isEmpty()) {
@@ -5569,6 +5571,8 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 				trustedChannels.end(),
 				record.channelId) == trustedChannels.end())) {
 			matchedHashInUntrustedChannel = true;
+			matchedChannelId = record.channelId;
+			matchedMessageId = record.messageId;
 			continue;
 		}
 		state.sourceVerified = true;
@@ -5586,6 +5590,8 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		return;
 	}
 
+	state.sourceChannelId = matchedChannelId;
+	state.sourceMessageId = matchedMessageId;
 	state.sourceTrustReason = trustedRecords.empty()
 		? u"no-trusted-records"_q
 		: !hasValidTrustedRecord

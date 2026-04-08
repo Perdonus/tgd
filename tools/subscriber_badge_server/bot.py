@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import os
-import sqlite3
-import time
+from pathlib import Path
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-BOT_TOKEN = os.environ.get("ASTRO_BADGE_BOT_TOKEN", "")
+from peer_ids import describe_peer_ref, parse_peer_ref
+from store import db_conn, delete_badge, get_badge, list_badges, upsert_badge
+
+
+DEFAULT_TOKEN_FILE = Path.home() / ".config" / "astrogram" / "badge_bot_token"
+BOT_TOKEN = os.environ.get("ASTRO_BADGE_BOT_TOKEN", "").strip()
 DB_PATH = os.environ.get("ASTRO_BADGE_DB", "./badge.db")
 ADMIN_IDS = {
     int(x.strip())
@@ -13,211 +20,288 @@ ADMIN_IDS = {
     if x.strip().isdigit()
 }
 DEFAULT_EMOJI_STATUS_ID = int(os.environ.get("ASTRO_BADGE_EMOJI_ID", "0"))
-CHAT_TYPE_MASK = (1 << 48) - 1
-BOT_API_CHANNEL_OFFSET = 10**12
 
 
-def make_peer_id(shift: int, bare: int) -> int:
-    if bare <= 0:
-        raise ValueError("bare peer id must be positive")
-    return int((shift << 48) | bare)
-
-
-def normalize_peer_id(value: int) -> int:
-    if value > CHAT_TYPE_MASK:
-        return int(value)
-    if value <= -BOT_API_CHANNEL_OFFSET:
-        bare = abs(value) - BOT_API_CHANNEL_OFFSET
-        return make_peer_id(2, bare)
-    if value < 0:
-        return make_peer_id(1, abs(value))
-    return make_peer_id(0, value)
-
-
-def describe_peer_id(peer_id: int) -> str:
-    shift = (int(peer_id) >> 48) & 0xFF
-    bare = int(peer_id) & CHAT_TYPE_MASK
-    if shift == 2:
-        return f"channel(-100{bare})"
-    if shift == 1:
-        return f"chat(-{bare})"
-    return f"user({bare})"
-
-
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    columns = [
-        row[1]
-        for row in conn.execute("PRAGMA table_info(subscribers)").fetchall()
-    ]
-    if not columns:
-        conn.execute(
-            """
-            CREATE TABLE subscribers (
-                peer_id INTEGER PRIMARY KEY,
-                emoji_status_id INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL
-            )
-            """
-        )
-        conn.commit()
-        return
-    if "peer_id" in columns:
-        return
-    if "user_id" in columns:
-        conn.execute("ALTER TABLE subscribers RENAME TO subscribers_legacy")
-        conn.execute(
-            """
-            CREATE TABLE subscribers (
-                peer_id INTEGER PRIMARY KEY,
-                emoji_status_id INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO subscribers(peer_id, emoji_status_id, updated_at)
-            SELECT user_id, emoji_status_id, updated_at
-            FROM subscribers_legacy
-            """
-        )
-        conn.execute("DROP TABLE subscribers_legacy")
-        conn.commit()
-        return
-    raise RuntimeError("Unsupported subscribers schema")
-
-
-def db_conn():
-    conn = sqlite3.connect(DB_PATH)
-    ensure_schema(conn)
-    return conn
+def load_token() -> str:
+    if BOT_TOKEN:
+        return BOT_TOKEN
+    configured = os.environ.get("ASTRO_BADGE_BOT_TOKEN_FILE", "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    if DEFAULT_TOKEN_FILE.is_file():
+        return DEFAULT_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    return ""
 
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS if ADMIN_IDS else False
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def require_admin(update: Update) -> bool:
+    uid = update.effective_user.id if update.effective_user else 0
+    return is_admin(uid)
+
+
+def usage_text() -> str:
+    return (
         "Astrogram Badge Bot.\n"
         "Commands:\n"
-        "/grant <peer_or_chat_id> [emoji_status_id]\n"
-        "/revoke <peer_or_chat_id>\n"
-        "/check <peer_or_chat_id>\n"
+        "/grant <peer_ref> [emoji_status_id]\n"
+        "/grant_user <user_id> [emoji_status_id]\n"
+        "/grant_chat <chat_id> [emoji_status_id]\n"
+        "/grant_channel <channel_profile_id_or_-100id> [emoji_status_id]\n"
+        "/revoke <peer_ref>\n"
+        "/revoke_user <user_id>\n"
+        "/revoke_chat <chat_id>\n"
+        "/revoke_channel <channel_profile_id_or_-100id>\n"
+        "/check <peer_ref>\n"
+        "/check_user <user_id>\n"
+        "/check_chat <chat_id>\n"
+        "/check_channel <channel_profile_id_or_-100id>\n"
+        "/normalize <peer_ref>\n"
+        "/list [limit]\n"
         "\n"
-        "Examples:\n"
-        "/grant 6603471853\n"
-        "/grant -1003814280064"
+        "Supported peer_ref formats:\n"
+        "- user id: 6603471853 or user:6603471853\n"
+        "- basic group chat id: -123456789 or chat:123456789\n"
+        "- channel/supergroup Bot API id: -1003814280064\n"
+        "- channel bare profile id: channel:3814280064\n"
+        "- internal client peer id: peer:562949953421312\n"
+        "\n"
+        "Important: a positive bare id without prefix is treated as user.\n"
+        "For channels from profile ids, use channel:<id>."
     )
 
 
-async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else 0
-    if not is_admin(uid):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(usage_text())
+
+
+async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not require_admin(update):
         await update.message.reply_text("Access denied.")
         return
-
     if not context.args:
-        await update.message.reply_text("Usage: /grant <peer_or_chat_id> [emoji_status_id]")
+        await update.message.reply_text("Usage: /grant <peer_ref> [emoji_status_id]")
         return
-
     try:
-        peer_id = normalize_peer_id(int(context.args[0]))
-        emoji_id = int(context.args[1]) if len(context.args) > 1 else DEFAULT_EMOJI_STATUS_ID
-    except ValueError:
-        await update.message.reply_text("Invalid ids")
-        return
-
-    conn = db_conn()
-    try:
-        conn.execute(
-            "INSERT INTO subscribers(peer_id, emoji_status_id, updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(peer_id) DO UPDATE SET emoji_status_id=excluded.emoji_status_id, updated_at=excluded.updated_at",
-            (peer_id, emoji_id, int(time.time())),
+        peer = parse_peer_ref(context.args[0])
+        emoji_id = (
+            int(context.args[1])
+            if len(context.args) > 1
+            else DEFAULT_EMOJI_STATUS_ID
         )
-        conn.commit()
+    except ValueError as e:
+        await update.message.reply_text(f"Invalid input: {e}")
+        return
+    conn = db_conn(DB_PATH)
+    try:
+        upsert_badge(conn, peer, emoji_id)
     finally:
         conn.close()
-
     await update.message.reply_text(
-        f"Granted badge for {describe_peer_id(peer_id)} / peer_id={peer_id}, emoji_status_id={emoji_id}"
+        f"Granted badge for {describe_peer_ref(peer)} / emoji_status_id={emoji_id}"
     )
 
 
-async def revoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else 0
-    if not is_admin(uid):
+def _typed_ref(kind: str, raw: str) -> str:
+    return f"{kind}:{raw}"
+
+
+async def grant_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /grant_user <user_id> [emoji_status_id]")
+        return
+    context.args[0] = _typed_ref("user", context.args[0])
+    await grant(update, context)
+
+
+async def grant_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /grant_chat <chat_id> [emoji_status_id]")
+        return
+    context.args[0] = _typed_ref("chat", context.args[0])
+    await grant(update, context)
+
+
+async def grant_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /grant_channel <channel_profile_id_or_-100id> [emoji_status_id]"
+        )
+        return
+    context.args[0] = _typed_ref("channel", context.args[0])
+    await grant(update, context)
+
+
+async def revoke(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not require_admin(update):
         await update.message.reply_text("Access denied.")
         return
-
     if not context.args:
-        await update.message.reply_text("Usage: /revoke <peer_or_chat_id>")
+        await update.message.reply_text("Usage: /revoke <peer_ref>")
         return
-
     try:
-        peer_id = normalize_peer_id(int(context.args[0]))
-    except ValueError:
-        await update.message.reply_text("Invalid peer/chat id")
+        peer = parse_peer_ref(context.args[0])
+    except ValueError as e:
+        await update.message.reply_text(f"Invalid input: {e}")
         return
-
-    conn = db_conn()
+    conn = db_conn(DB_PATH)
     try:
-        conn.execute("DELETE FROM subscribers WHERE peer_id = ?", (peer_id,))
-        conn.commit()
+        delete_badge(conn, peer)
     finally:
         conn.close()
-
-    await update.message.reply_text(
-        f"Revoked badge for {describe_peer_id(peer_id)} / peer_id={peer_id}"
-    )
+    await update.message.reply_text(f"Revoked badge for {describe_peer_ref(peer)}")
 
 
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else 0
-    if not is_admin(uid):
+async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /revoke_user <user_id>")
+        return
+    context.args[0] = _typed_ref("user", context.args[0])
+    await revoke(update, context)
+
+
+async def revoke_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /revoke_chat <chat_id>")
+        return
+    context.args[0] = _typed_ref("chat", context.args[0])
+    await revoke(update, context)
+
+
+async def revoke_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /revoke_channel <channel_profile_id_or_-100id>")
+        return
+    context.args[0] = _typed_ref("channel", context.args[0])
+    await revoke(update, context)
+
+
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not require_admin(update):
         await update.message.reply_text("Access denied.")
         return
-
     if not context.args:
-        await update.message.reply_text("Usage: /check <peer_or_chat_id>")
+        await update.message.reply_text("Usage: /check <peer_ref>")
         return
-
     try:
-        peer_id = normalize_peer_id(int(context.args[0]))
-    except ValueError:
-        await update.message.reply_text("Invalid peer/chat id")
+        peer = parse_peer_ref(context.args[0])
+    except ValueError as e:
+        await update.message.reply_text(f"Invalid input: {e}")
         return
-
-    conn = db_conn()
+    conn = db_conn(DB_PATH)
     try:
-        row = conn.execute(
-            "SELECT emoji_status_id, updated_at FROM subscribers WHERE peer_id = ?",
-            (peer_id,),
-        ).fetchone()
+        row = get_badge(conn, peer)
     finally:
         conn.close()
-
     if not row:
-        await update.message.reply_text("No badge")
+        await update.message.reply_text(f"No badge for {describe_peer_ref(peer)}")
         return
-
     await update.message.reply_text(
-        f"Badge enabled for {describe_peer_id(peer_id)} / peer_id={peer_id}: "
-        f"emoji_status_id={row[0]}, updated_at={row[1]}"
+        f"Badge enabled for {describe_peer_ref(peer)}: "
+        f"emoji_status_id={int(row['emoji_status_id'])}, "
+        f"updated_at={int(row['updated_at'])}"
     )
 
 
-def main():
-    if not BOT_TOKEN:
-        raise RuntimeError("Set ASTRO_BADGE_BOT_TOKEN")
+async def check_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /check_user <user_id>")
+        return
+    context.args[0] = _typed_ref("user", context.args[0])
+    await check(update, context)
+
+
+async def check_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /check_chat <chat_id>")
+        return
+    context.args[0] = _typed_ref("chat", context.args[0])
+    await check(update, context)
+
+
+async def check_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /check_channel <channel_profile_id_or_-100id>")
+        return
+    context.args[0] = _typed_ref("channel", context.args[0])
+    await check(update, context)
+
+
+async def normalize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not require_admin(update):
+        await update.message.reply_text("Access denied.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /normalize <peer_ref>")
+        return
+    try:
+        peer = parse_peer_ref(context.args[0])
+    except ValueError as e:
+        await update.message.reply_text(f"Invalid input: {e}")
+        return
+    await update.message.reply_text(describe_peer_ref(peer))
+
+
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not require_admin(update):
+        await update.message.reply_text("Access denied.")
+        return
+    limit = 20
+    if context.args:
+        try:
+            limit = max(1, min(int(context.args[0]), 50))
+        except ValueError:
+            await update.message.reply_text("Usage: /list [limit]")
+            return
+    conn = db_conn(DB_PATH)
+    try:
+        rows = list_badges(conn, limit)
+    finally:
+        conn.close()
+    if not rows:
+        await update.message.reply_text("No badge records.")
+        return
+    lines = []
+    for row in rows:
+        peer = parse_peer_ref(f"{row['peer_type']}:{int(row['bare_id'])}")
+        lines.append(
+            f"- {describe_peer_ref(peer)} / "
+            f"emoji_status_id={int(row['emoji_status_id'])}"
+        )
+    text = "Badge records:\n" + "\n".join(lines)
+    await update.message.reply_text(text[:4000])
+
+
+def main() -> None:
+    token = load_token()
+    if not token:
+        raise RuntimeError(
+            "Set ASTRO_BADGE_BOT_TOKEN or ASTRO_BADGE_BOT_TOKEN_FILE "
+            f"(default file: {DEFAULT_TOKEN_FILE})"
+        )
     if not ADMIN_IDS:
         raise RuntimeError("Set ASTRO_BADGE_ADMIN_IDS, comma-separated telegram numeric ids")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("grant", grant))
+    app.add_handler(CommandHandler("grant_user", grant_user))
+    app.add_handler(CommandHandler("grant_chat", grant_chat))
+    app.add_handler(CommandHandler("grant_channel", grant_channel))
     app.add_handler(CommandHandler("revoke", revoke))
+    app.add_handler(CommandHandler("revoke_user", revoke_user))
+    app.add_handler(CommandHandler("revoke_chat", revoke_chat))
+    app.add_handler(CommandHandler("revoke_channel", revoke_channel))
     app.add_handler(CommandHandler("check", check))
+    app.add_handler(CommandHandler("check_user", check_user))
+    app.add_handler(CommandHandler("check_chat", check_chat))
+    app.add_handler(CommandHandler("check_channel", check_channel))
+    app.add_handler(CommandHandler("normalize", normalize))
+    app.add_handler(CommandHandler("list", list_command))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
