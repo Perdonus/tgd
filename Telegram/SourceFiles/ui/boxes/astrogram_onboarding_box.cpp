@@ -55,7 +55,8 @@ enum class Step {
 	Presets = 1,
 	PluginsInfo = 2,
 	PluginsInstall = 3,
-	Finish = 4,
+	ShellMode = 4,
+	Finish = 5,
 };
 
 [[nodiscard]] QString RuEn(const char *ru, const char *en) {
@@ -507,12 +508,17 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 
 		const auto container = box->verticalLayout();
 		AddUniqueCloseButton(box);
+		const auto plugins = box->lifetime().make_state<
+				std::vector<AstrogramOnboardingPlugin>>(std::move(args.plugins));
 
 		struct State {
 			Step step = Step::Welcome;
 			PeerData *pluginsChannelPeer = nullptr;
 			PeerData *officialChannelPeer = nullptr;
 			QSet<qint64> requestedPluginPosts;
+			bool reloadingPlugins = false;
+			bool autoReloadTriggered = false;
+			bool completionStored = false;
 		};
 		const auto state = box->lifetime().make_state<State>(State{
 			.pluginsChannelPeer = args.pluginsChannelPeer,
@@ -521,16 +527,21 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 		const auto weak = base::make_weak(box);
 		const auto controller = args.controller;
 
-		const auto finish = [=] {
+		const auto markCompleted = [=] {
+			if (state->completionStored) {
+				return;
+			}
+			state->completionStored = true;
 			if (args.finished) {
 				args.finished();
 			}
+		};
+		const auto finish = [=] {
+			markCompleted();
 			box->closeBox();
 		};
 		const auto openExperimental = [=] {
-			if (args.finished) {
-				args.finished();
-			}
+			markCompleted();
 			box->closeBox();
 			const auto weakController = base::make_weak(controller);
 			QTimer::singleShot(0, [=] {
@@ -539,8 +550,32 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				}
 			});
 		};
+		box->boxClosing(
+		) | rpl::on_next([=] {
+			if ((state->step == Step::Finish) && !state->completionStored) {
+				markCompleted();
+			}
+		}, box->lifetime());
 
 		const auto rebuild = std::make_shared<Fn<void()>>();
+		const auto requestPluginsReload = std::make_shared<Fn<void()>>();
+		*requestPluginsReload = [=] {
+			if (state->reloadingPlugins || !args.reloadPlugins) {
+				return;
+			}
+			state->reloadingPlugins = true;
+			args.reloadPlugins([weak, rebuild, state, plugins](
+					std::vector<AstrogramOnboardingPlugin> refreshed) {
+				if (!weak.get()) {
+					return;
+				}
+				*plugins = std::move(refreshed);
+				state->reloadingPlugins = false;
+				state->requestedPluginPosts.clear();
+				(*rebuild)();
+			});
+		};
+
 		*rebuild = [=]() mutable {
 			ClearLayout(container);
 
@@ -559,6 +594,30 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						st::boxLabel),
 					style::margins(st::boxRowPadding.left(), 6, st::boxRowPadding.right(), 0),
 					style::al_top);
+			};
+			const auto pluginStatusText = [](const AstrogramOnboardingPlugin &plugin) {
+				if (plugin.invalidServerData) {
+					return RuEn(
+						"серверная карточка требует обновления",
+						"server card needs refresh");
+				} else if (plugin.pendingServerData) {
+					return RuEn(
+						"карточка ещё загружается с сервера",
+						"card is still loading from the server");
+				}
+				return RuEn(
+					"рекомендация сервера",
+					"server recommendation");
+			};
+			const auto applyShellPreset = [&](AstrogramOnboardingShellPreset preset) {
+				if (args.applyShellPreset && !args.applyShellPreset(preset)) {
+					controller->showToast(RuEn(
+						"Не удалось сохранить пресет меню Astrogram.",
+						"Failed to save the Astrogram menu preset."));
+					return;
+				}
+				state->step = Step::Finish;
+				(*rebuild)();
 			};
 
 			switch (state->step) {
@@ -659,16 +718,20 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					(*rebuild)();
 				});
 				AddLinkAction(container, RuEn("Позже", "Later"), [=] {
-					state->step = Step::Finish;
+					state->step = Step::ShellMode;
 					(*rebuild)();
 				});
 			} break;
 			case Step::PluginsInstall: {
+				if (!state->autoReloadTriggered && args.reloadPlugins) {
+					state->autoReloadTriggered = true;
+					(*requestPluginsReload)();
+				}
 				addTitle(
 					RuEn("Рекомендуемые плагины", "Recommended plugins"),
 					RuEn(
-						"Выбирай, что поставить сразу. Позже можно вернуться к этому списку из раздела плагинов и канала с пакетами.",
-						"Choose what to install right now. You can come back to this list later from the plugins section and the packages channel."));
+						"Список ниже тянется из серверного app config. Можно обновить его прямо сейчас без перезапуска клиента.",
+						"The list below is pulled from server app config. You can refresh it right now without restarting the client."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				const auto fallbackPluginsTitle = args.pluginsChannelTitle.isEmpty()
 					? RuEn("AstroPlugins", "AstroPlugins")
@@ -688,13 +751,33 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						args.subscribePluginsChannel();
 					}
 				});
-				if (args.plugins.empty()) {
+				if (args.reloadPlugins) {
+					AddLinkAction(container, RuEn("Обновить рекомендации с сервера", "Refresh recommendations from server"), [=] {
+						(*requestPluginsReload)();
+					});
+				}
+				if (state->reloadingPlugins) {
 					container->add(
 						object_ptr<Ui::FlatLabel>(
 							container,
 							rpl::single(RuEn(
-								"Сервер ещё не передал рекомендованные пакеты. Когда укажешь `astrogram_onboarding_plugin_post_ids`, они появятся здесь автоматически.",
-								"The server has not provided recommended packages yet. Once `astrogram_onboarding_plugin_post_ids` is set, they will appear here automatically.")),
+								"Проверяем свежие рекомендации и подтягиваем карточки постов…",
+								"Checking fresh recommendations and fetching post cards…")),
+							st::boxLabel),
+						style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
+						style::al_top);
+				}
+				if (plugins->empty()) {
+					container->add(
+						object_ptr<Ui::FlatLabel>(
+							container,
+							rpl::single(state->reloadingPlugins
+								? RuEn(
+									"Ждём ответ сервера с рекомендованными пакетами…",
+									"Waiting for the server to provide recommended packages…")
+								: RuEn(
+									"Сервер ещё не передал рекомендованные пакеты. Когда появятся `astrogram_onboarding_plugin_post_ids`, они подтянутся сюда автоматически.",
+									"The server has not provided recommended packages yet. Once `astrogram_onboarding_plugin_post_ids` appears, they will show up here automatically.")),
 							st::boxLabel),
 						style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
 						style::al_top);
@@ -702,7 +785,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					const auto channel = state->pluginsChannelPeer
 						? state->pluginsChannelPeer->asChannel()
 						: nullptr;
-					for (const auto &plugin : args.plugins) {
+					for (const auto &plugin : *plugins) {
 						if (channel
 							&& (plugin.postId > 0)
 							&& !state->requestedPluginPosts.contains(plugin.postId)
@@ -724,32 +807,45 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							state->pluginsChannelPeer,
 							plugin,
 							fallbackPluginsTitle);
-						const auto install = plugin.install;
+						const auto sourceText = [&] {
+							const auto status = pluginStatusText(plugin);
+							return texts.sourceLabel.isEmpty()
+								? status
+								: (texts.sourceLabel + u" · "_q + status);
+						}();
+						const auto action = plugin.invalidServerData
+							? std::function<void()>([requestPluginsReload] {
+								(*requestPluginsReload)();
+							})
+							: plugin.install;
+						const auto actionText = plugin.invalidServerData
+							? RuEn("Обновить список", "Refresh list")
+							: RuEn("Установить", "Install");
 						AddChoiceButton(
 							container,
 							texts.title,
 							texts.description,
 							&st::menuIconDownload,
-							[install] {
-								if (install) {
-									install();
+							[action] {
+								if (action) {
+									action();
 								}
 							});
-						if (!texts.sourceLabel.isEmpty()) {
+						if (!sourceText.isEmpty()) {
 							container->add(
 								object_ptr<Ui::FlatLabel>(
 									container,
-									rpl::single(texts.sourceLabel),
+									rpl::single(sourceText),
 									st::defaultFlatLabel),
 								style::margins(26, -2, 26, 4),
 								style::al_top);
 						}
 						AddPrimaryButton(
 							container,
-							RuEn("Установить", "Install"),
-							[install] {
-								if (install) {
-									install();
+							actionText,
+							[action] {
+								if (action) {
+									action();
 								}
 							});
 						Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
@@ -757,13 +853,51 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				}
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
-					state->step = Step::Finish;
+					state->step = Step::ShellMode;
 					(*rebuild)();
 				});
 				AddLinkAction(container, RuEn("Посмотреть все", "View all"), [=] {
 					if (args.openAllPlugins) {
 						args.openAllPlugins();
 					}
+				});
+			} break;
+			case Step::ShellMode: {
+				addTitle(
+					RuEn("Меню и оболочка Astrogram", "Astrogram menu and shell"),
+					RuEn(
+						"Выбери стартовую геометрию бокового меню и настроек прямо сейчас. Полный editor останется в Experimental.",
+						"Choose the starting side-menu and settings geometry right now. The full editor remains in Experimental."));
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				AddChoiceButton(
+					container,
+					RuEn("Сбалансированный", "Balanced"),
+					RuEn(
+						"Иммерсивная анимация остаётся включённой, а интерфейс сохраняет компактную ширину.",
+						"Keeps immersive animation on while leaving the interface compact."),
+					&st::menuIconPalette,
+					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Balanced); });
+				AddChoiceButton(
+					container,
+					RuEn("Фокус на меню", "Focused"),
+					RuEn(
+						"Расширяет боковую панель и делает меню выразительнее без левоторцевых настроек.",
+						"Expands the side panel and makes the shell stronger without left-edge settings."),
+					&st::menuIconCustomize,
+					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Focused); });
+				AddChoiceButton(
+					container,
+					RuEn("Широкий интерфейс", "Wide shell"),
+					RuEn(
+						"Включает широкие настройки, левый край для settings и максимально выразительную оболочку.",
+						"Enables wide settings, left-edge settings placement and the most expressive shell."),
+					&st::menuIconExperimental,
+					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Wide); });
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				AddPrimaryButton(container, RuEn("Открыть полный editor", "Open full editor"), openExperimental);
+				AddLinkAction(container, RuEn("Выбрать позже", "Choose later"), [=] {
+					state->step = Step::Finish;
+					(*rebuild)();
 				});
 			} break;
 			case Step::Finish: {
@@ -797,11 +931,11 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddChoiceButton(
 					container,
 					RuEn(
-						"Настроить меню и режимы оболочки",
-						"Customize menu and shell modes"),
+						"Открыть полный editor меню",
+						"Open the full menu editor"),
 					RuEn(
-						"Откроет Experimental: editor бокового меню, иммерсивную анимацию, расширенную панель и широкие настройки.",
-						"Opens Experimental with the side menu editor, immersive animation, expanded panel and wider settings."),
+						"Experimental откроет editor бокового меню, иммерсивную анимацию, расширенную панель и широкие настройки.",
+						"Experimental opens the side-menu editor, immersive animation, expanded panel and wide settings."),
 					&st::menuIconExperimental,
 					openExperimental);
 				AddChoiceButton(
@@ -822,32 +956,32 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddPrimaryButton(container, RuEn("Завершить", "Finish"), finish);
 			} break;
 			}
-			};
-
-			if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
-				args.resolvePluginsChannel([=](PeerData *peer) {
-					if (!peer) {
-						return;
-					}
-					state->pluginsChannelPeer = peer;
-					if (weak.get() && (state->step == Step::PluginsInstall)) {
-						(*rebuild)();
-					}
-				});
-			}
-			if (!state->officialChannelPeer && args.resolveOfficialChannel) {
-				args.resolveOfficialChannel([=](PeerData *peer) {
-					if (!peer) {
-						return;
-					}
-					state->officialChannelPeer = peer;
-					if (weak.get() && (state->step == Step::Finish)) {
-						(*rebuild)();
-					}
-				});
-			}
 		};
+
+		if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
+			args.resolvePluginsChannel([=](PeerData *peer) {
+				if (!peer) {
+					return;
+				}
+				state->pluginsChannelPeer = peer;
+				if (weak.get() && (state->step == Step::PluginsInstall)) {
+					(*rebuild)();
+				}
+			});
+		}
+		if (!state->officialChannelPeer && args.resolveOfficialChannel) {
+			args.resolveOfficialChannel([=](PeerData *peer) {
+				if (!peer) {
+					return;
+				}
+				state->officialChannelPeer = peer;
+				if (weak.get() && (state->step == Step::Finish)) {
+					(*rebuild)();
+				}
+			});
+		}
 		(*rebuild)();
 	}));
+}
 
 } // namespace Ui

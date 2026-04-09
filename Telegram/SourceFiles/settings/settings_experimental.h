@@ -11,6 +11,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Settings {
 
+struct ShellModePreferences;
+
+enum class AstrogramShellPreset {
+	Balanced,
+	Focused,
+	Wide,
+};
+
+[[nodiscard]] ShellModePreferences ShellModePreferencesFor(
+	AstrogramShellPreset preset);
+[[nodiscard]] bool ApplyAstrogramShellPreset(
+	AstrogramShellPreset preset);
+
 class Experimental : public Section<Experimental> {
 public:
 	Experimental(

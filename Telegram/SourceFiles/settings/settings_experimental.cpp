@@ -51,6 +51,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 
 namespace Settings {
+
+ShellModePreferences ShellModePreferencesFor(AstrogramShellPreset preset) {
+	auto result = ShellModePreferences();
+	switch (preset) {
+	case AstrogramShellPreset::Balanced:
+		break;
+	case AstrogramShellPreset::Focused:
+		result.expandedSidePanel = true;
+		break;
+	case AstrogramShellPreset::Wide:
+		result.expandedSidePanel = true;
+		result.leftEdgeSettings = true;
+		result.wideSettingsPane = true;
+		break;
+	}
+	return result;
+}
+
+bool ApplyAstrogramShellPreset(AstrogramShellPreset preset) {
+	return SaveShellModePreferences(ShellModePreferencesFor(preset));
+}
+
 namespace {
 
 [[nodiscard]] QString RuEn(const char *ru, const char *en) {
@@ -200,8 +222,8 @@ void SetupExperimental(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Вступительный гайд теперь может приводить сюда напрямую. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings.",
-			"The onboarding flow can now lead here directly. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container.")));
+			"Вступительный гайд теперь не только ведёт сюда напрямую, но и умеет заранее применять стартовые shell-пресеты. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings.",
+			"The onboarding flow can now lead here directly and pre-apply starter shell presets. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddMenuCustomizationEditor(controller, container);
 }

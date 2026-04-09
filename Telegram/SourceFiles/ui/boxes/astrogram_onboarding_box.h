@@ -27,11 +27,19 @@ enum class AstrogramOnboardingPreset {
 	Minimal,
 };
 
+enum class AstrogramOnboardingShellPreset {
+	Balanced,
+	Focused,
+	Wide,
+};
+
 struct AstrogramOnboardingPlugin {
 	QString title;
 	QString description;
 	QString sourceLabel;
 	qint64 postId = 0;
+	bool pendingServerData = false;
+	bool invalidServerData = false;
 	std::function<void()> install;
 };
 
@@ -48,7 +56,9 @@ struct AstrogramOnboardingArgs {
 	std::function<void(std::function<void(PeerData*)>)> resolvePluginsChannel;
 	std::function<void(std::function<void(PeerData*)>)> resolveOfficialChannel;
 	std::vector<AstrogramOnboardingPlugin> plugins;
+	std::function<void(std::function<void(std::vector<AstrogramOnboardingPlugin>)>)> reloadPlugins;
 	std::function<void(AstrogramOnboardingPreset)> applyPreset;
+	std::function<bool(AstrogramOnboardingShellPreset)> applyShellPreset;
 	std::function<void()> subscribePluginsChannel;
 	std::function<void()> openAllPlugins;
 	std::function<void()> openOfficialChannel;
