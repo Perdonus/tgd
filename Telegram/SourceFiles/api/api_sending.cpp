@@ -12,7 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_photo.h"
+#include "data/data_photo_media.h"
 #include "data/data_channel.h" // ChannelData::addsSignature.
 #include "data/data_user.h" // UserData::name
 #include "data/data_session.h"
@@ -31,9 +33,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "storage/localimageloader.h"
+#include "storage/storage_media_prepare.h"
 #include "storage/file_upload.h"
+#include "styles/style_boxes.h"
 #include "mainwidget.h"
 #include "apiwrap.h"
+
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 
 namespace Api {
 namespace {
@@ -64,6 +72,274 @@ void InnerFillMessagePostFlags(
 	if (channel->addsSignature()) {
 		flags |= MessageFlag::HasPostAuthor;
 	}
+}
+
+[[nodiscard]] bool NeedsForwardlessReupload(not_null<HistoryItem*> item) {
+	return !item->history()->peer->allowsForwarding()
+		|| item->forbidsForward()
+		|| item->forbidsSaving();
+}
+
+[[nodiscard]] QString ForwardlessTempDirectory() {
+	const auto path = QDir::cleanPath(
+		QDir::tempPath() + u"/Astrogram/share-without-author"_q);
+	QDir().mkpath(path);
+	return path;
+}
+
+[[nodiscard]] QString ForwardlessDocumentFileName(
+		not_null<DocumentData*> document) {
+	auto name = QFileInfo(document->filename()).fileName().trimmed();
+	if (!name.isEmpty()) {
+		return name;
+	} else if (document->isVoiceMessage()) {
+		return document->hasMimeType(u"audio/mp3"_q)
+			? u"voice.mp3"_q
+			: u"voice.ogg"_q;
+	} else if (document->isVideoMessage()) {
+		return u"video-message.mp4"_q;
+	} else if (document->isSong()) {
+		return u"audio.mp3"_q;
+	} else if (document->isVideoFile()) {
+		return u"video.mp4"_q;
+	}
+	return u"document.bin"_q;
+}
+
+[[nodiscard]] QString ForwardlessTempPath(QString name) {
+	name = QFileInfo(name).fileName().trimmed();
+	if (name.isEmpty()) {
+		name = u"file.bin"_q;
+	}
+	return QDir(ForwardlessTempDirectory()).filePath(
+		QString::number(qulonglong(base::RandomValue<uint64>()), 16)
+			+ u'-'
+			+ name);
+}
+
+[[nodiscard]] bool WriteBytesToPath(
+		const QString &path,
+		const QByteArray &bytes) {
+	if (bytes.isEmpty()) {
+		return false;
+	}
+	QFile file(path);
+	return file.open(QIODevice::WriteOnly)
+		&& (file.write(bytes) == bytes.size());
+}
+
+[[nodiscard]] QByteArray ReadBytesFromPath(const QString &path) {
+	if (path.isEmpty()) {
+		return {};
+	}
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return {};
+	}
+	return file.readAll();
+}
+
+[[nodiscard]] TextWithTags ForwardlessCaption(
+		not_null<HistoryItem*> item,
+		Data::ForwardOptions forwardOptions) {
+	if (forwardOptions == Data::ForwardOptions::NoNamesAndCaptions) {
+		return {};
+	}
+	const auto original = item->originalText();
+	return {
+		original.text,
+		TextUtilities::ConvertEntitiesToTextTags(original.entities),
+	};
+}
+
+void SendForwardlessPreparedUpload(
+		SendAction action,
+		const QString &path,
+		TextWithTags caption,
+		SendMediaType type,
+		bool spoiler) {
+	const auto premium = action.history->session().user()->isPremium();
+	auto list = Storage::PrepareMediaList(
+		QStringList{ path },
+		st::sendMediaPreviewSize,
+		premium);
+	if (list.error != Ui::PreparedList::Error::None || list.files.empty()) {
+		return;
+	}
+	list.files.front().spoiler = spoiler;
+	action.history->session().api().sendFiles(
+		std::move(list),
+		type,
+		std::move(caption),
+		nullptr,
+		action);
+	action.history->session().api().finishForwarding(action);
+}
+
+void SendForwardlessVoiceUpload(
+		SendAction action,
+		QByteArray bytes,
+		VoiceWaveform waveform,
+		crl::time duration,
+		bool video) {
+	if (bytes.isEmpty()) {
+		return;
+	}
+	action.history->session().api().sendVoiceMessage(
+		std::move(bytes),
+		waveform,
+		duration,
+		video,
+		action);
+	action.history->session().api().finishForwarding(action);
+}
+
+void SendForwardlessDocument(
+		SendAction action,
+		not_null<HistoryItem*> item,
+		not_null<DocumentData*> document,
+		TextWithTags caption,
+		bool spoiler) {
+	const auto origin = Data::FileOrigin(item->fullId());
+	const auto isRound = (document->round() != nullptr);
+	const auto isVoice = (document->voice() != nullptr) || isRound;
+	const auto sendVoice = [=](QByteArray bytes) {
+		auto waveform = VoiceWaveform();
+		if (const auto voice = document->voice()) {
+			waveform = voice->waveform;
+		} else if (const auto round = document->round()) {
+			waveform = round->waveform;
+		}
+		SendForwardlessVoiceUpload(
+			action,
+			std::move(bytes),
+			std::move(waveform),
+			document->duration(),
+			isRound);
+	};
+	const auto existingPath = document->filepath(true);
+	if (!existingPath.isEmpty()) {
+		if (isVoice) {
+			if (const auto bytes = ReadBytesFromPath(existingPath)
+				; !bytes.isEmpty()) {
+				sendVoice(bytes);
+				return;
+			}
+		} else {
+			SendForwardlessPreparedUpload(
+				action,
+				existingPath,
+				std::move(caption),
+				SendMediaType::File,
+				spoiler);
+			return;
+		}
+	}
+	const auto media = document->activeMediaView();
+	if (media && media->loaded(true) && !media->bytes().isEmpty()) {
+		if (isVoice) {
+			sendVoice(media->bytes());
+			return;
+		}
+		const auto tempPath = ForwardlessTempPath(
+			ForwardlessDocumentFileName(document));
+		if (WriteBytesToPath(tempPath, media->bytes())) {
+			SendForwardlessPreparedUpload(
+				action,
+				tempPath,
+				std::move(caption),
+				SendMediaType::File,
+				spoiler);
+			return;
+		}
+	}
+
+	const auto tempPath = ForwardlessTempPath(
+		ForwardlessDocumentFileName(document));
+	document->save(origin, tempPath, LoadFromCloudOrLocal, true);
+	auto sendReady = [=]() mutable -> bool {
+		if (isVoice) {
+			if (const auto current = document->activeMediaView(); current
+				&& current->loaded(true)
+				&& !current->bytes().isEmpty()) {
+				sendVoice(current->bytes());
+				return true;
+			}
+			const auto readyPath = QFileInfo::exists(tempPath)
+				? tempPath
+				: document->filepath(true);
+			if (const auto bytes = ReadBytesFromPath(readyPath)
+				; !bytes.isEmpty()) {
+				sendVoice(bytes);
+				return true;
+			}
+			return false;
+		}
+		const auto readyPath = QFileInfo::exists(tempPath)
+			? tempPath
+			: document->filepath(true);
+		if (readyPath.isEmpty()) {
+			return false;
+		}
+		SendForwardlessPreparedUpload(
+			action,
+			readyPath,
+			std::move(caption),
+			SendMediaType::File,
+			spoiler);
+		return true;
+	};
+	if (sendReady()) {
+		return;
+	}
+
+	const auto wait = std::make_shared<rpl::lifetime>();
+	document->session().downloaderTaskFinished() | rpl::on_next([=]() mutable {
+		if (document->loading() && !QFileInfo::exists(tempPath)) {
+			return;
+		}
+		wait->destroy();
+		sendReady();
+	}, *wait);
+}
+
+void SendForwardlessPhoto(
+		SendAction action,
+		not_null<HistoryItem*> item,
+		not_null<PhotoData*> photo,
+		TextWithTags caption,
+		bool spoiler) {
+	const auto origin = Data::FileOrigin(item->fullId());
+	const auto tempPath = ForwardlessTempPath(u"photo.jpg"_q);
+	auto sendReady = [=]() mutable -> bool {
+		const auto media = photo->activeMediaView();
+		if (!media || !media->loaded() || !media->saveToFile(tempPath)) {
+			return false;
+		}
+		SendForwardlessPreparedUpload(
+			action,
+			tempPath,
+			std::move(caption),
+			SendMediaType::Photo,
+			spoiler);
+		return true;
+	};
+	if (sendReady()) {
+		return;
+	}
+	photo->load(origin, LoadFromCloudOrLocal, true);
+	if (sendReady()) {
+		return;
+	}
+
+	const auto wait = std::make_shared<rpl::lifetime>();
+	photo->session().downloaderTaskFinished() | rpl::on_next([=]() mutable {
+		if (photo->loading()) {
+			return;
+		}
+		wait->destroy();
+		sendReady();
+	}, *wait);
 }
 
 void SendSimpleMedia(SendAction action, MTPInputMedia inputMedia) {
@@ -348,9 +624,9 @@ void SendExistingPhoto(
 		not_null<HistoryItem*> item,
 		Data::ForwardOptions forwardOptions) {
 	auto message = MessageToSend(action);
-	const auto originalText = item->originalText();
 	const auto media = item->media();
 	if (!media) {
+		const auto originalText = item->originalText();
 		if (originalText.text.isEmpty()) {
 			return false;
 		}
@@ -379,18 +655,34 @@ void SendExistingPhoto(
 		}
 		return true;
 	}
-	if (forwardOptions != Data::ForwardOptions::NoNamesAndCaptions) {
-		message.textWithTags = TextWithTags{
-			originalText.text,
-			TextUtilities::ConvertEntitiesToTextTags(originalText.entities),
-		};
-	}
+	const auto reupload = NeedsForwardlessReupload(item)
+		|| (media->ttlSeconds() > 0);
+	message.textWithTags = ForwardlessCaption(item, forwardOptions);
 	message.action.options.mediaSpoiler = media->hasSpoiler();
 	message.action.options.invertCaption = item->invertMedia();
+	message.action.options.ttlSeconds = media->ttlSeconds();
 	if (const auto photo = media->photo()) {
+		if (reupload) {
+			SendForwardlessPhoto(
+				message.action,
+				item,
+				photo,
+				std::move(message.textWithTags),
+				media->hasSpoiler());
+			return true;
+		}
 		SendExistingPhoto(std::move(message), photo);
 		return true;
 	} else if (const auto document = media->document()) {
+		if (reupload) {
+			SendForwardlessDocument(
+				message.action,
+				item,
+				document,
+				std::move(message.textWithTags),
+				media->hasSpoiler());
+			return true;
+		}
 		SendExistingDocument(std::move(message), document);
 		return true;
 	}

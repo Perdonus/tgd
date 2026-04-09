@@ -1333,18 +1333,12 @@ ShareWithoutAuthorCheck CheckShareWithoutAuthor(not_null<HistoryItem*> item) {
 		return ShareWithoutAuthorCheck::Allowed;
 	} else if (!item->isRegular() || item->isService()) {
 		return ShareWithoutAuthorCheck::Unsupported;
-	} else if (!item->history()->peer->allowsForwarding()
-		|| item->forbidsForward()
-		|| item->forbidsSaving()) {
-		return ShareWithoutAuthorCheck::Protected;
 	}
 	const auto media = item->media();
 	if (!media) {
 		return item->originalText().text.isEmpty()
 			? ShareWithoutAuthorCheck::Unsupported
 			: ShareWithoutAuthorCheck::Allowed;
-	} else if (media->ttlSeconds() > 0) {
-		return ShareWithoutAuthorCheck::EphemeralMedia;
 	} else if (media->sharedContact()) {
 		return ShareWithoutAuthorCheck::Allowed;
 	} else if (media->locationPoint()) {
@@ -1376,8 +1370,8 @@ QString ShareWithoutAuthorErrorText(const HistoryItemsList &list) {
 		return {};
 	case ShareWithoutAuthorCheck::Protected:
 		return AstrogramUiText(
-			"Protected messages can't be sent without author.",
-			"Защищённые сообщения нельзя переслать без автора.");
+			"Protected one-time media can't be sent without author.",
+			"Защищённые одноразовые медиа нельзя переслать без автора.");
 	case ShareWithoutAuthorCheck::EphemeralMedia:
 		return AstrogramUiText(
 			"One-time and self-destructing media can't be sent without author.",
