@@ -66,6 +66,43 @@ jobs:
           "win64_root=$win64Root" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "thirdparty_root=$thirdPartyRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Download prebuilt Windows deps bundle
+        id: prebuilt_deps
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = 'Perdonus/astrogram-win-deps'
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          try {
+            $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$repo/releases/latest"
+          } catch {
+            Write-Host "[deps] no published release in $repo yet"
+            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+
+          $assets = @{}
+          foreach ($asset in $release.assets) { $assets[$asset.name] = $asset.browser_download_url }
+          $required = @('astrogram-win-libs.tar.zst','astrogram-win-thirdparty.tar.zst','astrogram-win-sources.tar.zst')
+          $missing = @($required | Where-Object { -not $assets.ContainsKey($_) })
+          if ($missing.Count -gt 0) {
+            Write-Host "[deps] latest release exists but missing assets: $($missing -join ', ')"
+            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+
+          $tmp = Join-Path $env:RUNNER_TEMP 'astrogram-win-deps'
+          New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+          foreach ($name in $required) {
+            $dest = Join-Path $tmp $name
+            Invoke-WebRequest -Headers $headers -Uri $assets[$name] -OutFile $dest
+            tar --zstd -xf $dest -C '${{ steps.prepare_paths.outputs.prepare_root }}'
+          }
+
+          "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Restore desktop source mirrors cache
         id: desktop_sources_cache
         uses: actions/cache/restore@v4
@@ -115,7 +152,7 @@ jobs:
 
       - name: Prepare dependencies (Windows)
         id: prepare
-        if: ${{ steps.toolchain_state.outputs.ready != 'true' }}
+        if: ${{ steps.prebuilt_deps.outputs.ready != 'true' && steps.toolchain_state.outputs.ready != 'true' }}
         shell: cmd
         run: |
           @echo on
