@@ -120,6 +120,28 @@ constexpr auto kPlayStatusLimit = 2;
 		: QString::fromUtf8(en);
 }
 
+enum class SideMenuSection {
+	Default,
+	Astrogram,
+};
+
+[[nodiscard]] SideMenuSection SideMenuSectionFor(const QString &id) {
+	using Id = ::Menu::Customization::SideMenuItemId;
+	return (id == QString::fromLatin1(Id::Plugins))
+		|| (id == QString::fromLatin1(Id::ShowLogs))
+		|| (id == QString::fromLatin1(Id::GhostMode))
+		? SideMenuSection::Astrogram
+		: SideMenuSection::Default;
+}
+
+[[nodiscard]] bool IsAstrogramBoundary(
+		SideMenuSection previous,
+		SideMenuSection current) {
+	return (previous != current)
+		&& ((previous == SideMenuSection::Astrogram)
+			|| (current == SideMenuSection::Astrogram));
+}
+
 [[nodiscard]] rpl::producer<TextWithEntities> SetStatusLabel(
 		not_null<Main::Session*> session) {
 	const auto self = session->user();
@@ -1158,16 +1180,23 @@ void MainMenu::setupMenu() {
 		hasLogsAction);
 	auto hasRenderedAction = false;
 	auto pendingSeparator = false;
+	auto hasLastSection = false;
+	auto lastSection = SideMenuSection::Default;
 	for (const auto &entry : layout) {
 		if (!entry.visible) {
 			continue;
 		} else if (entry.separator) {
 			pendingSeparator = hasRenderedAction;
+			hasLastSection = false;
 			continue;
 		}
 		const auto i = renderers.find(entry.id);
 		if (i == renderers.end()) {
 			continue;
+		}
+		const auto section = SideMenuSectionFor(entry.id);
+		if (hasLastSection && IsAstrogramBoundary(lastSection, section)) {
+			pendingSeparator = pendingSeparator || hasRenderedAction;
 		}
 		if (pendingSeparator) {
 			addSeparator();
@@ -1175,6 +1204,8 @@ void MainMenu::setupMenu() {
 		}
 		i->second();
 		hasRenderedAction = true;
+		hasLastSection = true;
+		lastSection = section;
 	}
 }
 

@@ -873,12 +873,18 @@ protected:
 				selectedMeta.title);
 			p.setPen(QColor(0x67, 0x75, 0x84));
 			p.setFont(st::defaultTextStyle.font->f);
+			const auto focusLine = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
+				selectedMeta.subtitle
+					+ u" · "_q
+					+ (selectedHidden
+						? RuEn("restore-tray", "restore tray")
+						: RuEn("live preview", "live preview")),
+				Qt::ElideRight,
+				focusRect.width() - 62);
 			p.drawText(
 				QRect(focusRect.left() + 50, focusRect.top() + 28, focusRect.width() - 62, 18),
 				Qt::AlignLeft | Qt::AlignVCenter,
-				selectedHidden
-					? RuEn("Сейчас в restore-tray", "Currently in the restore tray")
-					: RuEn("Сейчас в live preview", "Currently in the live preview"));
+				focusLine);
 		}
 
 		auto top = profileAtBottom ? 24 : (profileRect.bottom() + 16);
@@ -1157,8 +1163,8 @@ protected:
 			QRect(scene.left() + 18, scene.bottom() - 20, scene.width() - 36, 18),
 			Qt::AlignLeft | Qt::AlignVCenter,
 			RuEn(
-				"Архитектура уже разложена под native preview для side / peer / context / strip. Следующий шаг: action catalog + drag handles поверх этих сцен.",
-				"The architecture is already laid out for native previews of side / peer / context / strip. The next step is action catalogs plus drag handles on top of these scenes."));
+				"Архитектура уже разложена под native preview для side / peer / context / strip: runtime-сепараторы Astrogram-блоков уже живые, а сцены и строки разложены так, чтобы потом поверх них безболезненно посадить drag handles.",
+				"The architecture is already laid out for native previews of side / peer / context / strip: Astrogram runtime separators are already live, and these scenes plus rows are structured so drag handles can land on top later without breaking the current UX."));
 
 		p.setClipping(false);
 		p.setPen(QColor(0xD9, 0xE3, 0xEC));
@@ -1658,12 +1664,14 @@ private:
 
 		p.setPen(QColor(0x67, 0x75, 0x84));
 		p.setFont(st::defaultTextStyle.font->f);
+		const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
+			meta.subtitle,
+			Qt::ElideRight,
+			row.width() - 242);
 		p.drawText(
 			QRect(row.left() + 84, row.top() + 34, row.width() - 242, 18),
 			Qt::AlignLeft | Qt::AlignVCenter,
-			entry.separator
-				? RuEn("Виден как разделитель", "Visible as divider")
-				: RuEn("Виден в меню", "Visible in menu"));
+			subtitle);
 
 		if (!floating) {
 			for (const auto &button : actionButtonsForRow(index)) {
@@ -2516,12 +2524,16 @@ protected:
 				: (_lane == ContextEditorLane::Strip
 					? RuEn("Скрыто из нижней полоски", "Hidden from the bottom strip")
 					: RuEn("Скрыто из контекстного меню", "Hidden from the context menu"));
+			const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
+				stateText + u" · "_q + meta.subtitle,
+				Qt::ElideRight,
+				row.width() - 220);
 			p.setPen(QColor(0x67, 0x75, 0x84));
 			p.setFont(st::defaultTextStyle.font->f);
 			p.drawText(
 				QRect(row.left() + 62, row.top() + 34, row.width() - 220, 18),
 				Qt::AlignLeft | Qt::AlignVCenter,
-				stateText);
+				subtitle);
 
 			for (const auto &button : actionButtonsForRow(i)) {
 				paintActionButton(p, button);
@@ -3081,11 +3093,11 @@ void AddMenuCustomizationEditor(
 			rpl::single(
 				(lane == ContextEditorLane::Strip)
 					? RuEn(
-						"Hide/Show управляет попаданием в нижнюю полоску. Runtime жёстко держит лимит в 4 видимых иконки.",
-						"Hide/Show controls whether the action appears in the bottom strip. Runtime strictly keeps the limit at 4 visible icons.")
+						"Hide/Show управляет попаданием в нижнюю полоску. Runtime жёстко держит лимит в 4 видимых иконки, а строка уже оформлена в том же ритме, что и side editor, чтобы потом спокойно принять drag-style сортировку.",
+						"Hide/Show controls whether the action appears in the bottom strip. Runtime strictly keeps the limit at 4 visible icons, and the row already follows the same rhythm as the side editor so it can accept drag-style sorting later.")
 					: RuEn(
-						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности.",
-						"Hide/Show and ordering here directly change the popup action list for this surface.")));
+						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности. Drag-style слой пока не включён, но геометрия и preview уже под него разложены.",
+						"Hide/Show and ordering here directly change the popup action list for this surface. The drag-style layer is not enabled yet, but the geometry and preview are already arranged for it.")));
 		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	};
 

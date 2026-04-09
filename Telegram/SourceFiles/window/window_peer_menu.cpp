@@ -153,6 +153,26 @@ constexpr auto kTopicsSearchMinCount = 1;
 		"Переслать без автора");
 }
 
+enum class PeerMenuSection {
+	Default,
+	Astrogram,
+};
+
+[[nodiscard]] PeerMenuSection PeerMenuSectionFor(const QString &id) {
+	using Id = ::Menu::Customization::PeerMenuItemId;
+	return (id == QString::fromLatin1(Id::DeletedMessages))
+		? PeerMenuSection::Astrogram
+		: PeerMenuSection::Default;
+}
+
+[[nodiscard]] bool IsAstrogramBoundary(
+		PeerMenuSection previous,
+		PeerMenuSection current) {
+	return (previous != current)
+		&& ((previous == PeerMenuSection::Astrogram)
+			|| (current == PeerMenuSection::Astrogram));
+}
+
 [[nodiscard]] QString PeerIdTextForCopy(not_null<PeerData*> peer) {
 	if (peer->isUser()) {
 		return QString::number(peerToUser(peer->id).bare);
@@ -706,12 +726,15 @@ void Filler::fillCustomized(
 		defaults);
 	auto hasRenderedAction = false;
 	auto pendingSeparator = false;
+	auto hasLastSection = false;
+	auto lastSection = PeerMenuSection::Default;
 
 	for (const auto &entry : layout) {
 		if (!entry.visible) {
 			continue;
 		} else if (entry.separator) {
 			pendingSeparator = hasRenderedAction;
+			hasLastSection = false;
 			continue;
 		}
 
@@ -719,12 +742,18 @@ void Filler::fillCustomized(
 		if (i == renderers.end() || !canRender(i->second)) {
 			continue;
 		}
+		const auto section = PeerMenuSectionFor(entry.id);
+		if (hasLastSection && IsAstrogramBoundary(lastSection, section)) {
+			pendingSeparator = pendingSeparator || hasRenderedAction;
+		}
 		if (pendingSeparator) {
 			_addAction(PeerMenuCallback::Args{ .isSeparator = true });
 			pendingSeparator = false;
 		}
 		render(i->second, _addAction);
 		hasRenderedAction = true;
+		hasLastSection = true;
+		lastSection = section;
 	}
 }
 
@@ -4387,13 +4416,18 @@ void FillSenderUserpicMenu(
 		controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
 	}, channel ? &st::menuIconChannel : &st::menuIconChatBubble);
 
+	const auto username = peer->username();
+	const auto mention = !username.isEmpty() || peer->isUser();
+	const auto hasTrailingActions = mention || searchInEntry;
+
+	addAction(PeerMenuCallback::Args{ .isSeparator = true });
 	addAction(
 		AstrogramUiText("Copy ID", "Скопировать ID"),
 		[=] { CopyPeerIdToClipboard(controller, peer); },
 		&st::menuIconCopy);
-
-	const auto username = peer->username();
-	const auto mention = !username.isEmpty() || peer->isUser();
+	if (hasTrailingActions) {
+		addAction(PeerMenuCallback::Args{ .isSeparator = true });
+	}
 	if (const auto guard = mention ? fieldForMention : nullptr) {
 		addAction(tr::lng_context_mention(tr::now), crl::guard(guard, [=] {
 			if (!username.isEmpty()) {

@@ -138,6 +138,71 @@ void AddOption(
 	}
 }
 
+[[nodiscard]] QString ShellPresetTitle(AstrogramShellPreset preset) {
+	switch (preset) {
+	case AstrogramShellPreset::Balanced: return RuEn(
+		"Сбалансированный shell-пресет",
+		"Balanced shell preset");
+	case AstrogramShellPreset::Focused: return RuEn(
+		"Сфокусированный shell-пресет",
+		"Focused shell preset");
+	case AstrogramShellPreset::Wide: return RuEn(
+		"Широкий + left-edge shell-пресет",
+		"Wide + left-edge shell preset");
+	}
+	return QString();
+}
+
+[[nodiscard]] QString ShellPresetDescription(AstrogramShellPreset preset) {
+	switch (preset) {
+	case AstrogramShellPreset::Balanced: return RuEn(
+		"Возвращает базовую shell-связку: immersive animation остаётся включённой, а wide/left-edge/expanded возвращаются к спокойному дефолту.",
+		"Returns the baseline shell stack: immersive animation stays on, while wide/left-edge/expanded go back to the calmer default state.");
+	case AstrogramShellPreset::Focused: return RuEn(
+		"Явный runtime-hook для более плотного shell: включает расширенную боковую панель, но оставляет settings/info в центрированном режиме.",
+		"An explicit runtime hook for a denser shell: turns on the expanded side panel while keeping settings/info in the centered mode.");
+	case AstrogramShellPreset::Wide: return RuEn(
+		"Явно включает весь широкий набор runtime-hook'ов сразу: expanded side panel, left-edge settings и wide settings pane. Иммерсивная анимация тоже остаётся активной.",
+		"Explicitly enables the full wide runtime hook stack at once: expanded side panel, left-edge settings and the wide settings pane. Immersive animation stays active too.");
+	}
+	return QString();
+}
+
+[[nodiscard]] QString ShellPresetToast(AstrogramShellPreset preset) {
+	switch (preset) {
+	case AstrogramShellPreset::Balanced: return RuEn(
+		"Сбалансированный shell-пресет применён.",
+		"Balanced shell preset applied.");
+	case AstrogramShellPreset::Focused: return RuEn(
+		"Сфокусированный shell-пресет применён.",
+		"Focused shell preset applied.");
+	case AstrogramShellPreset::Wide: return RuEn(
+		"Широкий shell-пресет применён.",
+		"Wide shell preset applied.");
+	}
+	return QString();
+}
+
+void AddShellPresetButton(
+		not_null<Window::Controller*> window,
+		not_null<Ui::VerticalLayout*> container,
+		AstrogramShellPreset preset) {
+	const auto button = container->add(object_ptr<Button>(
+		container,
+		rpl::single(ShellPresetTitle(preset)),
+		st::settingsButtonNoIcon));
+	button->addClickHandler([=] {
+		if (!ApplyAstrogramShellPreset(preset)) {
+			window->showToast(RuEn(
+				"Не удалось применить shell preset.",
+				"Could not apply the shell preset."));
+			return;
+		}
+		window->showToast(ShellPresetToast(preset));
+	});
+	Ui::AddDividerText(container, rpl::single(ShellPresetDescription(preset)));
+}
+
 void SetupExperimental(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -224,6 +289,20 @@ void SetupExperimental(
 		rpl::single(RuEn(
 			"Вступительный гайд теперь не только ведёт сюда напрямую, но и умеет заранее применять стартовые shell-пресеты. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings. Открытое боковое меню тоже подхватывает эти файлы live, без ручного переоткрытия.",
 			"The onboarding flow can now lead here directly and pre-apply starter shell presets. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container. The opened side menu now hot-reloads these files as well, without a manual reopen.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn(
+			"Shell presets и runtime-hooks",
+			"Shell presets and runtime hooks")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Это явные входы в runtime-хуки wide / left-edge / immersive без onboarding: пресеты сразу пишут в тот же preview/runtime файл, который уже слушают side menu, shell и settings/info layers.",
+			"These are explicit entry points into the wide / left-edge / immersive runtime hooks without onboarding: the presets write directly into the same preview/runtime file already observed by the side menu, the shell and the settings/info layers.")));
+	AddShellPresetButton(window, container, AstrogramShellPreset::Balanced);
+	AddShellPresetButton(window, container, AstrogramShellPreset::Focused);
+	AddShellPresetButton(window, container, AstrogramShellPreset::Wide);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddMenuCustomizationEditor(controller, container);
 }
