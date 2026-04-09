@@ -147,6 +147,26 @@ constexpr auto kTopicsSearchMinCount = 1;
 		: QString::fromUtf8(en);
 }
 
+[[nodiscard]] QString PeerIdTextForCopy(not_null<PeerData*> peer) {
+	if (peer->isUser()) {
+		return QString::number(peerToUser(peer->id).bare);
+	} else if (peer->isChat()) {
+		return QString::number(-qint64(peerToChat(peer->id).bare));
+	} else if (peer->isChannel()) {
+		return u"-100"_q + QString::number(peerToChannel(peer->id).bare);
+	}
+	return QString::number(peer->id.value & PeerId::kChatTypeMask);
+}
+
+void CopyPeerIdToClipboard(
+		not_null<SessionController*> controller,
+		not_null<PeerData*> peer) {
+	if (const auto clipboard = QGuiApplication::clipboard()) {
+		clipboard->setText(PeerIdTextForCopy(peer), QClipboard::Clipboard);
+	}
+	controller->showToast(tr::lng_text_copied(tr::now));
+}
+
 [[nodiscard]] ::Menu::Customization::PeerMenuEntry MakePeerMenuItem(
 		const char *id,
 		bool visible = true) {
@@ -180,6 +200,7 @@ DefaultPeerMenuChatsListLayout() {
 		MakePeerMenuItem(PeerMenuItemId::NewMembers),
 		MakePeerMenuItem(PeerMenuItemId::BoostChat),
 		MakePeerMenuItem(PeerMenuItemId::VideoChat),
+		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorDanger),
 		MakePeerMenuItem(PeerMenuItemId::Report),
 		MakePeerMenuItem(PeerMenuItemId::LeaveChat),
@@ -287,6 +308,7 @@ DefaultPeerMenuContextLayout() {
 		MakePeerMenuItem(PeerMenuItemId::ToggleArchive),
 		MakePeerMenuItem(PeerMenuItemId::TogglePin),
 		MakePeerMenuItem(PeerMenuItemId::Info),
+		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
 		MakePeerMenuItem(PeerMenuItemId::ToggleMute),
 		MakePeerMenuItem(PeerMenuItemId::ToggleUnreadMark),
 		MakePeerMenuItem(PeerMenuItemId::ToggleTopicClosed),
@@ -1814,6 +1836,9 @@ void Filler::fillChatsListActions() {
 		::Menu::Customization::PeerMenuItemId::VideoChat,
 		&Filler::addVideoChat);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DeletedMessages,
+		&Filler::addDeletedMessages);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::Report,
 		&Filler::addReport);
 	registerMethod(
@@ -1883,6 +1908,9 @@ void Filler::fillContextMenuActions() {
 			::Menu::Customization::PeerMenuItemId::Info,
 			std::move(renderer));
 	}
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DeletedMessages,
+		&Filler::addDeletedMessages);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ToggleMute,
 		&Filler::addToggleMuteSubmenu,
@@ -4322,6 +4350,11 @@ void FillSenderUserpicMenu(
 	addAction(showHistoryText, [=] {
 		controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
 	}, channel ? &st::menuIconChannel : &st::menuIconChatBubble);
+
+	addAction(
+		AstrogramUiText("Copy ID", "Скопировать ID"),
+		[=] { CopyPeerIdToClipboard(controller, peer); },
+		&st::menuIconCopy);
 
 	const auto username = peer->username();
 	const auto mention = !username.isEmpty() || peer->isUser();

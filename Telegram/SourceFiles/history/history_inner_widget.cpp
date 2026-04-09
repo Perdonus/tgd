@@ -79,6 +79,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
 #include "menu/menu_sponsored.h"
+#include "menu/menu_customization.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "apiwrap.h"
@@ -87,6 +88,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_toggling_media.h"
 #include "api/api_who_reacted.h"
 #include "api/api_views.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "data/components/factchecks.h"
 #include "data/components/sponsored_messages.h"
@@ -110,6 +112,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QClipboard>
 #include <QtWidgets/QApplication>
+#include <QtCore/QDateTime>
 #include <QtCore/QMimeData>
 
 namespace {
@@ -118,6 +121,78 @@ namespace {
 	return Core::App().settings().unlockForwardSelectionLimit()
 		? 1000
 		: MaxSelectedItems;
+}
+
+[[nodiscard]] bool AstrogramRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString AstrogramUiText(const char *en, const char *ru) {
+	return AstrogramRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString PeerIdTextForCopy(not_null<PeerData*> peer) {
+	if (peer->isUser()) {
+		return QString::number(peerToUser(peer->id).bare);
+	} else if (peer->isChat()) {
+		return QString::number(-qint64(peerToChat(peer->id).bare));
+	} else if (peer->isChannel()) {
+		return u"-100"_q + QString::number(peerToChannel(peer->id).bare);
+	}
+	return QString::number(peer->id.value & PeerId::kChatTypeMask);
+}
+
+[[nodiscard]] bool ContextMenuActionVisible(
+		const HistoryView::ContextMenuCustomizationLayout &layout,
+		HistoryView::ContextMenuSurface surface,
+		const char *id,
+		bool fallback = true) {
+	const auto &entries = HistoryView::LookupContextMenuSurfaceLayout(
+		layout,
+		surface).menu;
+	const auto i = ranges::find(
+		entries,
+		QString::fromLatin1(id),
+		&HistoryView::ContextMenuLayoutEntry::id);
+	return (i != entries.end()) ? i->visible : fallback;
+}
+
+void CopyIdsAndTime(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item) {
+	const auto dt = QDateTime::fromSecsSinceEpoch(item->date()).toLocalTime();
+	const auto text = AstrogramUiText(
+		"Chat ID: %1\nMessage ID: %2\nService time: %3",
+		"Chat ID: %1\nMessage ID: %2\nСлужебное время: %3")
+		.arg(PeerIdTextForCopy(item->history()->peer))
+		.arg(QString::number(item->id.bare))
+		.arg(dt.toString(Qt::ISODate));
+	if (const auto clipboard = QGuiApplication::clipboard()) {
+		clipboard->setText(text, QClipboard::Clipboard);
+	}
+	controller->showToast(AstrogramUiText("IDs copied.", "ID скопированы."));
+}
+
+bool ShowForwardWithoutAuthorValidated(
+		not_null<Window::SessionController*> controller,
+		MessageIdsList ids,
+		Fn<void()> &&successCallback = nullptr) {
+	if (ids.empty()) {
+		controller->showToast(tr::lng_forward_cant(tr::now));
+		return false;
+	}
+	const auto items = controller->session().data().idsToItems(ids);
+	if (items.size() != ids.size() || !CanShareWithoutAuthor(items)) {
+		controller->showToast(tr::lng_forward_cant(tr::now));
+		return false;
+	}
+	Window::ShowForwardWithoutAuthorBox(
+		controller,
+		std::move(ids),
+		std::move(successCallback));
+	return true;
 }
 
 constexpr auto kScrollDateHideTimeout = 1000;
@@ -2418,11 +2493,39 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		if (_menu->empty()) {
 			_menu = nullptr;
 		} else {
+			_menu->setForcedOrigin(Ui::PanelAnimation::Origin::BottomLeft);
 			_menu->popup(e->globalPos());
 			e->accept();
 		}
 		return;
 	}
+	const auto contextMenuLayout = HistoryView::LoadContextMenuCustomizationLayout();
+	const auto allowMessageCopyIdsTime = ContextMenuActionVisible(
+		contextMenuLayout,
+		HistoryView::ContextMenuSurface::Message,
+		Menu::Customization::ContextMenuItemId::MessageCopyIdsTime);
+	const auto allowMessageForwardWithoutAuthor = ContextMenuActionVisible(
+		contextMenuLayout,
+		HistoryView::ContextMenuSurface::Message,
+		Menu::Customization::ContextMenuItemId::MessageForwardWithoutAuthor);
+	const auto allowSelectionForwardWithoutAuthor = ContextMenuActionVisible(
+		contextMenuLayout,
+		HistoryView::ContextMenuSurface::Selection,
+		Menu::Customization::ContextMenuItemId::SelectionForwardWithoutAuthor);
+	const auto addCopyIdsTimeAction = [&](HistoryItem *item) {
+		if (!item || !allowMessageCopyIdsTime) {
+			return;
+		}
+		const auto itemId = item->fullId();
+		_menu->addAction(
+			AstrogramUiText("Copy IDs and time", "Скопировать ID и время"),
+			[=] {
+				if (const auto current = session->data().message(itemId)) {
+					CopyIdsAndTime(_controller, current);
+				}
+			},
+			&st::menuIconCopy);
+	};
 	const auto controller = _controller;
 	const auto addItemActions = [&](
 			HistoryItem *item,
@@ -2836,6 +2939,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 		}
 		addItemActions(item, item);
+		if (item && isUponSelected != 2 && isUponSelected != -2) {
+			addCopyIdsTimeAction(item);
+		}
 		if (!selectedState.count) {
 			if (lnkPhoto) {
 				addPhotoActions(lnkPhoto, item);
@@ -2854,14 +2960,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_widget->forwardSelected();
 				}, &st::menuIconForward);
 			}
-			if (const auto ids = getSelectedItems(); !ids.empty()) {
-				const auto items = session().data().idsToItems(ids);
-				if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-						Window::ShowForwardWithoutAuthorBox(_controller, getSelectedItems(), [=] {
-							_widget->clearSelected();
-						});
-					}, &st::menuIconForward);
+			if (allowSelectionForwardWithoutAuthor) {
+				if (const auto ids = getSelectedItems(); !ids.empty()) {
+					const auto items = session().data().idsToItems(ids);
+					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+							ShowForwardWithoutAuthorValidated(_controller, getSelectedItems(), [=] {
+								_widget->clearSelected();
+							});
+						}, &st::menuIconForward);
+					}
 				}
 			}
 			if (selectedState.count > 0 && selectedState.canDeleteCount == selectedState.count) {
@@ -2884,7 +2992,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						forwardItem(itemId);
 					}, &st::menuIconForward);
 				}
-				if (CanShareWithoutAuthor(item)) {
+				if (allowMessageForwardWithoutAuthor
+					&& CanShareWithoutAuthor(item)) {
 					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
 						forwardItemWithoutAuthor(itemId);
 					}, &st::menuIconForward);
@@ -2933,6 +3042,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				? Element::Hovered()->data().get()
 				: Element::HoveredLink()
 				? Element::HoveredLink()->data().get()
+				: Element::Moused()
+				? Element::Moused()->data().get()
 				: nullptr;
 			return result ? groupLeaderOrSelf(result) : nullptr;
 		}();
@@ -3126,20 +3237,25 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				_menu->addAction(std::move(item));
 			}
 		}
+		if (item && isUponSelected != 2 && isUponSelected != -2) {
+			addCopyIdsTimeAction(item);
+		}
 		if (isUponSelected > 1) {
 			if (selectedState.count > 0 && selectedState.count == selectedState.canForwardCount) {
 				_menu->addAction(tr::lng_context_forward_selected(tr::now), [=] {
 					_widget->forwardSelected();
 				}, &st::menuIconForward);
 			}
-			if (const auto ids = getSelectedItems(); !ids.empty()) {
-				const auto items = session().data().idsToItems(ids);
-				if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-						Window::ShowForwardWithoutAuthorBox(_controller, getSelectedItems(), [=] {
-							_widget->clearSelected();
-						});
-					}, &st::menuIconForward);
+			if (allowSelectionForwardWithoutAuthor) {
+				if (const auto ids = getSelectedItems(); !ids.empty()) {
+					const auto items = session().data().idsToItems(ids);
+					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+							ShowForwardWithoutAuthorValidated(_controller, getSelectedItems(), [=] {
+								_widget->clearSelected();
+							});
+						}, &st::menuIconForward);
+					}
 				}
 			}
 			if (selectedState.count > 0 && selectedState.count == selectedState.canDeleteCount) {
@@ -3160,12 +3276,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						forwardAsGroup(itemId);
 					}, &st::menuIconForward);
 				}
-				if (const auto ids = session().data().itemOrItsGroup(item); !ids.empty()) {
-					const auto items = session().data().idsToItems(ids);
-					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-							forwardAsGroupWithoutAuthor(itemId);
-						}, &st::menuIconForward);
+				if (allowMessageForwardWithoutAuthor) {
+					if (const auto ids = session().data().itemOrItsGroup(item); !ids.empty()) {
+						const auto items = session().data().idsToItems(ids);
+						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+								forwardAsGroupWithoutAuthor(itemId);
+							}, &st::menuIconForward);
+						}
 					}
 				}
 				if (HistoryView::CanAddOfferToMessage(item)) {
@@ -4911,7 +5029,7 @@ void HistoryInner::forwardItem(FullMsgId itemId) {
 }
 
 void HistoryInner::forwardItemWithoutAuthor(FullMsgId itemId) {
-	Window::ShowForwardWithoutAuthorBox(_controller, { 1, itemId });
+	ShowForwardWithoutAuthorValidated(_controller, { 1, itemId });
 }
 
 void HistoryInner::forwardAsGroup(FullMsgId itemId) {
@@ -4924,7 +5042,7 @@ void HistoryInner::forwardAsGroup(FullMsgId itemId) {
 
 void HistoryInner::forwardAsGroupWithoutAuthor(FullMsgId itemId) {
 	if (const auto item = session().data().message(itemId)) {
-		Window::ShowForwardWithoutAuthorBox(
+		ShowForwardWithoutAuthorValidated(
 			_controller,
 			session().data().itemOrItsGroup(item));
 	}
