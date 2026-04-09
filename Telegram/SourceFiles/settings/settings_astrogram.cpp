@@ -583,6 +583,34 @@ void SyncScheduledEditPersistence(
 		: trimmed;
 }
 
+[[nodiscard]] QString MarkPreviewSummary(
+		bool showIcon,
+		bool showText,
+		const QString &icon,
+		const QString &text,
+		const QString &fallbackIcon,
+		const QString &fallbackText) {
+	const auto resolvedIcon = icon.trimmed().isEmpty()
+		? fallbackIcon
+		: icon.trimmed();
+	const auto resolvedText = text.trimmed().isEmpty()
+		? fallbackText
+		: text.trimmed();
+	auto preview = QString();
+	if (showIcon && !resolvedIcon.isEmpty()) {
+		preview += resolvedIcon;
+	}
+	if (showText && !resolvedText.isEmpty()) {
+		if (!preview.isEmpty()) {
+			preview += u' ';
+		}
+		preview += resolvedText;
+	}
+	return preview.isEmpty()
+		? RuEn("Превью скрыто", "Preview hidden")
+		: RuEn("Превью: %1", "Preview: %1").arg(preview);
+}
+
 void AddSectionButton(
 			not_null<Window::SessionController*> controller,
 			not_null<Ui::VerticalLayout*> container,
@@ -1278,6 +1306,41 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
+	editedTagCard->add(
+		object_ptr<Ui::FlatLabel>(
+			editedTagCard,
+			rpl::combine(
+				settings.editedMarkShowIconValue(),
+				settings.editedMarkShowTextValue(),
+				settings.editedMarkIconValue(),
+				settings.editedMarkTextValue()) | rpl::map([](
+						bool showIcon,
+						bool showText,
+						const QString &icon,
+						const QString &text) {
+					return MarkPreviewSummary(
+						showIcon,
+						showText,
+						icon,
+						text,
+						DefaultEditedMarkIcon(),
+						DefaultEditedMarkText());
+				}),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+	AddActionButton(
+		editedTagCard,
+		RuEn("Сбросить отметку изменения", "Reset edited tag"),
+		[] {
+			auto &settings = Core::App().settings();
+			settings.setEditedMarkShowText(true);
+			settings.setEditedMarkShowIcon(true);
+			settings.setEditedMarkText(QString());
+			settings.setEditedMarkIcon(DefaultEditedMarkIcon());
+			Core::App().saveSettings();
+		},
+		{ &st::menuIconRestore });
 	FinishSettingsCard(editedTagCard);
 	Ui::AddSkip(container);
 	const auto deletedTagCard = AddSettingsCard(container);
@@ -1334,6 +1397,41 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
+	deletedTagCard->add(
+		object_ptr<Ui::FlatLabel>(
+			deletedTagCard,
+			rpl::combine(
+				settings.deletedMarkShowIconValue(),
+				settings.deletedMarkShowTextValue(),
+				settings.deletedMarkIconValue(),
+				settings.deletedMarkTextValue()) | rpl::map([](
+						bool showIcon,
+						bool showText,
+						const QString &icon,
+						const QString &text) {
+					return MarkPreviewSummary(
+						showIcon,
+						showText,
+						icon,
+						text,
+						DefaultDeletedMarkIcon(),
+						DefaultDeletedMarkText());
+				}),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+	AddActionButton(
+		deletedTagCard,
+		RuEn("Сбросить отметку удаления", "Reset deleted tag"),
+		[] {
+			auto &settings = Core::App().settings();
+			settings.setDeletedMarkShowText(true);
+			settings.setDeletedMarkShowIcon(true);
+			settings.setDeletedMarkText(QString());
+			settings.setDeletedMarkIcon(DefaultDeletedMarkIcon());
+			Core::App().saveSettings();
+		},
+		{ &st::menuIconRestore });
 	FinishSettingsCard(deletedTagCard);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
