@@ -2554,7 +2554,8 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 
 bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	Logs::writeClient(QString::fromLatin1("[plugins] remove requested: %1").arg(pluginId));
-	const auto *record = findRecord(pluginId);
+	const auto normalizedId = pluginId.trimmed();
+	const auto *record = findRecord(normalizedId);
 	if (!record) {
 		if (error) {
 			*error = u"Plugin was not found."_q;
@@ -2563,13 +2564,40 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 			u"package"_q,
 			u"remove-missing"_q,
 			QJsonObject{
-				{ u"pluginId"_q, pluginId },
+				{ u"pluginId"_q, normalizedId },
 			});
 		return false;
 	}
 
 	const auto pluginInfo = record->state.info;
-	const auto pluginPath = record->state.path;
+	auto packagePaths = QStringList();
+	auto seenPaths = QSet<QString>();
+	const auto rememberPackagePath = [&](QString path) {
+		path = path.trimmed();
+		if (path.isEmpty()) {
+			return;
+		}
+		path = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+#if defined(Q_OS_WIN)
+		const auto key = path.toLower();
+#else // Q_OS_WIN
+		const auto key = path;
+#endif // Q_OS_WIN
+		if (seenPaths.contains(key)) {
+			return;
+		}
+		seenPaths.insert(key);
+		packagePaths.push_back(path);
+	};
+	for (const auto &plugin : _plugins) {
+		if (plugin.state.info.id.trimmed() == normalizedId) {
+			rememberPackagePath(plugin.state.path);
+		}
+	}
+	rememberPackagePath(record->state.path);
+	const auto pluginPath = packagePaths.isEmpty()
+		? record->state.path.trimmed()
+		: packagePaths.front();
 	const auto rescanNow = [this] {
 		if (safeModeEnabled()) {
 			logEvent(u"safe-mode"_q, u"remove-rescan-metadata-only"_q);
@@ -2581,14 +2609,16 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 
 	startRecoveryOperation(
 		u"remove"_q,
-		{ pluginId },
+		{ normalizedId },
 		pluginInfo.name.isEmpty() ? pluginId : pluginInfo.name);
 	logEvent(
 		u"package"_q,
 		u"remove-start"_q,
 		QJsonObject{
-			{ u"pluginId"_q, pluginId },
+			{ u"pluginId"_q, normalizedId },
 			{ u"path"_q, pluginPath },
+			{ u"paths"_q, QJsonArray::fromStringList(packagePaths) },
+			{ u"pathCount"_q, packagePaths.size() },
 			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
 		});
 
@@ -2596,65 +2626,96 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	loadConfig();
 	loadRecoveryState();
 
-	if (pluginPath.trimmed().isEmpty() || !QFileInfo::exists(pluginPath)) {
+	if (packagePaths.isEmpty()) {
 		logEvent(
 			u"package"_q,
 			u"remove-missing-file"_q,
 			QJsonObject{
-				{ u"pluginId"_q, pluginId },
+				{ u"pluginId"_q, normalizedId },
 				{ u"path"_q, pluginPath },
+				{ u"paths"_q, QJsonArray::fromStringList(packagePaths) },
 			});
 		rescanNow();
 		if (error) {
-			*error = u"Plugin package file was not found."_q;
+			*error = u"Plugin package path was not found."_q;
 		}
 		finishRecoveryOperation();
 		return false;
 	}
 
-	auto removed = false;
-	auto removeError = QString();
-	for (auto attempt = 0; attempt != 16; ++attempt) {
-		QFile file(pluginPath);
-		if (file.remove() || !QFileInfo::exists(pluginPath)) {
-			removed = true;
-			break;
+	auto removedPaths = QStringList();
+	auto missingPaths = QStringList();
+	auto failedPaths = QStringList();
+	auto firstFailureReason = QString();
+	for (const auto &path : packagePaths) {
+		if (!QFileInfo::exists(path)) {
+			missingPaths.push_back(path);
+			continue;
 		}
-		removeError = file.errorString();
-		FlushPluginUnload();
-		QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-		QThread::msleep(20);
+		auto removed = false;
+		auto removeError = QString();
+		for (auto attempt = 0; attempt != 16; ++attempt) {
+			QFile file(path);
+			if (file.remove() || !QFileInfo::exists(path)) {
+				removed = true;
+				break;
+			}
+			removeError = file.errorString();
+			FlushPluginUnload();
+			QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+			QThread::msleep(20);
+		}
+		if (removed) {
+			removedPaths.push_back(path);
+		} else {
+			failedPaths.push_back(path);
+			if (firstFailureReason.isEmpty()) {
+				firstFailureReason = removeError;
+			}
+		}
 	}
 
-	if (!removed) {
+	if (!failedPaths.isEmpty()) {
 		Logs::writeClient(QString::fromLatin1(
-			"[plugins] remove failed: %1 reason=%2")
-			.arg(pluginId, removeError));
+			"[plugins] remove failed: %1 failed=%2 reason=%3")
+			.arg(normalizedId)
+			.arg(failedPaths.front())
+			.arg(firstFailureReason));
 		logEvent(
 			u"package"_q,
 			u"remove-file-failed"_q,
 			QJsonObject{
-				{ u"pluginId"_q, pluginId },
+				{ u"pluginId"_q, normalizedId },
 				{ u"path"_q, pluginPath },
-				{ u"reason"_q, removeError },
+				{ u"paths"_q, QJsonArray::fromStringList(packagePaths) },
+				{ u"removedPaths"_q, QJsonArray::fromStringList(removedPaths) },
+				{ u"missingPaths"_q, QJsonArray::fromStringList(missingPaths) },
+				{ u"failedPaths"_q, QJsonArray::fromStringList(failedPaths) },
+				{ u"reason"_q, firstFailureReason },
 			});
 		rescanNow();
 		if (error) {
-			*error = removeError.isEmpty()
-				? u"Could not delete the plugin package file."_q
-				: removeError;
+			*error = !firstFailureReason.isEmpty()
+				? firstFailureReason
+				: (failedPaths.size() > 1)
+				? u"Could not delete all plugin package files."_q
+				: u"Could not delete the plugin package file."_q;
 		}
 		finishRecoveryOperation();
 		return false;
 	}
 
-	_disabled.remove(pluginId);
-	_disabledByRecovery.remove(pluginId);
-	_storedSettings.remove(pluginId);
+	_disabled.remove(normalizedId);
+	_disabledByRecovery.remove(normalizedId);
+	_storedSettings.remove(normalizedId);
 	saveConfig();
 	saveRecoveryState();
 	rescanNow();
-	Logs::writeClient(QString::fromLatin1("[plugins] remove finished: %1").arg(pluginId));
+	Logs::writeClient(QString::fromLatin1(
+		"[plugins] remove finished: %1 removed=%2 missing=%3")
+		.arg(normalizedId)
+		.arg(removedPaths.size())
+		.arg(missingPaths.size()));
 	finishRecoveryOperation();
 
 	if (error) {
@@ -2664,8 +2725,11 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 		u"package"_q,
 		u"remove-finished"_q,
 		QJsonObject{
-			{ u"pluginId"_q, pluginId },
+			{ u"pluginId"_q, normalizedId },
 			{ u"path"_q, pluginPath },
+			{ u"paths"_q, QJsonArray::fromStringList(packagePaths) },
+			{ u"removedPaths"_q, QJsonArray::fromStringList(removedPaths) },
+			{ u"missingPaths"_q, QJsonArray::fromStringList(missingPaths) },
 			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
 		});
 	return true;

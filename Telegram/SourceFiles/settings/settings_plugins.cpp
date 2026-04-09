@@ -63,8 +63,12 @@ namespace {
 
 constexpr auto kPluginCardRadius = 20.;
 constexpr auto kPluginCardVerticalMargin = 12;
-constexpr auto kPluginCardContentInsetLeft = 14;
-constexpr auto kPluginCardContentInsetRight = 10;
+constexpr auto kPluginCardContentInsetLeft = 18;
+constexpr auto kPluginCardContentInsetRight = 14;
+constexpr auto kPluginCardDescriptionInsetLeft = 24;
+constexpr auto kPluginCardActionRowTopMargin = 8;
+constexpr auto kPluginCardActionRowBottomPadding = 3;
+constexpr auto kPluginCardActionGap = 8;
 
 [[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
 	return ch.isLetterOrNumber() || (ch == QChar::fromLatin1('_'));
@@ -154,8 +158,8 @@ void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
 		}
 		QDesktopServices::openUrl(QUrl(entity.data));
 		return false;
-	});
-}
+			});
+		}
 
 void AddPluginMetaText(
 		not_null<Ui::VerticalLayout*> container,
@@ -191,7 +195,7 @@ void AddPluginDescriptionText(
 			rpl::single(TextWithEntities{ text.trimmed() }),
 			st::defaultFlatLabel),
 		style::margins(
-			kPluginCardContentInsetLeft + 4,
+			kPluginCardDescriptionInsetLeft,
 			0,
 			kPluginCardContentInsetRight,
 			0),
@@ -1212,7 +1216,7 @@ void AddPluginCardActionRow(
 		Fn<void()> onChanged) {
 	const auto row = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(kPluginCardContentInsetLeft, 6, kPluginCardContentInsetRight, 0),
+		style::margins(kPluginCardContentInsetLeft, kPluginCardActionRowTopMargin, kPluginCardContentInsetRight, kPluginCardActionRowBottomPadding),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(row);
 	const auto settings = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarSettings);
@@ -1242,14 +1246,14 @@ void AddPluginCardActionRow(
 	raw->setMaximumHeight(buttonHeight);
 
 	raw->widthValue() | rpl::on_next([=](int) {
-		const auto gap = 8;
+		const auto gap = kPluginCardActionGap;
 		auto buttons = std::vector<Ui::IconButton*>{ settings };
 		if (share) {
 			buttons.push_back(share);
 		}
 		buttons.push_back(remove);
 		auto left = 0;
-		const auto top = std::max(0, raw->height() - buttonHeight - 1);
+		const auto top = std::max(0, raw->height() - buttonHeight - kPluginCardActionRowBottomPadding);
 		for (const auto current : buttons) {
 			current->move(left, top);
 			left += current->width() + gap;
@@ -1344,7 +1348,22 @@ void AddSettingsActionButton(
 		if (callback) {
 			callback();
 		}
-	});
+			});
+		}
+
+int PluginPackageCount(const QString &pluginId) {
+	const auto normalized = pluginId.trimmed();
+	if (normalized.isEmpty()) {
+		return 0;
+	}
+	auto count = 0;
+	for (const auto &state : Core::App().plugins().plugins()) {
+		if (state.info.id.trimmed() == normalized
+			&& !state.path.trimmed().isEmpty()) {
+			++count;
+		}
+	}
+	return count;
 }
 
 std::optional<::Plugins::PluginState> LookupPluginState(
@@ -1381,33 +1400,61 @@ void RequestPluginRemoval(
 		const ::Plugins::PluginState &state,
 		Fn<void()> onRemoved) {
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto packageCount = std::max(1, PluginPackageCount(state.info.id));
 		box->setWidth(st::boxWideWidth);
 		box->setTitle(rpl::single(PluginUiText(u"Delete plugin"_q, u"Удалить плагин"_q)));
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
-			rpl::single(PluginUiText(
-				u"Delete plugin \"%1\"?"_q,
-				u"Удалить плагин \"%1\"?"_q).arg(FormatPluginTitle(state))),
+			rpl::single((packageCount > 1)
+				? PluginUiText(
+					u"Delete plugin \"%1\" and all %2 package files with the same plugin ID?"_q,
+					u"Удалить плагин \"%1\" и все %2 файла пакетов с тем же ID?"_q)
+						.arg(FormatPluginTitle(state))
+						.arg(packageCount)
+				: PluginUiText(
+					u"Delete plugin \"%1\"?"_q,
+					u"Удалить плагин \"%1\"?"_q).arg(FormatPluginTitle(state))),
 			st::boxLabel),
 			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 			style::al_top);
+		if (packageCount > 1) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(PluginUiText(
+					u"Astrogram will unload the plugin first and then remove every local package file for this plugin ID."_q,
+					u"Astrogram сначала выгрузит плагин, а затем удалит все локальные файлы пакетов для этого ID."_q)),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					st::defaultVerticalListSkip / 2,
+					st::boxPadding.right(),
+					0),
+				style::al_top);
+		}
 		box->addButton(rpl::single(PluginUiText(u"Delete"_q, u"Удалить"_q)), [=] {
-			QString error;
-			if (!Core::App().plugins().removePlugin(state.info.id, &error)) {
-				controller->window().showToast(
-					error.isEmpty()
-						? PluginUiText(
-							u"Could not delete the plugin."_q,
-							u"Не удалось удалить плагин."_q)
-						: error);
-				return;
-			}
 			box->closeBox();
-			if (onRemoved) {
-				QTimer::singleShot(0, controller, [=] {
+			QTimer::singleShot(0, context, [=] {
+				QString error;
+				if (!Core::App().plugins().removePlugin(state.info.id, &error)) {
+					controller->window().showToast(
+						error.isEmpty()
+							? PluginUiText(
+								u"Could not delete the plugin."_q,
+								u"Не удалось удалить плагин."_q)
+							: error);
+					return;
+				}
+				controller->window().showToast((packageCount > 1)
+					? PluginUiText(
+						u"Plugin removed together with %1 package files."_q,
+						u"Плагин удалён вместе с %1 файлами пакетов."_q).arg(packageCount)
+					: PluginUiText(
+						u"Plugin removed."_q,
+						u"Плагин удалён."_q));
+				if (onRemoved) {
 					onRemoved();
-				});
-			}
+				}
+			});
 		});
 		box->addButton(rpl::single(tr::lng_cancel()), [=] {
 			box->closeBox();
@@ -1472,6 +1519,11 @@ void AddPluginsDiagnosticsSection(
 		ShowPluginDocsBox(controller);
 	});
 	AddSettingsActionButton(container, PluginUiText(
+		u"Open plugins folder"_q,
+		u"Открыть папку плагинов"_q), [=] {
+		File::ShowInFolder(Core::App().plugins().pluginsPath());
+	});
+	AddSettingsActionButton(container, PluginUiText(
 		u"Reload plugins now"_q,
 		u"Перезагрузить плагины сейчас"_q), [=] {
 		Core::App().plugins().reload();
@@ -1482,7 +1534,7 @@ void AddPluginsDiagnosticsSection(
 	AddSettingsActionButton(container, PluginUiText(
 		u"Open client.log"_q,
 		u"Открыть client.log"_q), [=] {
-		RevealPluginAuxFile(
+			RevealPluginAuxFile(
 			controller,
 			u"./tdata/client.log"_q,
 			PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
@@ -1490,7 +1542,7 @@ void AddPluginsDiagnosticsSection(
 	AddSettingsActionButton(container, PluginUiText(
 		u"Open plugins.log"_q,
 		u"Открыть plugins.log"_q), [=] {
-		RevealPluginAuxFile(
+			RevealPluginAuxFile(
 			controller,
 			u"./tdata/plugins.log"_q,
 			PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
@@ -1498,7 +1550,7 @@ void AddPluginsDiagnosticsSection(
 	AddSettingsActionButton(container, PluginUiText(
 		u"Open plugins.trace.jsonl"_q,
 		u"Открыть plugins.trace.jsonl"_q), [=] {
-		RevealPluginAuxFile(
+			RevealPluginAuxFile(
 			controller,
 			u"./tdata/plugins.trace.jsonl"_q,
 			PluginUiText(u"plugins.trace.jsonl was not found."_q, u"Файл plugins.trace.jsonl не найден."_q));
@@ -1506,7 +1558,7 @@ void AddPluginsDiagnosticsSection(
 	AddSettingsActionButton(container, PluginUiText(
 		u"Open recovery state"_q,
 		u"Открыть recovery-state"_q), [=] {
-		RevealPluginAuxFile(
+			RevealPluginAuxFile(
 			controller,
 			u"./tdata/plugins.recovery.json"_q,
 			PluginUiText(u"plugins.recovery.json was not found."_q, u"Файл plugins.recovery.json не найден."_q));
@@ -1789,6 +1841,32 @@ private:
 			u"Открыть рантайм и диагностику"_q), [=] {
 			ShowPluginRuntimeBox(_controller);
 		});
+		AddSettingsActionButton(_content, PluginUiText(
+			u"Open client.log"_q,
+			u"Открыть client.log"_q), [=] {
+			RevealPluginAuxFile(
+				_controller,
+				u"./tdata/client.log"_q,
+				PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
+		});
+		AddSettingsActionButton(_content, PluginUiText(
+			u"Open plugins.log"_q,
+			u"Открыть plugins.log"_q), [=] {
+			RevealPluginAuxFile(
+				_controller,
+				u"./tdata/plugins.log"_q,
+				PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
+		});
+		if (state->recoverySuspected || state->disabledByRecovery) {
+			AddSettingsActionButton(_content, PluginUiText(
+				u"Open recovery state"_q,
+				u"Открыть recovery-state"_q), [=] {
+				RevealPluginAuxFile(
+					_controller,
+					u"./tdata/plugins.recovery.json"_q,
+					PluginUiText(u"plugins.recovery.json was not found."_q, u"Файл plugins.recovery.json не найден."_q));
+			});
+		}
 		Ui::AddSkip(_content);
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
@@ -1960,64 +2038,6 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		.text = PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
 		.handler = [=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
 		.icon = &st::menuIconShowInFolder,
-	});
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = PluginUiText(u"Open client.log"_q, u"Открыть client.log"_q),
-		.handler = [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/client.log"_q,
-				PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
-		},
-		.icon = &st::menuIconSettings,
-	});
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = PluginUiText(u"Open plugins.log"_q, u"Открыть plugins.log"_q),
-		.handler = [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/plugins.log"_q,
-				PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
-		},
-		.icon = &st::menuIconSettings,
-	});
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = PluginUiText(u"Open plugins.trace.jsonl"_q, u"Открыть plugins.trace.jsonl"_q),
-		.handler = [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/plugins.trace.jsonl"_q,
-				PluginUiText(u"plugins.trace.jsonl was not found."_q, u"Файл plugins.trace.jsonl не найден."_q));
-		},
-		.icon = &st::menuIconSettings,
-	});
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = PluginUiText(u"Open recovery state"_q, u"Открыть recovery-state"_q),
-		.handler = [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/plugins.recovery.json"_q,
-				PluginUiText(u"plugins.recovery.json was not found."_q, u"Файл plugins.recovery.json не найден."_q));
-		},
-		.icon = &st::menuIconSettings,
-	});
-	const auto safeModeEnabled = Core::App().plugins().safeModeEnabled();
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = safeModeEnabled
-			? PluginUiText(
-				u"Disable Safe Mode"_q,
-				u"Выключить безопасный режим"_q)
-			: PluginUiText(
-				u"Enable Safe Mode"_q,
-				u"Включить безопасный режим"_q),
-		.handler = [=] {
-			RequestSafeModeChange(
-				_controller,
-				this,
-				!safeModeEnabled,
-				crl::guard(this, [=] { scheduleRebuildList(0); }));
-		},
-		.icon = &st::menuIconSettings,
 	});
 }
 
