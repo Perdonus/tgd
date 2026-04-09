@@ -99,6 +99,12 @@ struct ContextMenuRequest {
 
 [[nodiscard]] ContextMenuCustomizationLayout
 DefaultContextMenuCustomizationLayout();
+[[nodiscard]] QString ContextMenuCustomizationLayoutPath();
+[[nodiscard]] ContextMenuCustomizationLayout
+LoadContextMenuCustomizationLayout(bool *changed = nullptr);
+[[nodiscard]] bool SaveContextMenuCustomizationLayout(
+	const ContextMenuCustomizationLayout &layout);
+[[nodiscard]] bool ResetContextMenuCustomizationLayout();
 [[nodiscard]] ContextMenuCustomizationLayout
 ParseContextMenuCustomizationLayout(const QJsonObject &json);
 [[nodiscard]] QJsonObject SerializeContextMenuCustomizationLayout(

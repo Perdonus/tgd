@@ -115,6 +115,42 @@ inline constexpr auto SeparatorSecondary = "separator_secondary";
 inline constexpr auto SeparatorDanger = "separator_danger";
 } // namespace PeerMenuItemId
 
+namespace ContextMenuItemId {
+inline constexpr auto SelectionCopy = "selection.copy";
+inline constexpr auto SelectionTranslate = "selection.translate";
+inline constexpr auto SelectionSearch = "selection.search";
+inline constexpr auto SelectionForward = "selection.forward";
+inline constexpr auto SelectionForwardWithoutAuthor = "selection.forward_without_author";
+inline constexpr auto SelectionForwardSaved = "selection.forward_saved";
+inline constexpr auto SelectionSendNow = "selection.send_now";
+inline constexpr auto SelectionDelete = "selection.delete";
+inline constexpr auto SelectionDownloadFiles = "selection.download_files";
+inline constexpr auto SelectionClear = "selection.clear";
+
+inline constexpr auto MessageGoTo = "message.go_to";
+inline constexpr auto MessageViewReplies = "message.view_replies";
+inline constexpr auto MessageReply = "message.reply";
+inline constexpr auto MessageTodoEdit = "message.todo.edit";
+inline constexpr auto MessageTodoAdd = "message.todo.add";
+inline constexpr auto MessageEdit = "message.edit";
+inline constexpr auto MessageEditHistory = "message.edit_history";
+inline constexpr auto MessageCopyIdsTime = "message.copy_ids_time";
+inline constexpr auto MessageFactcheck = "message.factcheck";
+inline constexpr auto MessagePin = "message.pin";
+inline constexpr auto MessageCopyPostLink = "message.copy_post_link";
+inline constexpr auto MessageCopyText = "message.copy_text";
+inline constexpr auto MessageTranslate = "message.translate";
+inline constexpr auto LinkCopy = "link.copy";
+inline constexpr auto MessageForward = "message.forward";
+inline constexpr auto MessageForwardWithoutAuthor = "message.forward_without_author";
+inline constexpr auto MessageForwardSaved = "message.forward_saved";
+inline constexpr auto MessageSendNow = "message.send_now";
+inline constexpr auto MessageDelete = "message.delete";
+inline constexpr auto MessageReport = "message.report";
+inline constexpr auto MessageSelect = "message.select";
+inline constexpr auto MessageReschedule = "message.reschedule";
+} // namespace ContextMenuItemId
+
 [[nodiscard]] QString SideMenuLayoutPath();
 [[nodiscard]] std::vector<SideMenuEntry> DefaultSideMenuLayout(
 	bool supportMode,

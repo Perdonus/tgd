@@ -106,11 +106,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+#include "menu/menu_customization.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QSaveFile>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
@@ -125,40 +131,73 @@ namespace {
 constexpr auto kRescheduleLimit = 20;
 constexpr auto kTagNameLimit = 12;
 constexpr auto kPublicPostLinkToastDuration = 4 * crl::time(1000);
+constexpr auto kContextMenuStripLimit = 4;
 
 constexpr auto kContextLayoutVersion = 1;
-constexpr auto kContextMenuActionSelectionCopy = "selection.copy";
-constexpr auto kContextMenuActionSelectionTranslate = "selection.translate";
-constexpr auto kContextMenuActionSelectionSearch = "selection.search";
-constexpr auto kContextMenuActionSelectionForward = "selection.forward";
-constexpr auto kContextMenuActionSelectionForwardWithoutAuthor = "selection.forward_without_author";
-constexpr auto kContextMenuActionSelectionForwardSaved = "selection.forward_saved";
-constexpr auto kContextMenuActionSelectionSendNow = "selection.send_now";
-constexpr auto kContextMenuActionSelectionDelete = "selection.delete";
-constexpr auto kContextMenuActionSelectionDownloadFiles = "selection.download_files";
-constexpr auto kContextMenuActionSelectionClear = "selection.clear";
-constexpr auto kContextMenuActionMessageGoTo = "message.go_to";
-constexpr auto kContextMenuActionMessageViewReplies = "message.view_replies";
-constexpr auto kContextMenuActionMessageReply = "message.reply";
-constexpr auto kContextMenuActionMessageTodoEdit = "message.todo.edit";
-constexpr auto kContextMenuActionMessageTodoAdd = "message.todo.add";
-constexpr auto kContextMenuActionMessageEdit = "message.edit";
-constexpr auto kContextMenuActionMessageEditHistory = "message.edit_history";
-constexpr auto kContextMenuActionMessageCopyIdsTime = "message.copy_ids_time";
-constexpr auto kContextMenuActionMessageFactcheck = "message.factcheck";
-constexpr auto kContextMenuActionMessagePin = "message.pin";
-constexpr auto kContextMenuActionMessageCopyPostLink = "message.copy_post_link";
-constexpr auto kContextMenuActionMessageCopyText = "message.copy_text";
-constexpr auto kContextMenuActionMessageTranslate = "message.translate";
-constexpr auto kContextMenuActionLinkCopy = "link.copy";
-constexpr auto kContextMenuActionMessageForward = "message.forward";
-constexpr auto kContextMenuActionMessageForwardWithoutAuthor = "message.forward_without_author";
-constexpr auto kContextMenuActionMessageForwardSaved = "message.forward_saved";
-constexpr auto kContextMenuActionMessageSendNow = "message.send_now";
-constexpr auto kContextMenuActionMessageDelete = "message.delete";
-constexpr auto kContextMenuActionMessageReport = "message.report";
-constexpr auto kContextMenuActionMessageSelect = "message.select";
-constexpr auto kContextMenuActionMessageReschedule = "message.reschedule";
+constexpr auto kContextMenuActionSelectionCopy =
+	Menu::Customization::ContextMenuItemId::SelectionCopy;
+constexpr auto kContextMenuActionSelectionTranslate =
+	Menu::Customization::ContextMenuItemId::SelectionTranslate;
+constexpr auto kContextMenuActionSelectionSearch =
+	Menu::Customization::ContextMenuItemId::SelectionSearch;
+constexpr auto kContextMenuActionSelectionForward =
+	Menu::Customization::ContextMenuItemId::SelectionForward;
+constexpr auto kContextMenuActionSelectionForwardWithoutAuthor =
+	Menu::Customization::ContextMenuItemId::SelectionForwardWithoutAuthor;
+constexpr auto kContextMenuActionSelectionForwardSaved =
+	Menu::Customization::ContextMenuItemId::SelectionForwardSaved;
+constexpr auto kContextMenuActionSelectionSendNow =
+	Menu::Customization::ContextMenuItemId::SelectionSendNow;
+constexpr auto kContextMenuActionSelectionDelete =
+	Menu::Customization::ContextMenuItemId::SelectionDelete;
+constexpr auto kContextMenuActionSelectionDownloadFiles =
+	Menu::Customization::ContextMenuItemId::SelectionDownloadFiles;
+constexpr auto kContextMenuActionSelectionClear =
+	Menu::Customization::ContextMenuItemId::SelectionClear;
+constexpr auto kContextMenuActionMessageGoTo =
+	Menu::Customization::ContextMenuItemId::MessageGoTo;
+constexpr auto kContextMenuActionMessageViewReplies =
+	Menu::Customization::ContextMenuItemId::MessageViewReplies;
+constexpr auto kContextMenuActionMessageReply =
+	Menu::Customization::ContextMenuItemId::MessageReply;
+constexpr auto kContextMenuActionMessageTodoEdit =
+	Menu::Customization::ContextMenuItemId::MessageTodoEdit;
+constexpr auto kContextMenuActionMessageTodoAdd =
+	Menu::Customization::ContextMenuItemId::MessageTodoAdd;
+constexpr auto kContextMenuActionMessageEdit =
+	Menu::Customization::ContextMenuItemId::MessageEdit;
+constexpr auto kContextMenuActionMessageEditHistory =
+	Menu::Customization::ContextMenuItemId::MessageEditHistory;
+constexpr auto kContextMenuActionMessageCopyIdsTime =
+	Menu::Customization::ContextMenuItemId::MessageCopyIdsTime;
+constexpr auto kContextMenuActionMessageFactcheck =
+	Menu::Customization::ContextMenuItemId::MessageFactcheck;
+constexpr auto kContextMenuActionMessagePin =
+	Menu::Customization::ContextMenuItemId::MessagePin;
+constexpr auto kContextMenuActionMessageCopyPostLink =
+	Menu::Customization::ContextMenuItemId::MessageCopyPostLink;
+constexpr auto kContextMenuActionMessageCopyText =
+	Menu::Customization::ContextMenuItemId::MessageCopyText;
+constexpr auto kContextMenuActionMessageTranslate =
+	Menu::Customization::ContextMenuItemId::MessageTranslate;
+constexpr auto kContextMenuActionLinkCopy =
+	Menu::Customization::ContextMenuItemId::LinkCopy;
+constexpr auto kContextMenuActionMessageForward =
+	Menu::Customization::ContextMenuItemId::MessageForward;
+constexpr auto kContextMenuActionMessageForwardWithoutAuthor =
+	Menu::Customization::ContextMenuItemId::MessageForwardWithoutAuthor;
+constexpr auto kContextMenuActionMessageForwardSaved =
+	Menu::Customization::ContextMenuItemId::MessageForwardSaved;
+constexpr auto kContextMenuActionMessageSendNow =
+	Menu::Customization::ContextMenuItemId::MessageSendNow;
+constexpr auto kContextMenuActionMessageDelete =
+	Menu::Customization::ContextMenuItemId::MessageDelete;
+constexpr auto kContextMenuActionMessageReport =
+	Menu::Customization::ContextMenuItemId::MessageReport;
+constexpr auto kContextMenuActionMessageSelect =
+	Menu::Customization::ContextMenuItemId::MessageSelect;
+constexpr auto kContextMenuActionMessageReschedule =
+	Menu::Customization::ContextMenuItemId::MessageReschedule;
 
 [[nodiscard]] ContextMenuLayoutEntry MakeLayoutEntry(
 		const char *id,
@@ -176,7 +215,8 @@ public:
 		ContextMenuResolvedLayout *resolved,
 		ContextMenuSurface surface)
 	: _menu(menu)
-	, _resolved(resolved) {
+	, _resolved(resolved)
+	, _surface(surface) {
 		if (_resolved) {
 			_resolved->surface = surface;
 			_resolved->actions.clear();
@@ -193,11 +233,18 @@ public:
 		Fn<void()> callback,
 		const style::icon *icon = nullptr,
 		bool stripEligible = false) {
-		auto shared = std::make_shared<Fn<void()>>(std::move(callback));
-		_menu->addAction(text, [shared] {
-			(*shared)();
-		}, icon);
-		pushResolved(id, text, icon, std::move(shared), stripEligible);
+		const auto shared = std::make_shared<Fn<void()>>(std::move(callback));
+		pushPending(
+			id,
+			text,
+			icon,
+			shared,
+			stripEligible,
+			[text, icon, shared](not_null<Ui::PopupMenu*> menu) {
+				menu->addAction(text, [shared] {
+					(*shared)();
+				}, icon);
+			});
 	}
 
 	void addCustom(
@@ -207,31 +254,107 @@ public:
 		std::shared_ptr<Fn<void()>> trigger = nullptr,
 		bool stripEligible = false,
 		const QString &text = QString()) {
-		append(_menu);
-		pushResolved(id, text, icon, std::move(trigger), stripEligible);
+		pushPending(
+			id,
+			text,
+			icon,
+			std::move(trigger),
+			stripEligible,
+			std::move(append));
+	}
+
+	void finalize(const ContextMenuSurfaceLayout &layout) {
+		publishResolved();
+		auto handled = base::flat_set<QString>();
+		auto appendById = [&](const QString &id) {
+			if (id.isEmpty() || handled.contains(id)) {
+				return false;
+			}
+			for (const auto &action : _pending) {
+				if (action.id != id || !action.append) {
+					continue;
+				}
+				handled.emplace(id);
+				action.append(_menu);
+				return true;
+			}
+			return false;
+		};
+		for (const auto &entry : layout.menu) {
+			if (entry.id.isEmpty() || handled.contains(entry.id)) {
+				continue;
+			}
+			if (!entry.visible) {
+				handled.emplace(entry.id);
+				continue;
+			}
+			appendById(entry.id);
+		}
+		for (const auto &action : _pending) {
+			if (!action.id.isEmpty() && handled.contains(action.id)) {
+				continue;
+			}
+			if (!action.append) {
+				continue;
+			}
+			if (!action.id.isEmpty()) {
+				handled.emplace(action.id);
+			}
+			action.append(_menu);
+		}
 	}
 
 private:
-	void pushResolved(
+	struct PendingAction {
+		QString id;
+		QString text;
+		const style::icon *icon = nullptr;
+		std::shared_ptr<Fn<void()>> trigger;
+		bool stripEligible = false;
+		Fn<void(not_null<Ui::PopupMenu*>)> append;
+	};
+
+	void pushPending(
 		const char *id,
 		QString text,
 		const style::icon *icon,
 		std::shared_ptr<Fn<void()>> trigger,
-		bool stripEligible) {
-		if (!_resolved || !id || !*id) {
-			return;
-		}
-		_resolved->actions.push_back(ContextMenuResolvedAction{
-			.id = QString::fromLatin1(id),
+		bool stripEligible,
+		Fn<void(not_null<Ui::PopupMenu*>)> append) {
+		_pending.push_back(PendingAction{
+			.id = (id && *id) ? QString::fromLatin1(id) : QString(),
 			.text = std::move(text),
 			.icon = icon,
 			.trigger = std::move(trigger),
 			.stripEligible = stripEligible,
+			.append = std::move(append),
 		});
+	}
+
+	void publishResolved() {
+		if (!_resolved) {
+			return;
+		}
+		_resolved->surface = _surface;
+		_resolved->actions.clear();
+		for (const auto &action : _pending) {
+			if (action.id.isEmpty()) {
+				continue;
+			}
+			_resolved->actions.push_back(ContextMenuResolvedAction{
+				.id = action.id,
+				.text = action.text,
+				.icon = action.icon,
+				.trigger = action.trigger,
+				.stripEligible = action.stripEligible,
+			});
+		}
 	}
 
 	const not_null<Ui::PopupMenu*> _menu;
 	ContextMenuResolvedLayout *_resolved = nullptr;
+	const ContextMenuSurface _surface = ContextMenuSurface::Message;
+	std::vector<PendingAction> _pending;
 };
 
 [[nodiscard]] bool AstrogramRussianUi() {
@@ -1686,6 +1809,9 @@ ContextMenuCustomizationLayout DefaultContextMenuCustomizationLayout() {
 		MakeLayoutEntry(kContextMenuActionMessageTranslate),
 		MakeLayoutEntry(kContextMenuActionMessageForward),
 		MakeLayoutEntry(kContextMenuActionMessageForwardWithoutAuthor),
+		MakeLayoutEntry(kContextMenuActionMessageForwardSaved, false),
+		MakeLayoutEntry(kContextMenuActionMessageSendNow, false),
+		MakeLayoutEntry(kContextMenuActionMessageCopyPostLink, false),
 		MakeLayoutEntry(kContextMenuActionMessageSelect),
 	};
 	result.selection.menu = {
@@ -1706,12 +1832,35 @@ ContextMenuCustomizationLayout DefaultContextMenuCustomizationLayout() {
 		MakeLayoutEntry(kContextMenuActionSelectionSearch),
 		MakeLayoutEntry(kContextMenuActionSelectionForward),
 		MakeLayoutEntry(kContextMenuActionSelectionForwardWithoutAuthor),
+		MakeLayoutEntry(kContextMenuActionSelectionForwardSaved, false),
+		MakeLayoutEntry(kContextMenuActionSelectionSendNow, false),
 		MakeLayoutEntry(kContextMenuActionSelectionClear),
 	};
 	return result;
 }
 
 namespace {
+
+void NormalizeStripEntries(std::vector<ContextMenuLayoutEntry> &entries) {
+	auto visible = 0;
+	for (auto &entry : entries) {
+		if (!entry.visible) {
+			continue;
+		}
+		if (visible >= kContextMenuStripLimit) {
+			entry.visible = false;
+			continue;
+		}
+		++visible;
+	}
+}
+
+void NormalizeContextMenuCustomizationLayout(
+		ContextMenuCustomizationLayout &layout) {
+	layout.version = kContextLayoutVersion;
+	NormalizeStripEntries(layout.message.strip);
+	NormalizeStripEntries(layout.selection.strip);
+}
 
 [[nodiscard]] std::vector<ContextMenuLayoutEntry> ParseLayoutEntries(
 		const QJsonValue &value,
@@ -1777,6 +1926,65 @@ namespace {
 
 } // namespace
 
+QString ContextMenuCustomizationLayoutPath() {
+	return cWorkingDir() + QStringLiteral("tdata/context_menu_layout.json");
+}
+
+ContextMenuCustomizationLayout LoadContextMenuCustomizationLayout(bool *changed) {
+	if (changed) {
+		*changed = false;
+	}
+	auto file = QFile(ContextMenuCustomizationLayoutPath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		auto result = DefaultContextMenuCustomizationLayout();
+		NormalizeContextMenuCustomizationLayout(result);
+		return result;
+	}
+	const auto document = QJsonDocument::fromJson(file.readAll());
+	if (!document.isObject()) {
+		if (changed) {
+			*changed = true;
+		}
+		auto result = DefaultContextMenuCustomizationLayout();
+		NormalizeContextMenuCustomizationLayout(result);
+		return result;
+	}
+	auto result = ParseContextMenuCustomizationLayout(document.object());
+	if (changed) {
+		*changed = (
+			document.object()
+				!= SerializeContextMenuCustomizationLayout(result));
+	}
+	return result;
+}
+
+bool SaveContextMenuCustomizationLayout(
+		const ContextMenuCustomizationLayout &layout) {
+	auto normalized = layout;
+	NormalizeContextMenuCustomizationLayout(normalized);
+	const auto path = ContextMenuCustomizationLayoutPath();
+	const auto directory = QFileInfo(path).absolutePath();
+	if (!directory.isEmpty() && !QDir().mkpath(directory)) {
+		return false;
+	}
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return false;
+	}
+	const auto document = QJsonDocument(
+		SerializeContextMenuCustomizationLayout(normalized));
+	if (file.write(document.toJson(QJsonDocument::Indented)) < 0) {
+		file.cancelWriting();
+		return false;
+	}
+	return file.commit();
+}
+
+bool ResetContextMenuCustomizationLayout() {
+	return SaveContextMenuCustomizationLayout(
+		DefaultContextMenuCustomizationLayout());
+}
+
 ContextMenuCustomizationLayout ParseContextMenuCustomizationLayout(
 		const QJsonObject &json) {
 	auto result = DefaultContextMenuCustomizationLayout();
@@ -1785,6 +1993,7 @@ ContextMenuCustomizationLayout ParseContextMenuCustomizationLayout(
 	result.selection = ParseSurfaceLayout(
 		json.value(u"selection"_q),
 		result.selection);
+	NormalizeContextMenuCustomizationLayout(result);
 	return result;
 }
 
@@ -1833,6 +2042,9 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		|| !request.selectedText.empty();
 	const auto hasWhoReactedItem = item
 		&& Api::WhoReactedExists(item, Api::WhoReactedList::All);
+	const auto surface = request.overSelection
+		? ContextMenuSurface::Selection
+		: ContextMenuSurface::Message;
 
 	auto result = base::make_unique_q<Ui::PopupMenu>(
 		list,
@@ -1840,9 +2052,7 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	auto builder = ContextMenuBuilder(
 		result.get(),
 		resolved,
-		request.overSelection
-			? ContextMenuSurface::Selection
-			: ContextMenuSurface::Message);
+		surface);
 
 	AddReplyToMessageAction(&builder, request, list);
 	AddTodoListAction(&builder, request, list);
@@ -1957,6 +2167,11 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 
 	AddCopyLinkAction(&builder, link);
 	AddMessageActions(&builder, request, list);
+
+	const auto customizationLayout = LoadContextMenuCustomizationLayout();
+	builder.finalize(LookupContextMenuSurfaceLayout(
+		customizationLayout,
+		surface));
 
 	const auto wasAmount = result->actions().size();
 	if (const auto textItem = view ? view->textItem() : item) {

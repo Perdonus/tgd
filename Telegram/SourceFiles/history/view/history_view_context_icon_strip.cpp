@@ -221,7 +221,12 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 		QPoint desiredPosition,
 		const ContextMenuSurfaceLayout &layout,
 		const ContextMenuResolvedLayout &resolved) {
-	auto buttons = ResolveButtons(layout, resolved);
+	Q_UNUSED(layout);
+
+	const auto customizationLayout = LoadContextMenuCustomizationLayout();
+	auto buttons = ResolveButtons(
+		LookupContextMenuSurfaceLayout(customizationLayout, resolved.surface),
+		resolved);
 	if (buttons.empty()) {
 		return AttachContextIconStripResult::Skipped;
 	}

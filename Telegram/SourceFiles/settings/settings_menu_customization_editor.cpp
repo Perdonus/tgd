@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_menu_customization_editor.h"
 
 #include "settings/settings_common.h"
+#include "history/view/history_view_context_menu.h"
 #include "menu/menu_customization.h"
 #include "core/application.h"
 #include "core/launcher.h"
@@ -96,6 +97,7 @@ namespace {
 
 constexpr auto kPreviewHeight = 292;
 constexpr auto kFuturePreviewHeight = 214;
+constexpr auto kContextPreviewHeight = 322;
 constexpr auto kRowHeight = 64;
 constexpr auto kRowGap = 10;
 constexpr auto kRowPadding = 14;
@@ -1201,6 +1203,848 @@ private:
 	ActionKind _hoveredKind = ActionKind::None;
 };
 
+enum class ContextEditorLane {
+	Menu,
+	Strip,
+};
+
+struct ContextActionDescriptor {
+	QString title;
+	QString subtitle;
+	QString glyph;
+	QColor color;
+};
+
+[[nodiscard]] QString ContextSurfaceTitle(
+		HistoryView::ContextMenuSurface surface) {
+	return (surface == HistoryView::ContextMenuSurface::Selection)
+		? RuEn(
+			"Контекстное меню при выделении",
+			"Selection context menu")
+		: RuEn(
+			"Обычное контекстное меню",
+			"Message context menu");
+}
+
+[[nodiscard]] QString ContextLaneTitle(ContextEditorLane lane) {
+	return (lane == ContextEditorLane::Strip)
+		? RuEn("Нижняя полоска иконок", "Bottom icon strip")
+		: RuEn("Основной список действий", "Main action list");
+}
+
+[[nodiscard]] const std::vector<HistoryView::ContextMenuLayoutEntry> &ContextEntries(
+		const HistoryView::ContextMenuCustomizationLayout &layout,
+		HistoryView::ContextMenuSurface surface,
+		ContextEditorLane lane) {
+	if (surface == HistoryView::ContextMenuSurface::Selection) {
+		return (lane == ContextEditorLane::Strip)
+			? layout.selection.strip
+			: layout.selection.menu;
+	}
+	return (lane == ContextEditorLane::Strip)
+		? layout.message.strip
+		: layout.message.menu;
+}
+
+[[nodiscard]] std::vector<HistoryView::ContextMenuLayoutEntry> &ContextEntries(
+		HistoryView::ContextMenuCustomizationLayout &layout,
+		HistoryView::ContextMenuSurface surface,
+		ContextEditorLane lane) {
+	if (surface == HistoryView::ContextMenuSurface::Selection) {
+		return (lane == ContextEditorLane::Strip)
+			? layout.selection.strip
+			: layout.selection.menu;
+	}
+	return (lane == ContextEditorLane::Strip)
+		? layout.message.strip
+		: layout.message.menu;
+}
+
+[[nodiscard]] int VisibleEntryCount(
+		const std::vector<HistoryView::ContextMenuLayoutEntry> &entries) {
+	auto result = 0;
+	for (const auto &entry : entries) {
+		if (entry.visible) {
+			++result;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] ContextActionDescriptor DescribeContextAction(const QString &id) {
+	using Id = Menu::Customization::ContextMenuItemId;
+	const auto make = [&](const char *ruTitle,
+			const char *enTitle,
+			const char *ruSubtitle,
+			const char *enSubtitle,
+			const char *glyph,
+			QColor color) {
+		return ContextActionDescriptor{
+			.title = RuEn(ruTitle, enTitle),
+			.subtitle = RuEn(ruSubtitle, enSubtitle),
+			.glyph = QString::fromLatin1(glyph),
+			.color = color,
+		};
+	};
+
+	if (id == QString::fromLatin1(Id::SelectionCopy)) {
+		return make(
+			"Копировать выделение",
+			"Copy selection",
+			"Копирует выделенный текст или выбранные сообщения.",
+			"Copies selected text or picked messages.",
+			"C",
+			QColor(0x4F, 0x8D, 0xFF));
+	} else if (id == QString::fromLatin1(Id::SelectionTranslate)) {
+		return make(
+			"Перевести выделение",
+			"Translate selection",
+			"Открывает перевод выделенного текста.",
+			"Opens a translation for the selected text.",
+			"T",
+			QColor(0x35, 0xC3, 0x8F));
+	} else if (id == QString::fromLatin1(Id::SelectionSearch)) {
+		return make(
+			"Искать выделенное",
+			"Search selection",
+			"Открывает поиск по выделенному тексту.",
+			"Searches the selected text on the web.",
+			"S",
+			QColor(0xF0, 0x9A, 0x36));
+	} else if (id == QString::fromLatin1(Id::SelectionForward)
+		|| id == QString::fromLatin1(Id::MessageForward)) {
+		return make(
+			"Переслать",
+			"Forward",
+			"Обычная пересылка в другой чат.",
+			"Regular forward into another chat.",
+			"F",
+			QColor(0x31, 0xB0, 0xE7));
+	} else if (id == QString::fromLatin1(Id::SelectionForwardWithoutAuthor)
+		|| id == QString::fromLatin1(Id::MessageForwardWithoutAuthor)) {
+		return make(
+			"Переслать без автора",
+			"Forward without author",
+			"Ресенд без цитаты и указания автора.",
+			"Resends without quote and without author.",
+			"A",
+			QColor(0x35, 0xC3, 0x8F));
+	} else if (id == QString::fromLatin1(Id::SelectionForwardSaved)
+		|| id == QString::fromLatin1(Id::MessageForwardSaved)) {
+		return make(
+			"В Избранное",
+			"Forward to Saved",
+			"Сразу пересылает в Saved Messages.",
+			"Sends directly to Saved Messages.",
+			"S",
+			QColor(0x37, 0xA6, 0xF0));
+	} else if (id == QString::fromLatin1(Id::SelectionSendNow)
+		|| id == QString::fromLatin1(Id::MessageSendNow)) {
+		return make(
+			"Отправить сейчас",
+			"Send now",
+			"Мгновенная отправка для отложенных сообщений.",
+			"Instant send for scheduled messages.",
+			"N",
+			QColor(0x39, 0xB9, 0x8D));
+	} else if (id == QString::fromLatin1(Id::SelectionDelete)
+		|| id == QString::fromLatin1(Id::MessageDelete)) {
+		return make(
+			"Удалить",
+			"Delete",
+			"Удаление сообщения или выбранных сообщений.",
+			"Deletes the message or selected messages.",
+			"D",
+			QColor(0xD7, 0x59, 0x59));
+	} else if (id == QString::fromLatin1(Id::SelectionDownloadFiles)) {
+		return make(
+			"Скачать файлы",
+			"Download files",
+			"Сохраняет файлы из выбранных сообщений.",
+			"Saves files from selected messages.",
+			"L",
+			QColor(0xF1, 0xA4, 0x2B));
+	} else if (id == QString::fromLatin1(Id::SelectionClear)) {
+		return make(
+			"Снять выделение",
+			"Clear selection",
+			"Выходит из режима выделения.",
+			"Leaves the selection mode.",
+			"X",
+			QColor(0x8A, 0x93, 0xA3));
+	} else if (id == QString::fromLatin1(Id::MessageGoTo)) {
+		return make(
+			"Перейти к сообщению",
+			"Go to message",
+			"Открывает исходное сообщение в чате.",
+			"Opens the source message in chat.",
+			"G",
+			QColor(0x68, 0x79, 0xFF));
+	} else if (id == QString::fromLatin1(Id::MessageViewReplies)) {
+		return make(
+			"Открыть ответы",
+			"View replies",
+			"Показывает ветку ответов или тему.",
+			"Shows the replies thread or topic.",
+			"R",
+			QColor(0x58, 0xC8, 0x66));
+	} else if (id == QString::fromLatin1(Id::MessageReply)) {
+		return make(
+			"Ответить",
+			"Reply",
+			"Обычный ответ или quote reply.",
+			"Regular reply or quoted reply.",
+			"R",
+			QColor(0x31, 0xB0, 0xE7));
+	} else if (id == QString::fromLatin1(Id::MessageTodoEdit)) {
+		return make(
+			"Изменить To-Do",
+			"Edit to-do",
+			"Редактирует todo-сообщение.",
+			"Edits the to-do message.",
+			"E",
+			QColor(0xF0, 0x9A, 0x36));
+	} else if (id == QString::fromLatin1(Id::MessageTodoAdd)) {
+		return make(
+			"Добавить задачу",
+			"Add task",
+			"Добавляет задачу в todo-list.",
+			"Adds a task to the to-do list.",
+			"+",
+			QColor(0x4A, 0xC6, 0x7A));
+	} else if (id == QString::fromLatin1(Id::MessageEdit)) {
+		return make(
+			"Изменить сообщение",
+			"Edit message",
+			"Запускает обычное редактирование.",
+			"Starts regular message editing.",
+			"E",
+			QColor(0x4F, 0x8D, 0xFF));
+	} else if (id == QString::fromLatin1(Id::MessageEditHistory)) {
+		return make(
+			"История правок",
+			"Edit history",
+			"Показывает локально сохранённые ревизии.",
+			"Shows locally saved revisions.",
+			"H",
+			QColor(0x8A, 0x93, 0xA3));
+	} else if (id == QString::fromLatin1(Id::MessageCopyIdsTime)) {
+		return make(
+			"Скопировать ID и время",
+			"Copy IDs and time",
+			"Копирует chat id, message id и timestamp.",
+			"Copies chat id, message id and timestamp.",
+			"I",
+			QColor(0x73, 0x62, 0xE8));
+	} else if (id == QString::fromLatin1(Id::MessageFactcheck)) {
+		return make(
+			"Фактчек",
+			"Factcheck",
+			"Редактирование fact-check блока.",
+			"Edits the fact-check block.",
+			"F",
+			QColor(0x2D, 0xC8, 0xB3));
+	} else if (id == QString::fromLatin1(Id::MessagePin)) {
+		return make(
+			"Закрепить",
+			"Pin message",
+			"Закрепляет или открепляет сообщение.",
+			"Pins or unpins the message.",
+			"P",
+			QColor(0x5A, 0xAE, 0xF5));
+	} else if (id == QString::fromLatin1(Id::MessageCopyPostLink)
+		|| id == QString::fromLatin1(Id::LinkCopy)) {
+		return make(
+			"Скопировать ссылку",
+			"Copy link",
+			"Копирует ссылку на пост или выбранный URL.",
+			"Copies a post link or the selected URL.",
+			"L",
+			QColor(0x37, 0xA6, 0xF0));
+	} else if (id == QString::fromLatin1(Id::MessageCopyText)) {
+		return make(
+			"Копировать текст",
+			"Copy text",
+			"Копирует текст сообщения целиком.",
+			"Copies the full message text.",
+			"C",
+			QColor(0x4F, 0x8D, 0xFF));
+	} else if (id == QString::fromLatin1(Id::MessageTranslate)) {
+		return make(
+			"Перевести",
+			"Translate",
+			"Открывает перевод текста сообщения.",
+			"Opens a translation for the message text.",
+			"T",
+			QColor(0x35, 0xC3, 0x8F));
+	} else if (id == QString::fromLatin1(Id::MessageReport)) {
+		return make(
+			"Пожаловаться",
+			"Report",
+			"Жалоба на сообщение.",
+			"Reports the message.",
+			"!",
+			QColor(0xD7, 0x59, 0x59));
+	} else if (id == QString::fromLatin1(Id::MessageSelect)) {
+		return make(
+			"Выбрать",
+			"Select",
+			"Включает режим выделения сообщений.",
+			"Enters message selection mode.",
+			"S",
+			QColor(0x8A, 0x93, 0xA3));
+	} else if (id == QString::fromLatin1(Id::MessageReschedule)) {
+		return make(
+			"Перенести",
+			"Reschedule",
+			"Меняет время отложенной отправки.",
+			"Changes the scheduled send time.",
+			"R",
+			QColor(0xF0, 0x9A, 0x36));
+	}
+
+	return make(
+		"Неизвестное действие",
+		"Unknown action",
+		"Сохранено в layout-файле и будет оставлено как есть.",
+		"Persisted in the layout file and kept as-is.",
+		"?",
+		QColor(0x99, 0xA1, 0xAD));
+}
+
+class ContextMenuEditorState final {
+public:
+	ContextMenuEditorState()
+	: _layout(HistoryView::LoadContextMenuCustomizationLayout()) {
+	}
+
+	[[nodiscard]] const HistoryView::ContextMenuCustomizationLayout &layout() const {
+		return _layout;
+	}
+
+	[[nodiscard]] const std::vector<HistoryView::ContextMenuLayoutEntry> &entries(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane) const {
+		return ContextEntries(_layout, surface, lane);
+	}
+
+	[[nodiscard]] QString layoutPath() const {
+		return HistoryView::ContextMenuCustomizationLayoutPath();
+	}
+
+	[[nodiscard]] rpl::producer<> changes() const {
+		return _changes.events();
+	}
+
+	[[nodiscard]] bool reloadFromDisk() {
+		_layout = HistoryView::LoadContextMenuCustomizationLayout();
+		_changes.fire({});
+		return true;
+	}
+
+	[[nodiscard]] bool resetToDefaults() {
+		return applyLayout(HistoryView::DefaultContextMenuCustomizationLayout());
+	}
+
+	[[nodiscard]] bool toggleVisible(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int index) {
+		if (!hasIndex(surface, lane, index)) {
+			return false;
+		}
+		auto updated = _layout;
+		auto &entries = ContextEntries(updated, surface, lane);
+		const auto turnOn = !entries[index].visible;
+		if (turnOn
+			&& lane == ContextEditorLane::Strip
+			&& VisibleEntryCount(entries) >= 4) {
+			return false;
+		}
+		entries[index].visible = turnOn;
+		return applyLayout(updated);
+	}
+
+	[[nodiscard]] bool moveUp(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int index) {
+		if (!hasIndex(surface, lane, index) || (index <= 0)) {
+			return false;
+		}
+		auto updated = _layout;
+		auto &entries = ContextEntries(updated, surface, lane);
+		std::swap(entries[index], entries[index - 1]);
+		return applyLayout(updated);
+	}
+
+	[[nodiscard]] bool moveDown(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int index) {
+		if (!hasIndex(surface, lane, index)) {
+			return false;
+		}
+		auto updated = _layout;
+		auto &entries = ContextEntries(updated, surface, lane);
+		if (index + 1 >= int(entries.size())) {
+			return false;
+		}
+		std::swap(entries[index], entries[index + 1]);
+		return applyLayout(updated);
+	}
+
+private:
+	[[nodiscard]] bool applyLayout(
+			const HistoryView::ContextMenuCustomizationLayout &updated) {
+		if (!HistoryView::SaveContextMenuCustomizationLayout(updated)) {
+			return false;
+		}
+		_layout = HistoryView::LoadContextMenuCustomizationLayout();
+		_changes.fire({});
+		return true;
+	}
+
+	[[nodiscard]] bool hasIndex(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int index) const {
+		const auto &list = entries(surface, lane);
+		return (index >= 0) && (index < int(list.size()));
+	}
+
+	HistoryView::ContextMenuCustomizationLayout _layout;
+	mutable rpl::event_stream<> _changes;
+};
+
+class ContextMenuPreview final : public Ui::RpWidget {
+public:
+	ContextMenuPreview(
+		QWidget *parent,
+		std::shared_ptr<ContextMenuEditorState> state)
+	: RpWidget(parent)
+	, _state(std::move(state)) {
+		_state->changes() | rpl::start_with_next([=] {
+			update();
+		}, lifetime());
+	}
+
+protected:
+	int resizeGetHeight(int newWidth) override {
+		return (newWidth > 760)
+			? kContextPreviewHeight
+			: (kContextPreviewHeight + 110);
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		Q_UNUSED(e);
+
+		auto p = Painter(this);
+		p.setRenderHint(QPainter::Antialiasing);
+
+		const auto outer = rect().adjusted(0, 0, -1, -1);
+		auto path = QPainterPath();
+		path.addRoundedRect(outer, kPreviewRadius, kPreviewRadius);
+		auto background = QLinearGradient(
+			QPointF(0., 0.),
+			QPointF(width(), height()));
+		background.setColorAt(0., QColor(0xF0, 0xFA, 0xF5));
+		background.setColorAt(1., QColor(0xF7, 0xFB, 0xFD));
+		p.fillPath(path, background);
+		p.setClipPath(path);
+
+		const auto gap = 18;
+		const auto stacked = (width() <= 760);
+		const auto paneWidth = stacked
+			? (width() - 32)
+			: ((width() - 50) / 2);
+		const auto first = QRect(16, 16, paneWidth, 136);
+		const auto second = stacked
+			? QRect(16, first.bottom() + gap, paneWidth, 136)
+			: QRect(first.right() + gap, 16, paneWidth, 136);
+		paintSurface(&p, first, HistoryView::ContextMenuSurface::Message, false);
+		paintSurface(&p, second, HistoryView::ContextMenuSurface::Selection, true);
+
+		p.setClipping(false);
+		p.setPen(QColor(0xD3, 0xDE, 0xE8));
+		p.drawRoundedRect(outer, kPreviewRadius, kPreviewRadius);
+	}
+
+private:
+	void paintSurface(
+			QPainter *p,
+			const QRect &rect,
+			HistoryView::ContextMenuSurface surface,
+			bool selectionMode) const {
+		p->setPen(Qt::NoPen);
+		p->setBrush(QColor(0xE4, 0xF2, 0xEA));
+		p->drawRoundedRect(rect, 22, 22);
+
+		const auto bubbleLeft = QRect(rect.left() + 16, rect.top() + 18, 138, 34);
+		const auto bubbleRight = QRect(rect.right() - 154, rect.bottom() - 46, 136, 30);
+		p->setBrush(QColor(255, 255, 255, 220));
+		p->drawRoundedRect(bubbleLeft, 16, 16);
+		p->setBrush(selectionMode ? QColor(0xD7, 0xEC, 0xFF) : QColor(0xD3, 0xF1, 0xE0));
+		p->drawRoundedRect(bubbleRight, 16, 16);
+		if (selectionMode) {
+			p->setBrush(QColor(0x4F, 0x8D, 0xFF, 52));
+			p->drawRoundedRect(
+				QRect(rect.left() + 26, rect.top() + 62, rect.width() - 140, 24),
+				12,
+				12);
+		}
+
+		const auto popup = QRect(rect.left() + 94, rect.top() + 26, rect.width() - 118, 84);
+		p->setBrush(QColor(255, 255, 255, 246));
+		p->drawRoundedRect(popup, 18, 18);
+
+		p->setBrush(QColor(0xE7, 0xF8, 0xEF));
+		p->drawRoundedRect(QRect(popup.left() + 12, popup.top() + 10, 128, 22), 11, 11);
+		p->setPen(QColor(0x1C, 0x8B, 0x62));
+		p->setFont(st::normalFont->f);
+		p->drawText(
+			QRect(popup.left() + 12, popup.top() + 10, 128, 22),
+			Qt::AlignCenter,
+			ContextSurfaceTitle(surface));
+
+		const auto visibleMenu = visibleEntries(surface, ContextEditorLane::Menu, 3);
+		auto rowTop = popup.top() + 40;
+		for (const auto &entry : visibleMenu) {
+			const auto meta = DescribeContextAction(entry.id);
+			p->setPen(Qt::NoPen);
+			p->setBrush(meta.color);
+			p->drawEllipse(QRect(popup.left() + 14, rowTop + 2, 16, 16));
+			p->setPen(Qt::white);
+			p->setFont(st::normalFont->f);
+			p->drawText(
+				QRect(popup.left() + 14, rowTop + 2, 16, 16),
+				Qt::AlignCenter,
+				meta.glyph.left(1));
+			p->setPen(QColor(0x23, 0x2F, 0x3C));
+			p->setFont(st::normalFont->f);
+			p->drawText(
+				QRect(popup.left() + 38, rowTop, popup.width() - 52, 20),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				meta.title);
+			rowTop += 20;
+		}
+
+		const auto visibleStrip = visibleEntries(surface, ContextEditorLane::Strip, 4);
+		if (!visibleStrip.empty()) {
+			const auto strip = QRect(popup.left() + 10, popup.bottom() + 8, popup.width() - 20, 28);
+			p->setPen(Qt::NoPen);
+			p->setBrush(QColor(0xE7, 0xF8, 0xEF));
+			p->drawRoundedRect(strip, 14, 14);
+			auto left = strip.left() + 12;
+			for (const auto &entry : visibleStrip) {
+				const auto meta = DescribeContextAction(entry.id);
+				p->setBrush(meta.color);
+				p->drawEllipse(QRect(left, strip.top() + 4, 20, 20));
+				p->setPen(Qt::white);
+				p->setFont(st::normalFont->f);
+				p->drawText(
+					QRect(left, strip.top() + 4, 20, 20),
+					Qt::AlignCenter,
+					meta.glyph.left(1));
+				left += 30;
+			}
+		}
+	}
+
+	[[nodiscard]] std::vector<HistoryView::ContextMenuLayoutEntry> visibleEntries(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int limit) const {
+		auto result = std::vector<HistoryView::ContextMenuLayoutEntry>();
+		for (const auto &entry : _state->entries(surface, lane)) {
+			if (!entry.visible) {
+				continue;
+			}
+			result.push_back(entry);
+			if (int(result.size()) >= limit) {
+				break;
+			}
+		}
+		return result;
+	}
+
+	const std::shared_ptr<ContextMenuEditorState> _state;
+};
+
+class ContextMenuEntryList final : public Ui::RpWidget {
+public:
+	ContextMenuEntryList(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller,
+		std::shared_ptr<ContextMenuEditorState> state,
+		HistoryView::ContextMenuSurface surface,
+		ContextEditorLane lane)
+	: RpWidget(parent)
+	, _controller(controller)
+	, _state(std::move(state))
+	, _surface(surface)
+	, _lane(lane) {
+		setMouseTracking(true);
+		_state->changes() | rpl::start_with_next([=] {
+			clampSelection();
+			update();
+			updateGeometry();
+		}, lifetime());
+		clampSelection();
+	}
+
+protected:
+	int resizeGetHeight(int newWidth) override {
+		Q_UNUSED(newWidth);
+		const auto count = std::max(int(_state->entries(_surface, _lane).size()), 1);
+		return 18 + (count * (kRowHeight + kRowGap));
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		Q_UNUSED(e);
+
+		auto p = Painter(this);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto &entries = _state->entries(_surface, _lane);
+		if (entries.empty()) {
+			return;
+		}
+
+		for (auto i = 0; i != int(entries.size()); ++i) {
+			const auto row = rowRect(i);
+			const auto hovered = (i == _hoveredRow);
+			const auto selected = (i == _selected);
+			const auto meta = DescribeContextAction(entries[i].id);
+
+			p.setPen(Qt::NoPen);
+			p.setBrush(selected
+				? QColor(0xE7, 0xF8, 0xEF)
+				: hovered
+					? QColor(0xF5, 0xF9, 0xFC)
+					: QColor(0xFA, 0xFC, 0xFE));
+			p.drawRoundedRect(row, kRowRadius, kRowRadius);
+
+			p.setBrush(meta.color);
+			p.drawEllipse(QRect(row.left() + 14, row.top() + 14, 36, 36));
+			p.setPen(Qt::white);
+			p.setFont(st::semiboldFont->f);
+			p.drawText(
+				QRect(row.left() + 14, row.top() + 14, 36, 36),
+				Qt::AlignCenter,
+				meta.glyph.left(1));
+
+			p.setPen(QColor(0x23, 0x2F, 0x3C));
+			p.setFont(st::semiboldTextStyle.font->f);
+			p.drawText(
+				QRect(row.left() + 62, row.top() + 12, row.width() - 220, 20),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				meta.title);
+
+			const auto stateText = entries[i].visible
+				? (_lane == ContextEditorLane::Strip
+					? RuEn("Показывается в нижней полоске", "Shown in the bottom strip")
+					: RuEn("Показывается в контекстном меню", "Shown in the context menu"))
+				: (_lane == ContextEditorLane::Strip
+					? RuEn("Скрыто из нижней полоски", "Hidden from the bottom strip")
+					: RuEn("Скрыто из контекстного меню", "Hidden from the context menu"));
+			p.setPen(QColor(0x67, 0x75, 0x84));
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				QRect(row.left() + 62, row.top() + 34, row.width() - 220, 18),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				stateText);
+
+			for (const auto &button : actionButtonsForRow(i)) {
+				paintActionButton(p, button);
+			}
+		}
+	}
+
+	void mouseMoveEvent(QMouseEvent *e) override {
+		updateHover(e->position().toPoint());
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto point = e->position().toPoint();
+		const auto &entries = _state->entries(_surface, _lane);
+		for (auto i = 0; i != int(entries.size()); ++i) {
+			const auto row = rowRect(i);
+			if (!row.contains(point)) {
+				continue;
+			}
+			_selected = i;
+			for (const auto &button : actionButtonsForRow(i)) {
+				if (!button.enabled || !button.rect.contains(point)) {
+					continue;
+				}
+				handleAction(i, button.kind);
+				updateHover(point);
+				return;
+			}
+			update();
+			return;
+		}
+	}
+
+	void leaveEventHook(QEvent *e) override {
+		Q_UNUSED(e);
+		_hoveredRow = -1;
+		_hoveredKind = ActionKind::None;
+		update();
+	}
+
+private:
+	enum class ActionKind {
+		None,
+		ToggleVisible,
+		MoveUp,
+		MoveDown,
+	};
+
+	struct ActionButton {
+		QRect rect;
+		QString label;
+		ActionKind kind = ActionKind::None;
+		bool enabled = true;
+	};
+
+	[[nodiscard]] QRect rowRect(int index) const {
+		return QRect(
+			0,
+			8 + index * (kRowHeight + kRowGap),
+			width(),
+			kRowHeight);
+	}
+
+	[[nodiscard]] std::vector<ActionButton> actionButtonsForRow(int index) const {
+		const auto &entries = _state->entries(_surface, _lane);
+		if ((index < 0) || (index >= int(entries.size()))) {
+			return {};
+		}
+		const auto row = rowRect(index);
+		const auto fm = QFontMetrics(st::normalFont->f);
+		const auto height = 28;
+		auto right = row.right() - kRowPadding;
+		auto result = std::vector<ActionButton>();
+		const auto push = [&](QString label, ActionKind kind, bool enabled) {
+			const auto width = std::max(44, fm.horizontalAdvance(label) + 22);
+			right -= width;
+			result.push_back(ActionButton{
+				.rect = QRect(right, row.top() + 18, width, height),
+				.label = std::move(label),
+				.kind = kind,
+				.enabled = enabled,
+			});
+			right -= 8;
+		};
+
+		push(RuEn("Ниже", "Down"), ActionKind::MoveDown, index + 1 < int(entries.size()));
+		push(RuEn("Выше", "Up"), ActionKind::MoveUp, index > 0);
+		push(
+			entries[index].visible
+				? RuEn("Скрыть", "Hide")
+				: RuEn("Показать", "Show"),
+			ActionKind::ToggleVisible,
+			true);
+		std::reverse(result.begin(), result.end());
+		return result;
+	}
+
+	void paintActionButton(QPainter &p, const ActionButton &button) const {
+		const auto hovered = (_hoveredRow >= 0)
+			&& (button.kind == _hoveredKind)
+			&& button.rect.intersects(rowRect(_hoveredRow));
+		p.setPen(Qt::NoPen);
+		p.setBrush(!button.enabled
+			? QColor(0xE8, 0xEE, 0xF3)
+			: (hovered ? QColor(0xD8, 0xF1, 0xE5) : QColor(0xEB, 0xF7, 0xF1)));
+		p.drawRoundedRect(button.rect, 14, 14);
+		p.setPen(!button.enabled
+			? QColor(0xA0, 0xAD, 0xB8)
+			: QColor(0x1C, 0x8B, 0x62));
+		p.setFont(st::normalFont->f);
+		p.drawText(button.rect, Qt::AlignCenter, button.label);
+	}
+
+	void updateHover(QPoint point) {
+		auto newRow = -1;
+		auto newKind = ActionKind::None;
+		const auto &entries = _state->entries(_surface, _lane);
+		for (auto i = 0; i != int(entries.size()); ++i) {
+			if (!rowRect(i).contains(point)) {
+				continue;
+			}
+			newRow = i;
+			for (const auto &button : actionButtonsForRow(i)) {
+				if (button.enabled && button.rect.contains(point)) {
+					newKind = button.kind;
+					break;
+				}
+			}
+			break;
+		}
+		if ((newRow == _hoveredRow) && (newKind == _hoveredKind)) {
+			return;
+		}
+		_hoveredRow = newRow;
+		_hoveredKind = newKind;
+		update();
+	}
+
+	void handleAction(int index, ActionKind kind) {
+		auto changed = false;
+		switch (kind) {
+		case ActionKind::ToggleVisible:
+			changed = _state->toggleVisible(_surface, _lane, index);
+			break;
+		case ActionKind::MoveUp:
+			changed = _state->moveUp(_surface, _lane, index);
+			if (changed) {
+				_selected = std::max(0, index - 1);
+			}
+			break;
+		case ActionKind::MoveDown:
+			changed = _state->moveDown(_surface, _lane, index);
+			if (changed) {
+				_selected = index + 1;
+			}
+			break;
+		case ActionKind::None:
+			break;
+		}
+		if (!changed) {
+			if (kind == ActionKind::ToggleVisible
+				&& _lane == ContextEditorLane::Strip) {
+				_controller->window().showToast(RuEn(
+					"В нижней полоске можно держать максимум 4 иконки.",
+					"The bottom strip can show at most 4 icons."));
+			} else {
+				update();
+			}
+		}
+	}
+
+	void clampSelection() {
+		const auto &entries = _state->entries(_surface, _lane);
+		if (entries.empty()) {
+			_selected = -1;
+		} else if ((_selected < 0) || (_selected >= int(entries.size()))) {
+			_selected = std::clamp(_selected, 0, int(entries.size()) - 1);
+		}
+	}
+
+	const not_null<Window::SessionController*> _controller;
+	const std::shared_ptr<ContextMenuEditorState> _state;
+	const HistoryView::ContextMenuSurface _surface;
+	const ContextEditorLane _lane = ContextEditorLane::Menu;
+	int _selected = 0;
+	int _hoveredRow = -1;
+	ActionKind _hoveredKind = ActionKind::None;
+};
+
 void AddPreviewToggle(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
@@ -1239,6 +2083,7 @@ void AddMenuCustomizationEditor(
 	const auto state = std::make_shared<SideMenuEditorState>(
 		controller->session().supportMode(),
 		hasLogsAction);
+	const auto contextState = std::make_shared<ContextMenuEditorState>();
 
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
@@ -1443,8 +2288,106 @@ void AddMenuCustomizationEditor(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Peer / 3-dot / context / bottom strip уже получили отдельный UI-slot в experimental settings, но пока остаются read-only. Для реального drag/drop и скрытия кнопок здесь нужны runtime hooks из `window_peer_menu.cpp`, `history_view_context_menu.cpp` и consumer-слой для нижней icon-strip.",
-			"Peer / 3-dot / context / bottom strip now have a dedicated UI slot in experimental settings, but remain read-only. Real drag/drop and button hiding still need runtime hooks from `window_peer_menu.cpp`, `history_view_context_menu.cpp` and a consumer layer for the bottom icon strip.")));
+			"Peer и 3-dot здесь пока остаются preview-only. Зато ниже уже живой runtime-editor контекстного меню: он пишет в `context_menu_layout.json`, разделяет обычное состояние и состояние выделения и отдельно управляет нижней полоской до 4 иконок.",
+			"Peer and 3-dot remain preview-only here. But the section below is now a live runtime editor for the context menu: it writes into `context_menu_layout.json`, separates message and selection states and manages the bottom strip with up to 4 icons.")));
+
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn(
+			"Runtime editor контекстного меню",
+			"Runtime context menu editor")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Эта часть уже реально влияет на клиент: сохранённая раскладка применяется к runtime context menu и к нижней полоске иконок при каждом открытии меню.",
+			"This section already affects the real client: the saved layout is applied to the runtime context menu and the bottom icon strip every time the menu opens.")));
+	container->add(
+		object_ptr<ContextMenuPreview>(container, contextState),
+		style::margins(6, 0, 6, 0),
+		style::al_top);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+
+	const auto addContextEditor = [&](HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane) {
+		Ui::AddSubsectionTitle(
+			container,
+			rpl::single(ContextSurfaceTitle(surface) + u" · "_q + ContextLaneTitle(lane)));
+		container->add(
+			object_ptr<ContextMenuEntryList>(
+				container,
+				controller,
+				contextState,
+				surface,
+				lane),
+			style::margins(6, 0, 6, 0),
+			style::al_top);
+		Ui::AddDividerText(
+			container,
+			rpl::single(
+				(lane == ContextEditorLane::Strip)
+					? RuEn(
+						"Hide/Show управляет попаданием в нижнюю полоску. Runtime жёстко держит лимит в 4 видимых иконки.",
+						"Hide/Show controls whether the action appears in the bottom strip. Runtime strictly keeps the limit at 4 visible icons.")
+					: RuEn(
+						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности.",
+						"Hide/Show and ordering here directly change the popup action list for this surface.")));
+		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	};
+
+	addContextEditor(HistoryView::ContextMenuSurface::Message, ContextEditorLane::Menu);
+	addContextEditor(HistoryView::ContextMenuSurface::Message, ContextEditorLane::Strip);
+	addContextEditor(HistoryView::ContextMenuSurface::Selection, ContextEditorLane::Menu);
+	addContextEditor(HistoryView::ContextMenuSurface::Selection, ContextEditorLane::Strip);
+
+	AddButtonWithLabel(
+		container,
+		rpl::single(RuEn(
+			"Файл раскладки контекстного меню",
+			"Context menu layout file")),
+		rpl::single(QDir::toNativeSeparators(contextState->layoutPath())),
+		st::settingsButton,
+		{ &st::menuIconEdit }
+	)->addClickHandler([=] {
+		QGuiApplication::clipboard()->setText(
+			QDir::toNativeSeparators(contextState->layoutPath()));
+		controller->window().showToast(RuEn(
+			"Путь к context layout скопирован.",
+			"Context layout path copied."));
+	});
+
+	AddButtonWithIcon(
+		container,
+		rpl::single(RuEn(
+			"Перечитать раскладку контекстного меню с диска",
+			"Reload the context menu layout from disk")),
+		st::settingsButton,
+		{ &st::menuIconRestore }
+	)->addClickHandler([=] {
+		contextState->reloadFromDisk();
+		controller->window().showToast(RuEn(
+			"Контекстная раскладка перечитана с диска.",
+			"Context layout reloaded from disk."));
+	});
+
+	AddButtonWithIcon(
+		container,
+		rpl::single(RuEn(
+			"Сбросить раскладку контекстного меню к дефолту",
+			"Reset the context menu layout to defaults")),
+		st::settingsButton,
+		{ &st::menuIconRestore }
+	)->addClickHandler([=] {
+		if (!contextState->resetToDefaults()) {
+			controller->window().showToast(RuEn(
+				"Не удалось сбросить context layout.",
+				"Could not reset the context layout."));
+			return;
+		}
+		controller->window().showToast(RuEn(
+			"Контекстное меню сброшено к дефолту.",
+			"Context menu layout reset to defaults."));
+	});
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
