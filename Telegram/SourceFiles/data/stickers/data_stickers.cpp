@@ -781,6 +781,65 @@ void Stickers::removeFromRecentSet(not_null<DocumentData*> document) {
 	notifyRecentUpdated(StickersType::Stickers);
 }
 
+void Stickers::reapplyLocalLimitOverrides() {
+	const auto limits = Data::PremiumLimits(&session());
+	auto writeSavedGifs = false;
+	auto writeFaved = false;
+	auto writeCloudRecent = false;
+	auto writeOldRecent = false;
+	auto notifyUpdatedStickers = false;
+	auto notifyRecentStickers = false;
+
+	while (_savedGifs.size() > limits.gifsCurrent()) {
+		_savedGifs.pop_back();
+		writeSavedGifs = true;
+	}
+
+	auto cloudRecentCount = 0;
+	if (const auto it = setsRef().find(FavedSetId); it != setsRef().end()) {
+		const auto before = it->second->stickers.size();
+		TrimStickerSetToLimit(*it->second, limits.stickersFavedCurrent());
+		if (before != it->second->stickers.size()) {
+			writeFaved = true;
+			notifyUpdatedStickers = true;
+		}
+	}
+	if (const auto it = setsRef().find(CloudRecentSetId); it != setsRef().end()) {
+		const auto before = it->second->stickers.size();
+		TrimStickerSetToLimit(*it->second, RecentStickersCurrentLimit(&session()));
+		cloudRecentCount = it->second->stickers.size();
+		if (before != it->second->stickers.size()) {
+			writeCloudRecent = true;
+			notifyRecentStickers = true;
+		}
+	}
+	auto &recent = getRecentPack();
+	const auto recentLimit = RecentStickersCurrentLimit(&session());
+	while (!recent.isEmpty() && (cloudRecentCount + recent.size() > recentLimit)) {
+		recent.pop_back();
+		writeOldRecent = true;
+		notifyRecentStickers = true;
+	}
+
+	if (writeSavedGifs) {
+		session().local().writeSavedGifs();
+		notifySavedGifsUpdated();
+	}
+	if (writeFaved) {
+		session().local().writeFavedStickers();
+		notifyUpdated(StickersType::Stickers);
+	}
+	if (writeCloudRecent) {
+		session().local().writeRecentStickers();
+	}
+	if (writeOldRecent) {
+		session().saveSettings();
+	}
+	if (notifyRecentStickers) {
+		notifyRecentUpdated(StickersType::Stickers);
+	}
+}
+
 void Stickers::setIsNotFaved(not_null<DocumentData*> document) {
 	RemoveFromSet(setsRef(), document, FavedSetId);
 	session().local().writeFavedStickers();

@@ -1340,7 +1340,9 @@ ShareWithoutAuthorCheck CheckShareWithoutAuthor(not_null<HistoryItem*> item) {
 	}
 	const auto media = item->media();
 	if (!media) {
-		return ShareWithoutAuthorCheck::Unsupported;
+		return item->originalText().text.isEmpty()
+			? ShareWithoutAuthorCheck::Unsupported
+			: ShareWithoutAuthorCheck::Allowed;
 	} else if (media->ttlSeconds() > 0) {
 		return ShareWithoutAuthorCheck::EphemeralMedia;
 	}
@@ -1376,8 +1378,8 @@ QString ShareWithoutAuthorErrorText(const HistoryItemsList &list) {
 			"Одноразовые и самоуничтожающиеся медиа нельзя переслать без автора.");
 	case ShareWithoutAuthorCheck::Unsupported:
 		return AstrogramUiText(
-			"Only regular media like photo, video, voice, video note, music and files are supported without author here yet.",
-			"Без автора пока поддерживаются только обычные фото, видео, голосовые, кружки, музыка и файлы.");
+			"Only regular text, photo and document messages are supported without author here yet.",
+			"Без автора пока поддерживаются только обычные текстовые сообщения, фото и сообщения с документами.");
 	}
 	Unexpected("ShareWithoutAuthorCheck value.");
 	return {};

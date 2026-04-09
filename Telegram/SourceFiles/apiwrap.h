@@ -377,6 +377,7 @@ public:
 		bool spoilered,
 		ScheduledMessageEditKind kind = ScheduledMessageEditKind::Text);
 	void clearScheduledMessageEdit(FullMsgId itemId);
+	void syncScheduledMessageEditStorage();
 	void sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId = std::nullopt);
@@ -726,6 +727,9 @@ private:
 	};
 	void restoreScheduledMessageEdits();
 	void storeScheduledMessageEdits();
+	bool requeueScheduledMessageEdit(
+		ScheduledMessageEdit edit,
+		bool requestData);
 	void processScheduledMessageEdits();
 	void refreshScheduledMessageEdits();
 	base::flat_map<FullMsgId, ScheduledMessageEdit> _scheduledMessageEdits;

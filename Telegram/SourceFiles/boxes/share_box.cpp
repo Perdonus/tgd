@@ -1693,19 +1693,25 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		auto action = Api::SendAction(thread, options);
 		action.replyTo.monoforumPeerId = thread->monoforumPeerId();
 		auto message = Api::MessageToSend(action);
-		if (forwardOptions != Data::ForwardOptions::NoNamesAndCaptions) {
-			const auto caption = item->originalText();
+		const auto originalText = item->originalText();
+		const auto media = item->media();
+		if (!media
+			|| (forwardOptions != Data::ForwardOptions::NoNamesAndCaptions)) {
 			message.textWithTags = TextWithTags{
-				caption.text,
-				TextUtilities::ConvertEntitiesToTextTags(caption.entities),
+				originalText.text,
+				TextUtilities::ConvertEntitiesToTextTags(originalText.entities),
 			};
 		}
-		if (const auto media = item->media()) {
-			if (const auto photo = media->photo()) {
-				Api::SendExistingPhoto(std::move(message), photo);
-			} else if (const auto document = media->document()) {
-				Api::SendExistingDocument(std::move(message), document);
-			}
+		if (!media) {
+			thread->peer()->session().api().sendMessage(std::move(message));
+			return;
+		}
+		message.action.options.mediaSpoiler = media->hasSpoiler();
+		message.action.options.invertCaption = item->invertMedia();
+		if (const auto photo = media->photo()) {
+			Api::SendExistingPhoto(std::move(message), photo);
+		} else if (const auto document = media->document()) {
+			Api::SendExistingDocument(std::move(message), document);
 		}
 	};
 	return [=](

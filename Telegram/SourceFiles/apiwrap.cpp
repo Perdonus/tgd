@@ -121,6 +121,19 @@ constexpr auto kMaxPersistedScheduledEdits = quint32(512);
 constexpr auto kScheduledEditResolveRetryStep = TimeId(5);
 constexpr auto kScheduledEditResolveRetryMax = TimeId(60);
 constexpr auto kScheduledEditResolveMaxAttempts = uchar(24);
+constexpr auto kScheduledEditSaveDelay = crl::time(200);
+
+[[nodiscard]] TimeId ScheduledEditRetryDelay(uchar attempts) {
+	return std::min<TimeId>(
+		kScheduledEditResolveRetryStep * attempts,
+		kScheduledEditResolveRetryMax);
+}
+
+[[nodiscard]] bool ShouldRetryScheduledEditError(const QString &error) {
+	return (error == u"MESSAGE_ID_INVALID"_q)
+		|| (error == u"MSG_ID_INVALID"_q)
+		|| (error == u"PEER_ID_INVALID"_q);
+}
 
 struct PersistedScheduledMessageEditRecord {
 	uint64 sessionUniqueId = 0;
@@ -4264,6 +4277,32 @@ void ApiWrap::storeScheduledMessageEdits() {
 	}
 	Core::App().settings().setScheduledMessageEditsStorage(
 		merged.empty() ? QByteArray() : SerializeScheduledMessageEdits(merged));
+	Core::App().saveSettingsDelayed(kScheduledEditSaveDelay);
+}
+
+bool ApiWrap::requeueScheduledMessageEdit(
+		ScheduledMessageEdit edit,
+		bool requestData) {
+	if (edit.resolveAttempts >= kScheduledEditResolveMaxAttempts) {
+		return false;
+	}
+	++edit.resolveAttempts;
+	edit.options.scheduled = base::unixtime::now()
+		+ ScheduledEditRetryDelay(edit.resolveAttempts);
+	const auto itemId = edit.itemId;
+	_scheduledMessageEdits[itemId] = std::move(edit);
+	if (requestData) {
+		requestMessageData(
+			_session->data().peer(itemId.peer),
+			itemId.msg,
+			[=] {
+				crl::on_main(_session, [=] {
+					processScheduledMessageEdits();
+				});
+			});
+	}
+	refreshScheduledMessageEdits();
+	return true;
 }
 
 void ApiWrap::clearScheduledMessageEdit(FullMsgId itemId) {
@@ -4273,6 +4312,10 @@ void ApiWrap::clearScheduledMessageEdit(FullMsgId itemId) {
 	}
 	_scheduledMessageEdits.erase(i);
 	refreshScheduledMessageEdits();
+}
+
+void ApiWrap::syncScheduledMessageEditStorage() {
+	storeScheduledMessageEdits();
 }
 
 void ApiWrap::processScheduledMessageEdits() {
@@ -4290,29 +4333,11 @@ void ApiWrap::processScheduledMessageEdits() {
 	std::stable_sort(due.begin(), due.end(), [](const auto &a, const auto &b) {
 		return a.options.scheduled < b.options.scheduled;
 	});
-	auto requeued = false;
 
 	for (auto &edit : due) {
 		const auto item = _session->data().message(edit.itemId);
 		if (!item) {
-			if (edit.resolveAttempts >= kScheduledEditResolveMaxAttempts) {
-				continue;
-			}
-			++edit.resolveAttempts;
-			const auto retry = std::min<TimeId>(
-				kScheduledEditResolveRetryStep * edit.resolveAttempts,
-				kScheduledEditResolveRetryMax);
-			edit.options.scheduled = now + retry;
-			_scheduledMessageEdits[edit.itemId] = edit;
-			requestMessageData(
-				_session->data().peer(edit.itemId.peer),
-				edit.itemId.msg,
-				[=] {
-					crl::on_main(_session, [=] {
-						processScheduledMessageEdits();
-					});
-				});
-			requeued = true;
+			requeueScheduledMessageEdit(edit, true);
 			continue;
 		} else if (item->isScheduled() || item->isBusinessShortcut()) {
 			continue;
@@ -4330,13 +4355,15 @@ void ApiWrap::processScheduledMessageEdits() {
 				options,
 				[](mtpRequestId) {
 				},
-				[show](const QString &error, mtpRequestId) {
-					if (!show) {
+				[=, edit = edit](const QString &error, mtpRequestId) mutable {
+					if (error == u"MESSAGE_NOT_MODIFIED"_q) {
 						return;
-					} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+					} else if (ShouldRetryScheduledEditError(error)
+						&& requeueScheduledMessageEdit(edit, true)) {
 						return;
+					} else if (show) {
+						show->showToast(tr::lng_edit_error(tr::now));
 					}
-					show->showToast(tr::lng_edit_error(tr::now));
 				},
 				edit.spoilered);
 			break;
@@ -4353,19 +4380,18 @@ void ApiWrap::processScheduledMessageEdits() {
 				options,
 				[] {
 				},
-				[show](const QString &error) {
-					if (!show) {
+				[=, edit = edit](const QString &error) mutable {
+					if (error == u"MESSAGE_NOT_MODIFIED"_q) {
 						return;
-					} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+					} else if (ShouldRetryScheduledEditError(error)
+						&& requeueScheduledMessageEdit(edit, true)) {
 						return;
+					} else if (show) {
+						show->showToast(tr::lng_edit_error(tr::now));
 					}
-					show->showToast(tr::lng_edit_error(tr::now));
 				});
 			break;
 		}
-	}
-	if (requeued) {
-		refreshScheduledMessageEdits();
 	}
 }
 

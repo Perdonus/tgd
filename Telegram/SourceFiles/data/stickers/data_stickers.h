@@ -209,6 +209,7 @@ public:
 		return _savedGifs;
 	}
 	void removeFromRecentSet(not_null<DocumentData*> document);
+	void reapplyLocalLimitOverrides();
 
 	void addSavedGif(
 		std::shared_ptr<ChatHelpers::Show> show,

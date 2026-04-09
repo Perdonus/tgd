@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_astrogram.h"
 
+#include "apiwrap.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
@@ -15,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/version.h"
 #include "logs.h"
 #include "lang/lang_instance.h"
+#include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
 #include "plugins/plugins_manager.h"
 #include "settings/settings_common.h"
 #include "settings/settings_experimental.h"
@@ -433,6 +436,31 @@ void ShowNonNegativeIntEditBox(
 			box->closeBox();
 		});
 	}));
+}
+
+void RefreshLocalForwardingLimits(
+		not_null<Window::SessionController*> controller,
+		bool savedGifs,
+		bool favedStickers,
+		bool recentStickers) {
+	auto &session = controller->session();
+	session.data().stickers().reapplyLocalLimitOverrides();
+
+	auto &api = session.api();
+	if (savedGifs) {
+		api.updateSavedGifs();
+	}
+	if (favedStickers) {
+		api.requestSpecialStickersForce(true, false, false);
+	}
+	if (recentStickers) {
+		api.requestSpecialStickersForce(false, true, false);
+	}
+}
+
+void SyncScheduledEditPersistence(
+		not_null<Window::SessionController*> controller) {
+	controller->session().api().syncScheduledMessageEditStorage();
 }
 
 [[nodiscard]] QString LimitOverrideLabel(int value) {
@@ -948,8 +976,11 @@ void SetupAstrogramCore(
 		RuEn(
 			"Сохранять локальные отложенные правки после перезапуска",
 			"Keep local scheduled edits after restart"),
-		[&](bool toggled) {
+		[=](bool toggled) {
+			auto &settings = Core::App().settings();
 			settings.setPersistLocalScheduledEdits(toggled);
+			SyncScheduledEditPersistence(controller);
+			Core::App().saveSettings();
 		});
 	AddButtonWithLabel(
 		forwardingCard,
@@ -965,10 +996,11 @@ void SetupAstrogramCore(
 			RuEn("Локальный лимит сохранённых GIF", "Local saved GIF limit"),
 			RuEn("0 = авто, число = локальный лимит", "0 = auto, number = local limit"),
 			Core::App().settings().localSavedGifsLimitOverride(),
-			[](int value) {
+			[=](int value) {
 				auto &settings = Core::App().settings();
 				settings.setLocalSavedGifsLimitOverride(value);
 				Core::App().saveSettings();
+				RefreshLocalForwardingLimits(controller, true, false, false);
 			});
 	});
 	AddButtonWithLabel(
@@ -985,10 +1017,11 @@ void SetupAstrogramCore(
 			RuEn("Локальный лимит избранных стикеров", "Local favourite stickers limit"),
 			RuEn("0 = авто, число = локальный лимит", "0 = auto, number = local limit"),
 			Core::App().settings().localFavedStickersLimitOverride(),
-			[](int value) {
+			[=](int value) {
 				auto &settings = Core::App().settings();
 				settings.setLocalFavedStickersLimitOverride(value);
 				Core::App().saveSettings();
+				RefreshLocalForwardingLimits(controller, false, true, false);
 			});
 	});
 	AddButtonWithLabel(
@@ -1005,10 +1038,11 @@ void SetupAstrogramCore(
 			RuEn("Локальный лимит недавних стикеров", "Local recent stickers limit"),
 			RuEn("0 = авто, число = локальный лимит", "0 = auto, number = local limit"),
 			Core::App().settings().localRecentStickersLimitOverride(),
-			[](int value) {
+			[=](int value) {
 				auto &settings = Core::App().settings();
 				settings.setLocalRecentStickersLimitOverride(value);
 				Core::App().saveSettings();
+				RefreshLocalForwardingLimits(controller, false, false, true);
 			});
 	});
 	Ui::AddSkip(forwardingCard, st::settingsCheckboxesSkip / 4);

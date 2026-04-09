@@ -2982,11 +2982,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						forwardItem(itemId);
 					}, &st::menuIconForward);
 				}
-				if (allowMessageForwardWithoutAuthor
-					&& CanShareWithoutAuthor(item)) {
-					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-						forwardItemWithoutAuthor(itemId);
-					}, &st::menuIconForward);
+				if (allowMessageForwardWithoutAuthor) {
+					if (const auto ids = session().data().itemOrItsGroup(item);
+						!ids.empty()) {
+						const auto items = session().data().idsToItems(ids);
+						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+								ShowForwardWithoutAuthorValidated(_controller, ids);
+							}, &st::menuIconForward);
+						}
+					}
 				}
 				if (HistoryView::CanAddOfferToMessage(item)) {
 					_menu->addAction(tr::lng_context_add_offer(tr::now), [=] {
