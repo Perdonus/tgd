@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/launcher.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "tray.h"
 #include "storage/localstorage.h"
 #include "storage/storage_domain.h"
@@ -53,6 +54,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #ifdef Q_OS_MAC
 #include "base/platform/mac/base_confirm_quit.h"
 #endif // Q_OS_MAC
+
+#include <memory>
 
 #ifndef TDESKTOP_DISABLE_SPELLCHECK
 #include "boxes/dictionaries_manager.h"
@@ -74,6 +77,18 @@ namespace {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString UpdateChannelName(Core::UpdateChannel channel) {
+	switch (channel) {
+	case Core::UpdateChannel::DevBeta:
+		return RuEn("Dev (beta)", "Dev (beta)");
+	case Core::UpdateChannel::Alpha:
+		return RuEn("Alpha", "Alpha");
+	case Core::UpdateChannel::Stable:
+	default:
+		return RuEn("Stable", "Stable");
+	}
 }
 
 } // namespace
@@ -114,6 +129,12 @@ bool HasUpdate() {
 }
 
 void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
+	SetupUpdate(nullptr, container);
+}
+
+void SetupUpdate(
+		Window::SessionController *controller,
+		not_null<Ui::VerticalLayout*> container) {
 	if (!HasUpdate()) {
 		return;
 	}
@@ -122,10 +143,17 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		container.get());
 	const auto downloading = Ui::CreateChild<rpl::event_stream<bool>>(
 		container.get());
+	const auto releaseVisible = Ui::CreateChild<rpl::event_stream<bool>>(
+		container.get());
+	const auto releaseSummaryText = Ui::CreateChild<rpl::event_stream<QString>>(
+		container.get());
+	const auto releaseChangelogText = Ui::CreateChild<rpl::event_stream<QString>>(
+		container.get());
 	const auto version = tr::lng_settings_current_version(
 		tr::now,
 		lt_version,
 		currentVersionText());
+	Core::UpdateChecker checker;
 	const auto toggle = container->add(object_ptr<Button>(
 		container,
 		tr::lng_settings_update_automatically(),
@@ -140,13 +168,6 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 			container,
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto inner = options->entity();
-	const auto install = cAlphaVersion()
-		? nullptr
-		: inner->add(object_ptr<Button>(
-			inner,
-			tr::lng_settings_install_beta(),
-			st::settingsButtonNoIcon));
-
 	const auto check = inner->add(object_ptr<Button>(
 		inner,
 		tr::lng_settings_check_now(),
@@ -160,6 +181,70 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		update->resizeToWidth(width);
 		update->moveToLeft(0, 0);
 	}, update->lifetime());
+
+	const auto releaseWrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto releaseInner = releaseWrap->entity();
+	const auto releaseSummary = Ui::AddDividerText(
+		releaseInner,
+		releaseSummaryText->events());
+	const auto releaseChangelog = Ui::AddDividerText(
+		releaseInner,
+		releaseChangelogText->events());
+	releaseSummary->setSelectable(true);
+	releaseSummary->setBreakEverywhere(true);
+	releaseChangelog->setSelectable(true);
+	releaseChangelog->setBreakEverywhere(true);
+	const auto openRelease = releaseInner->add(object_ptr<Button>(
+		releaseInner,
+		rpl::single(RuEn(
+			"Открыть релиз на GitHub",
+			"Open release on GitHub")),
+		st::settingsButtonNoIcon));
+	openRelease->hide();
+	const auto releaseUrl = std::make_shared<QString>();
+	const auto refreshReleaseInfo = [=](
+			const Core::UpdateReleaseInfo &info) mutable {
+		const auto visible = info.available
+			|| info.changelogLoading
+			|| !info.changelog.isEmpty()
+			|| info.changelogFailed;
+		*releaseUrl = info.url;
+		if (!visible) {
+			releaseSummaryText->fire(QString());
+			releaseChangelogText->fire(QString());
+			openRelease->hide();
+			releaseVisible->fire(false);
+			return;
+		}
+		auto summary = RuEn("Доступно обновление: ", "Update available: ")
+			+ (info.versionText.isEmpty()
+				? Core::FormatVersionWithBuild(info.version)
+				: info.versionText);
+		summary += u" · "_q + UpdateChannelName(info.channel);
+		if (!info.title.isEmpty() && info.title != info.versionText) {
+			summary += u'\n' + info.title;
+		}
+		releaseSummaryText->fire_copy(summary);
+		const auto changelog = info.changelogLoading
+			? RuEn(
+				"Загружаю changelog из GitHub...",
+				"Loading changelog from GitHub...")
+			: (!info.changelog.isEmpty()
+				? info.changelog
+				: RuEn(
+					"Для этой сборки GitHub release body пока пустой или недоступен.",
+					"GitHub release notes are empty or unavailable for this build."));
+		releaseChangelogText->fire_copy(changelog);
+		if (!releaseUrl->isEmpty()) {
+			openRelease->show();
+		} else {
+			openRelease->hide();
+		}
+		releaseVisible->fire(true);
+	};
 
 	rpl::combine(
 		toggle->widthValue(),
@@ -183,6 +268,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		const auto state = checker.state();
 		switch (state) {
 		case State::Download:
+			update->hide();
 			showDownloadProgress(checker.already(), checker.size());
 			break;
 		case State::Ready:
@@ -190,6 +276,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 			update->show();
 			break;
 		default:
+			update->hide();
 			texts->fire_copy(version);
 			break;
 		}
@@ -203,7 +290,6 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		cSetAutoUpdate(toggled);
 
 		Local::writeSettings();
-		Core::UpdateChecker checker;
 		if (cAutoUpdate()) {
 			checker.start();
 		} else {
@@ -212,25 +298,6 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		}
 	}, toggle->lifetime());
 
-	if (install) {
-		install->toggleOn(rpl::single(cInstallBetaVersion()));
-		install->toggledValue(
-		) | rpl::filter([](bool toggled) {
-			return (toggled != cInstallBetaVersion());
-		}) | rpl::on_next([=](bool toggled) {
-			cSetInstallBetaVersion(toggled);
-			Core::Launcher::Instance().writeInstallBetaVersionsSetting();
-
-			Core::UpdateChecker checker;
-			checker.stop();
-			if (toggled) {
-				cSetLastUpdateCheck(0);
-			}
-			checker.start();
-		}, toggle->lifetime());
-	}
-
-	Core::UpdateChecker checker;
 	options->toggleOn(rpl::combine(
 		toggle->toggledValue(),
 		downloading->events_starting_with(
@@ -238,15 +305,23 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 	) | rpl::map([](bool check, bool downloading) {
 		return check && !downloading;
 	}));
+	const auto initialReleaseInfo = checker.releaseInfo();
+	releaseWrap->toggleOn(releaseVisible->events_starting_with(
+		initialReleaseInfo.available
+			|| initialReleaseInfo.changelogLoading
+			|| !initialReleaseInfo.changelog.isEmpty()
+			|| initialReleaseInfo.changelogFailed));
 
 	checker.checking() | rpl::on_next([=] {
 		options->setAttribute(Qt::WA_TransparentForMouseEvents);
 		texts->fire(tr::lng_settings_update_checking(tr::now));
+		update->hide();
 		downloading->fire(false);
 	}, options->lifetime());
 	checker.isLatest() | rpl::on_next([=] {
 		options->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 		texts->fire(tr::lng_settings_latest_installed(tr::now));
+		update->hide();
 		downloading->fire(false);
 	}, options->lifetime());
 	checker.progress(
@@ -256,6 +331,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 	checker.failed() | rpl::on_next([=] {
 		options->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 		texts->fire(tr::lng_settings_update_fail(tr::now));
+		update->hide();
 		downloading->fire(false);
 	}, options->lifetime());
 	checker.ready() | rpl::on_next([=] {
@@ -264,12 +340,14 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		update->show();
 		downloading->fire(false);
 	}, options->lifetime());
+	checker.releaseInfoChanged() | rpl::on_next([=] {
+		refreshReleaseInfo(checker.releaseInfo());
+	}, container->lifetime());
 
 	setDefaultStatus(checker);
+	refreshReleaseInfo(initialReleaseInfo);
 
-	check->addClickHandler([] {
-		Core::UpdateChecker checker;
-
+	check->addClickHandler([=] {
 		cSetLastUpdateCheck(0);
 		checker.start();
 	});
@@ -278,6 +356,11 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 			Core::checkReadyUpdate();
 		}
 		Core::Restart();
+	});
+	openRelease->addClickHandler([=] {
+		if (!releaseUrl->isEmpty()) {
+			File::OpenUrl(*releaseUrl);
+		}
 	});
 }
 
@@ -1069,7 +1152,7 @@ void Advanced::setupContent(not_null<Window::SessionController*> controller) {
 			addDivider();
 			AddSkip(content);
 			AddSubsectionTitle(content, tr::lng_settings_version_info());
-			SetupUpdate(content);
+			SetupUpdate(controller, content);
 			AddSkip(content);
 		}
 	};

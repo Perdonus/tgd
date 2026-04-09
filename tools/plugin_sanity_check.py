@@ -24,6 +24,8 @@ SETTINGS_UI = ROOT / "Telegram/SourceFiles/settings/settings_plugins.cpp"
 
 EXPECTED_EXAMPLES = {
     "ai_chat.cpp",
+    "font_tuner.cpp",
+    "show_logs.cpp",
     "transparent_telegram.cpp",
 }
 
@@ -31,6 +33,25 @@ EXPECTED_EXAMPLES = {
 def require(pattern: str, text: str, name: str, errors: list[str]) -> None:
     if re.search(pattern, text, flags=re.MULTILINE | re.DOTALL) is None:
         errors.append(name)
+
+
+def extract_method_body(text: str, signature_pattern: str) -> str:
+    match = re.search(signature_pattern, text, flags=re.MULTILINE | re.DOTALL)
+    if match is None:
+        return ""
+    start = text.find("{", match.start())
+    if start < 0:
+        return ""
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
 
 
 def extract_host_method_names(api_text: str) -> list[str]:
@@ -98,7 +119,7 @@ def check_plugin_source(
 
 def check_examples(host_methods: set[str], errors: list[str]) -> None:
     if not EXAMPLES_DIR.exists():
-        errors.append("Examples directory exists")
+        errors.append("Examples directory is missing")
         return
 
     sources = sorted(EXAMPLES_DIR.glob("*.cpp"))
@@ -113,12 +134,11 @@ def check_examples(host_methods: set[str], errors: list[str]) -> None:
 
 def check_catalog(host_methods: set[str], errors: list[str]) -> None:
     if not PLUGIN_CATALOG_DIR.exists():
-        errors.append("PluginCatalog directory exists")
         return
 
     sources = sorted(PLUGIN_CATALOG_DIR.glob("*/*/*.cpp"))
     if not sources:
-        errors.append("PluginCatalog contains versioned plugin sources")
+        errors.append("PluginCatalog exists but contains no versioned plugin sources")
         return
 
     for path in sources:
@@ -202,7 +222,16 @@ def main() -> int:
         errors,
     )
 
-    # Ensure disable path unregisters every registry.
+    disable_body = extract_method_body(
+        cpp,
+        r"void Manager::disablePlugin\(\s*const QString &pluginId,\s*const QString &reason,\s*bool disabledByRecovery,\s*const QString &recoveryReason\s*\)",
+    )
+    if not disable_body:
+        errors.append("extract disablePlugin(pluginId, reason, disabledByRecovery, recoveryReason) body")
+
+    unloads_single_plugin = "unloadPluginRecord(*record, true)" in disable_body
+
+    # Ensure disable path unregisters every registry directly or via single-plugin unload.
     for call in (
         "unregisterPluginCommands",
         "unregisterPluginActions",
@@ -214,12 +243,9 @@ def main() -> int:
         "unregisterPluginWindowWidgetHandlers",
         "unregisterPluginSessionHandlers",
     ):
-        require(
-            rf"disablePlugin\([^)]*\)\s*\{{[\s\S]*{call}\(",
-            cpp,
-            f"disablePlugin() calls {call}()",
-            errors,
-        )
+        if unloads_single_plugin or (f"{call}(" in disable_body):
+            continue
+        errors.append(f"disablePlugin() calls {call}()")
 
     # Registration guards by plugin ownership.
     for guard in (

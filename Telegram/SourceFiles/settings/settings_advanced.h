@@ -31,6 +31,9 @@ void SetupConnectionType(
 	not_null<Ui::VerticalLayout*> container);
 bool HasUpdate();
 void SetupUpdate(not_null<Ui::VerticalLayout*> container);
+void SetupUpdate(
+	Window::SessionController *controller,
+	not_null<Ui::VerticalLayout*> container);
 void SetupWindowTitleContent(
 	Window::SessionController *controller,
 	not_null<Ui::VerticalLayout*> container);

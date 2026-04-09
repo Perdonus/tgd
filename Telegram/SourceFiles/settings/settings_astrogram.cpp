@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
+#include "core/launcher.h"
+#include "core/update_checker.h"
 #include "core/version.h"
 #include "logs.h"
 #include "lang/lang_instance.h"
@@ -17,10 +19,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common.h"
 #include "settings/settings_experimental.h"
 #include "settings/settings_plugins.h"
+#include "settings.h"
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
+#include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
@@ -32,12 +36,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller_link_info.h"
 
 #include <QDesktopServices>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
 #include <QImage>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
@@ -47,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QStandardPaths>
 #include <QTextOption>
 #include <QUrl>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -57,7 +64,9 @@ namespace Settings {
 namespace {
 
 constexpr auto kHeaderHeight = 188;
-constexpr auto kAvatarSize = 76;
+constexpr auto kAvatarSize = 88;
+constexpr auto kSecretChannelClickThreshold = 7;
+constexpr auto kSecretChannelClickWindowMs = 1500;
 
 [[nodiscard]] bool IsRussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
@@ -110,14 +119,39 @@ constexpr auto kAvatarSize = 76;
 }
 
 [[nodiscard]] QString AstrogramVersionText() {
-	return QString::fromLatin1("Astrogram Desktop %1").arg(
-		QString::fromLatin1(AppVersionStr));
+	return QString::fromLatin1("Astrogram Desktop %1 (%2)").arg(
+		QString::fromLatin1(AppVersionStr),
+		QString::number(AppVersion));
 }
 
 [[nodiscard]] QString SpeechModelArchivePath(
 		const QString &modelsDir,
 		const QString &folderName) {
 	return QDir(modelsDir).filePath(folderName + u".zip"_q);
+}
+
+[[nodiscard]] QString SpeechModelPartialArchivePath(
+		const QString &modelsDir,
+		const QString &folderName) {
+	return SpeechModelArchivePath(modelsDir, folderName) + u".part"_q;
+}
+
+[[nodiscard]] QString SpeechModelStatusIdle(
+		bool installed,
+		bool archiveReady) {
+	if (installed) {
+		return RuEn("Установлена", "Installed");
+	} else if (archiveReady) {
+		return RuEn("Архив готов к установке", "Archive ready to install");
+	}
+	return RuEn("Не скачана", "Not downloaded");
+}
+
+[[nodiscard]] QString SpeechModelStatusDownloading(float64 progress) {
+	return (progress > 0.)
+		? RuEn("Скачивание: %1%", "Downloading: %1%").arg(
+			int(std::round(progress * 100.)))
+		: RuEn("Скачивание...", "Downloading...");
 }
 
 [[nodiscard]] bool ExtractSpeechModelArchive(
@@ -166,11 +200,55 @@ constexpr auto kAvatarSize = 76;
 	return true;
 }
 
-void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
+void ShowAstrogramUpdateChannelBox(
+		not_null<Window::SessionController*> controller) {
+	const auto applyChannel = [=](bool devChannel) {
+		if (devChannel == cInstallBetaVersion()) {
+			return;
+		}
+		cSetInstallBetaVersion(devChannel);
+		Core::Launcher::Instance().writeInstallBetaVersionsSetting();
+		cSetLastUpdateCheck(0);
+		auto checker = Core::UpdateChecker();
+		checker.stop();
+		if (cAutoUpdate()) {
+			checker.start();
+		}
+		controller->showToast(devChannel
+			? RuEn(
+				"Включён канал Dev (beta). Changelog будет браться из prerelease на GitHub.",
+				"Dev (beta) channel enabled. Changelog will follow GitHub prereleases.")
+			: RuEn(
+				"Включён Stable канал обновлений Astrogram.",
+				"Stable Astrogram update channel enabled."));
+	};
+
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		SingleChoiceBox(box, {
+			.title = rpl::single(RuEn(
+				"Скрытый канал обновлений Astrogram",
+				"Hidden Astrogram update channel")),
+			.options = {
+				rpl::single(RuEn("Stable", "Stable")),
+				rpl::single(RuEn("Dev (beta)", "Dev (beta)")),
+			},
+			.initialSelection = cInstallBetaVersion() ? 1 : 0,
+			.callback = [=](int index) {
+				applyChannel(index == 1);
+			},
+		});
+	}));
+}
+
+void AddAstrogramHeader(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
 	const auto header = container->add(object_ptr<Ui::RpWidget>(container));
 	const auto raw = header;
 	raw->setMinimumHeight(kHeaderHeight);
 	raw->setMaximumHeight(kHeaderHeight);
+	const auto secretClicks = raw->lifetime().make_state<int>(0);
+	const auto lastSecretClickMs = raw->lifetime().make_state<qint64>(0);
 
 	raw->paintRequest(
 	) | rpl::on_next([=] {
@@ -217,6 +295,33 @@ void AddAstrogramHeader(not_null<Ui::VerticalLayout*> container) {
 				Qt::AlignHCenter | Qt::TextSingleLine,
 				AstrogramVersionText());
 		}, raw->lifetime());
+	raw->events() | rpl::start_with_next([=](not_null<QEvent*> event) {
+		if (event->type() != QEvent::MouseButtonRelease) {
+			return;
+		}
+		const auto mouse = static_cast<QMouseEvent*>(event.get());
+		if (mouse->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto avatarRect = QRect(
+			(raw->width() - kAvatarSize) / 2,
+			14,
+			kAvatarSize,
+			kAvatarSize);
+		if (!avatarRect.contains(mouse->pos())) {
+			return;
+		}
+		const auto now = QDateTime::currentMSecsSinceEpoch();
+		if ((now - *lastSecretClickMs) > kSecretChannelClickWindowMs) {
+			*secretClicks = 0;
+		}
+		*lastSecretClickMs = now;
+		++(*secretClicks);
+		if (*secretClicks >= kSecretChannelClickThreshold) {
+			*secretClicks = 0;
+			ShowAstrogramUpdateChannelBox(controller);
+		}
+	}, raw->lifetime());
 }
 
 template <typename Producer, typename Callback>
@@ -310,16 +415,26 @@ void AddSectionButton(
 
 void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		struct ModelSpec {
+			QString label;
+			QString folderName;
+			QString url;
+		};
 		struct ModelRowState {
 			QString label;
 			QString folderName;
 			QUrl url;
+			QString archivePath;
+			QString partialPath;
 			bool installed = false;
 			bool downloading = false;
+			bool extracting = false;
 			float64 progress = 0.;
 			QString status;
+			QString lastError;
 			QPointer<QNetworkReply> reply;
 			std::unique_ptr<QFile> output;
+			QPointer<Ui::RpWidget> row;
 		};
 
 		const auto manager = box->lifetime().make_state<QNetworkAccessManager>();
@@ -327,39 +442,76 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		auto modelsDir = QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
 		QDir().mkpath(modelsDir);
 
-		const auto addModel = [&](QString label, QString folder, QString url) {
+		const auto specs = std::array<ModelSpec, 12>{{
+			{ u"Русский · Vosk small"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q },
+			{ u"English · Vosk small"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q },
+			{ u"Українська · Vosk small"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q },
+			{ u"Deutsch · Vosk small"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q },
+			{ u"Français · Vosk small"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q },
+			{ u"Español · Vosk small"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q },
+			{ u"Italiano · Vosk small"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q },
+			{ u"Português · Vosk small"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q },
+			{ u"Türkçe · Vosk small"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q },
+			{ u"Polski · Vosk small"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q },
+			{ u"日本語 · Vosk small"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q },
+			{ u"Қазақша · Vosk small"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q },
+		}};
+
+		const auto addModel = [&](const ModelSpec &spec) {
 			auto state = std::make_shared<ModelRowState>();
-			state->label = std::move(label);
-			state->folderName = std::move(folder);
-			state->url = QUrl(std::move(url));
-			state->status = RuEn("Не скачана", "Not downloaded");
+			state->label = spec.label;
+			state->folderName = spec.folderName;
+			state->url = QUrl(spec.url);
+			state->archivePath = SpeechModelArchivePath(modelsDir, state->folderName);
+			state->partialPath = SpeechModelPartialArchivePath(modelsDir, state->folderName);
+			state->status = SpeechModelStatusIdle(false, false);
 			models.push_back(std::move(state));
 		};
-		addModel(u"Русский · Vosk small"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q);
-		addModel(u"English · Vosk small"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q);
-		addModel(u"Українська · Vosk small"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q);
-		addModel(u"Deutsch · Vosk small"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q);
-		addModel(u"Français · Vosk small"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q);
-		addModel(u"Español · Vosk small"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q);
-		addModel(u"Italiano · Vosk small"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q);
-		addModel(u"Português · Vosk small"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q);
-		addModel(u"Türkçe · Vosk small"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q);
-		addModel(u"Polski · Vosk small"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q);
-		addModel(u"日本語 · Vosk small"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q);
-		addModel(u"Қазақша · Vosk small"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q);
+		for (const auto &spec : specs) {
+			addModel(spec);
+		}
 
-		const auto isInstalled = [&](const std::shared_ptr<ModelRowState> &state) {
+		const auto isInstalled = [modelsDir](const std::shared_ptr<ModelRowState> &state) {
 			const auto dir = QDir(modelsDir).filePath(state->folderName);
 			return QFileInfo(dir).isDir();
 		};
-		for (const auto &state : models) {
+		const auto hasArchive = [](const std::shared_ptr<ModelRowState> &state) {
+			return QFileInfo::exists(state->archivePath);
+		};
+		const auto updateRowState = [=](const std::shared_ptr<ModelRowState> &state) {
 			state->installed = isInstalled(state);
-			const auto archivePath = SpeechModelArchivePath(modelsDir, state->folderName);
-			state->status = state->installed
-				? RuEn("Скачана", "Downloaded")
-				: QFileInfo::exists(archivePath)
-				? RuEn("Архив готов к распаковке", "Archive ready to extract")
-				: RuEn("Не скачана", "Not downloaded");
+			if (state->installed) {
+				state->downloading = false;
+				state->extracting = false;
+				state->progress = 1.;
+				state->lastError = QString();
+				state->status = SpeechModelStatusIdle(true, false);
+			} else if (state->extracting) {
+				state->status = RuEn("Установка...", "Installing...");
+			} else if (state->downloading) {
+				state->status = SpeechModelStatusDownloading(state->progress);
+			} else if (!state->lastError.isEmpty()) {
+				state->status = state->lastError;
+			} else {
+				state->progress = 0.;
+				state->status = SpeechModelStatusIdle(false, hasArchive(state));
+			}
+			if (state->row) {
+				state->row->setCursor(
+					(state->installed || state->downloading || state->extracting)
+						? style::cur_default
+						: style::cur_pointer);
+				state->row->update();
+			}
+		};
+		for (const auto &state : models) {
+			if (QFileInfo::exists(state->partialPath)) {
+				QFile::remove(state->partialPath);
+				Logs::writeClient(QString::fromLatin1(
+					"[speech-models] removed stale partial archive: %1")
+					.arg(state->partialPath));
+			}
+			updateRowState(state);
 		}
 
 		box->setTitle(rpl::single(RuEn(
@@ -373,14 +525,15 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		container->add(object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Скачайте языковые модели локально. Повторная загрузка скрыта после установки, а прогресс показывается прямо на нижней границе строки.",
-				"Download language models locally. Re-download is hidden after install, and progress is shown on the bottom edge of each row.")),
+				"Скачайте языковые модели локально. Повторная загрузка скрыта после установки, прогресс показывается на нижней границе строки, а на Windows для языка может понадобиться системный speech pack.",
+				"Download language models locally. Re-download is hidden after install, progress is shown on the bottom edge of each row, and Windows may also require the matching system speech pack.")),
 			st::boxDividerLabel),
 			st::boxRowPadding);
 		Ui::AddSkip(container);
 
 		for (const auto &state : models) {
 			const auto row = container->add(object_ptr<Ui::RpWidget>(container));
+			state->row = row;
 			row->setMinimumHeight(54);
 			row->setMaximumHeight(54);
 			row->paintRequest() | rpl::on_next([=] {
@@ -391,17 +544,22 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				p.setBrush(st::windowBgOver);
 				p.drawRoundedRect(rect.adjusted(0, 0, 0, -1), 10, 10);
 				if (state->downloading) {
-					auto progressRect = QRect(0, rect.height() - 3, int(rect.width() * std::clamp(state->progress, 0., 1.)), 3);
+					const auto width = std::max(
+						6,
+						int(rect.width() * std::clamp(state->progress, 0., 1.)));
+					auto progressRect = QRect(0, rect.height() - 3, width, 3);
 					p.setBrush(QColor(0x21, 0xc7, 0x6a));
 					p.drawRoundedRect(progressRect, 2, 2);
 				}
 				p.setPen(st::windowFg);
 				p.setFont(st::semiboldFont->f);
 				p.drawText(QRect(14, 8, rect.width() - 90, 18), Qt::AlignLeft | Qt::AlignVCenter, state->label);
-				p.setPen(st::windowSubTextFg);
+				p.setPen(state->lastError.isEmpty()
+					? st::windowSubTextFg->c
+					: QColor(0xe1, 0x6b, 0x6b));
 				p.setFont(st::defaultFlatLabel.style.font->f);
 				p.drawText(QRect(14, 28, rect.width() - 90, 16), Qt::AlignLeft | Qt::AlignVCenter, state->status);
-				if (!state->installed && !state->downloading) {
+				if (!state->installed && !state->downloading && !state->extracting) {
 					st::menuIconDownload.paint(p, rect.width() - 14 - st::menuIconDownload.width(), (rect.height() - st::menuIconDownload.height()) / 2, rect.width(), st::windowSubTextFg->c);
 				} else if (state->installed) {
 					p.setPen(QColor(0x21, 0xc7, 0x6a));
@@ -409,68 +567,95 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 					p.drawText(QRect(rect.width() - 48, 0, 34, rect.height()), Qt::AlignCenter, QString::fromUtf8("✓"));
 				}
 			}, row->lifetime());
-			row->setCursor(style::cur_pointer);
+			updateRowState(state);
 			row->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
 				if (e->type() != QEvent::MouseButtonRelease) {
 					return;
 				}
-				if (state->installed || state->downloading) {
+				const auto mouse = static_cast<QMouseEvent*>(e.get());
+				if (mouse->button() != Qt::LeftButton) {
+					return;
+				}
+				if (state->installed || state->downloading || state->extracting) {
 					return;
 				}
 				for (const auto &other : models) {
-					if (other->downloading) {
+					if (other->downloading || other->extracting) {
+						controller->showToast(RuEn(
+							"Дождитесь завершения текущей установки модели.",
+							"Wait for the current model installation to finish."));
 						return;
 					}
 				}
-				const auto archivePath = SpeechModelArchivePath(modelsDir, state->folderName);
-				if (QFileInfo::exists(archivePath)) {
+				const auto failState = [=](const QString &status, const QString &log) {
+					state->downloading = false;
+					state->extracting = false;
+					state->progress = 0.;
+					state->lastError = status;
+					Logs::writeClient(QString::fromLatin1(
+						"[speech-models] %1: %2")
+						.arg(log, state->folderName));
+					updateRowState(state);
+				};
+				const auto extractModel = [=] {
 					Logs::writeClient(QString::fromLatin1(
 						"[speech-models] extract requested: %1")
 						.arg(state->folderName));
-					state->status = RuEn("Распаковка...", "Extracting...");
-					row->update();
+					state->lastError = QString();
+					state->extracting = true;
+					updateRowState(state);
 					auto error = QString();
-					if (!ExtractSpeechModelArchive(archivePath, modelsDir, &error)) {
+					if (!ExtractSpeechModelArchive(state->archivePath, modelsDir, &error)) {
+						QFile::remove(state->archivePath);
 						Logs::writeClient(QString::fromLatin1(
 							"[speech-models] extract failed: %1 reason=%2")
 							.arg(state->folderName, error));
-						state->status = error;
-						row->update();
+						failState(
+							error.isEmpty()
+								? RuEn("Ошибка установки", "Install failed")
+								: error,
+							u"extract failed"_q);
 						return;
 					}
 					if (!isInstalled(state)) {
+						QFile::remove(state->archivePath);
 						Logs::writeClient(QString::fromLatin1(
 							"[speech-models] extract finished without model dir: %1")
 							.arg(state->folderName));
-						state->status = RuEn("Модель не найдена после распаковки", "Model folder not found after extraction");
-						row->update();
+						failState(
+							RuEn(
+								"Модель не найдена после распаковки",
+								"Model folder not found after extraction"),
+							u"extract missing dir"_q);
 						return;
 					}
-					QFile::remove(archivePath);
-					state->progress = 1.;
-					state->installed = true;
-					state->status = RuEn("Скачана", "Downloaded");
+					QFile::remove(state->archivePath);
 					Logs::writeClient(QString::fromLatin1(
 						"[speech-models] extract finished: %1")
 						.arg(state->folderName));
-					row->update();
+					updateRowState(state);
+					return;
+				};
+				if (hasArchive(state)) {
+					extractModel();
 					return;
 				}
 				QDir().mkpath(modelsDir);
-				const auto targetPath = archivePath;
-				state->output = std::make_unique<QFile>(targetPath);
+				QFile::remove(state->partialPath);
+				state->output = std::make_unique<QFile>(state->partialPath);
 				if (!state->output->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-					state->status = RuEn("Не удалось создать файл", "Could not create file");
-					row->update();
+					failState(
+						RuEn("Не удалось создать файл", "Could not create file"),
+						u"create file failed"_q);
 					return;
 				}
+				state->lastError = QString();
 				state->progress = 0.;
 				state->downloading = true;
-				state->status = RuEn("Скачивание...", "Downloading...");
 				Logs::writeClient(QString::fromLatin1(
 					"[speech-models] download started: %1 url=%2")
 					.arg(state->folderName, state->url.toString()));
-				row->update();
+				updateRowState(state);
 				QNetworkRequest request(state->url);
 				request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 				state->reply = manager->get(request);
@@ -481,10 +666,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				});
 				QObject::connect(state->reply, &QNetworkReply::downloadProgress, box, [=](qint64 ready, qint64 total) {
 					state->progress = (total > 0) ? std::clamp(double(ready) / double(total), 0., 1.) : 0.;
-					state->status = (total > 0)
-						? RuEn("Скачивание: %1%", "Downloading: %1%").arg(int(std::round(state->progress * 100.)))
-						: RuEn("Скачивание...", "Downloading...");
-					row->update();
+					updateRowState(state);
 				});
 				QObject::connect(state->reply, &QNetworkReply::finished, box, [=] {
 					const auto reply = state->reply;
@@ -500,8 +682,9 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 						Logs::writeClient(QString::fromLatin1(
 							"[speech-models] download finished with null reply: %1")
 							.arg(state->folderName));
-						state->status = RuEn("Неизвестная ошибка", "Unknown error");
-						row->update();
+						failState(
+							RuEn("Неизвестная ошибка", "Unknown error"),
+							u"download finished with null reply"_q);
 						return;
 					}
 					if (reply->error() != QNetworkReply::NoError) {
@@ -511,41 +694,31 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 						Logs::writeClient(QString::fromLatin1(
 							"[speech-models] download failed: %1 reason=%2")
 							.arg(state->folderName, reply->errorString()));
-						state->status = RuEn("Ошибка загрузки", "Download failed");
 						reply->deleteLater();
-						row->update();
+						failState(
+							RuEn("Ошибка загрузки", "Download failed"),
+							u"download failed"_q);
 						return;
 					}
-					state->status = RuEn("Распаковка...", "Extracting...");
-					row->update();
-					auto error = QString();
-					if (!ExtractSpeechModelArchive(outputPath, modelsDir, &error)) {
-						Logs::writeClient(QString::fromLatin1(
-							"[speech-models] post-download extract failed: %1 reason=%2")
-							.arg(state->folderName, error));
-						state->status = error;
+					auto archive = QFile(outputPath);
+					if (!archive.rename(state->archivePath)) {
+						QFile::remove(outputPath);
 						reply->deleteLater();
-						row->update();
+						failState(
+							RuEn(
+								"Не удалось сохранить архив модели",
+								"Could not finalize model archive"),
+							u"rename archive failed"_q);
 						return;
 					}
-					if (!isInstalled(state)) {
-						Logs::writeClient(QString::fromLatin1(
-							"[speech-models] post-download extract missing dir: %1")
-							.arg(state->folderName));
-						state->status = RuEn("Модель не найдена после распаковки", "Model folder not found after extraction");
-						reply->deleteLater();
-						row->update();
-						return;
-					}
-					QFile::remove(outputPath);
-					state->progress = 1.;
-					state->installed = true;
-					state->status = RuEn("Скачана", "Downloaded");
+					Logs::writeClient(QString::fromLatin1(
+						"[speech-models] download complete, extracting: %1")
+						.arg(state->folderName));
 					Logs::writeClient(QString::fromLatin1(
 						"[speech-models] download finished: %1")
 						.arg(state->folderName));
 					reply->deleteLater();
-					row->update();
+					extractModel();
 				});
 			}, row->lifetime());
 			container->add(object_ptr<Ui::FixedHeightWidget>(container, st::settingsCheckboxesSkip / 3));
@@ -623,7 +796,7 @@ void AddSectionGroup(
 void SetupAstrogramHome(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	AddAstrogramHeader(container);
+	AddAstrogramHeader(controller, container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddSectionGroup(
 		controller,

@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_box_controller.h"
 #include "calls/calls_instance.h"
 #include "core/application.h"
+#include "core/update_checker.h"
 #include "core/click_handler_types.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
@@ -661,6 +662,7 @@ void MainMenu::setupMenu() {
 	using namespace Settings;
 
 	const auto controller = _controller;
+	Core::UpdateChecker checker;
 	const auto addAction = [&](
 			rpl::producer<QString> text,
 			IconDescriptor &&descriptor) {
@@ -807,6 +809,71 @@ void MainMenu::setupMenu() {
 			)->setClickedCallback([=] {
 				controller->showSettings();
 			});
+
+			const auto updateButtonText = [=] {
+				return (!Core::UpdaterDisabled()
+						&& (checker.state() == Core::UpdateChecker::State::Ready))
+					? RuEn(
+						"Установить обновление Astrogram",
+						"Install Astrogram update")
+					: RuEn(
+						"Посмотреть обновление Astrogram",
+						"View Astrogram update");
+			};
+			const auto updateButtonVisible = [=] {
+				if (Core::UpdaterDisabled()) {
+					return false;
+				}
+				const auto info = checker.releaseInfo();
+				return (checker.state() == Core::UpdateChecker::State::Ready)
+					|| info.available
+					|| info.changelogLoading
+					|| !info.changelog.isEmpty()
+					|| info.changelogFailed;
+			};
+			const auto updateButton = addAction(
+				rpl::single(updateButtonText()) | rpl::then(
+					rpl::merge(
+						checker.ready(),
+						checker.checking(),
+						checker.isLatest(),
+						checker.failed(),
+						checker.progress() | rpl::to_empty,
+						checker.releaseInfoChanged()
+					) | rpl::map(updateButtonText)),
+				{ &st::menuIconRestore });
+			updateButton->setVisible(updateButtonVisible());
+			updateButton->setClickedCallback([=] {
+				if (!Core::UpdaterDisabled()
+					&& (checker.state() == Core::UpdateChecker::State::Ready)) {
+					Core::checkReadyUpdate();
+					Core::Restart();
+					return;
+				}
+				controller->showSettings(Settings::Advanced::Id());
+			});
+			const auto syncUpdateButton = [=] {
+				updateButton->setVisible(updateButtonVisible());
+				updateInnerControlsGeometry();
+			};
+			checker.ready() | rpl::on_next([=] {
+				syncUpdateButton();
+			}, updateButton->lifetime());
+			checker.checking() | rpl::on_next(
+				syncUpdateButton,
+				updateButton->lifetime());
+			checker.isLatest() | rpl::on_next(
+				syncUpdateButton,
+				updateButton->lifetime());
+			checker.failed() | rpl::on_next(
+				syncUpdateButton,
+				updateButton->lifetime());
+			checker.releaseInfoChanged() | rpl::on_next(
+				syncUpdateButton,
+				updateButton->lifetime());
+			checker.progress() | rpl::on_next([=](Core::UpdateChecker::Progress) {
+				syncUpdateButton();
+			}, updateButton->lifetime());
 		});
 	registerRenderer(
 		::Menu::Customization::SideMenuItemId::Plugins,
@@ -964,6 +1031,11 @@ void MainMenu::chooseEmojiStatus() {
 		return;
 	} else if (const auto widget = _badge->widget()) {
 		_emojiStatusPanel->show(_controller, widget, _badge->sizeTag());
+	} else if (_controller->session().premiumPossible()) {
+		_emojiStatusPanel->show(
+			_controller,
+			not_null{ _setEmojiStatus.data() },
+			_badge->sizeTag());
 	} else {
 		ShowPremiumPreviewBox(_controller, PremiumFeature::EmojiStatus);
 	}

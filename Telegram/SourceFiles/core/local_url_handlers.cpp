@@ -39,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ministar_particles.h"
 #include "ui/boxes/about_cocoon_box.h"
 #include "ui/controls/feature_list.h"
+#include "ui/top_background_gradient.h"
 #include "payments/payments_non_panel_process.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/share_box.h"
@@ -53,6 +54,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
+#include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
 #include "data/components/credits.h"
 #include "data/data_birthday.h"
 #include "data/data_channel.h"
@@ -97,6 +100,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 #include <QFontMetrics>
 #include <QImage>
+#include <QLinearGradient>
 #include <QPainterPath>
 
 #include <optional>
@@ -115,6 +119,165 @@ using Match = qthelp::RegularExpressionMatch;
 	return AstrogramRussianUi()
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QImage AstrogramSupportLogo() {
+	auto result = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
+	if (result.isNull()) {
+		result = QImage(u":/gui/art/logo_256_no_margin.png"_q);
+	}
+	return result;
+}
+
+void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
+	const auto cover = container->add(object_ptr<Ui::RpWidget>(container));
+
+	static const auto gradientEdge = QColor(0x05, 0x12, 0x0d);
+	static const auto gradientCenter = QColor(0x08, 0x22, 0x15);
+	static const auto gradientLeft = QColor(0x27, 0xc2, 0x73);
+	static const auto gradientRight = QColor(0x8e, 0xf7, 0xb7);
+	static const auto textColor = QColor(0xc2, 0xf7, 0xd7);
+	static const auto boldColor = QColor(0xff, 0xff, 0xff);
+
+	const auto logoTop = st::cocoonLogoTop;
+	const auto logoSize = st::cocoonLogoSize;
+	const auto titleTop = logoTop + logoSize + st::cocoonTitleTop;
+	const auto subtitleTop = titleTop
+		+ st::cocoonTitleFont->height
+		+ st::cocoonSubtitleTop;
+
+	const auto colorizeBold = [](QString text) {
+		auto result = tr::rich(text);
+		auto &entities = result.entities;
+		for (auto i = entities.begin(); i != entities.end(); ++i) {
+			if (i->type() == EntityType::Bold) {
+				i = entities.insert(
+					i,
+					EntityInText(
+						EntityType::Colorized,
+						i->offset(),
+						i->length()));
+				++i;
+			}
+		}
+		return result;
+	};
+
+	struct State {
+		QImage gradient;
+		QImage logo;
+		Ui::Animations::Basic animation;
+		std::optional<Ui::StarParticles> particles;
+		style::owned_color subtitleFg = style::owned_color{ textColor };
+		style::owned_color subtitleBoldFg = style::owned_color{ boldColor };
+		style::FlatLabel subtitleSt = st::cocoonSubtitle;
+	};
+	const auto state = cover->lifetime().make_state<State>();
+	state->subtitleSt.textFg = state->subtitleFg.color();
+	state->subtitleSt.palette.linkFg = state->subtitleBoldFg.color();
+	state->animation.init([=] {
+		cover->update();
+		if (anim::Disabled()) {
+			state->animation.stop();
+		}
+	});
+
+	const auto ratio = style::DevicePixelRatio();
+	state->logo = AstrogramSupportLogo().scaled(
+		QSize(logoSize, logoSize) * ratio,
+		Qt::IgnoreAspectRatio,
+		Qt::SmoothTransformation);
+	state->logo.setDevicePixelRatio(ratio);
+
+	constexpr auto kParticlesCount = 48;
+	state->particles.emplace(
+		Ui::StarParticles::Type::RadialInside,
+		kParticlesCount,
+		st::cocoonLogoSize / 12);
+	state->particles->setSpeed(0.05);
+	state->particles->setColors({
+		QColor(0x1f, 0xb9, 0x6c),
+		QColor(0x27, 0xc2, 0x73),
+		QColor(0x63, 0xe0, 0x9c),
+		QColor(0xad, 0xff, 0xcf),
+	});
+
+	const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
+		cover,
+		colorizeBold(RuEn(
+			"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nПоддержите клиент и получите серверный значок подписчика Astrogram.",
+			"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nSupport the client and receive an Astrogram server-side subscriber badge.")),
+		state->subtitleSt);
+	subtitle->setTryMakeSimilarLines(true);
+
+	cover->widthValue() | rpl::on_next([=](int width) {
+		const auto available = width
+			- st::boxRowPadding.left()
+			- st::boxRowPadding.right();
+		subtitle->resizeToWidth(available);
+		subtitle->moveToLeft(st::boxRowPadding.left(), subtitleTop);
+		cover->resize(
+			width,
+			subtitle->y() + subtitle->height() + st::cocoonSubtitleBottom);
+	}, cover->lifetime());
+
+	cover->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(cover);
+		const auto width = cover->width();
+		const auto ratio = style::DevicePixelRatio();
+		if (state->gradient.size() != cover->size() * ratio) {
+			state->gradient = Ui::CreateTopBgGradient(
+				cover->size(),
+				gradientCenter,
+				gradientEdge);
+
+			auto q = QPainter(&state->gradient);
+			auto hq = PainterHighQualityEnabler(q);
+			auto font = st::cocoonTitleFont->f;
+			font.setWeight(QFont::Bold);
+			const auto metrics = QFontMetrics(font);
+			const auto title = RuEn(
+				"Поддержать Astrogram",
+				"Support Astrogram");
+			const auto textWidth = metrics.horizontalAdvance(title);
+			const auto left = (width - textWidth) / 2;
+
+			auto gradient = QLinearGradient(left, 0, left + textWidth, 0);
+			gradient.setStops({
+				{ 0., gradientLeft },
+				{ 1., gradientRight },
+			});
+			q.setPen(QPen(QBrush(gradient), 1.));
+			q.setBrush(Qt::NoBrush);
+			q.setFont(font);
+			q.drawText(left, titleTop + metrics.ascent(), title);
+		}
+		p.drawImage(0, 0, state->gradient);
+
+		const auto logoRect = QRect(
+			(width - logoSize) / 2,
+			logoTop,
+			logoSize,
+			logoSize);
+		const auto paddingAdd = int(base::SafeRound(logoTop * 1.15));
+		const auto particlesRect = logoRect.marginsAdded(
+			{ paddingAdd, paddingAdd, paddingAdd, paddingAdd });
+
+		state->particles->paint(p, particlesRect, crl::now(), false);
+		if (!anim::Disabled() && !state->animation.animating()) {
+			state->animation.start();
+		}
+
+		if (!state->logo.isNull()) {
+			auto hq = PainterHighQualityEnabler(p);
+			QPainterPath path;
+			path.addEllipse(QRectF(logoRect));
+			p.save();
+			p.setClipPath(path);
+			p.drawImage(logoRect, state->logo);
+			p.restore();
+		}
+	}, cover->lifetime());
 }
 
 class PersonalChannelController final : public PeerListController {
@@ -280,96 +443,34 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		box->setNoContentMargin(true);
 
 		const auto container = box->verticalLayout();
-		const auto cover = container->add(object_ptr<Ui::RpWidget>(container));
+		AddAstrogramSupportCover(container);
 		Ui::AddUniqueCloseButton(box);
-
-		struct CoverState {
-			QImage logo;
-			Ui::Animations::Basic animation;
-			std::optional<Ui::StarParticles> particles;
-		};
-		const auto state = cover->lifetime().make_state<CoverState>();
-		state->logo = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
-		if (state->logo.isNull()) {
-			state->logo = QImage(u":/gui/art/logo_256_no_margin.png"_q);
-		}
-		state->particles.emplace(Ui::StarParticles::Type::RadialInside, 44, st::cocoonLogoSize / 12);
-		state->particles->setSpeed(0.05);
-		state->particles->setColors({
-			QColor(0x17, 0x9f, 0x62),
-			QColor(0x21, 0xc7, 0x6a),
-			QColor(0x59, 0xe0, 0x94),
-			QColor(0x9a, 0xff, 0xc4),
-		});
-		state->animation.init([=] {
-			cover->update();
-			if (anim::Disabled()) {
-				state->animation.stop();
-			}
-		});
-
-		const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
-			cover,
-			rpl::single(TextWithEntities{ RuEn(
-				"Серверный значок подписчика и поддержка клиента.\n50 ₽ • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN",
-				"Server-side subscriber badge and support for the client.\n50 RUB • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN") }),
-			st::cocoonSubtitle);
-		subtitle->setTryMakeSimilarLines(true);
-
-		cover->widthValue() | rpl::on_next([=](int width) {
-			const auto logoTop = st::cocoonLogoTop;
-			const auto logoSize = st::cocoonLogoSize;
-			const auto titleTop = logoTop + logoSize + st::cocoonTitleTop;
-			const auto subtitleTop = titleTop + st::cocoonTitleFont->height + st::cocoonSubtitleTop;
-			const auto available = width - st::boxRowPadding.left() - st::boxRowPadding.right();
-			subtitle->resizeToWidth(available);
-			subtitle->moveToLeft(st::boxRowPadding.left(), subtitleTop);
-			cover->resize(width, subtitle->y() + subtitle->height() + st::cocoonSubtitleBottom);
-		}, cover->lifetime());
-
-		cover->paintRequest() | rpl::on_next([=] {
-			auto p = Painter(cover);
-			p.fillRect(cover->rect(), QColor(0x08, 0x14, 0x0f));
-			const auto width = cover->width();
-			const auto logoRect = QRect((width - st::cocoonLogoSize) / 2, st::cocoonLogoTop, st::cocoonLogoSize, st::cocoonLogoSize);
-			const auto particlesRect = logoRect.marginsAdded(QMargins(30, 30, 30, 30));
-			state->particles->paint(p, particlesRect, crl::now(), false);
-			if (!anim::Disabled() && !state->animation.animating()) {
-				state->animation.start();
-			}
-			auto titleFont = st::cocoonTitleFont->f;
-			titleFont.setWeight(QFont::Bold);
-			const auto titleMetrics = QFontMetrics(titleFont);
-			p.setPen(st::windowFg);
-			p.setFont(titleFont);
-			p.drawText(
-				QRect(
-					st::boxRowPadding.left(),
-					st::cocoonLogoTop + st::cocoonLogoSize + st::cocoonTitleTop,
-					width - st::boxRowPadding.left() - st::boxRowPadding.right(),
-					titleMetrics.height()),
-				Qt::AlignHCenter | Qt::AlignTop | Qt::TextSingleLine,
-				RuEn("Поддержать разработку Astrogram", "Support Astrogram development"));
-			if (!state->logo.isNull()) {
-				auto hq = PainterHighQualityEnabler(p);
-				QPainterPath path;
-				path.addEllipse(QRectF(logoRect));
-				p.save();
-				p.setClipPath(path);
-				p.drawImage(logoRect, state->logo);
-				p.restore();
-			}
-		}, cover->lifetime());
-
-		auto context = Ui::Text::MarkedContext();
 		const auto features = std::vector<Ui::FeatureListEntry>{
-			{ st::menuIconGiftPremium, RuEn("Серверный значок", "Server badge"), TextWithEntities{ RuEn("Выдаётся после поддержки и виден другим пользователям Astrogram.", "Granted after support and visible to other Astrogram users.") } },
-			{ st::menuIconUsername, RuEn("Как получить", "How to get it"), TextWithEntities{ RuEn("Напишите @astrogram_support и отправьте свой Telegram ID для выдачи.", "Message @astrogram_support and send your Telegram ID for activation.") } },
-			{ st::menuIconInfo, RuEn("Что это даёт", "What you get"), TextWithEntities{ RuEn("Поддержка разработки клиента и кастомный подписочный бейдж на сервере Astrogram.", "You support development and get a custom subscriber badge on the Astrogram server.") } },
+			{
+				st::menuIconGiftPremium,
+				RuEn("Серверный значок", "Server badge"),
+				TextWithEntities{ RuEn(
+					"После поддержки вы получаете серверный значок подписчика Astrogram, который видят другие пользователи клиента.",
+					"After supporting the project you receive an Astrogram server-side subscriber badge visible to other client users.") },
+			},
+			{
+				st::menuIconUsername,
+				RuEn("Как получить", "How to get it"),
+				TextWithEntities{ RuEn(
+					"Напишите @astrogram_support, отправьте свой Telegram ID и вам активируют значок.",
+					"Message @astrogram_support, send your Telegram ID and the badge will be activated for you.") },
+			},
+			{
+				st::menuIconInfo,
+				RuEn("Что входит", "What is included"),
+				TextWithEntities{ RuEn(
+					"50 ₽ поддерживают разработку Astrogram и помогают быстрее выпускать новые сборки и функции.",
+					"50 RUB supports Astrogram development and helps ship new builds and features faster.") },
+			},
 		};
 		auto margin = QMargins(0, st::defaultVerticalListSkip, 0, 0);
 		for (const auto &feature : features) {
-			box->addRow(Ui::MakeFeatureListEntry(box, feature, context), st::boxRowPadding + margin);
+			box->addRow(Ui::MakeFeatureListEntry(box, feature), st::boxRowPadding + margin);
 			margin = {};
 		}
 
