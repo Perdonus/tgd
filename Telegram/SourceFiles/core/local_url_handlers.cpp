@@ -204,9 +204,9 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 
 	const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		colorizeBold(RuEn(
+		rpl::single(colorizeBold(RuEn(
 			"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nПоддержите клиент и получите серверный значок подписчика Astrogram.",
-			"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nSupport the client and receive an Astrogram server-side subscriber badge.")),
+			"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nSupport the client and receive an Astrogram server-side subscriber badge."))),
 		state->subtitleSt);
 	subtitle->setTryMakeSimilarLines(true);
 

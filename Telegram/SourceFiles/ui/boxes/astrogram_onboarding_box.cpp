@@ -539,19 +539,19 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					(*rebuild)();
 				});
 			} break;
-				case Step::PluginsInstall: {
-					addTitle(
-						RuEn("Рекомендуемые плагины", "Recommended plugins"),
+			case Step::PluginsInstall: {
+				addTitle(
+					RuEn("Рекомендуемые плагины", "Recommended plugins"),
 					RuEn(
 						"Выбирай, что поставить сразу. Позже можно вернуться к этому списку из раздела плагинов и канала с пакетами.",
 						"Choose what to install right now. You can come back to this list later from the plugins section and the packages channel."));
-					Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
-					AddPeerChoiceButton(
-						container,
-						state->pluginsChannelPeer,
-						args.pluginsChannelTitle.isEmpty()
-							? RuEn("AstroPlugins", "AstroPlugins")
-							: args.pluginsChannelTitle,
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddPeerChoiceButton(
+					container,
+					state->pluginsChannelPeer,
+					args.pluginsChannelTitle.isEmpty()
+						? RuEn("AstroPlugins", "AstroPlugins")
+						: args.pluginsChannelTitle,
 					args.pluginsChannelSubtitle,
 					[=] {
 						if (args.subscribePluginsChannel) {
@@ -628,13 +628,13 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					QColor(0x0f, 0x2b, 0x3f),
 					QColor(0x44, 0xc0, 0xff),
 					QColor(0x9c, 0xff, 0xd3));
-					Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-					AddPeerChoiceButton(
-						container,
-						state->officialChannelPeer,
-						args.officialChannelTitle.trimmed().isEmpty()
-							? RuEn("Astrogram", "Astrogram")
-							: args.officialChannelTitle.trimmed(),
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				AddPeerChoiceButton(
+					container,
+					state->officialChannelPeer,
+					args.officialChannelTitle.trimmed().isEmpty()
+						? RuEn("Astrogram", "Astrogram")
+						: args.officialChannelTitle.trimmed(),
 					args.officialChannelSubtitle.trimmed().isEmpty()
 						? RuEn(
 							"Получай новости о сборках, клиентах и новых функциях Astrogram.",
@@ -662,8 +662,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Завершить", "Finish"), finish);
 			} break;
-				}
-			};
+			}
 
 			if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
 				args.resolvePluginsChannel([=](PeerData *peer) {
@@ -690,6 +689,6 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 		};
 		(*rebuild)();
 	}));
-	}
+}
 
 } // namespace Ui
