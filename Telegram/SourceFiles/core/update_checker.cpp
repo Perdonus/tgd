@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_advanced.h"
 #include "settings/settings_intro.h"
 #include "ui/layers/box_content.h"
+#include "lang/lang_instance.h"
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
@@ -293,6 +294,68 @@ QString GenericReleaseUrl() {
 	return QString::fromLatin1(kGitHubReleasesPage);
 }
 
+QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+QString UpdateChannelLabel(UpdateChannel channel) {
+	switch (channel) {
+	case UpdateChannel::DevBeta:
+		return RuEn("Dev (beta)", "Dev (beta)");
+	case UpdateChannel::Alpha:
+		return RuEn("Alpha", "Alpha");
+	case UpdateChannel::Stable:
+	default:
+		return RuEn("Stable", "Stable");
+	}
+}
+
+QString UpdateFeedLabel(UpdateChannel channel) {
+	switch (channel) {
+	case UpdateChannel::DevBeta:
+		return RuEn(
+			"Источник: GitHub prerelease / dev-канал",
+			"Source: GitHub prerelease / dev channel");
+	case UpdateChannel::Alpha:
+		return RuEn(
+			"Источник: alpha feed Astrogram",
+			"Source: Astrogram alpha feed");
+	case UpdateChannel::Stable:
+	default:
+		return RuEn(
+			"Источник: GitHub stable release",
+			"Source: GitHub stable release");
+	}
+}
+
+QString UpdaterBinaryLabel() {
+#ifdef Q_OS_WIN
+	return RuEn(
+		"Updater: встроенный updater.exe / Updater.exe",
+		"Updater: bundled updater.exe / Updater.exe");
+#elif defined Q_OS_MAC
+	return RuEn(
+		"Updater: встроенный Frameworks/Updater",
+		"Updater: bundled Frameworks/Updater");
+#else
+	return RuEn(
+		"Updater: встроенный Updater",
+		"Updater: bundled Updater");
+#endif
+}
+
+QString BuildReleaseMetadataTitle(const ReleaseCandidate &candidate) {
+	return RuEn(
+		"Текущая версия: %1\nКанал: %2\n%3\n%4",
+		"Current version: %1\nChannel: %2\n%3\n%4").arg(
+			FormatVersionWithBuild(AppVersion),
+			UpdateChannelLabel(candidate.channel),
+			UpdateFeedLabel(candidate.channel),
+			UpdaterBinaryLabel());
+}
+
 QString NormalizeReleaseMarkdown(QString text) {
 	text.replace("\r\n", "\n");
 	text.replace('\r', '\n');
@@ -441,6 +504,26 @@ bool SameReleaseInfo(
 		&& (a.changelogLoading == b.changelogLoading)
 		&& (a.changelogFailed == b.changelogFailed);
 }
+
+#ifdef Q_OS_WIN
+QString CanonicalWindowsUpdaterPath(const QString &directory) {
+	return directory + u"/Updater.exe"_q;
+}
+
+QString FindWindowsUpdaterPath(const QString &directory) {
+	const auto candidates = {
+		directory + u"/Updater.exe"_q,
+		directory + u"/AstrogramUpdater.exe"_q,
+		directory + u"/astrogram_updater.exe"_q,
+	};
+	for (const auto &candidate : candidates) {
+		if (QFileInfo::exists(candidate)) {
+			return QFileInfo(candidate).absoluteFilePath();
+		}
+	}
+	return QString();
+}
+#endif // Q_OS_WIN
 
 bool UnpackUpdate(const QString &filepath) {
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
@@ -1523,7 +1606,7 @@ void Updater::applyReleaseCandidate(
 		.channel = candidate->channel,
 		.version = candidate->version,
 		.versionText = FormatVersionWithBuild(candidate->version),
-		.title = FormatVersionWithBuild(candidate->version),
+		.title = BuildReleaseMetadataTitle(*candidate),
 		.url = GenericReleaseUrl(),
 		.changelogLoading = true,
 	};
@@ -1575,8 +1658,12 @@ void Updater::releaseNotesDone(
 		return;
 	}
 	if (const auto release = FindGitHubRelease(response, candidate)) {
-		if (!release->title.isEmpty()) {
-			info.title = release->title;
+		const auto metadataTitle = BuildReleaseMetadataTitle(candidate);
+		if (!release->title.isEmpty()
+			&& release->title != info.versionText) {
+			info.title = release->title + u'\n' + metadataTitle;
+		} else {
+			info.title = metadataTitle;
 		}
 		if (!release->url.isEmpty()) {
 			info.url = release->url;
@@ -1937,8 +2024,12 @@ bool checkReadyUpdate() {
 	}
 
 #ifdef Q_OS_WIN
-	QString curUpdater = (cExeDir() + u"Updater.exe"_q);
-	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Updater.exe"_q);
+	const auto curUpdater = CanonicalWindowsUpdaterPath(cExeDir());
+	const auto preparedUpdaterPath = FindWindowsUpdaterPath(
+		cWorkingDir() + u"tupdates/temp"_q);
+	QFileInfo updater(preparedUpdaterPath.isEmpty()
+		? (cWorkingDir() + u"tupdates/temp/Updater.exe"_q)
+		: preparedUpdaterPath);
 #elif defined Q_OS_MAC // Q_OS_WIN
 	QString curUpdater = (cExeDir() + cExeName() + u"/Contents/Frameworks/Updater"_q);
 	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Telegram.app/Contents/Frameworks/Updater"_q);
@@ -1947,7 +2038,14 @@ bool checkReadyUpdate() {
 	QFileInfo updater(cWorkingDir() + u"tupdates/temp/Updater"_q);
 #endif // else for Q_OS_WIN || Q_OS_MAC
 	if (!updater.exists()) {
+#ifdef Q_OS_WIN
+		const auto currentUpdaterPath = FindWindowsUpdaterPath(cExeDir());
+		QFileInfo current(currentUpdaterPath.isEmpty()
+			? curUpdater
+			: currentUpdaterPath);
+#else // Q_OS_WIN
 		QFileInfo current(curUpdater);
+#endif // !Q_OS_WIN
 		if (!current.exists()) {
 			ClearAll();
 			return false;
