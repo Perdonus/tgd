@@ -1088,7 +1088,7 @@ bool AddRescheduleAction(
 				box->closeBox();
 			}
 		}, box->lifetime());
-	}, &st::menuIconReschedule);
+	}, &st::menuIconReschedule, true);
 	return true;
 }
 
@@ -1210,7 +1210,7 @@ bool AddViewRepliesAction(
 			history,
 			rootId,
 			highlightId);
-	}), &st::menuIconViewReplies);
+	}), &st::menuIconViewReplies, true);
 	return true;
 }
 
@@ -1282,7 +1282,7 @@ void AddFactcheckAction(
 			const auto show = controller->uiShow();
 			session->factchecks().save(itemId, text, result, show);
 		}, FactcheckFieldIniter(controller->uiShow())));
-	}, &st::menuIconFactcheck);
+	}, &st::menuIconFactcheck, true);
 }
 
 bool AddPinMessageAction(
@@ -1316,7 +1316,7 @@ bool AddPinMessageAction(
 	const auto controller = list->controller();
 	menu->addAction(kContextMenuActionMessagePin, isPinned ? tr::lng_context_unpin_msg(tr::now) : tr::lng_context_pin_msg(tr::now), crl::guard(controller, [=] {
 		Window::ToggleMessagePinned(controller, pinItemId, !isPinned);
-	}), isPinned ? &st::menuIconUnpin : &st::menuIconPin);
+	}), isPinned ? &st::menuIconUnpin : &st::menuIconPin, true);
 	return true;
 }
 
@@ -1338,7 +1338,7 @@ bool AddGoToMessageAction(
 		if (const auto item = controller->session().data().message(itemId)) {
 			controller->showMessage(item);
 		}
-	}), &st::menuIconShowInChat);
+	}), &st::menuIconShowInChat, true);
 	return true;
 }
 
@@ -1370,7 +1370,7 @@ bool AddDeleteSelectedAction(
 			list->cancelSelection();
 		}));
 		request.navigation->parentController()->show(std::move(box));
-	}, &st::menuIconDelete);
+	}, &st::menuIconDelete, true);
 	return true;
 }
 
@@ -1430,6 +1430,7 @@ bool AddDeleteMessageAction(
 			&st::menuIconCancel);
 		return true;
 	}
+	const auto deleteTrigger = std::make_shared<Fn<void()>>(callback);
 	menu->addCustom(
 		kContextMenuActionMessageDelete,
 		[=](not_null<Ui::PopupMenu*> raw) {
@@ -1439,7 +1440,10 @@ bool AddDeleteMessageAction(
 				item->ttlDestroyAt(),
 				[=] { delete raw; }));
 		},
-		&st::menuIconDelete);
+		&st::menuIconDelete,
+		deleteTrigger,
+		true,
+		tr::lng_context_delete_msg(tr::now));
 	return true;
 }
 
@@ -1504,7 +1508,8 @@ void AddReportAction(
 		kContextMenuActionMessageReport,
 		tr::lng_context_report_msg(tr::now),
 		callback,
-		&st::menuIconReport);
+		&st::menuIconReport,
+		true);
 }
 
 bool AddClearSelectionAction(
@@ -1586,7 +1591,8 @@ void AddTopMessageActions(
 					"IDs copied.",
 					"ID скопированы."));
 			},
-			&st::menuIconCopy);
+			&st::menuIconCopy,
+			true);
 	}
 	AddFactcheckAction(menu, request, list);
 	AddPinMessageAction(menu, request, list);
@@ -1861,7 +1867,16 @@ ContextMenuCustomizationLayout DefaultContextMenuCustomizationLayout() {
 		MakeLayoutEntry(kContextMenuActionMessageForwardSaved, false),
 		MakeLayoutEntry(kContextMenuActionMessageSendNow, false),
 		MakeLayoutEntry(kContextMenuActionMessageCopyPostLink, false),
+		MakeLayoutEntry(kContextMenuActionMessageGoTo, false),
+		MakeLayoutEntry(kContextMenuActionMessageViewReplies, false),
+		MakeLayoutEntry(kContextMenuActionMessageEdit, false),
+		MakeLayoutEntry(kContextMenuActionMessageCopyIdsTime, false),
+		MakeLayoutEntry(kContextMenuActionMessageFactcheck, false),
+		MakeLayoutEntry(kContextMenuActionMessagePin, false),
+		MakeLayoutEntry(kContextMenuActionMessageDelete, false),
+		MakeLayoutEntry(kContextMenuActionMessageReport, false),
 		MakeLayoutEntry(kContextMenuActionMessageSelect),
+		MakeLayoutEntry(kContextMenuActionMessageReschedule, false),
 	};
 	result.selection.menu = {
 		MakeLayoutEntry(kContextMenuActionSelectionCopy),
@@ -1883,6 +1898,7 @@ ContextMenuCustomizationLayout DefaultContextMenuCustomizationLayout() {
 		MakeLayoutEntry(kContextMenuActionSelectionForwardWithoutAuthor),
 		MakeLayoutEntry(kContextMenuActionSelectionForwardSaved, false),
 		MakeLayoutEntry(kContextMenuActionSelectionSendNow, false),
+		MakeLayoutEntry(kContextMenuActionSelectionDelete, false),
 		MakeLayoutEntry(kContextMenuActionSelectionClear),
 	};
 	return result;
@@ -2349,7 +2365,11 @@ void AddPollActions(
 		return;
 	}
 	const auto itemId = item->fullId();
-	const auto canPreviewResults = !poll->quiz()
+	const auto canPreviewResults = item->history()
+		->session()
+		.settings()
+		.showPollResultsBeforeVoting()
+		&& !poll->quiz()
 		&& !poll->closed()
 		&& !poll->voted()
 		&& item->isRegular();

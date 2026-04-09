@@ -217,6 +217,10 @@ void CopyPeerIdToClipboard(
 DefaultPeerMenuChatsListLayout() {
 	using namespace ::Menu::Customization;
 	return {
+		MakePeerMenuItem(PeerMenuItemId::NewWindow),
+		MakePeerMenuItem(PeerMenuItemId::TogglePin),
+		MakePeerMenuItem(PeerMenuItemId::ToggleUnreadMark),
+		MakePeerMenuItem(PeerMenuItemId::ToggleArchive),
 		MakePeerMenuItem(PeerMenuItemId::CreateTopic),
 		MakePeerMenuItem(PeerMenuItemId::Info),
 		MakePeerMenuItem(PeerMenuItemId::ViewAsMessages),
@@ -224,8 +228,10 @@ DefaultPeerMenuChatsListLayout() {
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorPrimary),
 		MakePeerMenuItem(PeerMenuItemId::ManageChat),
 		MakePeerMenuItem(PeerMenuItemId::NewMembers),
+		MakePeerMenuItem(PeerMenuItemId::ViewStatistics),
 		MakePeerMenuItem(PeerMenuItemId::BoostChat),
 		MakePeerMenuItem(PeerMenuItemId::VideoChat),
+		MakePeerMenuItem(PeerMenuItemId::ToggleFolder),
 		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorDanger),
 		MakePeerMenuItem(PeerMenuItemId::Report),
@@ -238,16 +244,23 @@ DefaultPeerMenuChatsListLayout() {
 DefaultPeerMenuHistoryLayout() {
 	using namespace ::Menu::Customization;
 	return {
+		MakePeerMenuItem(PeerMenuItemId::NewWindow),
 		MakePeerMenuItem(PeerMenuItemId::ToggleMute),
+		MakePeerMenuItem(PeerMenuItemId::TogglePin),
+		MakePeerMenuItem(PeerMenuItemId::ToggleUnreadMark),
+		MakePeerMenuItem(PeerMenuItemId::ToggleArchive),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorPrimary),
 		MakePeerMenuItem(PeerMenuItemId::CreateTopic),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorSecondary),
 		MakePeerMenuItem(PeerMenuItemId::Info),
 		MakePeerMenuItem(PeerMenuItemId::ViewAsTopics),
 		MakePeerMenuItem(PeerMenuItemId::ManageChat),
+		MakePeerMenuItem(PeerMenuItemId::NewMembers),
+		MakePeerMenuItem(PeerMenuItemId::ViewStatistics),
 		MakePeerMenuItem(PeerMenuItemId::StoryArchive),
 		MakePeerMenuItem(PeerMenuItemId::SupportInfo),
 		MakePeerMenuItem(PeerMenuItemId::BoostChat),
+		MakePeerMenuItem(PeerMenuItemId::VideoChat),
 		MakePeerMenuItem(PeerMenuItemId::CreatePoll),
 		MakePeerMenuItem(PeerMenuItemId::CreateTodoList),
 		MakePeerMenuItem(PeerMenuItemId::ThemeEdit),
@@ -255,12 +268,15 @@ DefaultPeerMenuHistoryLayout() {
 		MakePeerMenuItem(PeerMenuItemId::DirectMessages),
 		MakePeerMenuItem(PeerMenuItemId::ExportChat),
 		MakePeerMenuItem(PeerMenuItemId::Translate),
+		MakePeerMenuItem(PeerMenuItemId::ToggleFolder),
 		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
+		MakePeerMenuItem(PeerMenuItemId::BlockUser),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorDanger),
 		MakePeerMenuItem(PeerMenuItemId::Report),
 		MakePeerMenuItem(PeerMenuItemId::ClearHistory),
 		MakePeerMenuItem(PeerMenuItemId::DeleteChat),
 		MakePeerMenuItem(PeerMenuItemId::LeaveChat),
+		MakePeerMenuItem(PeerMenuItemId::JoinChat),
 	};
 }
 
@@ -303,14 +319,26 @@ DefaultPeerMenuProfileLayout() {
 DefaultPeerMenuRepliesLayout() {
 	using namespace ::Menu::Customization;
 	return {
+		MakePeerMenuItem(PeerMenuItemId::NewWindow),
+		MakePeerMenuItem(PeerMenuItemId::ToggleMute),
+		MakePeerMenuSeparator(PeerMenuItemId::SeparatorPrimary),
 		MakePeerMenuItem(PeerMenuItemId::Info),
 		MakePeerMenuItem(PeerMenuItemId::ManageTopic),
+		MakePeerMenuItem(PeerMenuItemId::ManageChat),
+		MakePeerMenuItem(PeerMenuItemId::NewMembers),
+		MakePeerMenuItem(PeerMenuItemId::ViewStatistics),
 		MakePeerMenuItem(PeerMenuItemId::BoostChat),
+		MakePeerMenuItem(PeerMenuItemId::VideoChat),
 		MakePeerMenuItem(PeerMenuItemId::CreatePoll),
 		MakePeerMenuItem(PeerMenuItemId::CreateTodoList),
+		MakePeerMenuItem(PeerMenuItemId::ViewDiscussion),
+		MakePeerMenuItem(PeerMenuItemId::DirectMessages),
+		MakePeerMenuItem(PeerMenuItemId::ExportChat),
 		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorDanger),
 		MakePeerMenuItem(PeerMenuItemId::ToggleTopicClosed),
+		MakePeerMenuItem(PeerMenuItemId::Report),
+		MakePeerMenuItem(PeerMenuItemId::LeaveChat),
 		MakePeerMenuItem(PeerMenuItemId::DeleteTopic),
 	};
 }
@@ -319,8 +347,25 @@ DefaultPeerMenuRepliesLayout() {
 DefaultPeerMenuScheduledLayout() {
 	using namespace ::Menu::Customization;
 	return {
+		MakePeerMenuItem(PeerMenuItemId::NewWindow),
+		MakePeerMenuItem(PeerMenuItemId::ToggleMute),
+		MakePeerMenuSeparator(PeerMenuItemId::SeparatorPrimary),
+		MakePeerMenuItem(PeerMenuItemId::Info),
+		MakePeerMenuItem(PeerMenuItemId::ManageChat),
+		MakePeerMenuItem(PeerMenuItemId::NewMembers),
+		MakePeerMenuItem(PeerMenuItemId::ViewStatistics),
+		MakePeerMenuItem(PeerMenuItemId::BoostChat),
+		MakePeerMenuItem(PeerMenuItemId::VideoChat),
 		MakePeerMenuItem(PeerMenuItemId::CreatePoll),
 		MakePeerMenuItem(PeerMenuItemId::CreateTodoList),
+		MakePeerMenuItem(PeerMenuItemId::ViewDiscussion),
+		MakePeerMenuItem(PeerMenuItemId::DirectMessages),
+		MakePeerMenuItem(PeerMenuItemId::ExportChat),
+		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
+		MakePeerMenuSeparator(PeerMenuItemId::SeparatorDanger),
+		MakePeerMenuItem(PeerMenuItemId::Report),
+		MakePeerMenuItem(PeerMenuItemId::LeaveChat),
+		MakePeerMenuItem(PeerMenuItemId::JoinChat),
 	};
 }
 
@@ -329,21 +374,34 @@ DefaultPeerMenuContextLayout() {
 	using namespace ::Menu::Customization;
 	return {
 		MakePeerMenuItem(PeerMenuItemId::NewWindow),
-		MakePeerMenuSeparator(PeerMenuItemId::SeparatorPrimary),
-		MakePeerMenuItem(PeerMenuItemId::HidePromotion),
-		MakePeerMenuItem(PeerMenuItemId::ToggleArchive),
-		MakePeerMenuItem(PeerMenuItemId::TogglePin),
-		MakePeerMenuItem(PeerMenuItemId::Info),
-		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
 		MakePeerMenuItem(PeerMenuItemId::ToggleMute),
+		MakePeerMenuItem(PeerMenuItemId::TogglePin),
 		MakePeerMenuItem(PeerMenuItemId::ToggleUnreadMark),
+		MakePeerMenuItem(PeerMenuItemId::ToggleArchive),
+		MakePeerMenuSeparator(PeerMenuItemId::SeparatorPrimary),
+		MakePeerMenuItem(PeerMenuItemId::Info),
+		MakePeerMenuItem(PeerMenuItemId::ManageChat),
+		MakePeerMenuItem(PeerMenuItemId::NewMembers),
+		MakePeerMenuItem(PeerMenuItemId::ViewStatistics),
+		MakePeerMenuItem(PeerMenuItemId::BoostChat),
+		MakePeerMenuItem(PeerMenuItemId::VideoChat),
+		MakePeerMenuItem(PeerMenuItemId::CreatePoll),
+		MakePeerMenuItem(PeerMenuItemId::CreateTodoList),
+		MakePeerMenuItem(PeerMenuItemId::ViewDiscussion),
+		MakePeerMenuItem(PeerMenuItemId::DirectMessages),
+		MakePeerMenuItem(PeerMenuItemId::ExportChat),
+		MakePeerMenuItem(PeerMenuItemId::Translate),
+		MakePeerMenuItem(PeerMenuItemId::DeletedMessages),
 		MakePeerMenuItem(PeerMenuItemId::ToggleTopicClosed),
 		MakePeerMenuItem(PeerMenuItemId::ToggleFolder),
 		MakePeerMenuItem(PeerMenuItemId::BlockUser),
+		MakePeerMenuItem(PeerMenuItemId::HidePromotion),
 		MakePeerMenuSeparator(PeerMenuItemId::SeparatorDanger),
+		MakePeerMenuItem(PeerMenuItemId::Report),
 		MakePeerMenuItem(PeerMenuItemId::ClearHistory),
 		MakePeerMenuItem(PeerMenuItemId::DeleteChat),
 		MakePeerMenuItem(PeerMenuItemId::LeaveChat),
+		MakePeerMenuItem(PeerMenuItemId::JoinChat),
 		MakePeerMenuItem(PeerMenuItemId::DeleteTopic),
 	};
 }
@@ -1837,6 +1895,19 @@ void Filler::fillChatsListActions() {
 	};
 
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewWindow,
+		&Filler::addNewWindow,
+		false);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::TogglePin,
+		&Filler::addTogglePin);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleUnreadMark,
+		&Filler::addToggleUnreadMark);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleArchive,
+		&Filler::addToggleArchive);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::CreateTopic,
 		&Filler::addCreateTopic,
 		false);
@@ -1865,11 +1936,17 @@ void Filler::fillChatsListActions() {
 		::Menu::Customization::PeerMenuItemId::NewMembers,
 		&Filler::addNewMembers);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewStatistics,
+		&Filler::addViewStatistics);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::BoostChat,
 		&Filler::addBoostChat);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::VideoChat,
 		&Filler::addVideoChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleFolder,
+		&Filler::addToggleFolder);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::DeletedMessages,
 		&Filler::addDeletedMessages);
@@ -1926,33 +2003,57 @@ void Filler::fillContextMenuActions() {
 		&Filler::addNewWindow,
 		false);
 	registerMethod(
-		::Menu::Customization::PeerMenuItemId::HidePromotion,
-		&Filler::addHidePromotion);
-	registerMethod(
-		::Menu::Customization::PeerMenuItemId::ToggleArchive,
-		&Filler::addToggleArchive);
-	registerMethod(
-		::Menu::Customization::PeerMenuItemId::TogglePin,
-		&Filler::addTogglePin);
-	{
-		auto renderer = makeRenderer(&Filler::addInfo);
-		renderer.available = [=] {
-			return ViewProfileInChatsListContextMenu.value();
-		};
-		registerRenderer(
-			::Menu::Customization::PeerMenuItemId::Info,
-			std::move(renderer));
-	}
-	registerMethod(
-		::Menu::Customization::PeerMenuItemId::DeletedMessages,
-		&Filler::addDeletedMessages);
-	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ToggleMute,
 		&Filler::addToggleMuteSubmenu,
 		false);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::TogglePin,
+		&Filler::addTogglePin);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ToggleUnreadMark,
 		&Filler::addToggleUnreadMark);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleArchive,
+		&Filler::addToggleArchive);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Info,
+		&Filler::addInfo);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ManageChat,
+		&Filler::addManageChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewMembers,
+		&Filler::addNewMembers);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewStatistics,
+		&Filler::addViewStatistics);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::BoostChat,
+		&Filler::addBoostChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::VideoChat,
+		&Filler::addVideoChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::CreatePoll,
+		&Filler::addCreatePoll);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::CreateTodoList,
+		&Filler::addCreateTodoList);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewDiscussion,
+		&Filler::addViewDiscussion);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DirectMessages,
+		&Filler::addDirectMessages);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ExportChat,
+		&Filler::addExportChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Translate,
+		&Filler::addTranslate);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DeletedMessages,
+		&Filler::addDeletedMessages);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ToggleTopicClosed,
 		&Filler::addToggleTopicClosed);
@@ -1970,6 +2071,12 @@ void Filler::fillContextMenuActions() {
 			std::move(renderer));
 	}
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::HidePromotion,
+		&Filler::addHidePromotion);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Report,
+		&Filler::addReport);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ClearHistory,
 		&Filler::addClearHistory);
 	registerMethod(
@@ -1978,6 +2085,9 @@ void Filler::fillContextMenuActions() {
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::LeaveChat,
 		&Filler::addLeaveChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::JoinChat,
+		&Filler::addJoinChat);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::DeleteTopic,
 		&Filler::addDeleteTopic);
@@ -2000,9 +2110,22 @@ void Filler::fillHistoryActions() {
 	};
 
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewWindow,
+		&Filler::addNewWindow,
+		false);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ToggleMute,
 		&Filler::addToggleMuteSubmenu,
 		false);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::TogglePin,
+		&Filler::addTogglePin);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleUnreadMark,
+		&Filler::addToggleUnreadMark);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleArchive,
+		&Filler::addToggleArchive);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::CreateTopic,
 		&Filler::addCreateTopic,
@@ -2017,6 +2140,12 @@ void Filler::fillHistoryActions() {
 		::Menu::Customization::PeerMenuItemId::ManageChat,
 		&Filler::addManageChat);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewMembers,
+		&Filler::addNewMembers);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewStatistics,
+		&Filler::addViewStatistics);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::StoryArchive,
 		&Filler::addStoryArchive);
 	registerMethod(
@@ -2025,6 +2154,9 @@ void Filler::fillHistoryActions() {
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::BoostChat,
 		&Filler::addBoostChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::VideoChat,
+		&Filler::addVideoChat);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::CreatePoll,
 		&Filler::addCreatePoll);
@@ -2047,8 +2179,14 @@ void Filler::fillHistoryActions() {
 		::Menu::Customization::PeerMenuItemId::Translate,
 		&Filler::addTranslate);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleFolder,
+		&Filler::addToggleFolder);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::DeletedMessages,
 		&Filler::addDeletedMessages);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::BlockUser,
+		&Filler::addBlockUser);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::Report,
 		&Filler::addReport);
@@ -2061,6 +2199,9 @@ void Filler::fillHistoryActions() {
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::LeaveChat,
 		&Filler::addLeaveChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::JoinChat,
+		&Filler::addJoinChat);
 
 	fillCustomized(
 		QString::fromLatin1(::Menu::Customization::PeerMenuSurfaceId::History),
@@ -2175,19 +2316,35 @@ void Filler::fillRepliesActions() {
 		registerRenderer(id, makeRenderer(method, args...));
 	};
 
-	{
-		auto renderer = makeRenderer(&Filler::addInfo);
-		renderer.available = [=] { return _topic != nullptr; };
-		registerRenderer(
-			::Menu::Customization::PeerMenuItemId::Info,
-			std::move(renderer));
-	}
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewWindow,
+		&Filler::addNewWindow,
+		false);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleMute,
+		&Filler::addToggleMuteSubmenu,
+		false);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Info,
+		&Filler::addInfo);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ManageTopic,
 		&Filler::addManageTopic);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ManageChat,
+		&Filler::addManageChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewMembers,
+		&Filler::addNewMembers);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewStatistics,
+		&Filler::addViewStatistics);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::BoostChat,
 		&Filler::addBoostChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::VideoChat,
+		&Filler::addVideoChat);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::CreatePoll,
 		&Filler::addCreatePoll);
@@ -2195,11 +2352,26 @@ void Filler::fillRepliesActions() {
 		::Menu::Customization::PeerMenuItemId::CreateTodoList,
 		&Filler::addCreateTodoList);
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewDiscussion,
+		&Filler::addViewDiscussion);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DirectMessages,
+		&Filler::addDirectMessages);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ExportChat,
+		&Filler::addExportChat);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::DeletedMessages,
 		&Filler::addDeletedMessages);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::ToggleTopicClosed,
 		&Filler::addToggleTopicClosed);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Report,
+		&Filler::addReport);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::LeaveChat,
+		&Filler::addLeaveChat);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::DeleteTopic,
 		&Filler::addDeleteTopic);
@@ -2219,11 +2391,58 @@ void Filler::fillScheduledActions() {
 	};
 
 	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewWindow,
+		&Filler::addNewWindow,
+		false);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ToggleMute,
+		&Filler::addToggleMuteSubmenu,
+		false);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Info,
+		&Filler::addInfo);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ManageChat,
+		&Filler::addManageChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::NewMembers,
+		&Filler::addNewMembers);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewStatistics,
+		&Filler::addViewStatistics);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::BoostChat,
+		&Filler::addBoostChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::VideoChat,
+		&Filler::addVideoChat);
+	registerMethod(
 		::Menu::Customization::PeerMenuItemId::CreatePoll,
 		&Filler::addCreatePoll);
 	registerMethod(
 		::Menu::Customization::PeerMenuItemId::CreateTodoList,
 		&Filler::addCreateTodoList);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ViewDiscussion,
+		&Filler::addViewDiscussion);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DirectMessages,
+		&Filler::addDirectMessages);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::ExportChat,
+		&Filler::addExportChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::DeletedMessages,
+		&Filler::addDeletedMessages);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::Report,
+		&Filler::addReport);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::LeaveChat,
+		&Filler::addLeaveChat);
+	registerMethod(
+		::Menu::Customization::PeerMenuItemId::JoinChat,
+		&Filler::addJoinChat);
 
 	fillCustomized(
 		QString::fromLatin1(::Menu::Customization::PeerMenuSurfaceId::Scheduled),

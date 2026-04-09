@@ -647,6 +647,18 @@ CloudImage *Media::location() const {
 	return nullptr;
 }
 
+const LocationPoint *Media::locationPoint() const {
+	return nullptr;
+}
+
+TimeId Media::locationLivePeriod() const {
+	return 0;
+}
+
+std::optional<InputVenue> Media::venue() const {
+	return std::nullopt;
+}
+
 PollData *Media::poll() const {
 	return nullptr;
 }
@@ -1663,6 +1675,26 @@ std::unique_ptr<Media> MediaLocation::clone(not_null<HistoryItem*> parent) {
 
 CloudImage *MediaLocation::location() const {
 	return _location;
+}
+
+const LocationPoint *MediaLocation::locationPoint() const {
+	return &_point;
+}
+
+TimeId MediaLocation::locationLivePeriod() const {
+	return _livePeriod;
+}
+
+std::optional<InputVenue> MediaLocation::venue() const {
+	if (_title.isEmpty() && _description.isEmpty()) {
+		return std::nullopt;
+	}
+	return InputVenue{
+		.lat = _point.lat(),
+		.lon = _point.lon(),
+		.title = _title,
+		.address = _description,
+	};
 }
 
 QString MediaLocation::typeString() const {

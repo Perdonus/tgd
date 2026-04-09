@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_histories.h"
 #include "data/data_changes.h"
+#include "data/data_types.h"
 #include "data/stickers/data_stickers.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -340,6 +341,60 @@ void SendExistingPhoto(
 		inputMedia,
 		Data::FileOrigin(),
 		std::move(localMessageId));
+}
+
+[[nodiscard]] bool SendWithoutAuthor(
+		SendAction action,
+		not_null<HistoryItem*> item,
+		Data::ForwardOptions forwardOptions) {
+	auto message = MessageToSend(action);
+	const auto originalText = item->originalText();
+	const auto media = item->media();
+	if (!media) {
+		if (originalText.text.isEmpty()) {
+			return false;
+		}
+		message.textWithTags = TextWithTags{
+			originalText.text,
+			TextUtilities::ConvertEntitiesToTextTags(originalText.entities),
+		};
+		action.history->session().api().sendMessage(std::move(message));
+		return true;
+	}
+	if (const auto contact = media->sharedContact()) {
+		action.history->session().api().shareContact(
+			contact->phoneNumber,
+			contact->firstName,
+			contact->lastName,
+			action);
+		return true;
+	}
+	if (const auto point = media->locationPoint()) {
+		if (media->locationLivePeriod() > 0) {
+			return false;
+		} else if (const auto venue = media->venue()) {
+			SendVenue(action, *venue);
+		} else {
+			SendLocation(action, point->lat(), point->lon());
+		}
+		return true;
+	}
+	if (forwardOptions != Data::ForwardOptions::NoNamesAndCaptions) {
+		message.textWithTags = TextWithTags{
+			originalText.text,
+			TextUtilities::ConvertEntitiesToTextTags(originalText.entities),
+		};
+	}
+	message.action.options.mediaSpoiler = media->hasSpoiler();
+	message.action.options.invertCaption = item->invertMedia();
+	if (const auto photo = media->photo()) {
+		SendExistingPhoto(std::move(message), photo);
+		return true;
+	} else if (const auto document = media->document()) {
+		SendExistingDocument(std::move(message), document);
+		return true;
+	}
+	return false;
 }
 
 bool SendDice(MessageToSend &message) {

@@ -111,6 +111,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 
 #include <QtGui/QClipboard>
+#include <limits>
 #include <QtWidgets/QApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QMimeData>
@@ -119,7 +120,7 @@ namespace {
 
 [[nodiscard]] int SelectedItemsLimit() {
 	return Core::App().settings().unlockForwardSelectionLimit()
-		? 1000
+		? std::numeric_limits<int>::max()
 		: MaxSelectedItems;
 }
 

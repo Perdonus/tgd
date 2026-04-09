@@ -3686,16 +3686,45 @@ void ApiWrap::forwardMessages(
 		shared->callback = std::move(successCallback);
 	}
 
-	const auto count = int(draft.items.size());
-	const auto genClientSideMessage = action.generateLocal
-		&& (count < 2)
-		&& (draft.options == Data::ForwardOptions::PreserveInfo);
 	const auto history = action.history;
 	const auto peer = history->peer;
 
 	if (!action.options.scheduled && !action.options.shortcutId) {
 		histories.readInbox(history);
 	}
+	if (draft.options != Data::ForwardOptions::PreserveInfo) {
+		for (auto i = begin(draft.items); i != end(draft.items);) {
+			const auto item = *i;
+			if (item->allowsForward() || !CanShareWithoutAuthor(item)) {
+				++i;
+				continue;
+			}
+			auto resendAction = action;
+			const auto starsPaid = std::min(
+				peer->starsPerMessageChecked(),
+				action.options.starsApproved);
+			if (starsPaid) {
+				action.options.starsApproved -= starsPaid;
+			}
+			resendAction.options.starsApproved = starsPaid;
+			if (SendWithoutAuthor(resendAction, item, draft.options)) {
+				i = draft.items.erase(i);
+			} else {
+				++i;
+			}
+		}
+	}
+	if (draft.items.empty()) {
+		if (shared) {
+			shared->callback();
+		}
+		return;
+	}
+
+	const auto count = int(draft.items.size());
+	const auto genClientSideMessage = action.generateLocal
+		&& (count < 2)
+		&& (draft.options == Data::ForwardOptions::PreserveInfo);
 	const auto sendAs = action.options.sendAs;
 	const auto silentPost = ShouldSendSilent(peer, action.options);
 

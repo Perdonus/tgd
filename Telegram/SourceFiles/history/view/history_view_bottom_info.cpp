@@ -483,7 +483,9 @@ void BottomInfo::layoutDateText() {
 		? AstrogramBottomTag(
 			settings.deletedMarkShowIcon(),
 			settings.deletedMarkShowText(),
-			QString::fromUtf8("\xE2\x9C\x95"),
+			settings.deletedMarkIcon().trimmed().isEmpty()
+				? QString::fromUtf8("\xE2\x9C\x95")
+				: settings.deletedMarkIcon(),
 			settings.deletedMarkText().trimmed().isEmpty()
 				? tr::lng_deleted(tr::now)
 				: settings.deletedMarkText())
@@ -492,7 +494,9 @@ void BottomInfo::layoutDateText() {
 		? AstrogramBottomTag(
 			settings.editedMarkShowIcon(),
 			settings.editedMarkShowText(),
-			QString::fromUtf8("\xE2\x9C\x8E"),
+			settings.editedMarkIcon().trimmed().isEmpty()
+				? QString::fromUtf8("\xE2\x9C\x8E")
+				: settings.editedMarkIcon(),
 			settings.editedMarkText().trimmed().isEmpty()
 				? tr::lng_edited(tr::now)
 				: settings.editedMarkText())

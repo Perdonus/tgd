@@ -8,11 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 class History;
+class HistoryItem;
 class PhotoData;
 class DocumentData;
 struct FilePrepareResult;
 
 namespace Data {
+enum class ForwardOptions;
 struct InputVenue;
 } // namespace Data
 
@@ -34,6 +36,11 @@ void SendExistingPhoto(
 	MessageToSend &&message,
 	not_null<PhotoData*> photo,
 	std::optional<MsgId> localMessageId = std::nullopt);
+
+[[nodiscard]] bool SendWithoutAuthor(
+	SendAction action,
+	not_null<HistoryItem*> item,
+	Data::ForwardOptions forwardOptions);
 
 bool SendDice(MessageToSend &message);
 

@@ -25,8 +25,12 @@ namespace Data {
 namespace {
 
 constexpr auto kReloadThreshold = 60 * crl::time(1000);
-constexpr auto kMaxGifts = 3;
-constexpr auto kMaxPinnedGifts = 6;
+
+[[nodiscard]] int SharedGiftsRequestLimit(not_null<Main::Session*> session) {
+	return std::max(
+		session->appConfig().pinnedGiftsLimit(),
+		session->appConfig().giftCollectionGiftsLimit());
+}
 
 } // namespace
 
@@ -41,13 +45,9 @@ std::vector<Data::SavedStarGift> RecentSharedMediaGifts::filterGifts(
 		const std::deque<Data::SavedStarGift> &gifts,
 		bool onlyPinnedToTop) {
 	auto result = std::vector<Data::SavedStarGift>();
-	const auto maxCount = onlyPinnedToTop ? kMaxPinnedGifts : kMaxGifts;
 	for (const auto &gift : gifts) {
 		if (!onlyPinnedToTop || gift.pinned) {
 			result.push_back(gift);
-			if (result.size() >= maxCount) {
-				break;
-			}
 		}
 	}
 	return result;
@@ -82,7 +82,7 @@ void RecentSharedMediaGifts::request(
 			peer->input(),
 			MTP_int(0), // collection_id
 			MTP_string(QString()),
-			MTP_int(kMaxPinnedGifts)
+			MTP_int(SharedGiftsRequestLimit(_session))
 	)).done([=](const MTPpayments_SavedStarGifts &result) {
 		const auto &data = result.data();
 		const auto owner = &peer->owner();

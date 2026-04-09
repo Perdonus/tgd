@@ -50,6 +50,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 
+#include <functional>
+#include <vector>
+
 namespace Settings {
 
 ShellModePreferences ShellModePreferencesFor(AstrogramShellPreset preset) {
@@ -138,6 +141,51 @@ void AddOption(
 	}
 }
 
+struct ShellModeUiState {
+	ShellModePreferences prefs;
+	std::vector<std::function<void(const ShellModePreferences&)>> syncs;
+};
+
+[[nodiscard]] bool SameShellModePreferences(
+		const ShellModePreferences &a,
+		const ShellModePreferences &b) {
+	return (a.immersiveAnimation == b.immersiveAnimation)
+		&& (a.expandedSidePanel == b.expandedSidePanel)
+		&& (a.leftEdgeSettings == b.leftEdgeSettings)
+		&& (a.wideSettingsPane == b.wideSettingsPane);
+}
+
+void NotifyShellModeState(ShellModeUiState *state) {
+	for (const auto &sync : state->syncs) {
+		sync(state->prefs);
+	}
+}
+
+[[nodiscard]] bool SaveShellModeState(
+		not_null<Window::Controller*> window,
+		ShellModeUiState *state,
+		const ShellModePreferences &updated,
+		QString successToast = QString()) {
+	if (SameShellModePreferences(updated, state->prefs)) {
+		if (!successToast.isEmpty()) {
+			window->showToast(successToast);
+		}
+		return true;
+	}
+	if (!SaveShellModePreferences(updated)) {
+		window->showToast(RuEn(
+			"Не удалось сохранить параметры оболочки Astrogram.",
+			"Could not save Astrogram shell settings."));
+		return false;
+	}
+	state->prefs = updated;
+	NotifyShellModeState(state);
+	if (!successToast.isEmpty()) {
+		window->showToast(successToast);
+	}
+	return true;
+}
+
 [[nodiscard]] QString ShellPresetTitle(AstrogramShellPreset preset) {
 	switch (preset) {
 	case AstrogramShellPreset::Balanced: return RuEn(
@@ -183,22 +231,51 @@ void AddOption(
 	return QString();
 }
 
+template <typename Getter, typename Setter>
+void AddShellModeToggle(
+		not_null<Window::Controller*> window,
+		not_null<Ui::VerticalLayout*> container,
+		ShellModeUiState *state,
+		QString title,
+		QString description,
+		Getter getter,
+		Setter setter) {
+	const auto toggles = container->lifetime().make_state<rpl::event_stream<bool>>();
+	const auto current = getter(state->prefs);
+	const auto button = container->add(object_ptr<Button>(
+		container,
+		rpl::single(title),
+		st::settingsButtonNoIcon))->toggleOn(
+		toggles->events_starting_with(current));
+	state->syncs.push_back([=](const ShellModePreferences &prefs) {
+		toggles->fire_copy(getter(prefs));
+	});
+	button->toggledChanges() | rpl::on_next([=](bool toggled) {
+		auto updated = state->prefs;
+		setter(updated, toggled);
+		if (!SaveShellModeState(window, state, updated)) {
+			toggles->fire_copy(getter(state->prefs));
+		}
+	}, container->lifetime());
+	if (!description.isEmpty()) {
+		Ui::AddSkip(container, st::settingsCheckboxesSkip);
+		Ui::AddDividerText(container, rpl::single(description));
+		Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	}
+}
+
 void AddShellPresetButton(
 		not_null<Window::Controller*> window,
 		not_null<Ui::VerticalLayout*> container,
+		ShellModeUiState *state,
 		AstrogramShellPreset preset) {
 	const auto button = container->add(object_ptr<Button>(
 		container,
 		rpl::single(ShellPresetTitle(preset)),
 		st::settingsButtonNoIcon));
 	button->addClickHandler([=] {
-		if (!ApplyAstrogramShellPreset(preset)) {
-			window->showToast(RuEn(
-				"Не удалось применить shell preset.",
-				"Could not apply the shell preset."));
-			return;
-		}
-		window->showToast(ShellPresetToast(preset));
+		const auto updated = ShellModePreferencesFor(preset);
+		SaveShellModeState(window, state, updated, ShellPresetToast(preset));
 	});
 	Ui::AddDividerText(container, rpl::single(ShellPresetDescription(preset)));
 }
@@ -278,6 +355,9 @@ void SetupExperimental(
 	addToggle(Info::kAlternativeScrollProcessing);
 	addToggle(kModerateCommonGroups);
 
+	const auto shellState = container->lifetime().make_state<ShellModeUiState>();
+	shellState->prefs = LoadShellModePreferences();
+
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	Ui::AddSubsectionTitle(
 		container,
@@ -287,8 +367,83 @@ void SetupExperimental(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Вступительный гайд теперь не только ведёт сюда напрямую, но и умеет заранее применять стартовые shell-пресеты. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings. Открытое боковое меню тоже подхватывает эти файлы live, без ручного переоткрытия.",
-			"The onboarding flow can now lead here directly and pre-apply starter shell presets. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container. The opened side menu now hot-reloads these files as well, without a manual reopen.")));
+			"Вступительный гайд теперь не только ведёт сюда напрямую, но и отдельно объясняет кастомизацию меню перед shell-шагом. Здесь вынесены быстрые runtime-переключатели для боковой панели и анимации, а ниже остаётся живой editor с preview и более глубокой раскладкой меню.",
+			"The onboarding flow now not only lands here directly, but also explains menu customization before the shell step. This top area surfaces quick runtime switches for the side panel and animation, while the live editor with the preview and deeper menu layout stays below.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn(
+			"Быстрые shell-переключатели",
+			"Quick shell switches")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Это те же runtime-hooks wide / left-edge / immersive, которые использует onboarding и слушают side menu, shell и settings/info layers. Здесь ими можно управлять напрямую, не заходя сразу в deeper editor surface.",
+			"These are the same wide / left-edge / immersive runtime hooks used by onboarding and observed by the side menu, the shell and the settings/info layers. You can control them directly here without jumping into the deeper editor surface right away.")));
+	AddShellModeToggle(
+		window,
+		container,
+		shellState,
+		RuEn(
+			"Расширенная боковая панель",
+			"Expanded side panel"),
+		RuEn(
+			"Шире делает реальное боковое меню и одновременно перестраивает preview-панель ниже.",
+			"Makes the real side menu wider and immediately reshapes the preview panel below."),
+		[](const ShellModePreferences &prefs) {
+			return prefs.expandedSidePanel;
+		},
+		[](ShellModePreferences &prefs, bool value) {
+			prefs.expandedSidePanel = value;
+		});
+	AddShellModeToggle(
+		window,
+		container,
+		shellState,
+		RuEn(
+			"Левоторцевые settings/info surfaces",
+			"Left-edge settings/info surfaces"),
+		RuEn(
+			"Переставляет settings и info ближе к левому краю, чтобы оболочка ощущалась продолжением боковой панели, а не отдельным центрированным слоем.",
+			"Moves settings and info closer to the left edge so the shell feels like a continuation of the side menu instead of a separate centered layer."),
+		[](const ShellModePreferences &prefs) {
+			return prefs.leftEdgeSettings;
+		},
+		[](ShellModePreferences &prefs, bool value) {
+			prefs.leftEdgeSettings = value;
+		});
+	AddShellModeToggle(
+		window,
+		container,
+		shellState,
+		RuEn(
+			"Иммерсивная анимация бокового меню",
+			"Immersive side menu animation"),
+		RuEn(
+			"Основная часть клиента уезжает вправо вместе с открытием бокового меню. Это тот же runtime-переключатель, который теперь показывается и в onboarding shell-шаге.",
+			"The main part of the client shifts right together with the side menu opening. This is the same runtime switch now referenced by the onboarding shell step."),
+		[](const ShellModePreferences &prefs) {
+			return prefs.immersiveAnimation;
+		},
+		[](ShellModePreferences &prefs, bool value) {
+			prefs.immersiveAnimation = value;
+		});
+	AddShellModeToggle(
+		window,
+		container,
+		shellState,
+		RuEn(
+			"Более широкая панель настроек",
+			"Wider settings pane"),
+		RuEn(
+			"Даёт settings/info более широкий контейнер, чтобы длинные строки и новые shell-поверхности не упирались в узкую колонку.",
+			"Gives settings/info a wider container so longer rows and the newer shell surfaces do not collapse into a narrow column."),
+		[](const ShellModePreferences &prefs) {
+			return prefs.wideSettingsPane;
+		},
+		[](ShellModePreferences &prefs, bool value) {
+			prefs.wideSettingsPane = value;
+		});
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	Ui::AddSubsectionTitle(
 		container,
@@ -298,12 +453,17 @@ void SetupExperimental(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Это явные входы в runtime-хуки wide / left-edge / immersive без onboarding: пресеты сразу пишут в тот же preview/runtime файл, который уже слушают side menu, shell и settings/info layers.",
-			"These are explicit entry points into the wide / left-edge / immersive runtime hooks without onboarding: the presets write directly into the same preview/runtime file already observed by the side menu, the shell and the settings/info layers.")));
-	AddShellPresetButton(window, container, AstrogramShellPreset::Balanced);
-	AddShellPresetButton(window, container, AstrogramShellPreset::Focused);
-	AddShellPresetButton(window, container, AstrogramShellPreset::Wide);
+			"Если не хочется собирать режим по одному флагу, ниже лежат те же связки одним нажатием. Они обновляют этот верхний блок сразу, а дальше тот же state подхватывает live editor ниже.",
+			"If you do not want to build a mode flag by flag, the same stacks are available below in one tap. They update this top block immediately, and the live editor below picks up the same state next.")));
+	AddShellPresetButton(window, container, shellState, AstrogramShellPreset::Balanced);
+	AddShellPresetButton(window, container, shellState, AstrogramShellPreset::Focused);
+	AddShellPresetButton(window, container, shellState, AstrogramShellPreset::Wide);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Ниже остаётся расширенный editor: side menu layout, restore-tray, footer/profile presentation и тот же preview/runtime bridge для оболочки Astrogram.",
+			"The extended editor stays below: side menu layout, restore tray, footer/profile presentation and the same preview/runtime bridge for the Astrogram shell.")));
 	AddMenuCustomizationEditor(controller, container);
 }
 

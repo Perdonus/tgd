@@ -72,6 +72,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_todo_list.h"
 #include "data/data_web_page.h"
 #include "data/data_document.h"
+#include "data/data_peer_id.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_channel.h"
@@ -158,6 +159,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/continuous_scroll.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/text/text_utilities.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/item_text_options.h"
 #include "main/main_session.h"
@@ -229,6 +231,84 @@ const auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 		}
 	}
 	return QString();
+}
+
+[[nodiscard]] not_null<PeerData*> DeletedReplySender(
+		not_null<HistoryItem*> item) {
+	if (const auto from = item->displayFrom()) {
+		return not_null(from);
+	}
+	return item->author();
+}
+
+[[nodiscard]] QString DeletedReplySenderLabel(not_null<PeerData*> sender) {
+	const auto shortName = sender->shortName();
+	return shortName.isEmpty() ? sender->name() : shortName;
+}
+
+[[nodiscard]] TextWithEntities DeletedReplyMediaLabel(
+		not_null<HistoryItem*> item) {
+	if (const auto media = item->media()) {
+		if (const auto text = media->pinnedTextSubstring(); !text.isEmpty()) {
+			return TextWithEntities{ text };
+		}
+		auto notification = media->notificationText();
+		TextUtilities::Trim(notification);
+		if (!notification.empty()) {
+			return notification;
+		}
+	}
+	return {};
+}
+
+[[nodiscard]] TextWithEntities DeletedReplyBody(
+		not_null<HistoryItem*> item) {
+	auto text = item->translatedTextWithLocalEntities();
+	TextUtilities::Trim(text);
+	if (!text.empty()) {
+		return text;
+	}
+	auto media = DeletedReplyMediaLabel(item);
+	TextUtilities::Trim(media);
+	if (!media.empty()) {
+		return media;
+	}
+	auto notification = item->notificationText();
+	TextUtilities::Trim(notification);
+	if (!notification.empty()) {
+		return notification;
+	}
+	auto preview = item->inReplyText();
+	TextUtilities::Trim(preview);
+	if (!preview.empty()) {
+		return preview;
+	}
+	return tr::lng_deleted_message(tr::now, tr::marked);
+}
+
+[[nodiscard]] TextWithEntities DeletedReplyQuote(
+		not_null<HistoryItem*> item) {
+	const auto sender = DeletedReplySender(item);
+	auto result = TextWithEntities{ DeletedReplySenderLabel(sender) };
+	if (const auto user = sender->asUser()) {
+		const auto data = TextUtilities::MentionNameDataFromFields({
+			.selfId = item->history()->session().userId().bare,
+			.userId = peerToUser(user->id).bare,
+			.accessHash = user->accessHash(),
+		});
+		result.entities.push_back({
+			EntityType::MentionName,
+			0,
+			int(result.text.size()),
+			data,
+		});
+	}
+	auto body = DeletedReplyBody(item);
+	TextUtilities::Trim(body);
+	if (!body.empty()) {
+		result.append(u"\n"_q).append(std::move(body));
+	}
+	return result;
 }
 
 } // namespace
@@ -8730,14 +8810,13 @@ void HistoryWidget::processReply() {
 		return crl::guard(_list, [=] {
 			if (!_peer || !_processingReplyTo) {
 				return;
-			} else if (!_processingReplyItem) {
-				_processingReplyItem = _peer->owner().message(
-					_processingReplyTo.messageId);
-				if (!_processingReplyItem) {
-					_processingReplyTo = {};
-				} else {
-					processReply();
-				}
+			}
+			_processingReplyItem = _peer->owner().message(
+				_processingReplyTo.messageId);
+			if (!_processingReplyItem) {
+				_processingReplyTo = {};
+			} else {
+				processReply();
 			}
 		});
 	};
@@ -8810,7 +8889,7 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 	// Preserve context when replying to a locally saved deleted message:
 	// the server can carry quote text even if the original message is gone.
 	if (item->isDeleted() && replyTo.quote.empty()) {
-		replyTo.quote = item->inReplyText();
+		replyTo.quote = DeletedReplyQuote(item);
 		replyTo.quoteOffset = 0;
 	}
 	if (_editMsgId) {

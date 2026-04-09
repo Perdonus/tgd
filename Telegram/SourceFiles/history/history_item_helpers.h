@@ -268,6 +268,7 @@ enum class ShareWithoutAuthorCheck {
 	Allowed,
 	Protected,
 	EphemeralMedia,
+	LiveLocation,
 	Unsupported,
 };
 [[nodiscard]] ShareWithoutAuthorCheck CheckShareWithoutAuthor(

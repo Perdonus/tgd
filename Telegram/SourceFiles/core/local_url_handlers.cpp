@@ -177,6 +177,18 @@ using Match = qthelp::RegularExpressionMatch;
 			u"50 RUB • about $0.55 • 22 UAH • 265 KZT • 1.80 BYN"_q));
 }
 
+[[nodiscard]] QString AstrogramSupportPricePill(not_null<Main::Session*> session) {
+	return RuEn(
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_pill_ru"_q,
+			u"50 ₽ • $0.55"_q),
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_pill_en"_q,
+			u"50 RUB • $0.55"_q));
+}
+
 [[nodiscard]] QString AstrogramSupportPriceNote(not_null<Main::Session*> session) {
 	return RuEn(
 		AstrogramSupportConfigValue(
@@ -337,6 +349,18 @@ void AddAstrogramSupportCover(
 		p.drawRoundedRect(contactPill->rect(), radius, radius);
 	});
 
+	const auto pricePill = Ui::CreateChild<Ui::FlatLabel>(
+		cover,
+		rpl::single(AstrogramSupportPricePill(session)),
+		state->pillSt);
+	pricePill->paintOn([=](QPainter &p) {
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(QPen(pillBorder, 1.));
+		p.setBrush(pillBg);
+		const auto radius = pricePill->height() / 2.;
+		p.drawRoundedRect(pricePill->rect(), radius, radius);
+	});
+
 	const auto noteWrap = Ui::CreateChild<Ui::RpWidget>(cover);
 	const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
 		noteWrap,
@@ -363,13 +387,16 @@ void AddAstrogramSupportCover(
 
 		badgePill->resizeToNaturalWidth(available);
 		contactPill->resizeToNaturalWidth(available);
+		pricePill->resizeToNaturalWidth(available);
 		const auto pillGap = st::normalFont->spacew * 2;
 		const auto pillTop = subtitle->y()
 			+ subtitle->height()
 			+ st::defaultVerticalListSkip;
 		const auto combinedWidth = badgePill->width()
 			+ pillGap
-			+ contactPill->width();
+			+ contactPill->width()
+			+ pillGap
+			+ pricePill->width();
 		auto pillsBottom = pillTop;
 		if (combinedWidth <= available) {
 			const auto left = st::boxRowPadding.left()
@@ -378,18 +405,42 @@ void AddAstrogramSupportCover(
 			contactPill->moveToLeft(
 				left + badgePill->width() + pillGap,
 				pillTop);
-			pillsBottom = pillTop
-				+ ((badgePill->height() > contactPill->height())
-					? badgePill->height()
-					: contactPill->height());
-		} else {
-			badgePill->moveToLeft(
-				st::boxRowPadding.left() + (available - badgePill->width()) / 2,
+			pricePill->moveToLeft(
+				contactPill->x() + contactPill->width() + pillGap,
 				pillTop);
-			contactPill->moveToLeft(
-				st::boxRowPadding.left() + (available - contactPill->width()) / 2,
-				pillTop + badgePill->height() + st::normalFont->spacew);
-			pillsBottom = contactPill->y() + contactPill->height();
+			const auto firstRowHeight = (badgePill->height() > contactPill->height())
+				? badgePill->height()
+				: contactPill->height();
+			pillsBottom = pillTop + ((firstRowHeight > pricePill->height())
+				? firstRowHeight
+				: pricePill->height());
+		} else {
+			const auto firstRowWidth = badgePill->width()
+				+ pillGap
+				+ contactPill->width();
+			if (firstRowWidth <= available) {
+				const auto left = st::boxRowPadding.left()
+					+ (available - firstRowWidth) / 2;
+				badgePill->moveToLeft(left, pillTop);
+				contactPill->moveToLeft(
+					left + badgePill->width() + pillGap,
+					pillTop);
+				pricePill->moveToLeft(
+					st::boxRowPadding.left() + (available - pricePill->width()) / 2,
+					pillTop + badgePill->height() + st::normalFont->spacew);
+				pillsBottom = pricePill->y() + pricePill->height();
+			} else {
+				badgePill->moveToLeft(
+					st::boxRowPadding.left() + (available - badgePill->width()) / 2,
+					pillTop);
+				contactPill->moveToLeft(
+					st::boxRowPadding.left() + (available - contactPill->width()) / 2,
+					pillTop + badgePill->height() + st::normalFont->spacew);
+				pricePill->moveToLeft(
+					st::boxRowPadding.left() + (available - pricePill->width()) / 2,
+					contactPill->y() + contactPill->height() + st::normalFont->spacew);
+				pillsBottom = pricePill->y() + pricePill->height();
+			}
 		}
 
 		const auto notePadding = QMargins(
@@ -757,8 +808,8 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 			Ui::Text::IconEmoji(&st::infoStarsUnderstood)
 				.append(' ')
 				.append(RuEn(
-					QString(u"Открыть чат с %1"_q).arg(supportHandle),
-					QString(u"Open chat with %1"_q).arg(supportHandle)))));
+					QString(u"Написать %1"_q).arg(supportHandle),
+					QString(u"Message %1"_q).arg(supportHandle)))));
 	}));
 }
 

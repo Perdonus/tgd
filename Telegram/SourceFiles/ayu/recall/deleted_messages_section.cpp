@@ -69,6 +69,8 @@ constexpr auto kChipSpacing = 6;
 constexpr auto kDayBadgePadding = QMargins(14, 8, 14, 8);
 constexpr auto kScopeBarPadding = QMargins(16, 10, 16, 10);
 constexpr auto kScopeBarSkip = 8;
+constexpr auto kFooterBarPadding = QMargins(16, 10, 16, 10);
+constexpr auto kFooterBarSkip = 8;
 constexpr auto kJumpProbeRadius = 512;
 
 struct DeletedMessagesSectionState {
@@ -568,8 +570,8 @@ void SaveRememberedState(
 	if (!hasMessages) {
 		return query.isEmpty()
 			? UiText(
-				"This local archive is empty for the current scope.",
-				"Для текущего scope этот локальный архив пуст.")
+				"This local archive is empty for the current chat or topic.",
+				"Для текущего чата или темы этот локальный архив пуст.")
 			: UiText(
 				"No local deleted messages match this filter.",
 				"Ни одно локально сохранённое удалённое сообщение не подходит под этот фильтр.");
@@ -1510,6 +1512,127 @@ void DeletedMessagesScopeBar::layoutChildren(int newWidth) {
 	_cardRect = QRect(outer.left(), 0, outer.width(), top);
 }
 
+class DeletedMessagesFooterBar final : public Ui::RpWidget {
+public:
+	explicit DeletedMessagesFooterBar(not_null<Ui::RpWidget*> parent);
+
+	int resizeGetHeight(int newWidth) override;
+	void setContent(QString title, QString details, QString status);
+
+protected:
+	void resizeEvent(QResizeEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	void layoutChildren(int newWidth);
+
+	Ui::FlatLabel *_title = nullptr;
+	Ui::FlatLabel *_details = nullptr;
+	Ui::FlatLabel *_status = nullptr;
+	QRect _cardRect;
+};
+
+DeletedMessagesFooterBar::DeletedMessagesFooterBar(
+		not_null<Ui::RpWidget*> parent)
+: Ui::RpWidget(parent) {
+	_title = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(QString()),
+		st::boxLabel);
+	_details = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(QString()),
+		st::sessionDateLabel);
+	_status = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(QString()),
+		st::sessionDateLabel);
+	for (const auto label : { _title, _details, _status }) {
+		label->setAttribute(Qt::WA_TransparentForMouseEvents);
+		label->setTryMakeSimilarLines(true);
+	}
+	_title->setTextColorOverride(st::windowFgActive->c);
+	_details->setTextColorOverride(st::windowSubTextFg->c);
+	_status->setTextColorOverride(st::windowActiveTextFg->c);
+}
+
+int DeletedMessagesFooterBar::resizeGetHeight(int newWidth) {
+	layoutChildren(newWidth);
+	return _cardRect.isNull() ? 0 : (_cardRect.bottom() + kFooterBarSkip + 1);
+}
+
+void DeletedMessagesFooterBar::setContent(
+		QString title,
+		QString details,
+		QString status) {
+	_title->setText(std::move(title));
+	_details->setText(std::move(details));
+	_status->setText(std::move(status));
+	layoutChildren(width());
+	update();
+}
+
+void DeletedMessagesFooterBar::resizeEvent(QResizeEvent *e) {
+	Ui::RpWidget::resizeEvent(e);
+	layoutChildren(e->size().width());
+}
+
+void DeletedMessagesFooterBar::paintEvent(QPaintEvent *e) {
+	auto p = Painter(this);
+	if (_cardRect.isNull()) {
+		return;
+	}
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(Qt::NoPen);
+	p.setBrush(st::historyReplyBg);
+	p.setOpacity(0.98);
+	p.drawPath(BubblePath(
+		_cardRect,
+		st::boxRadius,
+		st::boxRadius,
+		st::boxRadius,
+		st::boxRadius));
+	p.setOpacity(1.);
+	p.setBrush(Qt::NoBrush);
+	p.setPen(anim::with_alpha(st::windowSubTextFg->c, 0.18));
+	p.drawPath(BubblePath(
+		_cardRect.adjusted(0, 0, -1, -1),
+		st::boxRadius,
+		st::boxRadius,
+		st::boxRadius,
+		st::boxRadius));
+}
+
+void DeletedMessagesFooterBar::layoutChildren(int newWidth) {
+	if (newWidth <= 0) {
+		_cardRect = {};
+		return;
+	}
+	const auto outer = QRect(
+		kRowOuterLeft,
+		0,
+		std::max(0, newWidth - kRowOuterLeft - kRowOuterRight),
+		0);
+	if (outer.width() <= 0) {
+		_cardRect = {};
+		return;
+	}
+	const auto innerLeft = outer.left() + kFooterBarPadding.left();
+	const auto innerTop = kFooterBarPadding.top();
+	const auto innerWidth = std::max(
+		1,
+		outer.width() - kFooterBarPadding.left() - kFooterBarPadding.right());
+	_title->resizeToWidth(innerWidth);
+	_details->resizeToWidth(innerWidth);
+	_status->resizeToWidth(innerWidth);
+	_title->moveToLeft(innerLeft, innerTop);
+	auto top = innerTop + _title->height() + 2;
+	_details->moveToLeft(innerLeft, top);
+	top += _details->height() + 4;
+	_status->moveToLeft(innerLeft, top);
+	top += _status->height() + kFooterBarPadding.bottom();
+	_cardRect = QRect(outer.left(), 0, outer.width(), top);
+}
 class DeletedMessageRow final : public Ui::RpWidget {
 public:
 	DeletedMessageRow(
@@ -1541,6 +1664,8 @@ private:
 	const QString _senderLabel;
 	const DeletedMessageVisualGroup _group;
 	const bool _outgoing = false;
+	const DeletedMessagePresentation _presentation;
+	const bool _interactive = false;
 
 	style::owned_color _senderColor;
 	style::owned_color _stateColor;
@@ -1574,6 +1699,8 @@ DeletedMessageRow::DeletedMessageRow(
 , _senderLabel(std::move(senderLabel))
 , _group(group)
 , _outgoing(IsOutgoing(_snapshot, _thread))
+, _presentation(BuildPresentation(_snapshot, _thread))
+, _interactive(_presentation.jumpState != DeletedJumpState::LocalOnly)
 , _senderColor(_outgoing ? st::msgOutServiceFg->c : st::msgInServiceFg->c)
 , _stateColor(st::windowSubTextFg->c)
 , _textColor(st::windowFg->c)
@@ -1596,24 +1723,22 @@ DeletedMessageRow::DeletedMessageRow(
 	}
 	_state = Ui::CreateChild<Ui::FlatLabel>(
 		this,
-		rpl::single(DeletedStateLabel(_snapshot)),
+		rpl::single(_presentation.state),
 		_stateSt);
 	_text = Ui::CreateChild<Ui::FlatLabel>(
 		this,
-		rpl::single(_snapshot.text.isEmpty()
-			? DeletedMessagePlaceholder()
-			: _snapshot.text),
+		rpl::single(_presentation.text),
 		_textSt);
 	_meta = Ui::CreateChild<Ui::FlatLabel>(
 		this,
-		rpl::single(MetaText(_snapshot)),
+		rpl::single(_presentation.meta),
 		_metaSt);
 
 	_state->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_text->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_meta->setAttribute(Qt::WA_TransparentForMouseEvents);
-	setCursor(style::cur_pointer);
-	setToolTip(OpenTooltip(_snapshot));
+	setCursor(_interactive ? style::cur_pointer : style::cur_default);
+	setToolTip(_presentation.tooltip);
 }
 
 int DeletedMessageRow::resizeGetHeight(int newWidth) {
@@ -1628,7 +1753,7 @@ int DeletedMessageRow::resizeGetHeight(int newWidth) {
 bool DeletedMessageRow::event(QEvent *e) {
 	switch (e->type()) {
 	case QEvent::Enter:
-		if (!_hovered) {
+		if (_interactive && !_hovered) {
 			_hovered = true;
 			update();
 		}
@@ -1740,15 +1865,23 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 
 void DeletedMessageRow::openOriginal() {
 	const auto controller = _controller;
-	if (_snapshot.messageId <= 0) {
+	const auto jump = ResolveJumpTarget(_thread, _snapshot.messageId);
+	if (jump.state == DeletedJumpState::LocalOnly) {
+		controller->window().showToast(JumpToastText(_thread, jump.state));
+		return;
+	}
+	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
+	if (jump.item) {
+		controller->showMessage(jump.item, params);
+	} else if (jump.openedMessageId > 0) {
+		controller->showThread(_thread, jump.openedMessageId, params);
+	} else {
 		controller->window().showToast(LocalCopyHint());
 		return;
 	}
-	const auto exactLoaded = (ResolveJumpTargetMessageId(_thread, _snapshot.messageId) == _snapshot.messageId);
-	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
-	controller->showThread(_thread, _snapshot.messageId, params);
-	if (!exactLoaded) {
-		controller->window().showToast(OpenAttemptHint(_thread));
+	const auto toast = JumpToastText(_thread, jump.state);
+	if (!toast.isEmpty()) {
+		controller->window().showToast(toast);
 	}
 }
 
@@ -1792,7 +1925,10 @@ private:
 	void recountChatWidth();
 	void updateControlsGeometry();
 	void rebuildContent();
+	void refreshScopeBar();
+	void refreshFooterBar();
 	void applySearchQuery(QString query);
+	[[nodiscard]] DeletedMessageRow *currentVisibleRow() const;
 	[[nodiscard]] DeletedMessagesSectionState captureState() const;
 	void applyState(const DeletedMessagesSectionState &state);
 	void saveState(not_null<DeletedMessagesMemento*> memento);
@@ -1806,11 +1942,14 @@ private:
 	const not_null<History*> _history;
 	std::shared_ptr<Ui::ChatTheme> _theme;
 	object_ptr<HistoryView::TopBarWidget> _topBar;
+	object_ptr<DeletedMessagesScopeBar> _scopeBar;
+	object_ptr<DeletedMessagesFooterBar> _footerBar;
 	object_ptr<Ui::PlainShadow> _topBarShadow;
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	QPointer<Ui::VerticalLayout> _content;
 	std::vector<DeletedMessageRow*> _rows;
 	std::vector<AyuMessages::MessageSnapshot> _messages;
+	std::map<int, DeletedMessagesDaySummary> _daySummaries;
 	QString _searchQuery;
 	int _totalMessages = 0;
 	int _oldestTimestamp = 0;
@@ -1904,6 +2043,8 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 , _thread(thread->migrateToOrMe())
 , _history(_thread->owningHistory())
 , _topBar(this, controller)
+, _scopeBar(this)
+, _footerBar(this)
 , _topBarShadow(this)
 , _scroll(std::make_unique<Ui::ScrollArea>(
 	this,
@@ -1931,6 +2072,8 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 		nullptr);
 	_topBar->move(0, 0);
 	_topBar->show();
+	_scopeBar->show();
+	_footerBar->show();
 
 	_topBarShadow->raise();
 	controller->adaptive().value(
@@ -1951,6 +2094,10 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 
 	_content = _scroll->setOwnedWidget(object_ptr<Ui::VerticalLayout>(this));
 	_scroll->show();
+	_scroll->scrolls(
+	) | rpl::on_next([=] {
+		refreshScopeBar();
+	}, lifetime());
 
 	rebuildContent();
 }
@@ -2038,7 +2185,8 @@ void DeletedMessagesWidget::paintEvent(QPaintEvent *e) {
 		QPainter(this).fillRect(e->rect(), st::windowBg);
 		return;
 	}
-	const auto aboveHeight = _topBar->height();
+	const auto aboveHeight = _topBar->height()
+		+ (_scopeBar ? _scopeBar->height() : 0);
 	const auto bg = e->rect().intersected(
 		QRect(0, aboveHeight, width(), height() - aboveHeight));
 	SectionWidget::PaintBackground(controller(), _theme.get(), this, bg);
@@ -2063,7 +2211,7 @@ void DeletedMessagesWidget::doSetInnerFocus() {
 void DeletedMessagesWidget::updateAdaptiveLayout() {
 	_topBarShadow->moveToLeft(
 		controller()->adaptive().isOneColumn() ? 0 : st::lineWidth,
-		_topBar->height());
+		_topBar->height() + (_scopeBar ? _scopeBar->height() : 0));
 }
 
 void DeletedMessagesWidget::recountChatWidth() {
@@ -2080,10 +2228,26 @@ void DeletedMessagesWidget::updateControlsGeometry() {
 		: base::make_optional(_scroll->scrollTop() + topDelta());
 
 	_topBar->resizeToWidth(contentWidth);
+	const auto scopeHeight = _scopeBar
+		? _scopeBar->resizeGetHeight(contentWidth)
+		: 0;
+	if (_scopeBar) {
+		_scopeBar->resize(contentWidth, scopeHeight);
+		_scopeBar->move(0, _topBar->height());
+	}
+	const auto footerHeight = _footerBar
+		? _footerBar->resizeGetHeight(contentWidth)
+		: 0;
+	if (_footerBar) {
+		_footerBar->resize(contentWidth, footerHeight);
+		_footerBar->move(0, std::max(_topBar->height() + scopeHeight, height() - footerHeight));
+	}
 	_topBarShadow->resize(contentWidth, st::lineWidth);
 
-	const auto top = _topBar->height();
-	const auto scrollSize = QSize(contentWidth, height() - top);
+	const auto top = _topBar->height() + scopeHeight;
+	const auto scrollSize = QSize(
+		contentWidth,
+		std::max(0, height() - top - footerHeight));
 	if (_scroll->size() != scrollSize) {
 		_scroll->resize(scrollSize);
 		if (_content) {
@@ -2095,6 +2259,73 @@ void DeletedMessagesWidget::updateControlsGeometry() {
 		_scroll->scrollToY(*newScrollTop);
 	}
 	updateAdaptiveLayout();
+}
+
+[[nodiscard]] DeletedMessageRow *DeletedMessagesWidget::currentVisibleRow() const {
+	if (_rows.empty()) {
+		return nullptr;
+	}
+	const auto scrollTop = _scroll ? _scroll->scrollTop() : 0;
+	for (const auto row : _rows) {
+		if (row && (row->geometry().bottom() >= scrollTop)) {
+			return row;
+		}
+	}
+	return _rows.back();
+}
+
+void DeletedMessagesWidget::refreshScopeBar() {
+	if (_scopeBar == nullptr) {
+		refreshFooterBar();
+		return;
+	}
+	const auto current = currentVisibleRow();
+	const auto timestamp = current ? DisplayTimestamp(current->snapshot()) : 0;
+	const auto summary = [&]() -> const DeletedMessagesDaySummary* {
+		const auto i = _daySummaries.find(DayKey(timestamp));
+		return (i != _daySummaries.end()) ? &i->second : nullptr;
+	}();
+	_scopeBar->setContent(
+		TitleText(int(_messages.size()), _totalMessages),
+		ScopeSubtitle(_thread),
+		_searchQuery.isEmpty()
+			? ScopeDetails(
+				int(_messages.size()),
+				_totalMessages,
+				_oldestTimestamp,
+				_newestTimestamp)
+			: SearchScopeDetails(_searchQuery, int(_messages.size()), _totalMessages),
+		HistoryStatusText(
+			summary,
+			timestamp,
+			!_searchQuery.isEmpty(),
+			_scroll && (_scroll->scrollTop() >= std::max(0, _scroll->scrollTopMax() - 2)),
+			!_messages.empty(),
+			_searchQuery),
+		HeaderScopeChips(_thread, _searchQuery));
+	refreshFooterBar();
+}
+
+void DeletedMessagesWidget::refreshFooterBar() {
+	if (_footerBar == nullptr) {
+		return;
+	}
+	_footerBar->setContent(
+		UiText("Local deleted archive", "Локальный архив"),
+		_thread->asTopic()
+			? UiText(
+				"This screen mirrors one topic. Tap a bubble to jump back to the live topic.",
+				"Этот экран повторяет одну тему. Нажмите на пузырь, чтобы вернуться в живую тему.")
+			: UiText(
+				"This screen mirrors one chat. Tap a bubble to jump back to the live chat.",
+				"Этот экран повторяет один чат. Нажмите на пузырь, чтобы вернуться в живой чат."),
+		_messages.empty()
+			? (_searchQuery.isEmpty()
+				? UiText("Waiting for saved local copies", "Ждём локально сохранённые копии")
+				: UiText("No matches for the current filter", "По текущему фильтру ничего не найдено"))
+			: (_searchQuery.isEmpty()
+				? UiText("Read-only · local copies", "Только чтение · локальные копии")
+				: UiText("Filter active · read-only", "Фильтр включён · только чтение")));
 }
 
 void DeletedMessagesWidget::applySearchQuery(QString query) {
@@ -2119,6 +2350,7 @@ void DeletedMessagesWidget::rebuildContent() {
 	}
 
 	_rows.clear();
+	_daySummaries.clear();
 	_messages = LoadMessages(_thread);
 	_totalMessages = int(_messages.size());
 	_oldestTimestamp = _messages.empty() ? 0 : DisplayTimestamp(_messages.front());
@@ -2133,6 +2365,7 @@ void DeletedMessagesWidget::rebuildContent() {
 		}
 		_messages = std::move(filtered);
 	}
+	_daySummaries = BuildDaySummaries(_messages);
 	_topBar->setCustomTitle(TitleText(int(_messages.size()), _totalMessages));
 	_content->clear();
 	Ui::AddSkip(_content, st::defaultVerticalListSkip);
@@ -2160,6 +2393,7 @@ void DeletedMessagesWidget::rebuildContent() {
 		if (_scroll->width() > 0) {
 			_content->resizeToWidth(_scroll->width());
 		}
+		refreshScopeBar();
 		return;
 	}
 
@@ -2176,7 +2410,16 @@ void DeletedMessagesWidget::rebuildContent() {
 		if (day != currentDay) {
 			currentDay = day;
 			Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
-			Ui::AddDividerText(_content, rpl::single(DayLabel(stamp)));
+			auto summary = DeletedMessagesDaySummary();
+			if (const auto i = _daySummaries.find(DayKey(stamp)); i != _daySummaries.end()) {
+				summary = i->second;
+			}
+			_content->add(
+				object_ptr<DeletedMessagesDayBadge>(
+					_content,
+					stamp,
+					summary,
+					!_searchQuery.isEmpty()));
 			Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 		}
 		const auto sender = ResolveSenderName(message, _thread);
@@ -2214,6 +2457,7 @@ void DeletedMessagesWidget::rebuildContent() {
 	if (_scroll->width() > 0) {
 		_content->resizeToWidth(_scroll->width());
 	}
+	refreshScopeBar();
 }
 
 DeletedMessagesSectionState DeletedMessagesWidget::captureState() const {
@@ -2267,6 +2511,7 @@ void DeletedMessagesWidget::applyState(const DeletedMessagesSectionState &state)
 			: _scroll->scrollTopMax();
 		_scroll->scrollToY(target);
 	}
+	refreshScopeBar();
 	SaveRememberedState(_thread, captureState());
 }
 

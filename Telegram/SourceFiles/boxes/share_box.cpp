@@ -1692,27 +1692,7 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 			Data::ForwardOptions forwardOptions) {
 		auto action = Api::SendAction(thread, options);
 		action.replyTo.monoforumPeerId = thread->monoforumPeerId();
-		auto message = Api::MessageToSend(action);
-		const auto originalText = item->originalText();
-		const auto media = item->media();
-		if (!media
-			|| (forwardOptions != Data::ForwardOptions::NoNamesAndCaptions)) {
-			message.textWithTags = TextWithTags{
-				originalText.text,
-				TextUtilities::ConvertEntitiesToTextTags(originalText.entities),
-			};
-		}
-		if (!media) {
-			thread->peer()->session().api().sendMessage(std::move(message));
-			return;
-		}
-		message.action.options.mediaSpoiler = media->hasSpoiler();
-		message.action.options.invertCaption = item->invertMedia();
-		if (const auto photo = media->photo()) {
-			Api::SendExistingPhoto(std::move(message), photo);
-		} else if (const auto document = media->document()) {
-			Api::SendExistingDocument(std::move(message), document);
-		}
+		return Api::SendWithoutAuthor(std::move(action), item, forwardOptions);
 	};
 	return [=](
 			std::vector<not_null<Data::Thread*>> &&result,

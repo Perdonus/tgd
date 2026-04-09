@@ -231,6 +231,9 @@ public:
 	virtual const Invoice *invoice() const;
 	virtual const GiftCode *gift() const;
 	virtual CloudImage *location() const;
+	virtual const LocationPoint *locationPoint() const;
+	virtual TimeId locationLivePeriod() const;
+	virtual std::optional<InputVenue> venue() const;
 	virtual PollData *poll() const;
 	virtual TodoListData *todolist() const;
 	virtual const WallPaper *paper() const;
@@ -453,6 +456,9 @@ public:
 	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
 
 	CloudImage *location() const override;
+	const LocationPoint *locationPoint() const override;
+	TimeId locationLivePeriod() const override;
+	std::optional<InputVenue> venue() const override;
 	ItemPreview toPreview(ToPreviewOptions options) const override;
 	TextWithEntities notificationText() const override;
 	QString pinnedTextSubstring() const override;

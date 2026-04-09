@@ -243,7 +243,9 @@ QByteArray Settings::serialize() const {
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
 		+ sizeof(qint32) * 22
+		+ Serialize::stringSize(_editedMarkIcon.current())
 		+ Serialize::stringSize(_editedMarkText.current())
+		+ Serialize::stringSize(_deletedMarkIcon.current())
 		+ Serialize::stringSize(_deletedMarkText.current())
 		+ sizeof(qint32) * 4
 		+ Serialize::bytearraySize(_scheduledMessageEditsStorage);
@@ -439,7 +441,9 @@ QByteArray Settings::serialize() const {
 			<< qint32(_localSavedGifsLimitOverride.current())
 			<< qint32(_localFavedStickersLimitOverride.current())
 			<< qint32(_localRecentStickersLimitOverride.current())
-			<< _scheduledMessageEditsStorage;
+			<< _scheduledMessageEditsStorage
+			<< _editedMarkIcon.current()
+			<< _deletedMarkIcon.current();
 	}
 
 	if (result.size() != size) {
@@ -591,9 +595,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 translateProvider = _translateProviderRaw.current();
 	qint32 editedMarkShowText = _editedMarkShowText.current() ? 1 : 0;
 	qint32 editedMarkShowIcon = _editedMarkShowIcon.current() ? 1 : 0;
+	QString editedMarkIcon = _editedMarkIcon.current();
 	QString editedMarkText = _editedMarkText.current();
 	qint32 deletedMarkShowText = _deletedMarkShowText.current() ? 1 : 0;
 	qint32 deletedMarkShowIcon = _deletedMarkShowIcon.current() ? 1 : 0;
+	QString deletedMarkIcon = _deletedMarkIcon.current();
 	QString deletedMarkText = _deletedMarkText.current();
 	qint32 unlockForwardSelectionLimit
 		= _unlockForwardSelectionLimit.current() ? 1 : 0;
@@ -1030,6 +1036,12 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> scheduledMessageEditsStorage;
 	}
+	if (!stream.atEnd()) {
+		stream >> editedMarkIcon;
+	}
+	if (!stream.atEnd()) {
+		stream >> deletedMarkIcon;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1270,9 +1282,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_translateProviderRaw = std::clamp(translateProvider, 0, 2);
 	_editedMarkShowText = (editedMarkShowText == 1);
 	_editedMarkShowIcon = (editedMarkShowIcon == 1);
+	_editedMarkIcon = editedMarkIcon.trimmed();
 	_editedMarkText = editedMarkText.trimmed();
 	_deletedMarkShowText = (deletedMarkShowText == 1);
 	_deletedMarkShowIcon = (deletedMarkShowIcon == 1);
+	_deletedMarkIcon = deletedMarkIcon.trimmed();
 	_deletedMarkText = deletedMarkText.trimmed();
 	_unlockForwardSelectionLimit = (unlockForwardSelectionLimit == 1);
 	_persistLocalScheduledEdits = (persistLocalScheduledEdits == 1);

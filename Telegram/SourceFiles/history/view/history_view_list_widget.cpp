@@ -80,6 +80,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h" // columnMaximalWidthLeft
 
 #include <QtWidgets/QApplication>
+#include <limits>
 #include <QtCore/QMimeData>
 
 namespace HistoryView {
@@ -93,7 +94,7 @@ constexpr auto kClearUserpicsAfter = 50;
 
 [[nodiscard]] int SelectedItemsLimit() {
 	return Core::App().settings().unlockForwardSelectionLimit()
-		? 1000
+		? std::numeric_limits<int>::max()
 		: MaxSelectedItems;
 }
 

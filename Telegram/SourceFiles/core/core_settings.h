@@ -577,6 +577,20 @@ public:
 		_editedMarkShowIcon = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] QString editedMarkIcon() const {
+		return _editedMarkIcon.current();
+	}
+	[[nodiscard]] rpl::producer<QString> editedMarkIconValue() const {
+		return _editedMarkIcon.value();
+	}
+	void setEditedMarkIcon(QString value) {
+		value = value.trimmed();
+		if (_editedMarkIcon.current() == value) {
+			return;
+		}
+		_editedMarkIcon = std::move(value);
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] QString editedMarkText() const {
 		return _editedMarkText.current();
 	}
@@ -615,6 +629,20 @@ public:
 			return;
 		}
 		_deletedMarkShowIcon = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] QString deletedMarkIcon() const {
+		return _deletedMarkIcon.current();
+	}
+	[[nodiscard]] rpl::producer<QString> deletedMarkIconValue() const {
+		return _deletedMarkIcon.value();
+	}
+	void setDeletedMarkIcon(QString value) {
+		value = value.trimmed();
+		if (_deletedMarkIcon.current() == value) {
+			return;
+		}
+		_deletedMarkIcon = std::move(value);
 		_saveDelayed.fire({});
 	}
 	[[nodiscard]] QString deletedMarkText() const {
@@ -1396,9 +1424,11 @@ private:
 	rpl::variable<bool> _semiTransparentDeletedMessages = false;
 	rpl::variable<bool> _editedMarkShowText = true;
 	rpl::variable<bool> _editedMarkShowIcon = true;
+	rpl::variable<QString> _editedMarkIcon = QString::fromUtf8("\xE2\x9C\x8E");
 	rpl::variable<QString> _editedMarkText;
 	rpl::variable<bool> _deletedMarkShowText = true;
 	rpl::variable<bool> _deletedMarkShowIcon = true;
+	rpl::variable<QString> _deletedMarkIcon = QString::fromUtf8("\xE2\x9C\x95");
 	rpl::variable<QString> _deletedMarkText;
 	bool _countUnreadMessages = true;
 	rpl::variable<bool> _notifyAboutPinned = true;

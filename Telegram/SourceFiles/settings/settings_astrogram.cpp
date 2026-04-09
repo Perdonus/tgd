@@ -127,6 +127,91 @@ constexpr auto kSecretChannelClickWindowMs = 1500;
 		QString::number(AppVersion));
 }
 
+struct SpeechModelSpec {
+	QString label;
+	QString folderName;
+	QString url;
+};
+
+[[nodiscard]] const std::vector<SpeechModelSpec> &SpeechModelSpecs() {
+	static const auto specs = std::vector<SpeechModelSpec>{
+		{ u"Русский · Vosk"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q },
+		{ u"English (US) · Vosk"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q },
+		{ u"English (India) · Vosk"_q, u"vosk-model-small-en-in-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip"_q },
+		{ u"中文 · Vosk"_q, u"vosk-model-small-cn-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"_q },
+		{ u"Українська · Vosk"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q },
+		{ u"Deutsch · Vosk"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q },
+		{ u"Français · Vosk"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q },
+		{ u"Español · Vosk"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q },
+		{ u"Português · Vosk"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q },
+		{ u"Ελληνικά · Vosk"_q, u"vosk-model-el-gr-0.7"_q, u"https://alphacephei.com/vosk/models/vosk-model-el-gr-0.7.zip"_q },
+		{ u"Türkçe · Vosk"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q },
+		{ u"Tiếng Việt · Vosk"_q, u"vosk-model-small-vn-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-vn-0.4.zip"_q },
+		{ u"Italiano · Vosk"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q },
+		{ u"Nederlands · Vosk"_q, u"vosk-model-small-nl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-nl-0.22.zip"_q },
+		{ u"Català · Vosk"_q, u"vosk-model-small-ca-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ca-0.4.zip"_q },
+		{ u"العربية · Vosk"_q, u"vosk-model-ar-mgb2-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-ar-mgb2-0.4.zip"_q },
+		{ u"العربية (تونس) · Vosk"_q, u"vosk-model-small-ar-tn-0.1-linto"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ar-tn-0.1-linto.zip"_q },
+		{ u"فارسی · Vosk"_q, u"vosk-model-small-fa-0.5"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fa-0.5.zip"_q },
+		{ u"Filipino · Vosk"_q, u"vosk-model-tl-ph-generic-0.6"_q, u"https://alphacephei.com/vosk/models/vosk-model-tl-ph-generic-0.6.zip"_q },
+		{ u"Қазақша · Vosk"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q },
+		{ u"Svenska · Vosk"_q, u"vosk-model-small-sv-rhasspy-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-sv-rhasspy-0.15.zip"_q },
+		{ u"日本語 · Vosk"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q },
+		{ u"Esperanto · Vosk"_q, u"vosk-model-small-eo-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-eo-0.42.zip"_q },
+		{ u"हिन्दी · Vosk"_q, u"vosk-model-small-hi-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip"_q },
+		{ u"Čeština · Vosk"_q, u"vosk-model-small-cs-0.4-rhasspy"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-cs-0.4-rhasspy.zip"_q },
+		{ u"Polski · Vosk"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q },
+		{ u"O'zbekcha · Vosk"_q, u"vosk-model-small-uz-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uz-0.22.zip"_q },
+		{ u"한국어 · Vosk"_q, u"vosk-model-small-ko-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ko-0.22.zip"_q },
+		{ u"Brezhoneg · Vosk"_q, u"vosk-model-br-0.8"_q, u"https://alphacephei.com/vosk/models/vosk-model-br-0.8.zip"_q },
+		{ u"ગુજરાતી · Vosk"_q, u"vosk-model-small-gu-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-gu-0.42.zip"_q },
+		{ u"Тоҷикӣ · Vosk"_q, u"vosk-model-small-tg-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tg-0.22.zip"_q },
+		{ u"తెలుగు · Vosk"_q, u"vosk-model-small-te-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-te-0.42.zip"_q },
+		{ u"Кыргызча · Vosk"_q, u"vosk-model-small-ky-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ky-0.42.zip"_q },
+	};
+	return specs;
+}
+
+[[nodiscard]] QString SpeechModelsDirectory() {
+	return QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
+}
+
+[[nodiscard]] int CountInstalledSpeechModels(const QString &modelsDir) {
+	auto result = 0;
+	const auto root = QDir(modelsDir);
+	for (const auto &spec : SpeechModelSpecs()) {
+		if (QFileInfo(root.filePath(spec.folderName)).isDir()) {
+			++result;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QString SpeechModelsSettingsLabel() {
+	const auto installed = CountInstalledSpeechModels(SpeechModelsDirectory());
+	const auto total = int(SpeechModelSpecs().size());
+	return RuEn(
+		"Все языки · %1 из %2 установлено",
+		"All languages · %1 of %2 installed").arg(installed).arg(total);
+}
+
+[[nodiscard]] QString SpeechModelsSummaryText(const QString &modelsDir) {
+	const auto installed = CountInstalledSpeechModels(modelsDir);
+	const auto total = int(SpeechModelSpecs().size());
+	if (installed <= 0) {
+		return RuEn(
+			"Пока ничего не скачано. Нажмите значок справа у нужного языка.",
+			"Nothing is downloaded yet. Tap the icon on the right for the language you need.");
+	} else if (installed >= total) {
+		return RuEn(
+			"Все модели установлены: %1 из %2.",
+			"All models are installed: %1 of %2.").arg(installed).arg(total);
+	}
+	return RuEn(
+		"Установлено моделей: %1 из %2.",
+		"Installed models: %1 of %2.").arg(installed).arg(total);
+}
+
 [[nodiscard]] QString SpeechModelArchivePath(
 		const QString &modelsDir,
 		const QString &folderName) {
@@ -473,6 +558,31 @@ void SyncScheduledEditPersistence(
 		: RuEn("Авто (лимит Telegram)", "Auto (Telegram limit)");
 }
 
+[[nodiscard]] QString DefaultEditedMarkText() {
+	return RuEn("Изменено", "Edited");
+}
+
+[[nodiscard]] QString DefaultDeletedMarkText() {
+	return RuEn("Удалено", "Deleted");
+}
+
+[[nodiscard]] QString DefaultEditedMarkIcon() {
+	return QString::fromUtf8("\xE2\x9C\x8E");
+}
+
+[[nodiscard]] QString DefaultDeletedMarkIcon() {
+	return QString::fromUtf8("\xE2\x9C\x95");
+}
+
+[[nodiscard]] QString MarkFieldSummary(
+		const QString &value,
+		const QString &fallback) {
+	const auto trimmed = value.trimmed();
+	return trimmed.isEmpty()
+		? RuEn("%1 (по умолчанию)", "%1 (default)").arg(fallback)
+		: trimmed;
+}
+
 void AddSectionButton(
 			not_null<Window::SessionController*> controller,
 			not_null<Ui::VerticalLayout*> container,
@@ -489,11 +599,6 @@ void AddSectionButton(
 
 void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		struct ModelSpec {
-			QString label;
-			QString folderName;
-			QString url;
-		};
 		struct ModelRowState {
 			QString label;
 			QString folderName;
@@ -513,46 +618,16 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 
 		const auto manager = box->lifetime().make_state<QNetworkAccessManager>();
 		auto models = std::vector<std::shared_ptr<ModelRowState>>();
-		auto modelsDir = QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
+		const auto modelsDir = SpeechModelsDirectory();
 		QDir().mkpath(modelsDir);
-
-		const auto specs = std::vector<ModelSpec>{
-			{ u"Русский · Vosk"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q },
-			{ u"English (US) · Vosk"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q },
-			{ u"English (India) · Vosk"_q, u"vosk-model-small-en-in-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip"_q },
-			{ u"中文 · Vosk"_q, u"vosk-model-small-cn-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"_q },
-			{ u"Українська · Vosk"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q },
-			{ u"Deutsch · Vosk"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q },
-			{ u"Français · Vosk"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q },
-			{ u"Español · Vosk"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q },
-			{ u"Português · Vosk"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q },
-			{ u"Ελληνικά · Vosk"_q, u"vosk-model-el-gr-0.7"_q, u"https://alphacephei.com/vosk/models/vosk-model-el-gr-0.7.zip"_q },
-			{ u"Türkçe · Vosk"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q },
-			{ u"Tiếng Việt · Vosk"_q, u"vosk-model-small-vn-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-vn-0.4.zip"_q },
-			{ u"Italiano · Vosk"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q },
-			{ u"Nederlands · Vosk"_q, u"vosk-model-small-nl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-nl-0.22.zip"_q },
-			{ u"Català · Vosk"_q, u"vosk-model-small-ca-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ca-0.4.zip"_q },
-			{ u"العربية · Vosk"_q, u"vosk-model-ar-mgb2-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-ar-mgb2-0.4.zip"_q },
-			{ u"العربية (تونس) · Vosk"_q, u"vosk-model-small-ar-tn-0.1-linto"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ar-tn-0.1-linto.zip"_q },
-			{ u"فارسی · Vosk"_q, u"vosk-model-small-fa-0.5"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fa-0.5.zip"_q },
-			{ u"Filipino · Vosk"_q, u"vosk-model-tl-ph-generic-0.6"_q, u"https://alphacephei.com/vosk/models/vosk-model-tl-ph-generic-0.6.zip"_q },
-			{ u"Қазақша · Vosk"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q },
-			{ u"Svenska · Vosk"_q, u"vosk-model-small-sv-rhasspy-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-sv-rhasspy-0.15.zip"_q },
-			{ u"日本語 · Vosk"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q },
-			{ u"Esperanto · Vosk"_q, u"vosk-model-small-eo-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-eo-0.42.zip"_q },
-			{ u"हिन्दी · Vosk"_q, u"vosk-model-small-hi-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip"_q },
-			{ u"Čeština · Vosk"_q, u"vosk-model-small-cs-0.4-rhasspy"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-cs-0.4-rhasspy.zip"_q },
-			{ u"Polski · Vosk"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q },
-			{ u"O'zbekcha · Vosk"_q, u"vosk-model-small-uz-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uz-0.22.zip"_q },
-			{ u"한국어 · Vosk"_q, u"vosk-model-small-ko-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ko-0.22.zip"_q },
-			{ u"Brezhoneg · Vosk"_q, u"vosk-model-br-0.8"_q, u"https://alphacephei.com/vosk/models/vosk-model-br-0.8.zip"_q },
-			{ u"ગુજરાતી · Vosk"_q, u"vosk-model-small-gu-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-gu-0.42.zip"_q },
-			{ u"Тоҷикӣ · Vosk"_q, u"vosk-model-small-tg-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tg-0.22.zip"_q },
-			{ u"తెలుగు · Vosk"_q, u"vosk-model-small-te-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-te-0.42.zip"_q },
-			{ u"Кыргызча · Vosk"_q, u"vosk-model-small-ky-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ky-0.42.zip"_q },
+		const auto summaryText = box->lifetime().make_state<rpl::variable<QString>>(
+			SpeechModelsSummaryText(modelsDir));
+		const auto refreshSummary = [=] {
+			summaryText->force_assign(SpeechModelsSummaryText(modelsDir));
 		};
 
-		const auto addModel = [&](const ModelSpec &spec) {
+
+		const auto addModel = [&](const SpeechModelSpec &spec) {
 			auto state = std::make_shared<ModelRowState>();
 			state->label = spec.label;
 			state->folderName = spec.folderName;
@@ -562,7 +637,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 			state->status = SpeechModelStatusIdle(false, false);
 			models.push_back(std::move(state));
 		};
-		for (const auto &spec : specs) {
+		for (const auto &spec : SpeechModelSpecs()) {
 			addModel(spec);
 		}
 		Logs::writeClient(QString::fromLatin1(
@@ -601,6 +676,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 						: style::cur_pointer);
 				state->row->update();
 			}
+			refreshSummary();
 		};
 		for (const auto &state : models) {
 			if (QFileInfo::exists(state->partialPath)) {
@@ -627,6 +703,13 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				"All language models are shown in one list. Not-downloaded models keep a download action on the right, re-download is hidden after install, and progress is shown as a thin bar on the bottom edge of the row. Windows may also require the matching system speech pack.")),
 			st::boxDividerLabel),
 			st::boxRowPadding);
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				summaryText->value(),
+				st::defaultFlatLabel),
+			style::margins(14, 0, 14, 0),
+			style::al_top);
 		Ui::AddSkip(container);
 
 		for (const auto &state : models) {
@@ -1141,27 +1224,25 @@ void SetupAstrogramPrivacy(
 	FinishSettingsCard(historyCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Отметки изменений и удаления", "Edited & deleted tags"));
-	const auto tagsCard = AddSettingsCard(container);
+	const auto editedTagCard = AddSettingsCard(container);
 	AddSectionGroupTitle(
-		tagsCard,
+		editedTagCard,
 		RuEn("Изменённое сообщение", "Edited message"));
 	AddToggle(
-		tagsCard,
+		editedTagCard,
 		settings.editedMarkShowTextValue(),
 		RuEn("Показывать текст у отметки изменения", "Show text on edited tag"),
 		[&](bool toggled) { settings.setEditedMarkShowText(toggled); });
 	AddToggle(
-		tagsCard,
+		editedTagCard,
 		settings.editedMarkShowIconValue(),
 		RuEn("Показывать значок у отметки изменения", "Show icon on edited tag"),
 		[&](bool toggled) { settings.setEditedMarkShowIcon(toggled); });
 	AddButtonWithLabel(
-		tagsCard,
+		editedTagCard,
 		rpl::single(RuEn("Текст отметки изменения", "Edited tag text")),
 		settings.editedMarkTextValue() | rpl::map([](const QString &value) {
-			return value.trimmed().isEmpty()
-				? RuEn("Изменено (по умолчанию)", "Edited (default)")
-				: value.trimmed();
+			return MarkFieldSummary(value, DefaultEditedMarkText());
 		}),
 		st::settingsButton,
 		{ &st::menuIconEdit }
@@ -1169,7 +1250,7 @@ void SetupAstrogramPrivacy(
 		ShowSingleLineTextEditBox(
 			controller,
 			RuEn("Текст отметки изменения", "Edited tag text"),
-			RuEn("Изменено", "Edited"),
+			DefaultEditedMarkText(),
 			Core::App().settings().editedMarkText(),
 			[](QString value) {
 				auto &settings = Core::App().settings();
@@ -1177,27 +1258,47 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
-	Ui::AddSkip(tagsCard);
+	AddButtonWithLabel(
+		editedTagCard,
+		rpl::single(RuEn("Значок отметки изменения", "Edited tag icon")),
+		settings.editedMarkIconValue() | rpl::map([](const QString &value) {
+			return MarkFieldSummary(value, DefaultEditedMarkIcon());
+		}),
+		st::settingsButton,
+		{ &st::menuIconEdit }
+	)->addClickHandler([=] {
+		ShowSingleLineTextEditBox(
+			controller,
+			RuEn("Значок отметки изменения", "Edited tag icon"),
+			DefaultEditedMarkIcon(),
+			Core::App().settings().editedMarkIcon(),
+			[](QString value) {
+				auto &settings = Core::App().settings();
+				settings.setEditedMarkIcon(std::move(value));
+				Core::App().saveSettings();
+			});
+	});
+	FinishSettingsCard(editedTagCard);
+	Ui::AddSkip(container);
+	const auto deletedTagCard = AddSettingsCard(container);
 	AddSectionGroupTitle(
-		tagsCard,
+		deletedTagCard,
 		RuEn("Удалённое сообщение", "Deleted message"));
 	AddToggle(
-		tagsCard,
+		deletedTagCard,
 		settings.deletedMarkShowTextValue(),
 		RuEn("Показывать текст у отметки удаления", "Show text on deleted tag"),
 		[&](bool toggled) { settings.setDeletedMarkShowText(toggled); });
 	AddToggle(
-		tagsCard,
+		deletedTagCard,
 		settings.deletedMarkShowIconValue(),
 		RuEn("Показывать значок у отметки удаления", "Show icon on deleted tag"),
 		[&](bool toggled) { settings.setDeletedMarkShowIcon(toggled); });
 	AddButtonWithLabel(
-		tagsCard,
+		deletedTagCard,
 		rpl::single(RuEn("Текст отметки удаления", "Deleted tag text")),
 		settings.deletedMarkTextValue() | rpl::map([](const QString &value) {
-			return value.trimmed().isEmpty()
-				? RuEn("Удалено (по умолчанию)", "Deleted (default)")
-				: value.trimmed();
+			return MarkFieldSummary(value, DefaultDeletedMarkText());
 		}),
 		st::settingsButton,
 		{ &st::menuIconDelete }
@@ -1205,7 +1306,7 @@ void SetupAstrogramPrivacy(
 		ShowSingleLineTextEditBox(
 			controller,
 			RuEn("Текст отметки удаления", "Deleted tag text"),
-			RuEn("Удалено", "Deleted"),
+			DefaultDeletedMarkText(),
 			Core::App().settings().deletedMarkText(),
 			[](QString value) {
 				auto &settings = Core::App().settings();
@@ -1213,7 +1314,27 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
-	FinishSettingsCard(tagsCard);
+	AddButtonWithLabel(
+		deletedTagCard,
+		rpl::single(RuEn("Значок отметки удаления", "Deleted tag icon")),
+		settings.deletedMarkIconValue() | rpl::map([](const QString &value) {
+			return MarkFieldSummary(value, DefaultDeletedMarkIcon());
+		}),
+		st::settingsButton,
+		{ &st::menuIconDelete }
+	)->addClickHandler([=] {
+		ShowSingleLineTextEditBox(
+			controller,
+			RuEn("Значок отметки удаления", "Deleted tag icon"),
+			DefaultDeletedMarkIcon(),
+			Core::App().settings().deletedMarkIcon(),
+			[](QString value) {
+				auto &settings = Core::App().settings();
+				settings.setDeletedMarkIcon(std::move(value));
+				Core::App().saveSettings();
+			});
+	});
+	FinishSettingsCard(deletedTagCard);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
@@ -1287,14 +1408,25 @@ void SetupAstrogramInterface(
 		settings.setTranslateProvider(next);
 		Core::App().saveSettings();
 	});
-	AddActionButtonWithLabel(
+	AddButtonWithLabel(
 		speechCard,
-		RuEn("Локальное распознавание речи", "Local speech recognition"),
-		RuEn("Все языки и загрузки", "All languages & downloads"),
-		[=] {
-			ShowSpeechModelDownloadBox(controller);
-		},
-		{ &st::menuIconDownload });
+		rpl::single(RuEn("Локальное распознавание речи", "Local speech recognition")),
+		rpl::single(SpeechModelsSettingsLabel()),
+		st::settingsButton,
+		{ &st::menuIconDownload }
+	)->addClickHandler([=] {
+		ShowSpeechModelDownloadBox(controller);
+	});
+	Ui::AddSkip(speechCard, st::settingsCheckboxesSkip / 4);
+	speechCard->add(
+		object_ptr<Ui::FlatLabel>(
+			speechCard,
+			rpl::single(RuEn(
+				"Открывается отдельное окно со всеми языками сразу: у не скачанных моделей справа есть значок загрузки, прогресс идёт тонкой полосой снизу, после установки повторная загрузка скрывается.",
+				"A separate box shows all languages at once: not-downloaded models keep a download icon on the right, progress is shown as a thin bar at the bottom, and re-download is hidden after install.")),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
 	FinishSettingsCard(speechCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Текст и ввод", "Text & input"));
