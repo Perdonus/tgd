@@ -1334,7 +1334,7 @@ void AddPluginSettingsContent(
 				}) | rpl::on_next([=](bool value) {
 					auto updated = setting;
 					updated.boolValue = value;
-					if (!Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+					if (Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
 						onStateChanged();
 					}
 				}, button->lifetime());
@@ -1403,7 +1403,7 @@ void AddPluginSettingsContent(
 					auto updated = setting;
 					updated.intValue = valueFromSlider(raw);
 					valueLabel->setText(formatValue(updated.intValue));
-					if (!Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+					if (Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
 						onStateChanged();
 					}
 				});
@@ -1470,7 +1470,7 @@ void AddPluginSettingsContent(
 					rpl::single(buttonTitle),
 					st::settingsButtonNoIcon));
 				button->setClickedCallback([=] {
-					if (!Core::App().plugins().updateSetting(page.id, setting) && onStateChanged) {
+					if (Core::App().plugins().updateSetting(page.id, setting) && onStateChanged) {
 						onStateChanged();
 					}
 				});
@@ -1536,11 +1536,17 @@ private:
 
 		_title = FormatPluginTitle(*state);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
+		const auto refreshDetails = [=] {
+			QTimer::singleShot(0, _content, [=] {
+				stateChanged();
+			});
+		};
 
 		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
 		Ui::AddSkip(_content);
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
+		const auto panels = Core::App().plugins().panelsFor(state->info.id);
 		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
 
 		if (!actions.empty()) {
@@ -1561,11 +1567,43 @@ private:
 							u"Could not run the plugin action."_q,
 							u"Не удалось выполнить действие плагина."_q));
 					}
+					refreshDetails();
 				});
 				if (!action.description.trimmed().isEmpty()) {
 					Ui::AddDividerText(
 						_content,
 						rpl::single(action.description.trimmed()));
+				}
+			}
+			if (!panels.empty() || !settingsPages.empty()) {
+				Ui::AddSkip(_content);
+			}
+		}
+
+		if (!panels.empty()) {
+			Ui::AddSubsectionTitle(
+				_content,
+				rpl::single(PluginUiText(u"Panels"_q, u"Панели"_q)));
+			for (const auto &panel : panels) {
+				Ui::AddSkip(_content);
+				const auto button = _content->add(object_ptr<Ui::SettingsButton>(
+					_content,
+					rpl::single(panel.title.trimmed().isEmpty()
+						? PluginUiText(u"Open panel"_q, u"Открыть панель"_q)
+						: panel.title.trimmed()),
+					st::settingsButtonNoIcon));
+				button->setClickedCallback([=] {
+					if (!Core::App().plugins().openPanel(panel.id)) {
+						_controller->window().showToast(PluginUiText(
+							u"Could not open the plugin panel."_q,
+							u"Не удалось открыть панель плагина."_q));
+					}
+					refreshDetails();
+				});
+				if (!panel.description.trimmed().isEmpty()) {
+					Ui::AddDividerText(
+						_content,
+						rpl::single(panel.description.trimmed()));
 				}
 			}
 			if (!settingsPages.empty()) {

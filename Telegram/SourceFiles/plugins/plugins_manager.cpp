@@ -2804,7 +2804,7 @@ bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 	Logs::writeClient(QString::fromLatin1("[plugins] toggle requested: %1 -> %2")
 		.arg(pluginId)
 		.arg(enabled ? u"enabled"_q : u"disabled"_q));
-	if (!_pluginIndexById.contains(pluginId)) {
+	if (!findRecord(pluginId)) {
 		logEvent(
 			u"plugin"_q,
 			u"toggle-missing"_q,
@@ -3641,6 +3641,12 @@ void Manager::onWindowCreated(
 			QJsonObject{
 				{ u"pluginId"_q, _registeringPluginId },
 			});
+		const auto replay = _windowHandlers.back().handler;
+		forEachWindow([&](Window::Controller *window) {
+			InvokePluginCallbackOrThrow([&] {
+				replay(window);
+			});
+		});
 	}
 }
 
@@ -3669,6 +3675,12 @@ void Manager::onWindowWidgetCreated(
 			QJsonObject{
 				{ u"pluginId"_q, _registeringPluginId },
 			});
+		const auto replay = _windowWidgetHandlers.back().handler;
+		forEachWindowWidget([&](QWidget *widget) {
+			InvokePluginCallbackOrThrow([&] {
+				replay(widget);
+			});
+		});
 	}
 }
 
@@ -3753,6 +3765,12 @@ void Manager::onSessionActivated(
 			QJsonObject{
 				{ u"pluginId"_q, _registeringPluginId },
 			});
+		const auto replay = _sessionHandlers.back().handler;
+		forEachSession([&](Main::Session *session) {
+			InvokePluginCallbackOrThrow([&] {
+				replay(session);
+			});
+		});
 	}
 }
 
@@ -5048,29 +5066,37 @@ void Manager::unloadAll() {
 	logEvent(u"unload"_q, u"finish"_q);
 }
 
+int Manager::findRecordIndex(const QString &pluginId) const {
+	const auto normalized = pluginId.trimmed();
+	if (normalized.isEmpty()) {
+		return -1;
+	}
+	const auto it = _pluginIndexById.find(normalized);
+	if (it != _pluginIndexById.end()) {
+		const auto index = it.value();
+		if (index >= 0
+			&& index < int(_plugins.size())
+			&& _plugins[index].state.info.id.trimmed() == normalized) {
+			return index;
+		}
+	}
+	for (auto i = 0; i != int(_plugins.size()); ++i) {
+		if (_plugins[i].state.info.id.trimmed() == normalized) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 Manager::PluginRecord *Manager::findRecord(const QString &pluginId) {
-	const auto it = _pluginIndexById.find(pluginId);
-	if (it == _pluginIndexById.end()) {
-		return nullptr;
-	}
-	const auto index = it.value();
-	if (index < 0 || index >= int(_plugins.size())) {
-		return nullptr;
-	}
-	return &_plugins[index];
+	const auto index = findRecordIndex(pluginId);
+	return (index >= 0) ? &_plugins[index] : nullptr;
 }
 
 const Manager::PluginRecord *Manager::findRecord(
 		const QString &pluginId) const {
-	const auto it = _pluginIndexById.find(pluginId);
-	if (it == _pluginIndexById.end()) {
-		return nullptr;
-	}
-	const auto index = it.value();
-	if (index < 0 || index >= int(_plugins.size())) {
-		return nullptr;
-	}
-	return &_plugins[index];
+	const auto index = findRecordIndex(pluginId);
+	return (index >= 0) ? &_plugins[index] : nullptr;
 }
 
 void Manager::unregisterPluginCommands(const QString &pluginId) {
@@ -5153,10 +5179,7 @@ QString Manager::commandKey(const QString &command) const {
 }
 
 bool Manager::hasPlugin(const QString &pluginId) const {
-	if (pluginId.trimmed().isEmpty()) {
-		return false;
-	}
-	return _pluginIndexById.contains(pluginId);
+	return findRecordIndex(pluginId) >= 0;
 }
 
 void Manager::disablePlugin(const QString &pluginId, const QString &reason) {
