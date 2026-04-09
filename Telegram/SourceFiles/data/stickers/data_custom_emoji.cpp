@@ -38,9 +38,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/dynamic_thumbnails.h"
 #include "ui/ui_utility.h"
+#include "logs.h"
 #include "apiwrap.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+
+#include <set>
 
 namespace Data {
 namespace {
@@ -649,7 +652,9 @@ void CustomEmojiManager::resolve(
 void CustomEmojiManager::resolve(
 		DocumentId documentId,
 		not_null<Listener*> listener) {
-	if (_owner->document(documentId)->sticker()) {
+	if (const auto document = _owner->document(documentId);
+		document->sticker()) {
+		listener->customEmojiResolveDone(document);
 		return;
 	}
 	_resolvers[documentId].emplace(listener);
@@ -779,15 +784,27 @@ void CustomEmojiManager::request() {
 	_requestId = api->request(MTPmessages_GetCustomEmojiDocuments(
 		MTP_vector<MTPlong>(ids)
 	)).done([=](const MTPVector<MTPDocument> &result) {
+		auto resolvedIds = std::set<uint64>();
 		for (const auto &entry : result.v) {
 			const auto document = _owner->processDocument(entry);
+			resolvedIds.emplace(document->id);
 			fillColoredFlags(document);
 			processLoaders(document);
 			processListeners(document);
 			requestSetFor(document);
 		}
+		for (const auto &id : ids) {
+			if (!resolvedIds.contains(id.v)) {
+				Logs::writeClient(QString::fromLatin1(
+					"[premium-emoji] document not returned: id=%1")
+					.arg(QString::number(qulonglong(id.v))));
+			}
+		}
 		requestFinished();
 	}).fail([=] {
+		Logs::writeClient(QString::fromLatin1(
+			"[premium-emoji] request failed: count=%1")
+			.arg(ids.size()));
 		LOG(("API Error: Failed to get documents for emoji."));
 		for (const auto &id : ids) {
 			processListeners(_owner->document(id.v));

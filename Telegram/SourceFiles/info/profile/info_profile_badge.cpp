@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "data/data_emoji_statuses.h"
 #include "data/data_peer.h"
+#include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -69,15 +70,73 @@ namespace {
 constexpr auto kServerBadgeSuccessTtl = crl::time(5 * 60 * 1000);
 constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 
+[[nodiscard]] QString ServerBadgeLogText(QByteArray body) {
+	auto result = QString::fromUtf8(body.left(512));
+	result.replace(u'\n', u' ');
+	result.replace(u'\r', u' ');
+	return result;
+}
+
+[[nodiscard]] QString PeerTypeForLog(PeerId peerId) {
+	return peerId.is<UserId>()
+		? u"user"_q
+		: peerId.is<ChatId>()
+		? u"chat"_q
+		: peerId.is<ChannelId>()
+		? u"channel"_q
+		: u"unknown"_q;
+}
+
+[[nodiscard]] uint64 PeerBareId(PeerId peerId) {
+	return peerId.is<UserId>()
+		? uint64(peerToUser(peerId).bare)
+		: peerId.is<ChatId>()
+		? uint64(peerToChat(peerId).bare)
+		: peerId.is<ChannelId>()
+		? uint64(peerToChannel(peerId).bare)
+		: 0;
+}
+
+[[nodiscard]] uint64 ServerBadgeEmojiStatusId(const QJsonObject &object);
+
+[[nodiscard]] uint64 ServerBadgeEmojiStatusId(const QJsonValue &value) {
+	if (value.isObject()) {
+		return ServerBadgeEmojiStatusId(value.toObject());
+	}
+	return JsonToUint64(value);
+}
+
 [[nodiscard]] uint64 ServerBadgeEmojiStatusId(const QJsonObject &object) {
 	for (const auto &key : {
 		u"emoji_status_id"_q,
 		u"emojiStatusId"_q,
+		u"emoji_status_document_id"_q,
+		u"emojiStatusDocumentId"_q,
 		u"document_id"_q,
 		u"documentId"_q,
+		u"custom_emoji_id"_q,
+		u"customEmojiId"_q,
+		u"emoji_id"_q,
+		u"emojiId"_q,
+		u"id"_q,
 	}) {
 		if (const auto value = object.value(key); !value.isUndefined()) {
-			return JsonToUint64(value);
+			if (const auto parsed = ServerBadgeEmojiStatusId(value)) {
+				return parsed;
+			}
+		}
+	}
+	for (const auto &key : {
+		u"emoji_status"_q,
+		u"emojiStatus"_q,
+		u"badge"_q,
+		u"subscriber_badge"_q,
+		u"subscriberBadge"_q,
+	}) {
+		if (const auto value = object.value(key); value.isObject()) {
+			if (const auto parsed = ServerBadgeEmojiStatusId(value.toObject())) {
+				return parsed;
+			}
 		}
 	}
 	return 0;
@@ -85,13 +144,38 @@ constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 
 [[nodiscard]] std::optional<std::optional<EmojiStatusId>> ParseServerBadgeObject(
 		const QJsonObject &object) {
+	for (const auto &key : {
+		u"badge"_q,
+		u"subscriber_badge"_q,
+		u"subscriberBadge"_q,
+		u"subscriber"_q,
+		u"emoji_status"_q,
+		u"emojiStatus"_q,
+	}) {
+		const auto value = object.value(key);
+		if (value.isObject()) {
+			if (const auto parsed = ParseServerBadgeObject(value.toObject())) {
+				return parsed;
+			}
+		}
+	}
 	const auto hasEnabledField = object.contains(u"badge"_q)
 		|| object.contains(u"subscriber"_q)
+		|| object.contains(u"subscriber_badge"_q)
+		|| object.contains(u"subscriberBadge"_q)
 		|| object.contains(u"enabled"_q);
 	const auto hasStatusIdField = object.contains(u"emoji_status_id"_q)
 		|| object.contains(u"emojiStatusId"_q)
+		|| object.contains(u"emoji_status_document_id"_q)
+		|| object.contains(u"emojiStatusDocumentId"_q)
 		|| object.contains(u"document_id"_q)
-		|| object.contains(u"documentId"_q);
+		|| object.contains(u"documentId"_q)
+		|| object.contains(u"custom_emoji_id"_q)
+		|| object.contains(u"customEmojiId"_q)
+		|| object.contains(u"emoji_id"_q)
+		|| object.contains(u"emojiId"_q)
+		|| object.contains(u"emoji_status"_q)
+		|| object.contains(u"emojiStatus"_q);
 	if (!hasEnabledField && !hasStatusIdField) {
 		return std::nullopt;
 	}
@@ -99,6 +183,8 @@ constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 	const auto enabled = hasEnabledField
 		? (JsonTruthy(object.value(u"badge"_q))
 			|| JsonTruthy(object.value(u"subscriber"_q))
+			|| JsonTruthy(object.value(u"subscriber_badge"_q))
+			|| JsonTruthy(object.value(u"subscriberBadge"_q))
 			|| JsonTruthy(object.value(u"enabled"_q))
 			|| (statusId != 0))
 		: (statusId != 0);
@@ -121,6 +207,9 @@ constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 		u"result"_q,
 		u"payload"_q,
 		u"response"_q,
+		u"badge"_q,
+		u"subscriber_badge"_q,
+		u"subscriberBadge"_q,
 	}) {
 		const auto value = root.value(key);
 		if (value.isObject()) {
@@ -174,10 +263,26 @@ private:
 		query.addQueryItem(
 			u"peer_id"_q,
 			QString::number(qulonglong(peerId.value)));
+		query.addQueryItem(
+			u"peer_type"_q,
+			PeerTypeForLog(peerId));
+		if (const auto bareId = PeerBareId(peerId); bareId != 0) {
+			query.addQueryItem(
+				u"peer_bare_id"_q,
+				QString::number(qulonglong(bareId)));
+		}
 		if (peerId.is<UserId>()) {
 			query.addQueryItem(
 				u"user_id"_q,
-				QString::number(qulonglong(peerId.to<UserId>().bare)));
+				QString::number(qulonglong(peerToUser(peerId).bare)));
+		} else if (peerId.is<ChatId>()) {
+			query.addQueryItem(
+				u"chat_id"_q,
+				QString::number(qulonglong(peerToChat(peerId).bare)));
+		} else if (peerId.is<ChannelId>()) {
+			query.addQueryItem(
+				u"channel_id"_q,
+				QString::number(qulonglong(peerToChannel(peerId).bare)));
 		}
 		url.setQuery(query);
 		return url;
@@ -191,8 +296,10 @@ private:
 		entry->inFlight = true;
 		const auto peerKey = uint64(peerId.value);
 		Logs::writeClient(QString::fromLatin1(
-			"[badge] request started: peer=%1")
-			.arg(QString::number(qulonglong(peerId.value))));
+			"[badge] request started: peer=%1 bare=%2 type=%3")
+			.arg(QString::number(qulonglong(peerId.value)))
+			.arg(QString::number(qulonglong(PeerBareId(peerId))))
+			.arg(PeerTypeForLog(peerId)));
 
 		QNetworkRequest request(BuildRequestUrl(peerId));
 		request.setAttribute(
@@ -217,8 +324,9 @@ private:
 				auto nextRequestAt = crl::now() + kServerBadgeRetryTtl;
 				const auto statusCode = reply->attribute(
 					QNetworkRequest::HttpStatusCodeAttribute).toInt();
+				const auto body = reply->readAll();
 				if (reply->error() == QNetworkReply::NoError) {
-					const auto parsed = QJsonDocument::fromJson(reply->readAll());
+					const auto parsed = QJsonDocument::fromJson(body);
 					if (parsed.isObject()) {
 						if (const auto parsedBadge = ParseServerBadgeResponse(
 								parsed.object())) {
@@ -234,6 +342,12 @@ private:
 						.arg(resolved ? u"true"_q : u"false"_q)
 						.arg(next.has_value() ? u"true"_q : u"false"_q)
 						.arg(next ? QString::number(next->documentId) : QStringLiteral("0")));
+					if (!resolved) {
+						Logs::writeClient(QString::fromLatin1(
+							"[badge] response not recognized: peer=%1 body=%2")
+							.arg(QString::number(qulonglong(peerId.value)))
+							.arg(ServerBadgeLogText(body)));
+					}
 				} else {
 					Logs::writeClient(QString::fromLatin1(
 						"[badge] request failed: peer=%1 http=%2 reason=%3")
@@ -248,6 +362,7 @@ private:
 				}
 				reply->deleteLater();
 			});
+	}
 	}
 
 	std::map<uint64, std::unique_ptr<Entry>> _entries;
@@ -310,78 +425,87 @@ void Badge::setContent(Content content) {
 	case BadgeType::Verified:
 	case BadgeType::BotVerified:
 	case BadgeType::Premium: {
-		const auto id = _content.emojiStatusId;
-		const auto emoji = id
-			? (Data::FrameSizeFromTag(sizeTag())
-				/ style::DevicePixelRatio())
-			: 0;
-		const auto &style = st();
-		const auto icon = (_content.badge == BadgeType::Verified)
-			? &style.verified
-			: id
-			? nullptr
-			: &style.premium;
-		const auto iconForeground = (_content.badge == BadgeType::Verified)
-			? &style.verifiedCheck
-			: nullptr;
-		if (id) {
-			_emojiStatus = _session->data().customEmojiManager().create(
-				Data::EmojiStatusCustomId(id),
-				[raw = _view.data()] { raw->update(); },
-				sizeTag());
-			if (_content.badge == BadgeType::BotVerified) {
-				_emojiStatus = std::make_unique<Ui::Text::FirstFrameEmoji>(
-					std::move(_emojiStatus));
-			} else if (_customStatusLoopsLimit > 0) {
-				_emojiStatus = std::make_unique<Ui::Text::LimitedLoopsEmoji>(
-					std::move(_emojiStatus),
-					_customStatusLoopsLimit);
-			}
-		}
-		const auto width = emoji + (icon ? icon->width() : 0);
-		const auto height = std::max(emoji, icon ? icon->height() : 0);
-		_view->resize(width, height);
-		_view->paintRequest(
-		) | rpl::on_next([=, check = _view.data()]{
-			if (_emojiStatus) {
-				auto args = Ui::Text::CustomEmoji::Context{
-					.textColor = style.premiumFg->c,
-					.now = crl::now(),
-					.paused = ((_animationPaused && _animationPaused())
-						|| On(PowerSaving::kEmojiStatus)),
-				};
-				if (!_emojiStatusPanel
-					|| !_emojiStatusPanel->paintBadgeFrame(check)) {
-					Painter p(check);
-					_emojiStatus->paint(p, args);
+			const auto id = _content.emojiStatusId;
+			const auto emoji = id
+				? (Data::FrameSizeFromTag(sizeTag())
+					/ style::DevicePixelRatio())
+				: 0;
+			const auto &style = st();
+			const auto icon = (_content.badge == BadgeType::Premium)
+				? &style.premium
+				: (_content.badge == BadgeType::Verified
+					|| _content.badge == BadgeType::BotVerified)
+				? &style.verified
+				: nullptr;
+			const auto iconForeground = (_content.badge == BadgeType::Verified
+				|| _content.badge == BadgeType::BotVerified)
+				? &style.verifiedCheck
+				: nullptr;
+			if (id) {
+				_emojiStatus = _session->data().customEmojiManager().create(
+					Data::EmojiStatusCustomId(id),
+					[raw = _view.data()] { raw->update(); },
+					sizeTag());
+				if (_content.badge == BadgeType::BotVerified) {
+					_emojiStatus = std::make_unique<Ui::Text::FirstFrameEmoji>(
+						std::move(_emojiStatus));
+				} else if (_customStatusLoopsLimit > 0) {
+					_emojiStatus = std::make_unique<Ui::Text::LimitedLoopsEmoji>(
+						std::move(_emojiStatus),
+						_customStatusLoopsLimit);
 				}
 			}
-			if (icon) {
-				auto p = Painter(check);
-				if (_overrideSt && !iconForeground) {
-					icon->paint(
-						p,
-						emoji,
-						0,
-						check->width(),
-						_overrideSt->premiumFg->c);
-				} else {
-					icon->paint(p, emoji, 0, check->width());
+			const auto width = std::max(emoji, icon ? icon->width() : 0);
+			const auto height = std::max(emoji, icon ? icon->height() : 0);
+			_view->resize(width, height);
+			_view->paintRequest(
+			) | rpl::on_next([=, check = _view.data()] {
+				const auto emojiReady = _emojiStatus && _emojiStatus->ready();
+				if (emojiReady) {
+					auto args = Ui::Text::CustomEmoji::Context{
+						.textColor = style.premiumFg->c,
+						.now = crl::now(),
+						.paused = ((_animationPaused && _animationPaused())
+							|| On(PowerSaving::kEmojiStatus)),
+					};
+					if (!_emojiStatusPanel
+						|| !_emojiStatusPanel->paintBadgeFrame(check)) {
+						Painter p(check);
+						_emojiStatus->paint(p, args);
+					}
 				}
-				if (iconForeground) {
-					if (_overrideSt) {
-						iconForeground->paint(
+				if (icon && !emojiReady) {
+					auto p = Painter(check);
+					const auto left = std::max(
+						(check->width() - icon->width()) / 2,
+						0);
+					const auto top = std::max(
+						(check->height() - icon->height()) / 2,
+						0);
+					if (_overrideSt && !iconForeground) {
+						icon->paint(
 							p,
-							emoji,
-							0,
+							left,
+							top,
 							check->width(),
 							_overrideSt->premiumFg->c);
 					} else {
-						iconForeground->paint(p, emoji, 0, check->width());
+						icon->paint(p, left, top, check->width());
+					}
+					if (iconForeground) {
+						if (_overrideSt) {
+							iconForeground->paint(
+								p,
+								left,
+								top,
+								check->width(),
+								_overrideSt->premiumFg->c);
+						} else {
+							iconForeground->paint(p, left, top, check->width());
+						}
 					}
 				}
-			}
-		}, _view->lifetime());
+			}, _view->lifetime());
 	} break;
 	case BadgeType::Scam:
 	case BadgeType::Fake:
@@ -448,10 +572,12 @@ void Badge::move(int left, int top, int bottom) {
 		return;
 	}
 	const auto &style = st();
-	const auto star = !_emojiStatus
+	const auto customReady = _emojiStatus && _emojiStatus->ready();
+	const auto star = !customReady
 		&& (_content.badge == BadgeType::Premium
-			|| _content.badge == BadgeType::Verified);
-	const auto fake = !_emojiStatus && !star;
+			|| _content.badge == BadgeType::Verified
+			|| _content.badge == BadgeType::BotVerified);
+	const auto fake = !customReady && !star;
 	const auto skip = fake ? 0 : style.position.x();
 	const auto badgeLeft = left + skip;
 	const auto badgeTop = top
@@ -499,13 +625,15 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 			badge = BadgeType::Premium;
 			if (serverBadgeStatus->documentId) {
 				emojiStatusId = *serverBadgeStatus;
+			} else {
+				emojiStatusId = EmojiStatusId();
 			}
 		}
 		if (statusOnlyForPremium && badge != BadgeType::Premium) {
 			emojiStatusId = EmojiStatusId();
 		}
 		return Badge::Content{ badge, emojiStatusId };
-	});
+	}) | rpl::distinct_until_changed();
 }
 
 rpl::producer<Badge::Content> VerifiedContentForPeer(
