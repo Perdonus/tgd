@@ -365,6 +365,13 @@ public:
 	void sendShortcutMessages(
 		not_null<PeerData*> peer,
 		BusinessShortcutId id);
+	bool scheduleMessageEdit(
+		not_null<HistoryItem*> item,
+		TextWithEntities text,
+		Data::WebPageDraft webpage,
+		Api::SendOptions options,
+		bool spoilered);
+	void clearScheduledMessageEdit(FullMsgId itemId);
 	void sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId = std::nullopt);
@@ -702,6 +709,18 @@ private:
 			const HistoryRequest&) = default;
 	};
 	base::flat_set<HistoryRequest> _historyRequests;
+
+	struct ScheduledMessageEdit {
+		FullMsgId itemId;
+		TextWithEntities text;
+		Data::WebPageDraft webpage;
+		Api::SendOptions options;
+		bool spoilered = false;
+	};
+	void processScheduledMessageEdits();
+	void refreshScheduledMessageEdits();
+	base::flat_map<FullMsgId, ScheduledMessageEdit> _scheduledMessageEdits;
+	base::Timer _scheduledMessageEditsTimer;
 
 	struct GlobalMediaRequest {
 		SharedMediaType mediaType = {};

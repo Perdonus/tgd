@@ -89,11 +89,12 @@ void ScheduleBox(
 		std::shared_ptr<ChatHelpers::Show> maybeShow,
 		const Api::SendOptions &initialOptions,
 		const SendMenu::Details &details,
-		Fn<void(Api::SendOptions)> done,
-		TimeId time,
-		ScheduleBoxStyleArgs style) {
-	const auto repeat = std::make_shared<TimeId>(
-		initialOptions.scheduleRepeatPeriod);
+	Fn<void(Api::SendOptions)> done,
+	TimeId time,
+	ScheduleBoxStyleArgs style) {
+	const auto repeat = (details.type == SendMenu::Type::EditScheduled)
+		? std::shared_ptr<TimeId>()
+		: std::make_shared<TimeId>(initialOptions.scheduleRepeatPeriod);
 	const auto submit = [=](Api::SendOptions options) {
 		if (!options.scheduled) {
 			return;

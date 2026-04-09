@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_user_privacy.h"
 #include "api/api_views.h"
 #include "api/api_confirm_phone.h"
+#include "api/api_editing.h"
 #include "api/api_unread_things.h"
 #include "api/api_ringtones.h"
 #include "api/api_transcribes.h"
@@ -167,6 +168,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _messageDataResolveDelayed([=] { resolveMessageDatas(); })
 , _webPagesTimer([=] { resolveWebPages(); })
 , _draftsSaveTimer([=] { saveDraftsToCloud(); })
+, _scheduledMessageEditsTimer([=] { processScheduledMessageEdits(); })
 , _featuredSetsReadTimer([=] { readFeaturedSets(); })
 , _dialogsLoadState(std::make_unique<DialogsLoadState>())
 , _fileLoader(std::make_unique<TaskQueue>(kFileLoaderQueueStopTimeout))
@@ -3976,6 +3978,99 @@ void ApiWrap::sendShortcutMessages(
 		applyUpdates(result);
 	}).fail([=](const MTP::Error &error) {
 	}).send();
+}
+
+bool ApiWrap::scheduleMessageEdit(
+		not_null<HistoryItem*> item,
+		TextWithEntities text,
+		Data::WebPageDraft webpage,
+		Api::SendOptions options,
+		bool spoilered) {
+	if (item->isScheduled()
+		|| item->isBusinessShortcut()
+		|| !options.scheduled
+		|| (options.scheduled == Api::kScheduledUntilOnlineTimestamp)
+		|| (options.scheduled <= base::unixtime::now())) {
+		return false;
+	}
+	options.scheduleRepeatPeriod = 0;
+	_scheduledMessageEdits[item->fullId()] = ScheduledMessageEdit{
+		.itemId = item->fullId(),
+		.text = std::move(text),
+		.webpage = std::move(webpage),
+		.options = options,
+		.spoilered = spoilered,
+	};
+	refreshScheduledMessageEdits();
+	return true;
+}
+
+void ApiWrap::clearScheduledMessageEdit(FullMsgId itemId) {
+	const auto i = _scheduledMessageEdits.find(itemId);
+	if (i == end(_scheduledMessageEdits)) {
+		return;
+	}
+	_scheduledMessageEdits.erase(i);
+	refreshScheduledMessageEdits();
+}
+
+void ApiWrap::processScheduledMessageEdits() {
+	const auto now = base::unixtime::now();
+	auto due = std::vector<ScheduledMessageEdit>();
+	for (auto i = begin(_scheduledMessageEdits); i != end(_scheduledMessageEdits);) {
+		if (i->second.options.scheduled > now) {
+			++i;
+			continue;
+		}
+		due.push_back(std::move(i->second));
+		i = _scheduledMessageEdits.erase(i);
+	}
+	refreshScheduledMessageEdits();
+
+	for (auto &edit : due) {
+		const auto item = _session->data().message(edit.itemId);
+		if (!item || item->isScheduled() || item->isBusinessShortcut()) {
+			continue;
+		}
+		auto options = edit.options;
+		options.scheduled = 0;
+		options.scheduleRepeatPeriod = 0;
+		const auto show = ShowForPeer(item->history()->peer);
+		Api::EditTextMessage(
+			item,
+			edit.text,
+			edit.webpage,
+			options,
+			[](mtpRequestId) {
+			},
+			[show](const QString &error, mtpRequestId) {
+				if (!show) {
+					return;
+				} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+					return;
+				}
+				show->showToast(tr::lng_edit_error(tr::now));
+			},
+			edit.spoilered);
+	}
+}
+
+void ApiWrap::refreshScheduledMessageEdits() {
+	if (_scheduledMessageEdits.empty()) {
+		_scheduledMessageEditsTimer.cancel();
+		return;
+	}
+	auto next = TimeId(0);
+	for (const auto &[_, edit] : _scheduledMessageEdits) {
+		if (!next || (edit.options.scheduled < next)) {
+			next = edit.options.scheduled;
+		}
+	}
+	const auto now = base::unixtime::now();
+	const auto delay = (next > now)
+		? crl::time(next - now) * crl::time(1000)
+		: crl::time(0);
+	_scheduledMessageEditsTimer.callOnce(delay);
 }
 
 void ApiWrap::sendMessage(

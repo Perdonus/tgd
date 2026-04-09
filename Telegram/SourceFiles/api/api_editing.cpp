@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_media.h"
 #include "api/api_text_entities.h"
+#include "base/unixtime.h"
 #include "base/random.h"
 #include "ui/boxes/confirm_box.h"
 #include "data/business/data_shortcut_messages.h"
@@ -246,6 +247,12 @@ mtpRequestId EditMessage(
 		DoneCallback &&done,
 		FailCallback &&fail,
 		std::optional<MTPInputMedia> inputMedia = std::nullopt) {
+	if (!item->isScheduled()
+		&& !item->isBusinessShortcut()
+		&& !options.scheduled) {
+		item->history()->session().api().clearScheduledMessageEdit(
+			item->fullId());
+	}
 	if (item->computeSuggestionActions()
 		== SuggestionActions::AcceptAndDecline) {
 		return SuggestMessageOrMedia(
@@ -464,6 +471,24 @@ mtpRequestId EditTextMessage(
 		Fn<void(mtpRequestId requestId)> done,
 		Fn<void(const QString &error, mtpRequestId requestId)> fail,
 		bool spoilered) {
+	const auto localScheduledEdit = !item->isScheduled()
+		&& !item->isBusinessShortcut()
+		&& options.scheduled
+		&& (options.scheduled != Api::kScheduledUntilOnlineTimestamp)
+		&& (options.scheduled > base::unixtime::now());
+	if (localScheduledEdit
+		&& item->history()->session().api().scheduleMessageEdit(
+			item,
+			caption,
+			webpage,
+			options,
+			spoilered)) {
+		const auto session = &item->history()->session();
+		crl::on_main(session, [=] {
+			done(mtpRequestId(0));
+		});
+		return 0;
+	}
 	const auto media = item->media();
 	if (media
 		&& HistoryView::MediaEditManager::CanBeSpoilered(item)
