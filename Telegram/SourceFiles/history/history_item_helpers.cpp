@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/item_text_options.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 
 namespace {
@@ -61,6 +62,16 @@ bool PeerCallKnown(not_null<PeerData*> peer) {
 		return !(channel->flags() & ChannelDataFlag::CallActive);
 	}
 	return true;
+}
+
+[[nodiscard]] bool AstrogramRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString AstrogramUiText(const char *en, const char *ru) {
+	return AstrogramRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
 }
 
 } // namespace
@@ -1317,18 +1328,65 @@ int ItemsForwardCaptionsCount(const HistoryItemsList &list) {
 	return result;
 }
 
-bool CanShareWithoutAuthor(not_null<HistoryItem*> item) {
+ShareWithoutAuthorCheck CheckShareWithoutAuthor(not_null<HistoryItem*> item) {
 	if (item->allowsForward()) {
-		return true;
-	} else if (!item->isRegular() || item->isService() || item->forbidsForward()) {
-		return false;
+		return ShareWithoutAuthorCheck::Allowed;
+	} else if (!item->isRegular() || item->isService()) {
+		return ShareWithoutAuthorCheck::Unsupported;
+	} else if (!item->history()->peer->allowsForwarding()
+		|| item->forbidsForward()
+		|| item->forbidsSaving()) {
+		return ShareWithoutAuthorCheck::Protected;
 	}
 	const auto media = item->media();
-	return media && (media->photo() || media->document());
+	if (!media) {
+		return ShareWithoutAuthorCheck::Unsupported;
+	} else if (media->ttlSeconds() > 0) {
+		return ShareWithoutAuthorCheck::EphemeralMedia;
+	}
+	return (media->photo() || media->document())
+		? ShareWithoutAuthorCheck::Allowed
+		: ShareWithoutAuthorCheck::Unsupported;
+}
+
+ShareWithoutAuthorCheck CheckShareWithoutAuthor(const HistoryItemsList &list) {
+	if (list.empty()) {
+		return ShareWithoutAuthorCheck::Unsupported;
+	}
+	for (const auto &item : list) {
+		const auto check = CheckShareWithoutAuthor(item);
+		if (check != ShareWithoutAuthorCheck::Allowed) {
+			return check;
+		}
+	}
+	return ShareWithoutAuthorCheck::Allowed;
+}
+
+QString ShareWithoutAuthorErrorText(const HistoryItemsList &list) {
+	switch (CheckShareWithoutAuthor(list)) {
+	case ShareWithoutAuthorCheck::Allowed:
+		return {};
+	case ShareWithoutAuthorCheck::Protected:
+		return AstrogramUiText(
+			"Protected messages can't be sent without author.",
+			"Защищённые сообщения нельзя переслать без автора.");
+	case ShareWithoutAuthorCheck::EphemeralMedia:
+		return AstrogramUiText(
+			"One-time and self-destructing media can't be sent without author.",
+			"Одноразовые и самоуничтожающиеся медиа нельзя переслать без автора.");
+	case ShareWithoutAuthorCheck::Unsupported:
+		return AstrogramUiText(
+			"This message type can't be sent without author yet.",
+			"Этот тип сообщения пока нельзя переслать без автора.");
+	}
+	Unexpected("ShareWithoutAuthorCheck value.");
+	return {};
+}
+
+bool CanShareWithoutAuthor(not_null<HistoryItem*> item) {
+	return CheckShareWithoutAuthor(item) == ShareWithoutAuthorCheck::Allowed;
 }
 
 bool CanShareWithoutAuthor(const HistoryItemsList &list) {
-	return !list.empty() && ranges::all_of(list, [](not_null<HistoryItem*> item) {
-		return CanShareWithoutAuthor(item);
-	});
+	return CheckShareWithoutAuthor(list) == ShareWithoutAuthorCheck::Allowed;
 }

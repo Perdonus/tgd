@@ -264,5 +264,17 @@ void ShowTrialTranscribesToast(int left, TimeId until);
 
 [[nodiscard]] int ItemsForwardSendersCount(const HistoryItemsList &list);
 [[nodiscard]] int ItemsForwardCaptionsCount(const HistoryItemsList &list);
+enum class ShareWithoutAuthorCheck {
+	Allowed,
+	Protected,
+	EphemeralMedia,
+	Unsupported,
+};
+[[nodiscard]] ShareWithoutAuthorCheck CheckShareWithoutAuthor(
+	not_null<HistoryItem*> item);
+[[nodiscard]] ShareWithoutAuthorCheck CheckShareWithoutAuthor(
+	const HistoryItemsList &list);
+[[nodiscard]] QString ShareWithoutAuthorErrorText(
+	const HistoryItemsList &list);
 [[nodiscard]] bool CanShareWithoutAuthor(not_null<HistoryItem*> item);
 [[nodiscard]] bool CanShareWithoutAuthor(const HistoryItemsList &list);

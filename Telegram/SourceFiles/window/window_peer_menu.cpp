@@ -3191,6 +3191,12 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 	const auto captionsCount = ItemsForwardCaptionsCount(itemsList);
 	if (msgIds.empty()) {
 		return nullptr;
+	} else if (draft.options != Data::ForwardOptions::PreserveInfo) {
+		if (const auto error = ShareWithoutAuthorErrorText(itemsList);
+			!error.isEmpty()) {
+			show->showToast(error);
+			return nullptr;
+		}
 	}
 
 	class ListBox final : public PeerListBox {

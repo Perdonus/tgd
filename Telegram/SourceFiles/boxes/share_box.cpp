@@ -1714,6 +1714,8 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		state->failed = false;
 
 		const auto items = history->owner().idsToItems(msgIds);
+		const auto withoutAuthor
+			= (forwardOptions != Data::ForwardOptions::PreserveInfo);
 		if (items.empty() || result.empty()) {
 			return;
 		}
@@ -1721,12 +1723,18 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		supportedItems.reserve(items.size());
 		for (const auto item : items) {
 			if (item->allowsForward()
-				|| ((forwardOptions != Data::ForwardOptions::PreserveInfo)
+				|| (withoutAuthor
 					&& CanShareWithoutAuthor(item))) {
 				supportedItems.push_back(item);
 			}
 		}
 		if (supportedItems.empty() || supportedItems.size() != items.size()) {
+			if (withoutAuthor && show->valid()) {
+				const auto error = ShareWithoutAuthorErrorText(items);
+				show->showToast(error.isEmpty()
+					? tr::lng_forward_cant(tr::now)
+					: error);
+			}
 			return;
 		}
 		auto forwardItems = HistoryItemsList();
