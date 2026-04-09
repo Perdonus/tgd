@@ -187,6 +187,19 @@ struct SpeechModelSpec {
 	return result;
 }
 
+[[nodiscard]] int CountReadySpeechArchives(const QString &modelsDir) {
+	auto result = 0;
+	const auto root = QDir(modelsDir);
+	for (const auto &spec : SpeechModelSpecs()) {
+		const auto modelPath = root.filePath(spec.folderName);
+		const auto archivePath = root.filePath(spec.folderName + u".zip"_q);
+		if (!QFileInfo(modelPath).isDir() && QFileInfo::exists(archivePath)) {
+			++result;
+		}
+	}
+	return result;
+}
+
 [[nodiscard]] QString SpeechModelsSettingsLabel() {
 	const auto installed = CountInstalledSpeechModels(SpeechModelsDirectory());
 	const auto total = int(SpeechModelSpecs().size());
@@ -197,8 +210,9 @@ struct SpeechModelSpec {
 
 [[nodiscard]] QString SpeechModelsSummaryText(const QString &modelsDir) {
 	const auto installed = CountInstalledSpeechModels(modelsDir);
+	const auto ready = CountReadySpeechArchives(modelsDir);
 	const auto total = int(SpeechModelSpecs().size());
-	if (installed <= 0) {
+	if ((installed <= 0) && (ready <= 0)) {
 		return RuEn(
 			"Пока ничего не скачано. Нажмите значок справа у нужного языка.",
 			"Nothing is downloaded yet. Tap the icon on the right for the language you need.");
@@ -206,6 +220,11 @@ struct SpeechModelSpec {
 		return RuEn(
 			"Все модели установлены: %1 из %2.",
 			"All models are installed: %1 of %2.").arg(installed).arg(total);
+	} else if (ready > 0) {
+		return RuEn(
+			"Установлено моделей: %1 из %2. Архивов готово к установке: %3.",
+			"Installed models: %1 of %2. Archives ready to install: %3.").arg(
+				installed).arg(total).arg(ready);
 	}
 	return RuEn(
 		"Установлено моделей: %1 из %2.",
@@ -972,6 +991,12 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 			container->add(object_ptr<Ui::FixedHeightWidget>(container, st::settingsCheckboxesSkip / 3));
 		}
 
+		box->addLeftButton(rpl::single(RuEn(
+			"Открыть папку моделей",
+			"Open models folder")), [=] {
+			QDir().mkpath(modelsDir);
+			File::ShowInFolder(modelsDir);
+		});
 		box->addButton(rpl::single(RuEn("Готово", "Done")), [=] { box->closeBox(); });
 	}));
 }

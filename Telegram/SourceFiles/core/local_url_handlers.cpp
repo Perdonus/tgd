@@ -795,6 +795,18 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 
 		box->addRow(object_ptr<Ui::PlainShadow>(box), st::cocoonJoinSeparatorPadding);
 
+		box->addLeftButton(rpl::single(RuEn(
+			"Скопировать мой Telegram ID",
+			"Copy my Telegram ID")), [=] {
+			const auto selfId = QString::number(
+				qulonglong(peerToUser(session->userPeerId()).bare));
+			QGuiApplication::clipboard()->setText(selfId);
+			Logs::writeClient(u"[support] copied self id from support box"_q);
+			controller->showToast(RuEn(
+				"Telegram ID скопирован. Отправьте его вместе с донатом.",
+				"Telegram ID copied. Send it together with your donation."));
+		});
+
 		auto button = box->addButton(rpl::single(QString()), [=] {
 			Logs::writeClient(QString::fromLatin1(
 				"[support] open %1 from support box")
@@ -2409,7 +2421,7 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			ResolveTonSettings
 		},
 		{
-			u"^(support)|(donate)$"_q,
+			u"^(support|donate)$"_q,
 			HandleAstrogramSupport
 		},
 		{
