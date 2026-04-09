@@ -358,6 +358,12 @@ MainMenu::MainMenu(
 , _version(AddVersionLabel(_footer)) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
+	const auto sideMenuOptions = ::Menu::Customization::LoadSideMenuOptions();
+	_footer->setVisible(sideMenuOptions.showFooterText);
+	setProperty(
+		"astrogram_profile_block_position",
+		sideMenuOptions.profileBlockPosition);
+
 	setupUserpicButton();
 	setupAccountsToggle();
 	setupSetEmojiStatus();
@@ -604,6 +610,10 @@ void MainMenu::toggleAccounts() {
 	const auto shown = !_accounts->toggled();
 	_accounts->toggle(shown, anim::type::normal);
 	_toggleAccounts->setToggled(shown);
+	if (Core::App().settings().mainMenuAccountsShown() != shown) {
+		Core::App().settings().setMainMenuAccountsShown(shown);
+		Core::App().saveSettingsDelayed();
+	}
 }
 
 void MainMenu::setupAccounts() {
@@ -624,6 +634,10 @@ void MainMenu::setupAccounts() {
 	_accounts->shownValue(
 	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
 		_toggleAccounts->setToggled(shown);
+		if (Core::App().settings().mainMenuAccountsShown() != shown) {
+			Core::App().settings().setMainMenuAccountsShown(shown);
+			Core::App().saveSettingsDelayed();
+		}
 	}, inner->lifetime());
 
 	_shadow->setDuration(0)->toggleOn(_accounts->shownValue());
@@ -1013,14 +1027,15 @@ void MainMenu::updateControlsGeometry() {
 }
 
 void MainMenu::updateInnerControlsGeometry() {
+	const auto footerVisible = _footer->isVisible();
 	const auto contentHeight = _accounts->height()
 		+ _shadow->height()
 		+ st::mainMenuSkip
 		+ _menu->height();
 	const auto available = height() - st::mainMenuCoverHeight - contentHeight;
-	const auto footerHeight = std::max(
-		available,
-		st::mainMenuFooterHeightMin);
+	const auto footerHeight = footerVisible
+		? std::max(available, st::mainMenuFooterHeightMin)
+		: 0;
 	if (_footer->height() != footerHeight) {
 		_footer->resize(_footer->width(), footerHeight);
 	}
