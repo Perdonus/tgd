@@ -721,8 +721,11 @@ private:
 		Data::WebPageDraft webpage;
 		Api::SendOptions options;
 		bool spoilered = false;
+		uchar resolveAttempts = 0;
 		ScheduledMessageEditKind kind = ScheduledMessageEditKind::Text;
 	};
+	void restoreScheduledMessageEdits();
+	void storeScheduledMessageEdits();
 	void processScheduledMessageEdits();
 	void refreshScheduledMessageEdits();
 	base::flat_map<FullMsgId, ScheduledMessageEdit> _scheduledMessageEdits;

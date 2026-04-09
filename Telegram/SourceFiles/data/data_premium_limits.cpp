@@ -7,10 +7,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_premium_limits.h"
 
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 
 namespace Data {
+namespace {
+
+[[nodiscard]] int ApplyLocalLimitOverride(int base, int overrideValue) {
+	return (overrideValue > 0) ? std::max(base, overrideValue) : base;
+}
+
+} // namespace
 
 PremiumLimits::PremiumLimits(not_null<Main::Session*> session)
 : _session(session) {
@@ -47,9 +56,11 @@ int PremiumLimits::gifsPremium() const {
 	return appConfigLimit("saved_gifs_limit_premium", 400);
 }
 int PremiumLimits::gifsCurrent() const {
-	return isPremium()
-		? gifsPremium()
-		: gifsDefault();
+	return ApplyLocalLimitOverride(
+		isPremium()
+			? gifsPremium()
+			: gifsDefault(),
+		Core::App().settings().localSavedGifsLimitOverride());
 }
 
 int PremiumLimits::stickersFavedDefault() const {
@@ -59,9 +70,11 @@ int PremiumLimits::stickersFavedPremium() const {
 	return appConfigLimit("stickers_faved_limit_premium", 10);
 }
 int PremiumLimits::stickersFavedCurrent() const {
-	return isPremium()
-		? stickersFavedPremium()
-		: stickersFavedDefault();
+	return ApplyLocalLimitOverride(
+		isPremium()
+			? stickersFavedPremium()
+			: stickersFavedDefault(),
+		Core::App().settings().localFavedStickersLimitOverride());
 }
 
 int PremiumLimits::dialogFiltersDefault() const {

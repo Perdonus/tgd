@@ -100,6 +100,45 @@ void MaybeShowPremiumToast(
 	});
 }
 
+[[nodiscard]] bool SavedGifsLocalOverrideActive(
+		not_null<Main::Session*> session) {
+	const auto overrideValue = Core::App().settings().localSavedGifsLimitOverride();
+	if (overrideValue <= 0) {
+		return false;
+	}
+	const auto limits = Data::PremiumLimits(&session());
+	const auto base = session->premium()
+		? limits.gifsPremium()
+		: limits.gifsDefault();
+	return limits.gifsCurrent() > base;
+}
+
+[[nodiscard]] bool FavedStickersLocalOverrideActive(
+		not_null<Main::Session*> session) {
+	const auto overrideValue = Core::App().settings().localFavedStickersLimitOverride();
+	if (overrideValue <= 0) {
+		return false;
+	}
+	const auto limits = Data::PremiumLimits(session);
+	const auto base = session->premium()
+		? limits.stickersFavedPremium()
+		: limits.stickersFavedDefault();
+	return limits.stickersFavedCurrent() > base;
+}
+
+[[nodiscard]] int RecentStickersCurrentLimit(
+		not_null<Main::Session*> session) {
+	const auto base = session->serverConfig().stickersRecentLimit;
+	const auto overrideValue = Core::App().settings().localRecentStickersLimitOverride();
+	return (overrideValue > 0) ? std::max(base, overrideValue) : base;
+}
+
+[[nodiscard]] bool RecentStickersLocalOverrideActive(
+		not_null<Main::Session*> session) {
+	return RecentStickersCurrentLimit(session)
+		> session->serverConfig().stickersRecentLimit;
+}
+
 void RemoveFromSet(
 		StickersSets &sets,
 		not_null<DocumentData*> document,
@@ -131,6 +170,90 @@ void RemoveFromSet(
 	if (set->stickers.empty()) {
 		sets.erase(it);
 	}
+}
+
+void RemoveDocumentFromEmojiMap(
+		base::flat_map<EmojiPtr, StickersPack> &emoji,
+		not_null<DocumentData*> document) {
+	for (auto i = emoji.begin(); i != emoji.end();) {
+		const auto index = i->second.indexOf(document);
+		if (index >= 0) {
+			i->second.removeAt(index);
+			if (i->second.empty()) {
+				i = emoji.erase(i);
+				continue;
+			}
+		}
+		++i;
+	}
+}
+
+void TrimStickerSetToLimit(StickersSet &set, int limit) {
+	while (!set.stickers.isEmpty() && (set.stickers.size() > limit)) {
+		const auto removing = set.stickers.back();
+		set.stickers.pop_back();
+		if (!set.dates.empty() && (set.dates.size() > set.stickers.size())) {
+			set.dates.pop_back();
+		}
+		RemoveDocumentFromEmojiMap(set.emoji, removing);
+	}
+	if (!set.dates.empty() && (set.dates.size() > set.stickers.size())) {
+		set.dates.resize(set.stickers.size());
+	}
+}
+
+void AppendDocumentEmoji(
+		Stickers &owner,
+		StickersSet &set,
+		not_null<DocumentData*> document,
+		const base::flat_map<EmojiPtr, StickersPack> &retainedEmoji) {
+	auto added = false;
+	for (const auto &[emoji, list] : retainedEmoji) {
+		if (list.indexOf(document) >= 0) {
+			set.emoji[emoji].push_back(document);
+			added = true;
+		}
+	}
+	if (added) {
+		return;
+	}
+	if (const auto emojiList = owner.getEmojiListFromSet(document)) {
+		for (const auto &emoji : *emojiList) {
+			set.emoji[emoji].push_back(document);
+		}
+	} else if (const auto sticker = document->sticker()) {
+		if (const auto emoji = Ui::Emoji::Find(sticker->alt)) {
+			set.emoji[emoji->original()].push_back(document);
+		}
+	}
+}
+
+void AppendRetainedDocuments(
+		Stickers &owner,
+		StickersSet &set,
+		const StickersPack &retained,
+		const std::vector<TimeId> &retainedDates,
+		const base::flat_map<EmojiPtr, StickersPack> &retainedEmoji,
+		int limit,
+		bool keepDates) {
+	for (const auto document : retained) {
+		if (set.stickers.size() >= limit) {
+			break;
+		} else if (set.stickers.indexOf(document) >= 0) {
+			continue;
+		}
+		set.stickers.push_back(document);
+		if (keepDates) {
+			auto date = TimeId(base::unixtime::now());
+			const auto index = retained.indexOf(document);
+			if (index >= 0 && index < int(retainedDates.size())) {
+				date = retainedDates[index];
+			}
+			set.dates.push_back(date);
+		}
+		AppendDocumentEmoji(owner, set, document, retainedEmoji);
+	}
+	TrimStickerSetToLimit(set, limit);
 }
 
 } // namespace
@@ -229,6 +352,7 @@ void Stickers::incrementSticker(not_null<DocumentData*> document) {
 		it->second->title = tr::lng_recent_stickers(tr::now);
 	}
 	const auto set = it->second.get();
+	const auto limits = Data::PremiumLimits(&session());
 	auto removedFromEmoji = std::vector<not_null<EmojiPtr>>();
 	auto index = set->stickers.indexOf(document);
 	if (index > 0) {
@@ -267,6 +391,7 @@ void Stickers::incrementSticker(not_null<DocumentData*> document) {
 		} else {
 			session().api().requestSpecialStickersForce(false, true, false);
 		}
+		TrimStickerSetToLimit(*set, RecentStickersCurrentLimit(&session()));
 
 		writeRecentStickers = true;
 	}
@@ -283,7 +408,7 @@ void Stickers::incrementSticker(not_null<DocumentData*> document) {
 	}
 	while (!recent.isEmpty()
 		&& (set->stickers.size() + recent.size()
-			> session().serverConfig().stickersRecentLimit)) {
+			> RecentStickersCurrentLimit(&session()))) {
 		writeOldRecent = true;
 		recent.pop_back();
 	}
@@ -329,8 +454,12 @@ void Stickers::addSavedGif(
 	_savedGifs.push_front(document);
 	const auto session = &document->session();
 	const auto limits = Data::PremiumLimits(session);
-	if (_savedGifs.size() > limits.gifsCurrent()) {
+	auto trimmed = false;
+	while (_savedGifs.size() > limits.gifsCurrent()) {
 		_savedGifs.pop_back();
+		trimmed = true;
+	}
+	if (trimmed && !SavedGifsLocalOverrideActive(session)) {
 		MaybeShowPremiumToast(
 			show,
 			SavedGifsToast(limits),
@@ -527,23 +656,13 @@ void Stickers::checkFavedLimit(
 	if (set.stickers.size() <= limits.stickersFavedCurrent()) {
 		return;
 	}
-	auto removing = set.stickers.back();
-	set.stickers.pop_back();
-	for (auto i = set.emoji.begin(); i != set.emoji.end();) {
-		auto index = i->second.indexOf(removing);
-		if (index >= 0) {
-			i->second.removeAt(index);
-			if (i->second.empty()) {
-				i = set.emoji.erase(i);
-				continue;
-			}
-		}
-		++i;
+	TrimStickerSetToLimit(set, limits.stickersFavedCurrent());
+	if (!FavedStickersLocalOverrideActive(session)) {
+		MaybeShowPremiumToast(
+			std::move(show),
+			FaveStickersToast(limits),
+			LimitsPremiumRef("stickers_faved"));
 	}
-	MaybeShowPremiumToast(
-		std::move(show),
-		FaveStickersToast(limits),
-		LimitsPremiumRef("stickers_faved"));
 }
 
 void Stickers::pushFavedToFront(
@@ -850,10 +969,36 @@ void Stickers::specialSetReceived(
 		const QVector<MTPint> &usageDates) {
 	auto &sets = setsRef();
 	auto it = sets.find(setId);
+	const auto limits = Data::PremiumLimits(&session());
+	const auto preserveLocalTail = (setId == FavedSetId)
+		? FavedStickersLocalOverrideActive(&session())
+		: (setId == CloudRecentSetId)
+		? RecentStickersLocalOverrideActive(&session())
+		: false;
+	const auto localLimit = (setId == FavedSetId)
+		? limits.stickersFavedCurrent()
+		: (setId == CloudRecentSetId)
+		? RecentStickersCurrentLimit(&session())
+		: 0;
+	auto retained = StickersPack();
+	auto retainedDates = std::vector<TimeId>();
+	auto retainedEmoji = base::flat_map<EmojiPtr, StickersPack>();
+	if (preserveLocalTail && (it != sets.cend())) {
+		retained = it->second->stickers;
+		retainedDates = it->second->dates;
+		retainedEmoji = it->second->emoji;
+	}
 
 	if (items.isEmpty()) {
 		if (it != sets.cend()) {
-			sets.erase(it);
+			if (preserveLocalTail && !retained.empty()) {
+				const auto set = it->second.get();
+				set->title = setTitle;
+				set->hash = hash;
+				TrimStickerSetToLimit(*set, localLimit);
+			} else {
+				sets.erase(it);
+			}
 		}
 	} else {
 		if (it == sets.cend()) {
@@ -919,9 +1064,31 @@ void Stickers::specialSetReceived(
 		}
 
 		if (pack.isEmpty()) {
-			sets.erase(it);
+			if (preserveLocalTail && !retained.empty()) {
+				TrimStickerSetToLimit(*set, localLimit);
+			} else {
+				sets.erase(it);
+			}
 		} else {
 			setPackAndEmoji(*set, std::move(pack), std::move(dates), packs);
+			if (preserveLocalTail) {
+				AppendRetainedDocuments(
+					*this,
+					*set,
+					retained,
+					retainedDates,
+					retainedEmoji,
+					localLimit,
+					(setId == CloudRecentSetId));
+			}
+			if (setId == CloudRecentSetId) {
+				while (!recent.isEmpty()
+					&& (set->stickers.size() + recent.size()
+						> limits.stickersRecentCurrent())) {
+					recent.pop_back();
+					writeRecent = true;
+				}
+			}
 		}
 
 		if (writeRecent) {
@@ -1129,6 +1296,8 @@ void Stickers::featuredReceived(
 
 void Stickers::gifsReceived(const QVector<MTPDocument> &items, uint64 hash) {
 	auto &saved = savedGifsRef();
+	const auto limits = Data::PremiumLimits(&session());
+	const auto retained = SavedGifsLocalOverrideActive(&session()) ? saved : SavedGifs();
 	saved.clear();
 
 	saved.reserve(items.size());
@@ -1141,6 +1310,19 @@ void Stickers::gifsReceived(const QVector<MTPDocument> &items, uint64 hash) {
 		}
 
 		saved.push_back(document);
+	}
+	if (SavedGifsLocalOverrideActive(&session())) {
+		for (const auto document : retained) {
+			if (saved.size() >= limits.gifsCurrent()) {
+				break;
+			} else if (saved.indexOf(document) >= 0) {
+				continue;
+			}
+			saved.push_back(document);
+		}
+	}
+	while (saved.size() > limits.gifsCurrent()) {
+		saved.pop_back();
 	}
 	const auto counted = Api::CountSavedGifsHash(&session());
 	if (counted != hash) {

@@ -244,7 +244,9 @@ QByteArray Settings::serialize() const {
 		+ sizeof(ushort)
 		+ sizeof(qint32) * 22
 		+ Serialize::stringSize(_editedMarkText.current())
-		+ Serialize::stringSize(_deletedMarkText.current());
+		+ Serialize::stringSize(_deletedMarkText.current())
+		+ sizeof(qint32) * 4
+		+ Serialize::bytearraySize(_scheduledMessageEditsStorage);
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -432,7 +434,12 @@ QByteArray Settings::serialize() const {
 			<< qint32(_deletedMarkShowText.current() ? 1 : 0)
 			<< qint32(_deletedMarkShowIcon.current() ? 1 : 0)
 			<< _deletedMarkText.current()
-			<< qint32(_unlockForwardSelectionLimit.current() ? 1 : 0);
+			<< qint32(_unlockForwardSelectionLimit.current() ? 1 : 0)
+			<< qint32(_persistLocalScheduledEdits.current() ? 1 : 0)
+			<< qint32(_localSavedGifsLimitOverride.current())
+			<< qint32(_localFavedStickersLimitOverride.current())
+			<< qint32(_localRecentStickersLimitOverride.current())
+			<< _scheduledMessageEditsStorage;
 	}
 
 	if (result.size() != size) {
@@ -590,6 +597,12 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	QString deletedMarkText = _deletedMarkText.current();
 	qint32 unlockForwardSelectionLimit
 		= _unlockForwardSelectionLimit.current() ? 1 : 0;
+	qint32 persistLocalScheduledEdits
+		= _persistLocalScheduledEdits.current() ? 1 : 0;
+	qint32 localSavedGifsLimitOverride = _localSavedGifsLimitOverride.current();
+	qint32 localFavedStickersLimitOverride = _localFavedStickersLimitOverride.current();
+	qint32 localRecentStickersLimitOverride = _localRecentStickersLimitOverride.current();
+	QByteArray scheduledMessageEditsStorage = _scheduledMessageEditsStorage;
 	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
 	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
 	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
@@ -1002,6 +1015,21 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> unlockForwardSelectionLimit;
 	}
+	if (!stream.atEnd()) {
+		stream >> persistLocalScheduledEdits;
+	}
+	if (!stream.atEnd()) {
+		stream >> localSavedGifsLimitOverride;
+	}
+	if (!stream.atEnd()) {
+		stream >> localFavedStickersLimitOverride;
+	}
+	if (!stream.atEnd()) {
+		stream >> localRecentStickersLimitOverride;
+	}
+	if (!stream.atEnd()) {
+		stream >> scheduledMessageEditsStorage;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1247,6 +1275,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_deletedMarkShowIcon = (deletedMarkShowIcon == 1);
 	_deletedMarkText = deletedMarkText.trimmed();
 	_unlockForwardSelectionLimit = (unlockForwardSelectionLimit == 1);
+	_persistLocalScheduledEdits = (persistLocalScheduledEdits == 1);
+	_localSavedGifsLimitOverride = std::max(localSavedGifsLimitOverride, 0);
+	_localFavedStickersLimitOverride = std::max(localFavedStickersLimitOverride, 0);
+	_localRecentStickersLimitOverride = std::max(localRecentStickersLimitOverride, 0);
+	_scheduledMessageEditsStorage = scheduledMessageEditsStorage;
 	_ghostHideReadMessages = (ghostHideReadMessages == 1);
 	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
 	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);

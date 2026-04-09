@@ -304,6 +304,71 @@ public:
 		_unlockForwardSelectionLimit = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool persistLocalScheduledEdits() const {
+		return _persistLocalScheduledEdits.current();
+	}
+	[[nodiscard]] rpl::producer<bool> persistLocalScheduledEditsValue() const {
+		return _persistLocalScheduledEdits.value();
+	}
+	void setPersistLocalScheduledEdits(bool value) {
+		if (_persistLocalScheduledEdits.current() == value) {
+			return;
+		}
+		_persistLocalScheduledEdits = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] int localSavedGifsLimitOverride() const {
+		return _localSavedGifsLimitOverride.current();
+	}
+	[[nodiscard]] rpl::producer<int> localSavedGifsLimitOverrideValue() const {
+		return _localSavedGifsLimitOverride.value();
+	}
+	void setLocalSavedGifsLimitOverride(int value) {
+		value = std::max(value, 0);
+		if (_localSavedGifsLimitOverride.current() == value) {
+			return;
+		}
+		_localSavedGifsLimitOverride = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] int localFavedStickersLimitOverride() const {
+		return _localFavedStickersLimitOverride.current();
+	}
+	[[nodiscard]] rpl::producer<int> localFavedStickersLimitOverrideValue() const {
+		return _localFavedStickersLimitOverride.value();
+	}
+	void setLocalFavedStickersLimitOverride(int value) {
+		value = std::max(value, 0);
+		if (_localFavedStickersLimitOverride.current() == value) {
+			return;
+		}
+		_localFavedStickersLimitOverride = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] int localRecentStickersLimitOverride() const {
+		return _localRecentStickersLimitOverride.current();
+	}
+	[[nodiscard]] rpl::producer<int> localRecentStickersLimitOverrideValue() const {
+		return _localRecentStickersLimitOverride.value();
+	}
+	void setLocalRecentStickersLimitOverride(int value) {
+		value = std::max(value, 0);
+		if (_localRecentStickersLimitOverride.current() == value) {
+			return;
+		}
+		_localRecentStickersLimitOverride = value;
+		_saveDelayed.fire({});
+	}
+	[[nodiscard]] QByteArray scheduledMessageEditsStorage() const {
+		return _scheduledMessageEditsStorage;
+	}
+	void setScheduledMessageEditsStorage(QByteArray value) {
+		if (_scheduledMessageEditsStorage == value) {
+			return;
+		}
+		_scheduledMessageEditsStorage = std::move(value);
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool disableAds() const {
 		return _disableAds.current();
 	}
@@ -1310,6 +1375,11 @@ private:
 	rpl::variable<bool> _ghostMode = false;
 	rpl::variable<bool> _localPremium = false;
 	rpl::variable<bool> _unlockForwardSelectionLimit = false;
+	rpl::variable<bool> _persistLocalScheduledEdits = true;
+	rpl::variable<int> _localSavedGifsLimitOverride = 0;
+	rpl::variable<int> _localFavedStickersLimitOverride = 0;
+	rpl::variable<int> _localRecentStickersLimitOverride = 0;
+	QByteArray _scheduledMessageEditsStorage;
 	rpl::variable<bool> _disableAds = true;
 	rpl::variable<bool> _disableStories = false;
 	rpl::variable<bool> _disableOpenLinkWarning = false;

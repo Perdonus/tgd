@@ -52,6 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
+#include "data/data_peer_id.h"
 #include "data/data_user.h"
 #include "data/data_chat_filters.h"
 #include "data/data_histories.h"
@@ -91,6 +92,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localimageloader.h"
 #include "storage/download_manager_mtproto.h"
 #include "storage/file_upload.h"
+#include "storage/serialize_common.h"
 #include "storage/storage_account.h"
 
 #include <algorithm>
@@ -113,6 +115,153 @@ constexpr auto kStatsSessionKillTimeout = 10 * crl::time(1000);
 using PhotoFileLocationId = Data::PhotoFileLocationId;
 using DocumentFileLocationId = Data::DocumentFileLocationId;
 using UpdatedFileReferences = Data::UpdatedFileReferences;
+
+constexpr auto kScheduledEditStorageVersion = quint32(1);
+constexpr auto kMaxPersistedScheduledEdits = quint32(512);
+constexpr auto kScheduledEditResolveRetryStep = TimeId(5);
+constexpr auto kScheduledEditResolveRetryMax = TimeId(60);
+constexpr auto kScheduledEditResolveMaxAttempts = uchar(24);
+
+struct PersistedScheduledMessageEditRecord {
+	uint64 sessionUniqueId = 0;
+	FullMsgId itemId;
+	TextWithTags text;
+	Data::WebPageDraft webpage;
+	TimeId scheduled = 0;
+	bool invertCaption = false;
+	bool spoilered = false;
+	qint32 kind = 0;
+	uchar resolveAttempts = 0;
+};
+
+[[nodiscard]] TextWithTags ToTextWithTags(const TextWithEntities &text) {
+	return TextWithTags{
+		text.text,
+		TextUtilities::ConvertEntitiesToTextTags(text.entities),
+	};
+}
+
+[[nodiscard]] TextWithEntities ToTextWithEntities(const TextWithTags &text) {
+	return TextWithEntities{
+		text.text,
+		TextUtilities::ConvertTextTagsToEntities(text.tags),
+	};
+}
+
+[[nodiscard]] QByteArray SerializeScheduledMessageEdits(
+		const std::vector<PersistedScheduledMessageEditRecord> &records) {
+	auto writer = Serialize::ByteArrayWriter();
+	writer << kScheduledEditStorageVersion;
+	writer << quint32(std::min<size_t>(records.size(), kMaxPersistedScheduledEdits));
+	for (auto i = size_t(0);
+		i != records.size() && i != kMaxPersistedScheduledEdits;
+		++i) {
+		const auto &record = records[i];
+		writer
+			<< quint64(record.sessionUniqueId)
+			<< SerializePeerId(record.itemId.peer)
+			<< qint64(record.itemId.msg.bare)
+			<< record.text.text
+			<< TextUtilities::SerializeTags(record.text.tags)
+			<< qint64(record.webpage.id)
+			<< record.webpage.url
+			<< qint32(record.webpage.forceLargeMedia ? 1 : 0)
+			<< qint32(record.webpage.forceSmallMedia ? 1 : 0)
+			<< qint32(record.webpage.invert ? 1 : 0)
+			<< qint32(record.webpage.manual ? 1 : 0)
+			<< qint32(record.webpage.removed ? 1 : 0)
+			<< qint32(record.scheduled)
+			<< qint32(record.invertCaption ? 1 : 0)
+			<< qint32(record.spoilered ? 1 : 0)
+			<< qint32(record.kind)
+			<< qint32(record.resolveAttempts);
+	}
+	return std::move(writer).result();
+}
+
+[[nodiscard]] std::vector<PersistedScheduledMessageEditRecord> DeserializeScheduledMessageEdits(
+		const QByteArray &bytes) {
+	if (bytes.isEmpty()) {
+		return {};
+	}
+	auto reader = Serialize::ByteArrayReader(bytes);
+	auto version = quint32();
+	auto count = quint32();
+	reader >> version >> count;
+	if (!reader.ok()
+		|| (version != kScheduledEditStorageVersion)
+		|| (count > kMaxPersistedScheduledEdits)) {
+		return {};
+	}
+	auto result = std::vector<PersistedScheduledMessageEditRecord>();
+	result.reserve(count);
+	for (auto i = quint32(0); i != count; ++i) {
+		auto sessionUniqueId = quint64();
+		auto peerSerialized = quint64();
+		auto messageId = qint64();
+		auto text = QString();
+		auto textTags = QByteArray();
+		auto webPageId = qint64();
+		auto webPageUrl = QString();
+		auto forceLargeMedia = qint32();
+		auto forceSmallMedia = qint32();
+		auto invert = qint32();
+		auto manual = qint32();
+		auto removed = qint32();
+		auto scheduled = qint32();
+		auto invertCaption = qint32();
+		auto spoilered = qint32();
+		auto kind = qint32();
+		auto resolveAttempts = qint32();
+		reader
+			>> sessionUniqueId
+			>> peerSerialized
+			>> messageId
+			>> text
+			>> textTags
+			>> webPageId
+			>> webPageUrl
+			>> forceLargeMedia
+			>> forceSmallMedia
+			>> invert
+			>> manual
+			>> removed
+			>> scheduled
+			>> invertCaption
+			>> spoilered
+			>> kind
+			>> resolveAttempts;
+		if (!reader.ok()) {
+			return {};
+		}
+		if (!sessionUniqueId || !peerSerialized || (scheduled <= 0) || !messageId) {
+			continue;
+		}
+		auto webpage = Data::WebPageDraft();
+		webpage.id = WebPageId(webPageId);
+		webpage.url = webPageUrl;
+		webpage.forceLargeMedia = (forceLargeMedia == 1);
+		webpage.forceSmallMedia = (forceSmallMedia == 1);
+		webpage.invert = (invert == 1);
+		webpage.manual = (manual == 1);
+		webpage.removed = (removed == 1);
+		result.push_back(PersistedScheduledMessageEditRecord{
+			.sessionUniqueId = sessionUniqueId,
+			.itemId = FullMsgId(DeserializePeerId(peerSerialized), MsgId(messageId)),
+			.text = TextWithTags{
+				text,
+				TextUtilities::DeserializeTags(textTags, text.size()),
+			},
+			.webpage = std::move(webpage),
+			.scheduled = TimeId(scheduled),
+			.invertCaption = (invertCaption == 1),
+			.spoilered = (spoilered == 1),
+			.kind = kind,
+			.resolveAttempts = uchar(std::clamp(resolveAttempts, 0, 255)),
+		});
+	}
+	return result;
+}
 
 [[nodiscard]] std::shared_ptr<ChatHelpers::Show> ShowForPeer(
 		not_null<PeerData*> peer) {
@@ -244,6 +393,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 		}, _session->lifetime());
 
 		setupSupportMode();
+		restoreScheduledMessageEdits();
 	});
 }
 
@@ -4043,11 +4193,77 @@ bool ApiWrap::scheduleMessageEdit(
 		.webpage = std::move(webpage),
 		.options = options,
 		.spoilered = spoilered,
+		.resolveAttempts = 0,
 		.kind = kind,
 	};
 	refreshScheduledMessageEdits();
 	ShowScheduledEditQueuedToast(item, replaced, options.scheduled);
 	return true;
+}
+
+void ApiWrap::restoreScheduledMessageEdits() {
+	_scheduledMessageEdits.clear();
+	const auto &settings = Core::App().settings();
+	if (!settings.persistLocalScheduledEdits()) {
+		refreshScheduledMessageEdits();
+		return;
+	}
+	const auto sessionUniqueId = _session->uniqueId();
+	for (const auto &record : DeserializeScheduledMessageEdits(
+			settings.scheduledMessageEditsStorage())) {
+		if (record.sessionUniqueId != sessionUniqueId) {
+			continue;
+		}
+		const auto kind = (record.kind == qint32(ScheduledMessageEditKind::Caption))
+			? ScheduledMessageEditKind::Caption
+			: ScheduledMessageEditKind::Text;
+		auto options = Api::SendOptions();
+		options.scheduled = record.scheduled;
+		options.invertCaption = record.invertCaption;
+		_scheduledMessageEdits[record.itemId] = ScheduledMessageEdit{
+			.itemId = record.itemId,
+			.text = ToTextWithEntities(record.text),
+			.webpage = record.webpage,
+			.options = options,
+			.spoilered = record.spoilered,
+			.resolveAttempts = record.resolveAttempts,
+			.kind = kind,
+		};
+	}
+	refreshScheduledMessageEdits();
+}
+
+void ApiWrap::storeScheduledMessageEdits() {
+	auto records = DeserializeScheduledMessageEdits(
+		Core::App().settings().scheduledMessageEditsStorage());
+	auto merged = std::vector<PersistedScheduledMessageEditRecord>();
+	merged.reserve(records.size() + _scheduledMessageEdits.size());
+	const auto sessionUniqueId = _session->uniqueId();
+	for (const auto &record : records) {
+		if (record.sessionUniqueId != sessionUniqueId) {
+			merged.push_back(record);
+		}
+	}
+	if (Core::App().settings().persistLocalScheduledEdits()) {
+		for (const auto &[_, edit] : _scheduledMessageEdits) {
+			if (!edit.options.scheduled) {
+				continue;
+			}
+			merged.push_back(PersistedScheduledMessageEditRecord{
+				.sessionUniqueId = sessionUniqueId,
+				.itemId = edit.itemId,
+				.text = ToTextWithTags(edit.text),
+				.webpage = edit.webpage,
+				.scheduled = edit.options.scheduled,
+				.invertCaption = edit.options.invertCaption,
+				.spoilered = edit.spoilered,
+				.kind = qint32(edit.kind),
+				.resolveAttempts = edit.resolveAttempts,
+			});
+		}
+	}
+	Core::App().settings().setScheduledMessageEditsStorage(
+		merged.empty() ? QByteArray() : SerializeScheduledMessageEdits(merged));
 }
 
 void ApiWrap::clearScheduledMessageEdit(FullMsgId itemId) {
@@ -4074,10 +4290,31 @@ void ApiWrap::processScheduledMessageEdits() {
 	std::stable_sort(due.begin(), due.end(), [](const auto &a, const auto &b) {
 		return a.options.scheduled < b.options.scheduled;
 	});
+	auto requeued = false;
 
 	for (auto &edit : due) {
 		const auto item = _session->data().message(edit.itemId);
-		if (!item || item->isScheduled() || item->isBusinessShortcut()) {
+		if (!item) {
+			if (edit.resolveAttempts >= kScheduledEditResolveMaxAttempts) {
+				continue;
+			}
+			++edit.resolveAttempts;
+			const auto retry = std::min<TimeId>(
+				kScheduledEditResolveRetryStep * edit.resolveAttempts,
+				kScheduledEditResolveRetryMax);
+			edit.options.scheduled = now + retry;
+			_scheduledMessageEdits[edit.itemId] = edit;
+			requestMessageData(
+				_session->data().peer(edit.itemId.peer),
+				edit.itemId.msg,
+				[=] {
+					crl::on_main(_session, [=] {
+						processScheduledMessageEdits();
+					});
+				});
+			requeued = true;
+			continue;
+		} else if (item->isScheduled() || item->isBusinessShortcut()) {
 			continue;
 		}
 		auto options = edit.options;
@@ -4127,11 +4364,15 @@ void ApiWrap::processScheduledMessageEdits() {
 			break;
 		}
 	}
+	if (requeued) {
+		refreshScheduledMessageEdits();
+	}
 }
 
 void ApiWrap::refreshScheduledMessageEdits() {
 	if (_scheduledMessageEdits.empty()) {
 		_scheduledMessageEditsTimer.cancel();
+		storeScheduledMessageEdits();
 		return;
 	}
 	auto next = TimeId(0);
@@ -4145,6 +4386,7 @@ void ApiWrap::refreshScheduledMessageEdits() {
 		? crl::time(next - now) * crl::time(1000)
 		: crl::time(0);
 	_scheduledMessageEditsTimer.callOnce(delay);
+	storeScheduledMessageEdits();
 }
 
 void ApiWrap::sendMessage(
