@@ -365,12 +365,17 @@ public:
 	void sendShortcutMessages(
 		not_null<PeerData*> peer,
 		BusinessShortcutId id);
+	enum class ScheduledMessageEditKind : uchar {
+		Text,
+		Caption,
+	};
 	bool scheduleMessageEdit(
 		not_null<HistoryItem*> item,
 		TextWithEntities text,
 		Data::WebPageDraft webpage,
 		Api::SendOptions options,
-		bool spoilered);
+		bool spoilered,
+		ScheduledMessageEditKind kind = ScheduledMessageEditKind::Text);
 	void clearScheduledMessageEdit(FullMsgId itemId);
 	void sendMessage(
 		MessageToSend &&message,
@@ -716,6 +721,7 @@ private:
 		Data::WebPageDraft webpage;
 		Api::SendOptions options;
 		bool spoilered = false;
+		ScheduledMessageEditKind kind = ScheduledMessageEditKind::Text;
 	};
 	void processScheduledMessageEdits();
 	void refreshScheduledMessageEdits();

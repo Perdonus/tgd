@@ -872,11 +872,21 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 		forwardingCard,
 		settings.unlockForwardSelectionLimitValue(),
 		RuEn(
-			"Снять лимит 100 сообщений при пересылке",
-			"Unlock 100-message forward limit"),
+			"Снять локальный лимит 100 сообщений при пересылке",
+			"Remove local 100-message forward limit"),
 		[&](bool toggled) {
 			settings.setUnlockForwardSelectionLimit(toggled);
 		});
+	Ui::AddSkip(forwardingCard, st::settingsCheckboxesSkip / 4);
+	forwardingCard->add(
+		object_ptr<Ui::FlatLabel>(
+			forwardingCard,
+			rpl::single(RuEn(
+				"Снимает только клиентский лимит на выделение. Большие пересылки всё равно идут пачками, а серверные ограничения Telegram остаются.",
+				"Removes only the client-side selection cap. Large forwards still go in batches, and Telegram server-side limits still remain.")),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
 	FinishSettingsCard(forwardingCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Боковое меню", "Side menu"));

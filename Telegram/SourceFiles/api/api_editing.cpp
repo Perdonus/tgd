@@ -50,6 +50,16 @@ template <typename T>
 constexpr auto ErrorWithoutId
 	= is_callable_plain_v<T, QString>;
 
+[[nodiscard]] bool CanUseLocalScheduledEdit(
+		not_null<HistoryItem*> item,
+		const SendOptions &options) {
+	return !item->isScheduled()
+		&& !item->isBusinessShortcut()
+		&& options.scheduled
+		&& (options.scheduled != Api::kScheduledUntilOnlineTimestamp)
+		&& (options.scheduled > base::unixtime::now());
+}
+
 template <typename DoneCallback, typename FailCallback>
 mtpRequestId SuggestMessage(
 		not_null<HistoryItem*> item,
@@ -454,6 +464,20 @@ mtpRequestId EditCaption(
 		SendOptions options,
 		Fn<void()> done,
 		Fn<void(const QString &)> fail) {
+	if (CanUseLocalScheduledEdit(item, options)
+		&& item->history()->session().api().scheduleMessageEdit(
+			item,
+			caption,
+			Data::WebPageDraft(),
+			options,
+			item->media() ? item->media()->hasSpoiler() : false,
+			ApiWrap::ScheduledMessageEditKind::Caption)) {
+		const auto session = &item->history()->session();
+		crl::on_main(session, [=] {
+			done();
+		});
+		return 0;
+	}
 	return EditMessage(
 		item,
 		caption,
@@ -468,21 +492,17 @@ mtpRequestId EditTextMessage(
 		const TextWithEntities &caption,
 		Data::WebPageDraft webpage,
 		SendOptions options,
-		Fn<void(mtpRequestId requestId)> done,
-		Fn<void(const QString &error, mtpRequestId requestId)> fail,
-		bool spoilered) {
-	const auto localScheduledEdit = !item->isScheduled()
-		&& !item->isBusinessShortcut()
-		&& options.scheduled
-		&& (options.scheduled != Api::kScheduledUntilOnlineTimestamp)
-		&& (options.scheduled > base::unixtime::now());
-	if (localScheduledEdit
+	Fn<void(mtpRequestId requestId)> done,
+	Fn<void(const QString &error, mtpRequestId requestId)> fail,
+	bool spoilered) {
+	if (CanUseLocalScheduledEdit(item, options)
 		&& item->history()->session().api().scheduleMessageEdit(
 			item,
 			caption,
 			webpage,
 			options,
-			spoilered)) {
+			spoilered,
+			ApiWrap::ScheduledMessageEditKind::Text)) {
 		const auto session = &item->history()->session();
 		crl::on_main(session, [=] {
 			done(mtpRequestId(0));

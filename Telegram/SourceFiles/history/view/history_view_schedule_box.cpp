@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_peer_values.h"
 #include "data/data_user.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "base/event_filter.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -41,6 +42,23 @@ not_null<Main::Session*> SessionFromShow(
 
 namespace HistoryView {
 namespace {
+
+[[nodiscard]] bool IsRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return IsRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] bool IsLocalScheduledEdit(
+		const Api::SendOptions &initialOptions,
+		const SendMenu::Details &details) {
+	return (details.type == SendMenu::Type::EditScheduled)
+		&& !initialOptions.scheduled;
+}
 
 void FillSendUntilOnlineMenu(
 		not_null<Ui::IconButton*> button,
@@ -100,8 +118,8 @@ void ScheduleBox(
 		if (!options.scheduled) {
 			return;
 		}
-		// Pro tip: Hold Ctrl key to send a silent scheduled message!
-		if (base::IsCtrlPressed()) {
+		if ((details.type != SendMenu::Type::EditScheduled)
+			&& base::IsCtrlPressed()) {
 			options.silent = true;
 		}
 		if (repeat) {
@@ -116,11 +134,28 @@ void ScheduleBox(
 		result.scheduled = scheduled;
 		return result;
 	};
-	auto descriptor = Ui::ChooseDateTimeBox(box, {
-		.title = (details.type == SendMenu::Type::Reminder
+	const auto title = [&]() -> rpl::producer<QString> {
+		if (details.type == SendMenu::Type::EditScheduled) {
+			return rpl::single(RuEn("Отложенная правка", "Scheduled edit"));
+		}
+		return (details.type == SendMenu::Type::Reminder)
 			? tr::lng_remind_title()
-			: tr::lng_schedule_title()),
-		.submit = tr::lng_schedule_button(),
+			: tr::lng_schedule_title();
+	}();
+	const auto submitText = [&]() -> rpl::producer<QString> {
+		return (details.type == SendMenu::Type::EditScheduled)
+			? rpl::single(RuEn("Запланировать правку", "Schedule edit"))
+			: tr::lng_schedule_button();
+	}();
+	const auto description = IsLocalScheduledEdit(initialOptions, details)
+		? rpl::single(RuEn(
+			"Локальная отложенная правка сработает, пока Astrogram остаётся запущен.",
+			"Local scheduled edits work while Astrogram stays open."))
+		: rpl::producer<QString>();
+	auto descriptor = Ui::ChooseDateTimeBox(box, {
+		.title = std::move(title),
+		.submit = std::move(submitText),
+		.description = std::move(description),
 		.done = [=](TimeId result) { submit(with(result)); },
 		.time = time,
 		.style = style.chooseDateTimeArgs,

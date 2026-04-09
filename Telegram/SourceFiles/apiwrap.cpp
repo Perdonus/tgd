@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "base/call_delayed.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_instance.h"
 #include "mainwidget.h"
 #include "boxes/add_contact_box.h"
 #include "mtproto/mtproto_config.h"
@@ -92,6 +93,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/storage_account.h"
 
+#include <algorithm>
+#include <QLocale>
+
 namespace {
 
 // Save draft to the cloud with 1 sec extra delay.
@@ -120,6 +124,38 @@ using UpdatedFileReferences = Data::UpdatedFileReferences;
 		}
 	}
 	return nullptr;
+}
+
+[[nodiscard]] bool IsRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return IsRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString ScheduledEditToastText(bool replaced, TimeId when) {
+	const auto whenText = QLocale().toString(
+		base::unixtime::parse(when),
+		QLocale::ShortFormat);
+	return replaced
+		? RuEn(
+			"Отложенная правка обновлена: %1",
+			"Scheduled edit updated: %1").arg(whenText)
+		: RuEn(
+			"Правка запланирована на %1",
+			"Edit scheduled for %1").arg(whenText);
+}
+
+void ShowScheduledEditQueuedToast(
+		not_null<HistoryItem*> item,
+		bool replaced,
+		TimeId when) {
+	if (const auto show = ShowForPeer(item->history()->peer)) {
+		show->showToast(ScheduledEditToastText(replaced, when));
+	}
 }
 
 void ShowChannelsLimitBox(not_null<PeerData*> peer) {
@@ -3985,7 +4021,8 @@ bool ApiWrap::scheduleMessageEdit(
 		TextWithEntities text,
 		Data::WebPageDraft webpage,
 		Api::SendOptions options,
-		bool spoilered) {
+		bool spoilered,
+		ScheduledMessageEditKind kind) {
 	if (item->isScheduled()
 		|| item->isBusinessShortcut()
 		|| !options.scheduled
@@ -3993,6 +4030,12 @@ bool ApiWrap::scheduleMessageEdit(
 		|| (options.scheduled <= base::unixtime::now())) {
 		return false;
 	}
+	if ((kind == ScheduledMessageEditKind::Caption)
+		&& (!item->media() || !item->media()->allowsEditCaption())) {
+		return false;
+	}
+	const auto replaced = (_scheduledMessageEdits.find(item->fullId())
+		!= end(_scheduledMessageEdits));
 	options.scheduleRepeatPeriod = 0;
 	_scheduledMessageEdits[item->fullId()] = ScheduledMessageEdit{
 		.itemId = item->fullId(),
@@ -4000,8 +4043,10 @@ bool ApiWrap::scheduleMessageEdit(
 		.webpage = std::move(webpage),
 		.options = options,
 		.spoilered = spoilered,
+		.kind = kind,
 	};
 	refreshScheduledMessageEdits();
+	ShowScheduledEditQueuedToast(item, replaced, options.scheduled);
 	return true;
 }
 
@@ -4026,6 +4071,9 @@ void ApiWrap::processScheduledMessageEdits() {
 		i = _scheduledMessageEdits.erase(i);
 	}
 	refreshScheduledMessageEdits();
+	std::stable_sort(due.begin(), due.end(), [](const auto &a, const auto &b) {
+		return a.options.scheduled < b.options.scheduled;
+	});
 
 	for (auto &edit : due) {
 		const auto item = _session->data().message(edit.itemId);
@@ -4036,22 +4084,48 @@ void ApiWrap::processScheduledMessageEdits() {
 		options.scheduled = 0;
 		options.scheduleRepeatPeriod = 0;
 		const auto show = ShowForPeer(item->history()->peer);
-		Api::EditTextMessage(
-			item,
-			edit.text,
-			edit.webpage,
-			options,
-			[](mtpRequestId) {
-			},
-			[show](const QString &error, mtpRequestId) {
-				if (!show) {
-					return;
-				} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
-					return;
+		switch (edit.kind) {
+		case ScheduledMessageEditKind::Text:
+			Api::EditTextMessage(
+				item,
+				edit.text,
+				edit.webpage,
+				options,
+				[](mtpRequestId) {
+				},
+				[show](const QString &error, mtpRequestId) {
+					if (!show) {
+						return;
+					} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+						return;
+					}
+					show->showToast(tr::lng_edit_error(tr::now));
+				},
+				edit.spoilered);
+			break;
+		case ScheduledMessageEditKind::Caption:
+			if (!item->media() || !item->media()->allowsEditCaption()) {
+				if (show) {
+					show->showToast(tr::lng_edit_error(tr::now));
 				}
-				show->showToast(tr::lng_edit_error(tr::now));
-			},
-			edit.spoilered);
+				break;
+			}
+			Api::EditCaption(
+				item,
+				edit.text,
+				options,
+				[] {
+				},
+				[show](const QString &error) {
+					if (!show) {
+						return;
+					} else if (error == u"MESSAGE_NOT_MODIFIED"_q) {
+						return;
+					}
+					show->showToast(tr::lng_edit_error(tr::now));
+				});
+			break;
+		}
 	}
 }
 
