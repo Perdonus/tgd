@@ -23,7 +23,7 @@ namespace {
 
 constexpr auto kLegacyCallsPeerToPeerNobody = 4;
 constexpr auto kVersionTag = -1;
-constexpr auto kVersion = 2;
+constexpr auto kVersion = 3;
 
 } // namespace
 
@@ -66,6 +66,7 @@ QByteArray SessionSettings::serialize() const {
 			+ Serialize::stringSize(auth.location);
 	}
 	size += sizeof(qint32); // _setupEmailState
+	size += sizeof(qint32); // _astrogramOnboardingShown
 	size += sizeof(qint32) // _moderateCommonGroups size
 		+ (_moderateCommonGroups.size() * sizeof(quint64));
 
@@ -149,6 +150,7 @@ QByteArray SessionSettings::serialize() const {
 				<< auth.location;
 		}
 		stream << qint32(static_cast<int>(_setupEmailState));
+		stream << qint32(_astrogramOnboardingShown ? 1 : 0);
 		stream << qint32(_moderateCommonGroups.size());
 		for (const auto &peerId : _moderateCommonGroups) {
 			stream << SerializePeerId(peerId);
@@ -225,6 +227,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	base::flat_set<uint64> ratedTranscriptions;
 	std::vector<Data::UnreviewedAuth> unreviewed;
 	qint32 setupEmailState = 0;
+	qint32 astrogramOnboardingShown = 1;
 	std::vector<PeerId> moderateCommonGroups;
 
 	stream >> versionTag;
@@ -643,6 +646,9 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 		stream >> setupEmailState;
 	}
 	if (!stream.atEnd()) {
+		stream >> astrogramOnboardingShown;
+	}
+	if (!stream.atEnd()) {
 		auto count = qint32(0);
 		stream >> count;
 		if (stream.status() == QDataStream::Ok) {
@@ -722,6 +728,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 		break;
 	}
 
+	_astrogramOnboardingShown = (astrogramOnboardingShown == 1);
 	_moderateCommonGroups = std::move(moderateCommonGroups);
 
 	if (version < 2) {

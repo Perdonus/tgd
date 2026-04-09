@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/dropdown_menu.h"
 #include "ui/focus_persister.h"
@@ -36,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/ui_utility.h"
+#include "ui/boxes/astrogram_onboarding_box.h"
+#include "ui/layers/generic_box.h"
 #include "window/window_connecting_widget.h"
 #include "window/window_top_bar_wrap.h"
 #include "window/notifications_manager.h"
@@ -57,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_service_message.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "lang/lang_cloud_manager.h"
 #include "inline_bots/inline_bot_layout_item.h"
@@ -75,6 +79,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/shortcuts.h"
 #include "core/application.h"
 #include "core/changelogs.h"
+#include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "calls/calls_call.h"
 #include "calls/calls_instance.h"
@@ -87,15 +92,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/main_app_config.h"
+#include "settings/settings_advanced.h"
+#include "settings/settings_plugins.h"
 #include "settings/settings_premium.h"
 #include "support/support_helper.h"
 #include "storage/storage_user_photos.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
+#include "styles/style_layers.h"
 #include "styles/style_window.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMimeData>
+#include <QtCore/QSet>
+#include <QtCore/QTimer>
+
+#include <algorithm>
+#include <memory>
+#include <optional>
 
 namespace {
 
@@ -103,6 +118,637 @@ void ClearBotStartToken(PeerData *peer) {
 	if (peer && peer->isUser() && peer->asUser()->isBot()) {
 		peer->asUser()->botInfo->startToken = QString();
 	}
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString UpdateChannelText(Core::UpdateChannel channel) {
+	switch (channel) {
+	case Core::UpdateChannel::DevBeta:
+		return RuEn("Dev (beta)", "Dev (beta)");
+	case Core::UpdateChannel::Alpha:
+		return RuEn("Alpha", "Alpha");
+	case Core::UpdateChannel::Stable:
+	default:
+		return RuEn("Stable", "Stable");
+	}
+}
+
+[[nodiscard]] QString AstrogramUpdateNoticeKey(
+		const Core::UpdateReleaseInfo &info) {
+	if (!info.available || (info.version <= 0)) {
+		return QString();
+	}
+	return QString::number(info.version)
+		+ u':' + QString::number(int(info.channel))
+		+ u':' + info.url;
+}
+
+[[nodiscard]] bool IsAstrogramPluginPackage(not_null<DocumentData*> document) {
+	const auto filename = document->filename().trimmed();
+	return !filename.isEmpty()
+		&& filename.endsWith(u".tgd"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString AstrogramPluginTitle(
+		not_null<DocumentData*> document,
+		QString overrideTitle) {
+	overrideTitle = overrideTitle.trimmed();
+	if (!overrideTitle.isEmpty()) {
+		return overrideTitle;
+	}
+	auto filename = document->filename().trimmed();
+	if (filename.isEmpty()) {
+		return RuEn("Плагин Astrogram", "Astrogram plugin");
+	}
+	if (filename.endsWith(u".tgd"_q, Qt::CaseInsensitive)) {
+		filename.chop(4);
+	}
+	filename = QFileInfo(filename).completeBaseName().trimmed();
+	return filename.isEmpty()
+		? RuEn("Плагин Astrogram", "Astrogram plugin")
+		: filename;
+}
+
+[[nodiscard]] QString AstrogramPluginDescription(
+		not_null<HistoryItem*> item,
+		QString overrideDescription,
+		int64 postId) {
+	overrideDescription = overrideDescription.trimmed();
+	if (!overrideDescription.isEmpty()) {
+		return overrideDescription;
+	}
+	const auto message = item->originalText().text.simplified();
+	if (!message.isEmpty()) {
+		return message;
+	}
+	return RuEn(
+		"Пакет плагина из поста #%1",
+		"Plugin package from post #%1").arg(postId);
+}
+
+[[nodiscard]] QString AstrogramPluginSourceLabel(
+		QString channelTitle,
+		int64 postId) {
+	channelTitle = channelTitle.trimmed();
+	if (channelTitle.isEmpty()) {
+		channelTitle = RuEn(
+			"Astrogram Plugins",
+			"Astrogram Plugins");
+	}
+	return RuEn(
+		"Источник: %1 · пост #%2",
+		"Source: %1 · post #%2").arg(channelTitle).arg(postId);
+}
+
+[[nodiscard]] QString AstrogramChannelTitle(
+		PeerData *peer,
+		QString fallbackTitle) {
+	if (peer) {
+		const auto name = peer->name().trimmed();
+		if (!name.isEmpty()) {
+			return name;
+		}
+	}
+	fallbackTitle = fallbackTitle.trimmed();
+	return fallbackTitle.isEmpty()
+		? RuEn("Канал Astrogram", "Astrogram channel")
+		: fallbackTitle;
+}
+
+[[nodiscard]] QString AstrogramChannelUsername(int64 channelId) {
+	switch (channelId) {
+	case -1003814280064LL: return u"astroplugin"_q;
+	case -1003641835839LL: return u"astrogramchannel"_q;
+	}
+	return QString();
+}
+
+[[nodiscard]] ChannelId AstrogramChannelBareId(int64 channelId) {
+	constexpr auto kBotApiChannelOffset = 1000000000000LL;
+	if (channelId <= -kBotApiChannelOffset) {
+		const auto bare = (-channelId) - kBotApiChannelOffset;
+		return (bare > 0) ? ChannelId(uint64(bare)) : ChannelId();
+	}
+	return (channelId > 0) ? ChannelId(uint64(channelId)) : ChannelId();
+}
+
+void PrimeAstrogramChannel(
+		not_null<Window::SessionController*> controller,
+		ChannelData *channel) {
+	if (!channel) {
+		return;
+	}
+	channel->loadUserpic();
+	controller->session().api().requestFullPeer(channel);
+}
+
+void ResolveAstrogramChannelByBareId(
+		not_null<Window::SessionController*> controller,
+		ChannelId bareId,
+		Fn<void(not_null<ChannelData*>)> done) {
+	if (!bareId) {
+		return;
+	}
+	if (const auto loaded = controller->session().data().channelLoaded(bareId)) {
+		done(loaded);
+		return;
+	}
+	const auto weak = base::make_weak(controller);
+	const auto sharedDone = std::make_shared<Fn<void(not_null<ChannelData*>)>>(
+		std::move(done));
+	controller->session().api().request(MTPchannels_GetChannels(
+		MTP_vector<MTPInputChannel>(
+			1,
+			MTP_inputChannel(MTP_long(bareId.bare), MTP_long(0)))
+	)).done([=](const MTPmessages_Chats &result) {
+		const auto controller = weak.get();
+		if (!controller) {
+			return;
+		}
+		result.match([&](const auto &data) {
+			const auto peer = controller->session().data().processChats(
+				data.vchats());
+			if (peer && (peer->id == peerFromChannel(bareId))) {
+				if (const auto channel = peer->asChannel()) {
+					(*sharedDone)(channel);
+				}
+			}
+		});
+	}).send();
+}
+
+void ResolveAstrogramChannel(
+		not_null<Window::SessionController*> controller,
+		int64 channelId,
+		Fn<void(not_null<ChannelData*>)> done) {
+	if (!channelId) {
+		return;
+	}
+	const auto bareId = AstrogramChannelBareId(channelId);
+	if (bareId) {
+		if (const auto loaded = controller->session().data().channelLoaded(
+				bareId)) {
+			done(loaded);
+			return;
+		}
+	}
+	const auto username = AstrogramChannelUsername(channelId).trimmed();
+	if (username.isEmpty()) {
+		if (bareId) {
+			ResolveAstrogramChannelByBareId(
+				controller,
+				bareId,
+				std::move(done));
+		}
+		return;
+	}
+	if (const auto peer = controller->session().data().peerByUsername(username)) {
+		if (const auto channel = peer->asChannel()) {
+			done(channel);
+			return;
+		}
+	}
+	const auto weak = base::make_weak(controller);
+	const auto sharedDone = std::make_shared<Fn<void(not_null<ChannelData*>)>>(
+		std::move(done));
+	using Flag = MTPcontacts_ResolveUsername::Flag;
+	controller->session().api().request(MTPcontacts_ResolveUsername(
+		MTP_flags(Flag()),
+		MTP_string(username),
+		MTP_string(QString())
+	)).done([=](const MTPcontacts_ResolvedPeer &result) {
+		const auto controller = weak.get();
+		if (!controller) {
+			return;
+		}
+		auto resolved = false;
+		result.match([&](const MTPDcontacts_resolvedPeer &data) {
+			controller->session().data().processUsers(data.vusers());
+			controller->session().data().processChats(data.vchats());
+			if (const auto peerId = peerFromMTP(data.vpeer())) {
+				if (const auto channel = controller->session().data().peer(
+						peerId)->asChannel()) {
+					resolved = true;
+					(*sharedDone)(channel);
+				}
+			}
+		});
+		if (!resolved) {
+			if (bareId) {
+				ResolveAstrogramChannelByBareId(
+					controller,
+					bareId,
+					*sharedDone);
+			}
+		}
+	}).fail([=](const MTP::Error &) {
+		if (const auto controller = weak.get(); controller && bareId) {
+			ResolveAstrogramChannelByBareId(
+				controller,
+				bareId,
+				*sharedDone);
+		}
+	}).send();
+}
+
+void OpenAstrogramChannel(
+		not_null<Window::SessionController*> controller,
+		int64 channelId) {
+	if (!channelId) {
+		return;
+	}
+	const auto weak = base::make_weak(controller);
+	ResolveAstrogramChannel(controller, channelId, [=](not_null<ChannelData*> channel) {
+		if (const auto controller = weak.get()) {
+			PrimeAstrogramChannel(controller, channel);
+			controller->showPeer(channel);
+		}
+	});
+}
+
+void InstallAstrogramOnboardingPlugin(
+		not_null<Window::SessionController*> controller,
+		int64 channelId,
+		int64 postId) {
+	if (!channelId || (postId <= 0)) {
+		controller->showToast(RuEn(
+			"Сервер ещё не передал корректный пост с плагином.",
+			"The server has not provided a valid plugin post yet."));
+		return;
+	}
+	const auto weak = base::make_weak(controller);
+	const auto tryInstall = [=](not_null<ChannelData*> channel) {
+		const auto controller = weak.get();
+		if (!controller) {
+			return;
+		}
+		const auto item = controller->session().data().message(
+			channel,
+			MsgId(postId));
+		if (!item) {
+			controller->showToast(RuEn(
+				"Пост с пакетом ещё не загрузился.",
+				"The package post has not finished loading yet."));
+			return;
+		}
+		const auto media = item->media();
+		const auto document = media ? media->document() : nullptr;
+		if (!document || !IsAstrogramPluginPackage(document)) {
+			controller->showToast(RuEn(
+				"В этом посте не найден пакет плагина.",
+				"No plugin package was found in this post."));
+			return;
+		}
+		Data::ResolveDocument(controller, document, item, 0, 0);
+	};
+	ResolveAstrogramChannel(controller, channelId, [=](not_null<ChannelData*> channel) {
+		const auto controller = weak.get();
+		if (!controller) {
+			return;
+		}
+		PrimeAstrogramChannel(controller, channel);
+		if (controller->session().data().message(channel, MsgId(postId))) {
+			tryInstall(channel);
+			return;
+		}
+		controller->session().api().requestMessageData(
+			channel,
+			MsgId(postId),
+			[=] {
+				tryInstall(channel);
+			});
+	});
+}
+
+void ApplyAstrogramOnboardingPreset(Ui::AstrogramOnboardingPreset preset) {
+	auto &settings = Core::App().settings();
+	switch (preset) {
+	case Ui::AstrogramOnboardingPreset::Recommended:
+		settings.setDisableAds(true);
+		settings.setLocalPremium(true);
+		settings.setShowMessageSeconds(true);
+		settings.setShowPollResultsBeforeVoting(true);
+		settings.setSaveDeletedMessages(true);
+		settings.setSaveMessagesHistory(true);
+		break;
+	case Ui::AstrogramOnboardingPreset::Private:
+		settings.setDisableAds(true);
+		settings.setDisableStories(true);
+		settings.setLocalPremium(true);
+		settings.setShowMessageSeconds(true);
+		settings.setShowPollResultsBeforeVoting(true);
+		settings.setGhostMode(true);
+		settings.setGhostHideReadMessages(true);
+		settings.setGhostHideOnlineStatus(true);
+		settings.setGhostHideTypingProgress(true);
+		settings.setSaveDeletedMessages(true);
+		settings.setSaveMessagesHistory(true);
+		settings.setSemiTransparentDeletedMessages(true);
+		break;
+	case Ui::AstrogramOnboardingPreset::Minimal:
+		settings.setDisableAds(true);
+		break;
+	}
+}
+
+void MaybeShowAstrogramOnboarding(
+		not_null<Window::SessionController*> controller) {
+	static auto shown = QSet<quint64>();
+
+	const auto sessionKey = quint64(controller->session().uniqueId());
+	if (shown.contains(sessionKey)
+			|| controller->session().settings().astrogramOnboardingShown()) {
+		return;
+	}
+	if (controller->isLayerShown()) {
+		const auto weak = base::make_weak(controller);
+		QTimer::singleShot(1200, controller->content(), [weak] {
+			if (const auto controller = weak.get()) {
+				MaybeShowAstrogramOnboarding(controller);
+			}
+		});
+		return;
+	}
+	shown.insert(sessionKey);
+
+	const auto weak = base::make_weak(controller);
+	const auto &appConfig = controller->session().appConfig();
+	const auto pluginsChannelId = appConfig.astrogramPluginsChannelId();
+	const auto officialChannelId = appConfig.astrogramOfficialChannelId();
+	struct ResolveState {
+		ChannelData *pluginsChannel = nullptr;
+		ChannelData *officialChannel = nullptr;
+		int pending = 0;
+		bool shown = false;
+	};
+	const auto resolveState = std::make_shared<ResolveState>();
+	const auto show = [=] {
+		const auto controller = weak.get();
+		if (!controller || resolveState->shown) {
+			return;
+		}
+		resolveState->shown = true;
+
+		const auto &appConfig = controller->session().appConfig();
+		auto args = Ui::AstrogramOnboardingArgs();
+		args.controller = controller;
+		args.pluginsChannelPeer = resolveState->pluginsChannel;
+		args.pluginsChannelId = pluginsChannelId;
+		args.pluginsChannelTitle = AstrogramChannelTitle(
+			resolveState->pluginsChannel,
+			u"AstroPlugins"_q);
+		args.pluginsChannelSubtitle = RuEn(
+			"Подтверждённый канал с рекомендованными пакетами Astrogram.",
+			"Verified channel with recommended Astrogram packages.");
+		args.officialChannelPeer = resolveState->officialChannel;
+		args.officialChannelId = officialChannelId;
+		args.officialChannelTitle = AstrogramChannelTitle(
+			resolveState->officialChannel,
+			u"Astrogram"_q);
+		args.officialChannelSubtitle = RuEn(
+			"Получай новости о сборках, клиентах и новых функциях Astrogram.",
+			"Get updates about builds, client changes and new Astrogram features.");
+		args.resolvePluginsChannel = [weak, channelId = pluginsChannelId](
+				std::function<void(PeerData*)> done) {
+			if (const auto controller = weak.get()) {
+				ResolveAstrogramChannel(
+					controller,
+					channelId,
+					[controller, done = std::move(done)](
+							not_null<ChannelData*> channel) mutable {
+						PrimeAstrogramChannel(controller, channel);
+						if (done) {
+							done(channel);
+						}
+					});
+			}
+		};
+		args.resolveOfficialChannel = [weak, channelId = officialChannelId](
+				std::function<void(PeerData*)> done) {
+			if (const auto controller = weak.get()) {
+				ResolveAstrogramChannel(
+					controller,
+					channelId,
+					[controller, done = std::move(done)](
+							not_null<ChannelData*> channel) mutable {
+						PrimeAstrogramChannel(controller, channel);
+						if (done) {
+							done(channel);
+						}
+					});
+			}
+		};
+		args.applyPreset = [](Ui::AstrogramOnboardingPreset preset) {
+			ApplyAstrogramOnboardingPreset(preset);
+		};
+		args.subscribePluginsChannel = [weak, channelId = pluginsChannelId] {
+			if (const auto controller = weak.get()) {
+				OpenAstrogramChannel(controller, channelId);
+			}
+		};
+		args.openAllPlugins = [weak] {
+			if (const auto controller = weak.get()) {
+				controller->showSettings(Settings::Plugins::Id());
+			}
+		};
+		args.openOfficialChannel = [weak, channelId = officialChannelId] {
+			if (const auto controller = weak.get()) {
+				OpenAstrogramChannel(controller, channelId);
+			}
+		};
+		args.openDonate = [] {
+			File::OpenUrl(u"tg://support"_q);
+		};
+		args.finished = [weak] {
+			if (const auto controller = weak.get()) {
+				controller->session().settings().setAstrogramOnboardingShown(true);
+				controller->session().saveSettingsDelayed();
+			}
+		};
+
+		const auto postIds = appConfig.astrogramOnboardingPluginPostIds();
+		const auto titleOverrides = appConfig.astrogramOnboardingPluginTitles();
+		const auto descriptionOverrides
+			= appConfig.astrogramOnboardingPluginDescriptions();
+		const auto pluginsChannel = resolveState->pluginsChannel;
+		args.plugins.reserve(std::min<size_t>(postIds.size(), 3));
+		for (auto i = size_t(0), count = std::min<size_t>(postIds.size(), 3); i != count; ++i) {
+			const auto item = pluginsChannel
+				? controller->session().data().message(
+					pluginsChannel,
+					MsgId(postIds[i]))
+				: nullptr;
+			const auto media = item ? item->media() : nullptr;
+			const auto document = media ? media->document() : nullptr;
+			auto plugin = Ui::AstrogramOnboardingPlugin();
+			plugin.postId = postIds[i];
+			plugin.title = document
+				? AstrogramPluginTitle(
+					document,
+					(i < titleOverrides.size()) ? titleOverrides[i] : QString())
+				: (((i < titleOverrides.size())
+						&& !titleOverrides[i].trimmed().isEmpty())
+					? titleOverrides[i].trimmed()
+					: RuEn("Плагин #%1", "Plugin #%1").arg(postIds[i]));
+			plugin.description = item
+				? AstrogramPluginDescription(
+					item,
+					(i < descriptionOverrides.size())
+						? descriptionOverrides[i]
+						: QString(),
+					postIds[i])
+				: (((i < descriptionOverrides.size())
+						&& !descriptionOverrides[i].trimmed().isEmpty())
+					? descriptionOverrides[i].trimmed()
+					: RuEn(
+						"Рекомендованный пакет Astrogram. Установка откроет нативное окно просмотра и подтверждения.",
+						"Recommended Astrogram package. Installing opens the native preview and confirmation flow."));
+			plugin.sourceLabel = AstrogramPluginSourceLabel(
+				args.pluginsChannelTitle,
+				postIds[i]);
+			plugin.install = [weak, channelId = pluginsChannelId, postId = postIds[i]] {
+				if (const auto controller = weak.get()) {
+					InstallAstrogramOnboardingPlugin(controller, channelId, postId);
+				}
+			};
+			args.plugins.push_back(std::move(plugin));
+		}
+		Ui::ShowAstrogramOnboardingBox(std::move(args));
+	};
+	const auto resolveDone = [=] {
+		if (resolveState->pending > 0) {
+			--resolveState->pending;
+		}
+		if (resolveState->pending == 0) {
+			show();
+		}
+	};
+	const auto resolveChannel = [=](int64 channelId, auto assign) {
+		if (!channelId) {
+			return;
+		}
+		++resolveState->pending;
+		const auto bareId = AstrogramChannelBareId(channelId);
+		if (bareId) {
+			if (const auto loaded = controller->session().data().channelLoaded(
+					bareId)) {
+				assign(loaded);
+				PrimeAstrogramChannel(controller, loaded);
+				resolveDone();
+				return;
+			}
+		}
+		ResolveAstrogramChannel(controller, channelId, [=](not_null<ChannelData*> channel) {
+			assign(channel);
+			PrimeAstrogramChannel(controller, channel);
+			resolveDone();
+		});
+	};
+	resolveChannel(pluginsChannelId, [=](ChannelData *channel) {
+		resolveState->pluginsChannel = channel;
+	});
+	resolveChannel(officialChannelId, [=](ChannelData *channel) {
+		resolveState->officialChannel = channel;
+	});
+	if (!resolveState->pending) {
+		show();
+		return;
+	}
+	QTimer::singleShot(3500, controller->content(), [weak, show] {
+		if (weak.get()) {
+			show();
+		}
+	});
+}
+
+void ShowAstrogramUpdateNotice(
+		not_null<Window::SessionController*> controller,
+		const Core::UpdateReleaseInfo &info) {
+	const auto ready = (Core::UpdateChecker().state()
+		== Core::UpdateChecker::State::Ready);
+	const auto summary = [&] {
+		auto text = info.versionText.isEmpty()
+			? Core::FormatVersionWithBuild(info.version)
+			: info.versionText;
+		text += u" · "_q + UpdateChannelText(info.channel);
+		if (!info.title.isEmpty() && info.title != info.versionText) {
+			text += u'\n' + info.title;
+		}
+		return text;
+	}();
+	const auto changelog = !info.changelog.trimmed().isEmpty()
+		? info.changelog.trimmed()
+		: RuEn(
+			"GitHub release body для этой сборки пустой или ещё недоступен.",
+			"GitHub release body for this build is empty or unavailable.");
+
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(RuEn(
+			"Доступно обновление Astrogram",
+			"Astrogram update available")));
+		box->setWidth(st::boxWideWidth);
+		const auto content = box->verticalLayout();
+		const auto addText = [&](const QString &text) {
+			const auto label = content->add(
+				object_ptr<Ui::FlatLabel>(
+					content,
+					rpl::single(text),
+					st::boxLabel),
+				st::boxRowPadding);
+			label->setSelectable(true);
+			label->setBreakEverywhere(true);
+		};
+		addText(summary);
+		addText(changelog);
+
+		box->addButton(rpl::single(
+			ready
+				? RuEn("Установить и перезапустить", "Install and restart")
+				: RuEn(
+					"Открыть настройки обновлений",
+					"Open update settings")), [=] {
+			box->closeBox();
+			if (ready) {
+				Core::checkReadyUpdate();
+				Core::Restart();
+			} else {
+				controller->showSettings(Settings::Advanced::Id());
+			}
+		});
+		if (!info.url.isEmpty()) {
+			box->addButton(rpl::single(RuEn(
+				"Открыть релиз на GitHub",
+				"Open release on GitHub")), [=] {
+				box->closeBox();
+				File::OpenUrl(info.url);
+			});
+		}
+		box->addButton(rpl::single(tr::lng_cancel(tr::now)), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
+void MaybeShowAstrogramUpdateNotice(
+		not_null<Window::SessionController*> controller) {
+	static auto shown = QSet<QString>();
+
+	const auto checker = Core::UpdateChecker();
+	const auto info = checker.releaseInfo();
+	if (!info.available || info.changelogLoading) {
+		return;
+	}
+	const auto key = AstrogramUpdateNoticeKey(info);
+	if (key.isEmpty() || shown.contains(key)) {
+		return;
+	}
+	shown.insert(key);
+	ShowAstrogramUpdateNotice(controller, info);
 }
 
 } // namespace
@@ -422,6 +1068,15 @@ MainWidget::MainWidget(
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
 		checker.start();
+		const auto maybeShowUpdateNotice = [=] {
+			MaybeShowAstrogramUpdateNotice(_controller);
+		};
+		checker.releaseInfoChanged() | rpl::on_next(
+			maybeShowUpdateNotice,
+			lifetime());
+		checker.ready() | rpl::on_next(
+			maybeShowUpdateNotice,
+			lifetime());
 	}
 
 	cSetOtherOnline(0);
@@ -2176,6 +2831,7 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 
 void MainWidget::windowShown() {
 	_history->windowShown();
+	MaybeShowAstrogramOnboarding(_controller);
 }
 
 void MainWidget::dialogsToUp() {

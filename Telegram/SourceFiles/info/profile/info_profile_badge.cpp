@@ -39,6 +39,99 @@ namespace {
 		|| (content.badge == BadgeType::Verified && content.emojiStatusId);
 }
 
+[[nodiscard]] bool JsonTruthy(const QJsonValue &value) {
+	if (value.isBool()) {
+		return value.toBool();
+	} else if (value.isDouble()) {
+		return (value.toInt() != 0);
+	} else if (value.isString()) {
+		const auto lowered = value.toString().trimmed().toLower();
+		return (lowered == u"1"_q
+			|| lowered == u"true"_q
+			|| lowered == u"yes"_q
+			|| lowered == u"on"_q);
+	}
+	return false;
+}
+
+[[nodiscard]] uint64 JsonToUint64(const QJsonValue &value) {
+	if (value.isDouble()) {
+		const auto asInt = value.toVariant().toULongLong();
+		return asInt;
+	} else if (value.isString()) {
+		auto ok = false;
+		const auto parsed = value.toString().trimmed().toULongLong(&ok);
+		return ok ? parsed : 0;
+	}
+	return 0;
+}
+
+constexpr auto kServerBadgeSuccessTtl = crl::time(5 * 60 * 1000);
+constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
+
+[[nodiscard]] uint64 ServerBadgeEmojiStatusId(const QJsonObject &object) {
+	for (const auto &key : {
+		u"emoji_status_id"_q,
+		u"emojiStatusId"_q,
+		u"document_id"_q,
+		u"documentId"_q,
+	}) {
+		if (const auto value = object.value(key); !value.isUndefined()) {
+			return JsonToUint64(value);
+		}
+	}
+	return 0;
+}
+
+[[nodiscard]] std::optional<std::optional<EmojiStatusId>> ParseServerBadgeObject(
+		const QJsonObject &object) {
+	const auto hasEnabledField = object.contains(u"badge"_q)
+		|| object.contains(u"subscriber"_q)
+		|| object.contains(u"enabled"_q);
+	const auto hasStatusIdField = object.contains(u"emoji_status_id"_q)
+		|| object.contains(u"emojiStatusId"_q)
+		|| object.contains(u"document_id"_q)
+		|| object.contains(u"documentId"_q);
+	if (!hasEnabledField && !hasStatusIdField) {
+		return std::nullopt;
+	}
+	const auto statusId = ServerBadgeEmojiStatusId(object);
+	const auto enabled = hasEnabledField
+		? (JsonTruthy(object.value(u"badge"_q))
+			|| JsonTruthy(object.value(u"subscriber"_q))
+			|| JsonTruthy(object.value(u"enabled"_q))
+			|| (statusId != 0))
+		: (statusId != 0);
+	if (!enabled) {
+		return std::optional<std::optional<EmojiStatusId>>(
+			std::optional<EmojiStatusId>());
+	}
+	auto result = EmojiStatusId();
+	result.documentId = statusId;
+	return std::optional<std::optional<EmojiStatusId>>(result);
+}
+
+[[nodiscard]] std::optional<std::optional<EmojiStatusId>> ParseServerBadgeResponse(
+		const QJsonObject &root) {
+	if (const auto parsed = ParseServerBadgeObject(root)) {
+		return parsed;
+	}
+	for (const auto &key : {
+		u"data"_q,
+		u"result"_q,
+		u"payload"_q,
+		u"response"_q,
+	}) {
+		const auto value = root.value(key);
+		if (value.isObject()) {
+			if (const auto parsed = ParseServerBadgeObject(value.toObject())) {
+				return parsed;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
 class ServerSubscriberBadge final {
 public:
 	[[nodiscard]] static ServerSubscriberBadge &Instance() {
@@ -47,8 +140,8 @@ public:
 	}
 
 	[[nodiscard]] rpl::producer<std::optional<EmojiStatusId>> badgeValue(
-			not_null<UserData*> user) {
-		const auto key = uint64(user->id.value);
+			not_null<PeerData*> peer) {
+		const auto key = uint64(peer->id.value);
 		auto i = _entries.find(key);
 		if (i == end(_entries)) {
 			_entries.emplace(key, std::make_unique<Entry>());
@@ -56,7 +149,7 @@ public:
 		}
 		Expects(i != end(_entries));
 		const auto entry = i->second.get();
-		requestIfNeeded(key, entry);
+		requestIfNeeded(peer->id, entry);
 		return rpl::single(entry->emojiStatusId) | rpl::then(
 			entry->updated.events() | rpl::map([=] {
 				return entry->emojiStatusId;
@@ -71,30 +164,37 @@ private:
 		rpl::event_stream<> updated;
 	};
 
-	[[nodiscard]] static QUrl BuildRequestUrl(uint64 userId) {
+	[[nodiscard]] static QUrl BuildRequestUrl(PeerId peerId) {
 		// Server-side subscriber badge endpoint.
 		// Expected JSON:
 		// { "badge": true, "emoji_status_id": 1234567890 }
 		// or { "subscriber": true, "emoji_status_id": 1234567890 }
 		auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/subscriber-badge"_q);
 		auto query = QUrlQuery();
-		query.addQueryItem(u"user_id"_q, QString::number(userId));
+		query.addQueryItem(
+			u"peer_id"_q,
+			QString::number(qulonglong(peerId.value)));
+		if (peerId.is<UserId>()) {
+			query.addQueryItem(
+				u"user_id"_q,
+				QString::number(qulonglong(peerId.to<UserId>().bare)));
+		}
 		url.setQuery(query);
 		return url;
 	}
 
-	void requestIfNeeded(uint64 userId, Entry *entry) {
+	void requestIfNeeded(PeerId peerId, Entry *entry) {
 		Expects(entry != nullptr);
 		if (entry->inFlight || entry->nextRequestAt > crl::now()) {
 			return;
 		}
 		entry->inFlight = true;
-		entry->nextRequestAt = crl::now() + 5 * 60 * 1000; // 5 min TTL.
+		const auto peerKey = uint64(peerId.value);
 		Logs::writeClient(QString::fromLatin1(
-			"[badge] request started: user=%1")
-			.arg(userId));
+			"[badge] request started: peer=%1")
+			.arg(QString::number(qulonglong(peerId.value))));
 
-		QNetworkRequest request(BuildRequestUrl(userId));
+		QNetworkRequest request(BuildRequestUrl(peerId));
 		request.setAttribute(
 			QNetworkRequest::RedirectPolicyAttribute,
 			QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -104,7 +204,7 @@ private:
 			&QNetworkReply::finished,
 			reply,
 			[=] {
-				auto i = _entries.find(userId);
+				auto i = _entries.find(peerKey);
 				if (i == end(_entries)) {
 					reply->deleteLater();
 					return;
@@ -112,34 +212,37 @@ private:
 				auto &stored = i->second;
 				stored->inFlight = false;
 
-				auto next = std::optional<EmojiStatusId>();
+				auto next = stored->emojiStatusId;
+				auto resolved = false;
+				auto nextRequestAt = crl::now() + kServerBadgeRetryTtl;
+				const auto statusCode = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute).toInt();
 				if (reply->error() == QNetworkReply::NoError) {
 					const auto parsed = QJsonDocument::fromJson(reply->readAll());
 					if (parsed.isObject()) {
-						const auto object = parsed.object();
-						const auto enabled = object.value(u"badge"_q).toBool()
-							|| object.value(u"subscriber"_q).toBool()
-							|| object.value(u"enabled"_q).toBool();
-						if (enabled) {
-							EmojiStatusId id;
-							id.documentId = object.value(u"emoji_status_id"_q)
-								.toVariant()
-								.toULongLong();
-							next = id;
+						if (const auto parsedBadge = ParseServerBadgeResponse(
+								parsed.object())) {
+							next = *parsedBadge;
+							resolved = true;
+							nextRequestAt = crl::now() + kServerBadgeSuccessTtl;
 						}
 					}
 					Logs::writeClient(QString::fromLatin1(
-						"[badge] request finished: user=%1 enabled=%2 emojiStatusId=%3")
-						.arg(userId)
+						"[badge] request finished: peer=%1 http=%2 resolved=%3 enabled=%4 emojiStatusId=%5")
+						.arg(QString::number(qulonglong(peerId.value)))
+						.arg(statusCode)
+						.arg(resolved ? u"true"_q : u"false"_q)
 						.arg(next.has_value() ? u"true"_q : u"false"_q)
 						.arg(next ? QString::number(next->documentId) : QStringLiteral("0")));
 				} else {
 					Logs::writeClient(QString::fromLatin1(
-						"[badge] request failed: user=%1 reason=%2")
-						.arg(userId)
+						"[badge] request failed: peer=%1 http=%2 reason=%3")
+						.arg(QString::number(qulonglong(peerId.value)))
+						.arg(statusCode)
 						.arg(reply->errorString()));
 				}
-				if (stored->emojiStatusId != next) {
+				stored->nextRequestAt = nextRequestAt;
+				if (resolved && stored->emojiStatusId != next) {
 					stored->emojiStatusId = next;
 					stored->updated.fire({});
 				}
@@ -374,51 +477,32 @@ Data::CustomEmojiSizeTag Badge::sizeTag() const {
 
 rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	const auto statusOnlyForPremium = peer->isUser();
-	const auto user = peer->asUser();
-	if (user) {
-		return rpl::combine(
-			BadgeValue(peer),
-			EmojiStatusIdValue(peer),
-			ServerSubscriberBadge::Instance().badgeValue(user)
-		) | rpl::map([=](
-				BadgeType badge,
-				EmojiStatusId emojiStatusId,
-				std::optional<EmojiStatusId> serverBadgeStatus) {
-			if (emojiStatusId.collectible) {
-				return Badge::Content{ BadgeType::Premium, emojiStatusId };
-			}
-			if (badge == BadgeType::Verified) {
-				badge = BadgeType::None;
-			}
-			if (statusOnlyForPremium && badge != BadgeType::Premium) {
-				emojiStatusId = EmojiStatusId();
-			} else if (emojiStatusId && badge == BadgeType::None) {
-				badge = BadgeType::Premium;
-			}
-			if (serverBadgeStatus.has_value()) {
-				// Server-side badge source of truth.
-				badge = BadgeType::Premium;
-				if (serverBadgeStatus->documentId) {
-					emojiStatusId = *serverBadgeStatus;
-				}
-			}
-			return Badge::Content{ badge, emojiStatusId };
-		});
-	}
 	return rpl::combine(
 		BadgeValue(peer),
-		EmojiStatusIdValue(peer)
-	) | rpl::map([=](BadgeType badge, EmojiStatusId emojiStatusId) {
+		EmojiStatusIdValue(peer),
+		ServerSubscriberBadge::Instance().badgeValue(peer)
+	) | rpl::map([=](
+			BadgeType badge,
+			EmojiStatusId emojiStatusId,
+			std::optional<EmojiStatusId> serverBadgeStatus) {
 		if (emojiStatusId.collectible) {
 			return Badge::Content{ BadgeType::Premium, emojiStatusId };
 		}
 		if (badge == BadgeType::Verified) {
 			badge = BadgeType::None;
 		}
+		if (emojiStatusId && badge == BadgeType::None) {
+			badge = BadgeType::Premium;
+		}
+		if (serverBadgeStatus.has_value()) {
+			// Server-side badge source of truth.
+			badge = BadgeType::Premium;
+			if (serverBadgeStatus->documentId) {
+				emojiStatusId = *serverBadgeStatus;
+			}
+		}
 		if (statusOnlyForPremium && badge != BadgeType::Premium) {
 			emojiStatusId = EmojiStatusId();
-		} else if (emojiStatusId && badge == BadgeType::None) {
-			badge = BadgeType::Premium;
 		}
 		return Badge::Content{ badge, emojiStatusId };
 	});

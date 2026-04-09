@@ -343,6 +343,19 @@ public:
 		_showMessageSeconds = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool showPollResultsBeforeVoting() const {
+		return _showPollResultsBeforeVoting.current();
+	}
+	[[nodiscard]] rpl::producer<bool> showPollResultsBeforeVotingValue() const {
+		return _showPollResultsBeforeVoting.value();
+	}
+	void setShowPollResultsBeforeVoting(bool value) {
+		if (_showPollResultsBeforeVoting.current() == value) {
+			return;
+		}
+		_showPollResultsBeforeVoting = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool localOnlyDrafts() const {
 		return _localOnlyDrafts.current();
 	}
@@ -1287,6 +1300,7 @@ private:
 	rpl::variable<bool> _disableStories = false;
 	rpl::variable<bool> _disableOpenLinkWarning = false;
 	rpl::variable<bool> _showMessageSeconds = false;
+	rpl::variable<bool> _showPollResultsBeforeVoting = false;
 	rpl::variable<bool> _localOnlyDrafts = false;
 	rpl::variable<bool> _collapseSimilarChannels = true;
 	rpl::variable<bool> _hideSimilarChannels = false;

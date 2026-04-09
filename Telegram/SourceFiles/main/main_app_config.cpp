@@ -256,6 +256,44 @@ QString AppConfig::ageVerifyBotUsername() const {
 	return get<QString>(u"verify_age_bot_username"_q, QString());
 }
 
+int64 AppConfig::astrogramPluginsChannelId() const {
+	return get<int64>(u"astrogram_onboarding_plugins_channel_id"_q, -1003814280064LL);
+}
+
+int64 AppConfig::astrogramOfficialChannelId() const {
+	return get<int64>(u"astrogram_onboarding_official_channel_id"_q, -1003641835839LL);
+}
+
+std::vector<int64> AppConfig::astrogramOnboardingPluginPostIds() const {
+	return get<std::vector<int64>>(
+		u"astrogram_onboarding_plugin_post_ids"_q,
+		std::vector<int64>());
+}
+
+std::vector<QString> AppConfig::astrogramOnboardingPluginTitles() const {
+	return get<std::vector<QString>>(
+		u"astrogram_onboarding_plugin_titles"_q,
+		std::vector<QString>());
+}
+
+std::vector<QString> AppConfig::astrogramOnboardingPluginDescriptions() const {
+	return get<std::vector<QString>>(
+		u"astrogram_onboarding_plugin_descriptions"_q,
+		std::vector<QString>());
+}
+
+std::vector<int64> AppConfig::astrogramTrustedPluginChannelIds() const {
+	return get<std::vector<int64>>(
+		u"astrogram_trusted_plugin_channel_ids"_q,
+		std::vector<int64>{ astrogramPluginsChannelId() });
+}
+
+std::vector<QString> AppConfig::astrogramTrustedPluginRecords() const {
+	return get<std::vector<QString>>(
+		u"astrogram_trusted_plugin_records"_q,
+		std::vector<QString>());
+}
+
 int AppConfig::storiesAlbumsLimit() const {
 	return get<int>(u"stories_albums_limit"_q, 100);
 }

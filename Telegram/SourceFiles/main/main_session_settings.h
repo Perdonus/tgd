@@ -176,6 +176,13 @@ public:
 	void setSetupEmailState(Data::SetupEmailState state);
 	[[nodiscard]] Data::SetupEmailState setupEmailState() const;
 
+	void setAstrogramOnboardingShown(bool shown) {
+		_astrogramOnboardingShown = shown;
+	}
+	[[nodiscard]] bool astrogramOnboardingShown() const {
+		return _astrogramOnboardingShown;
+	}
+
 	void setModerateCommonGroups(std::vector<PeerId> groups) {
 		_moderateCommonGroups = std::move(groups);
 	}
@@ -228,6 +235,7 @@ private:
 	std::vector<Data::UnreviewedAuth> _unreviewed;
 
 	Data::SetupEmailState _setupEmailState;
+	bool _astrogramOnboardingShown = false;
 
 	std::vector<PeerId> _moderateCommonGroups;
 
