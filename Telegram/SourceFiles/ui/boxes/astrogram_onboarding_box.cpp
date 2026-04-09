@@ -57,7 +57,8 @@ enum class Step {
 	PluginsInfo = 2,
 	PluginsInstall = 3,
 	ShellMode = 4,
-	Finish = 5,
+	ExperimentalTips = 5,
+	Finish = 6,
 };
 
 [[nodiscard]] QString RuEn(const char *ru, const char *en) {
@@ -96,6 +97,25 @@ struct BadgePalette {
 	QColor fill;
 	QColor border;
 	QColor fg;
+};
+
+struct SurfacePalette {
+	QColor top;
+	QColor bottom;
+	QColor border;
+	QColor accent;
+	QColor title;
+	QColor body;
+	QColor footer;
+};
+
+struct InfoCardDescriptor {
+	QString eyebrow;
+	QString title;
+	QString description;
+	QString footer;
+	const style::icon *icon = nullptr;
+	OnboardingBadgeTone tone = OnboardingBadgeTone::Trusted;
 };
 
 void AppendInlinePart(QString &base, QString part) {
@@ -146,6 +166,76 @@ void AppendInlinePart(QString &base, QString part) {
 		};
 	}
 	Unexpected("Unknown onboarding badge tone.");
+}
+
+[[nodiscard]] SurfacePalette SurfaceColors(OnboardingBadgeTone tone) {
+	switch (tone) {
+	case OnboardingBadgeTone::Trusted:
+		return {
+			.top = QColor(0xec, 0xf6, 0xff),
+			.bottom = QColor(0xe2, 0xf1, 0xff),
+			.border = QColor(0x9f, 0xd1, 0xff),
+			.accent = QColor(0x2e, 0xa4, 0xff),
+			.title = QColor(0x1a, 0x2c, 0x3f),
+			.body = QColor(0x4c, 0x61, 0x75),
+			.footer = QColor(0x1d, 0x7f, 0xff),
+		};
+	case OnboardingBadgeTone::Official:
+		return {
+			.top = QColor(0xeb, 0xfb, 0xf1),
+			.bottom = QColor(0xe0, 0xf7, 0xe9),
+			.border = QColor(0x96, 0xe1, 0xbd),
+			.accent = QColor(0x27, 0xc9, 0x83),
+			.title = QColor(0x1f, 0x35, 0x2b),
+			.body = QColor(0x4f, 0x67, 0x5a),
+			.footer = QColor(0x1e, 0xa8, 0x6b),
+		};
+	case OnboardingBadgeTone::Pending:
+		return {
+			.top = QColor(0xff, 0xf8, 0xe3),
+			.bottom = QColor(0xff, 0xef, 0xc1),
+			.border = QColor(0xf0, 0xd1, 0x73),
+			.accent = QColor(0xe6, 0xb8, 0x2f),
+			.title = QColor(0x3c, 0x33, 0x18),
+			.body = QColor(0x6f, 0x60, 0x2e),
+			.footer = QColor(0xb7, 0x82, 0x00),
+		};
+	case OnboardingBadgeTone::Warning:
+		return {
+			.top = QColor(0xff, 0xee, 0xee),
+			.bottom = QColor(0xff, 0xe1, 0xe1),
+			.border = QColor(0xff, 0xba, 0xba),
+			.accent = QColor(0xeb, 0x57, 0x57),
+			.title = QColor(0x3d, 0x1f, 0x1f),
+			.body = QColor(0x7d, 0x4a, 0x4a),
+			.footer = QColor(0xcf, 0x45, 0x45),
+		};
+	}
+	Unexpected("Unknown onboarding surface tone.");
+}
+
+[[nodiscard]] int StepIndex(Step step) {
+	switch (step) {
+	case Step::Welcome: return 1;
+	case Step::Presets: return 2;
+	case Step::PluginsInfo: return 3;
+	case Step::PluginsInstall: return 4;
+	case Step::ShellMode: return 5;
+	case Step::ExperimentalTips: return 6;
+	case Step::Finish: return 7;
+	}
+	Unexpected("Unknown onboarding step.");
+}
+
+[[nodiscard]] QString StepBadgeText(Step step) {
+	constexpr auto kTotalSteps = 7;
+	return RuEn("Шаг %1 из %2", "Step %1 of %2").arg(StepIndex(step)).arg(kTotalSteps);
+}
+
+[[nodiscard]] OnboardingBadgeTone StepBadgeTone(Step step) {
+	return (step == Step::Finish)
+		? OnboardingBadgeTone::Official
+		: OnboardingBadgeTone::Pending;
 }
 
 [[nodiscard]] QString AstrogramKnownChannelUsername(qint64 channelId) {
@@ -519,6 +609,259 @@ void AddHeroCover(
 	}, cover->lifetime());
 }
 
+not_null<Ui::RpWidget*> AddInfoCard(
+		not_null<Ui::VerticalLayout*> container,
+		InfoCardDescriptor descriptor,
+		style::margins margins = style::margins(12, 0, 12, 0)) {
+	const auto card = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		margins,
+		style::al_top);
+	const auto palette = SurfaceColors(descriptor.tone);
+
+	struct State {
+		Ui::Text::String eyebrow;
+		Ui::Text::String title;
+		Ui::Text::String description;
+		Ui::Text::String footer;
+		int height = 0;
+	};
+	const auto state = card->lifetime().make_state<State>();
+	state->eyebrow.setText(st::defaultTextStyle, descriptor.eyebrow.trimmed());
+	state->title.setText(st::semiboldTextStyle, descriptor.title.trimmed());
+	state->description.setText(st::defaultTextStyle, descriptor.description.trimmed());
+	state->footer.setText(st::semiboldTextStyle, descriptor.footer.trimmed());
+
+	const auto relayout = [=](int width) {
+		const auto cardWidth = std::max(width, 200);
+		const auto contentLeft = descriptor.icon ? 72 : 18;
+		const auto contentWidth = std::max(80, cardWidth - contentLeft - 18);
+		auto top = 18;
+		if (!descriptor.eyebrow.trimmed().isEmpty()) {
+			top += state->eyebrow.countHeight(contentWidth);
+			top += 5;
+		}
+		top += state->title.countHeight(contentWidth);
+		if (!descriptor.description.trimmed().isEmpty()) {
+			top += 8;
+			top += state->description.countHeight(contentWidth);
+		}
+		if (!descriptor.footer.trimmed().isEmpty()) {
+			top += 10;
+			top += state->footer.countHeight(contentWidth);
+		}
+		top += 18;
+		state->height = std::max(top, descriptor.icon ? 78 : top);
+		card->resize(width, state->height);
+		card->update();
+	};
+	card->widthValue() | rpl::on_next(relayout, card->lifetime());
+	relayout(std::max(card->width(), container->width() - 24));
+
+	card->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(card);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto width = card->width();
+		const auto height = card->height();
+		const auto outer = QRectF(0.5, 0.5, width - 1., height - 1.);
+		auto gradient = QLinearGradient(QPointF(0., 0.), QPointF(width, height));
+		gradient.setColorAt(0., palette.top);
+		gradient.setColorAt(1., palette.bottom);
+		p.setPen(QPen(palette.border, 1.));
+		p.setBrush(gradient);
+		p.drawRoundedRect(outer, 22., 22.);
+		p.setPen(Qt::NoPen);
+		p.setBrush(QColor(palette.accent.red(), palette.accent.green(), palette.accent.blue(), 32));
+		p.drawEllipse(QRectF(width - 82., 14., 64., 64.));
+		if (descriptor.icon) {
+			const auto bubble = QRect(18, 18, 42, 42);
+			p.setBrush(QColor(255, 255, 255, 165));
+			p.drawEllipse(bubble);
+			descriptor.icon->paintInCenter(p, bubble.adjusted(9, 9, -9, -9));
+		}
+
+		const auto contentLeft = descriptor.icon ? 72 : 18;
+		const auto contentWidth = std::max(80, width - contentLeft - 18);
+		auto top = 18;
+		if (!descriptor.eyebrow.trimmed().isEmpty()) {
+			p.setPen(palette.accent);
+			state->eyebrow.drawLeft(p, contentLeft, top, contentWidth, width);
+			top += state->eyebrow.countHeight(contentWidth);
+			top += 5;
+		}
+		p.setPen(palette.title);
+		state->title.drawLeft(p, contentLeft, top, contentWidth, width);
+		top += state->title.countHeight(contentWidth);
+		if (!descriptor.description.trimmed().isEmpty()) {
+			top += 8;
+			p.setPen(palette.body);
+			state->description.drawLeft(p, contentLeft, top, contentWidth, width);
+			top += state->description.countHeight(contentWidth);
+		}
+		if (!descriptor.footer.trimmed().isEmpty()) {
+			top += 10;
+			p.setPen(palette.footer);
+			state->footer.drawLeft(p, contentLeft, top, contentWidth, width);
+		}
+	}, card->lifetime());
+
+	return card;
+}
+
+not_null<Ui::AbstractButton*> AddChannelCard(
+		not_null<Ui::VerticalLayout*> container,
+		PeerData *peer,
+		qint64 channelId,
+		QString fallbackTitle,
+		QString subtitle,
+		bool official,
+		std::function<void()> callback,
+		style::margins margins = style::margins(12, 0, 12, 0)) {
+	const auto card = container->add(
+		object_ptr<Ui::AbstractButton>::fromRaw(
+			Ui::CreateSimpleSettingsButton(
+				container,
+				st::defaultRippleAnimation,
+				st::defaultSettingsButton.textBgOver)),
+		margins,
+		style::al_top);
+	card->setClickedCallback(std::move(callback));
+
+	const auto tone = official
+		? OnboardingBadgeTone::Official
+		: ChannelCardBadgeTone(peer, false);
+	const auto palette = SurfaceColors(tone);
+	const auto badgePalette = BadgeColors(tone);
+	const auto userpicSt = card->lifetime().make_state<style::UserpicButton>(
+		st::defaultUserpicButton);
+	userpicSt->photoSize = 58;
+	userpicSt->size = QSize(userpicSt->photoSize, userpicSt->photoSize);
+
+	struct State {
+		Ui::Text::String title;
+		Ui::Text::String meta;
+		Ui::Text::String subtitle;
+		Ui::Text::String footer;
+		QImage fallbackLogo;
+		int height = 0;
+	};
+	const auto state = card->lifetime().make_state<State>();
+	const auto ratio = style::DevicePixelRatio();
+	state->fallbackLogo = AstrogramLogo().scaled(
+		QSize(34, 34) * ratio,
+		Qt::IgnoreAspectRatio,
+		Qt::SmoothTransformation);
+	state->fallbackLogo.setDevicePixelRatio(ratio);
+
+	if (peer) {
+		using Button = Ui::UserpicButton;
+		const auto userpic = Ui::CreateChild<Button>(card, peer, *userpicSt);
+		userpic->move(18, 20);
+		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
+		peer->loadUserpic();
+		if (const auto channel = peer->asChannel();
+			channel && !channel->membersCountKnown()) {
+			peer->session().api().requestFullPeer(channel);
+		}
+	}
+
+	const auto refresh = [=](int width) {
+		const auto cardWidth = std::max(width, 240);
+		auto meta = QString();
+		AppendInlinePart(meta, ChannelHandleText(peer, channelId));
+		if (peer) {
+			AppendInlinePart(meta, PeerAudienceText(peer));
+		}
+		if (meta.isEmpty()) {
+			meta = ChannelMetaText(peer, channelId);
+		}
+		state->title.setText(
+			st::semiboldTextStyle,
+			ComputePeerCardTexts(peer, fallbackTitle, QString()).title);
+		state->meta.setText(st::defaultTextStyle, meta);
+		state->subtitle.setText(
+			st::defaultTextStyle,
+			subtitle.trimmed().isEmpty()
+				? ChannelCardDetailText(peer, channelId, official)
+				: subtitle.trimmed());
+		state->footer.setText(
+			st::semiboldTextStyle,
+			RuEn("Нажми, чтобы открыть канал", "Click to open the channel"));
+		const auto contentLeft = 90;
+		const auto contentWidth = std::max(90, cardWidth - contentLeft - 18);
+		auto top = 18;
+		top += state->title.countHeight(contentWidth);
+		top += 6;
+		top += state->meta.countHeight(contentWidth);
+		top += 8;
+		top += state->subtitle.countHeight(contentWidth);
+		top += 10;
+		top += state->footer.countHeight(contentWidth);
+		top += 18;
+		state->height = std::max(top, 96);
+		card->resize(width, state->height);
+		card->update();
+	};
+	if (peer) {
+		peer->session().changes().peerUpdates(
+			peer,
+			Data::PeerUpdate::Flag::Name
+				| Data::PeerUpdate::Flag::Username
+				| Data::PeerUpdate::Flag::Photo
+				| Data::PeerUpdate::Flag::Members
+				| Data::PeerUpdate::Flag::FullInfo
+		) | rpl::on_next([=](const Data::PeerUpdate &) {
+			refresh(card->width());
+		}, card->lifetime());
+	}
+	card->widthValue() | rpl::on_next(refresh, card->lifetime());
+	refresh(std::max(card->width(), container->width() - 24));
+
+	card->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(card);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto width = card->width();
+		const auto height = card->height();
+		const auto outer = QRectF(0.5, 0.5, width - 1., height - 1.);
+		auto gradient = QLinearGradient(QPointF(0., 0.), QPointF(width, height));
+		gradient.setColorAt(0., palette.top);
+		gradient.setColorAt(1., palette.bottom);
+		p.setPen(QPen(palette.border, 1.));
+		p.setBrush(gradient);
+		p.drawRoundedRect(outer, 24., 24.);
+		p.setPen(Qt::NoPen);
+		p.setBrush(QColor(badgePalette.fill.red(), badgePalette.fill.green(), badgePalette.fill.blue(), 46));
+		p.drawEllipse(QRectF(width - 96., 12., 76., 76.));
+		if (!peer) {
+			const auto userpicRect = QRect(18, 20, 58, 58);
+			p.setBrush(QColor(255, 255, 255, 176));
+			p.drawEllipse(userpicRect);
+			p.drawImage(
+				QRect(userpicRect.x() + 12, userpicRect.y() + 12, 34, 34),
+				state->fallbackLogo);
+		}
+		const auto contentLeft = 90;
+		const auto contentWidth = std::max(90, width - contentLeft - 18);
+		auto top = 18;
+		p.setPen(palette.title);
+		state->title.drawLeft(p, contentLeft, top, contentWidth, width);
+		top += state->title.countHeight(contentWidth);
+		top += 6;
+		p.setPen(badgePalette.fg);
+		state->meta.drawLeft(p, contentLeft, top, contentWidth, width);
+		top += state->meta.countHeight(contentWidth);
+		top += 8;
+		p.setPen(palette.body);
+		state->subtitle.drawLeft(p, contentLeft, top, contentWidth, width);
+		top += state->subtitle.countHeight(contentWidth);
+		top += 10;
+		p.setPen(palette.footer);
+		state->footer.drawLeft(p, contentLeft, top, contentWidth, width);
+	}, card->lifetime());
+
+	return card;
+}
+
 not_null<Ui::RoundButton*> AddPrimaryButton(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
@@ -827,6 +1170,17 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					style::margins(st::boxRowPadding.left(), 6, st::boxRowPadding.right(), 0),
 					style::al_top);
 			};
+			const auto addStepBadge = [&](Step step) {
+				AddBadgePill(
+					container,
+					StepBadgeText(step),
+					StepBadgeTone(step),
+					style::margins(
+						st::boxRowPadding.left(),
+						12,
+						st::boxRowPadding.right(),
+						0));
+			};
 			const auto pluginStatusText = [](const AstrogramOnboardingPlugin &plugin) {
 				if (plugin.invalidServerData) {
 					return RuEn(
@@ -848,7 +1202,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						"Failed to save the Astrogram menu preset."));
 					return;
 				}
-				state->step = Step::Finish;
+				state->step = Step::ExperimentalTips;
 				(*rebuild)();
 			};
 
@@ -858,31 +1212,105 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					RuEn("Добро пожаловать в", "Welcome to"),
 					RuEn(
-						"Astrogram Desktop\nКлиент уже готов к работе, дальше поможем быстро настроить самое важное.",
-						"Astrogram Desktop\nThe client is ready to use, next we will quickly tune the important parts."),
+						"Astrogram Desktop\nЗа минуту настроим стартовый профиль, плагины и боковое меню без резкого слома привычного интерфейса.",
+						"Astrogram Desktop\nIn a minute we'll set up your starter profile, plugins and side menu without abruptly breaking the familiar interface."),
 					QColor(0x08, 0x15, 0x11),
 					QColor(0x10, 0x2b, 0x20),
 					QColor(0x2d, 0xd1, 0x85),
 					QColor(0xa1, 0xff, 0xcc));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip);
+				addStepBadge(Step::Welcome);
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Astrogram settings", "Astrogram settings"),
+						.title = RuEn(
+							"Главная точка входа Astrogram",
+							"Your main Astrogram home"),
+						.description = RuEn(
+							"Здесь живут anti-recall, ghost mode, local premium, плагины и будущие клиентские функции. Гайд просто проведёт к ним быстрее.",
+							"This is where anti-recall, ghost mode, local premium, plugins and future client-only features live. The guide just gets you there faster."),
+						.footer = RuEn("Дом Astrogram-функций", "Home of Astrogram features"),
+						.icon = &st::menuIconSettings,
+						.tone = OnboardingBadgeTone::Official,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Быстрый старт", "Fast start"),
+						.title = RuEn(
+							"Сначала пресет, потом плагины и меню",
+							"Preset first, then plugins and menu"),
+						.description = RuEn(
+							"Гайд идёт по порядку: подберёт базовый профиль, покажет доверенный AstroPlugins и только потом предложит shell-настройку.",
+							"The guide moves in order: it picks your baseline profile, shows trusted AstroPlugins and only then suggests shell tuning."),
+						.footer = RuEn("Нормальный дефолт без лишней агрессии", "A sane default without aggressive changes"),
+						.icon = &st::menuIconCustomize,
+						.tone = OnboardingBadgeTone::Trusted,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Experimental", "Experimental"),
+						.title = RuEn(
+							"Живые editor-ы и shell-режимы никуда не спрятаны",
+							"Live editors and shell modes stay visible"),
+						.description = RuEn(
+							"Вступительный гайд ведёт в реальные поверхности клиента: later можно открыть Experimental и дотюнить side menu уже без скрытых жестов и магии.",
+							"The onboarding guide leads into real client surfaces: later you can open Experimental and fine-tune the side menu without hidden gestures or magic."),
+						.footer = RuEn("Guide only shortens the path", "The guide only shortens the path"),
+						.icon = &st::menuIconExperimental,
+						.tone = OnboardingBadgeTone::Pending,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				AddBadgePill(
+					container,
+					RuEn("anti-recall · ghost mode · local premium", "anti-recall · ghost mode · local premium"),
+					OnboardingBadgeTone::Trusted,
+					style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
+				AddSecondaryNote(
+					container,
+					RuEn(
+						"Ничего из этого не забирает возможность вернуться к более спокойной раскладке позже.",
+						"None of this removes your ability to go back to a calmer setup later."),
+					style::margins(st::boxRowPadding.left(), -2, st::boxRowPadding.right(), 4));
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
 					state->step = Step::Presets;
 					(*rebuild)();
 				});
 			} break;
 			case Step::Presets: {
+				addStepBadge(Step::Presets);
 				addTitle(
 					RuEn("Выбери стартовый пресет", "Choose a startup preset"),
 					RuEn(
-						"Это можно поменять позже в настройках Astrogram. Если не хочешь выбирать сейчас, просто пропусти шаг.",
-						"You can change this later in Astrogram settings. If you don't want to decide now, just skip this step."));
+						"Это меняет только стартовые prefs клиента. Позже всё можно спокойно дотюнить в настройках Astrogram.",
+						"This only changes the client's starter prefs. You can calmly fine-tune everything later in Astrogram settings."));
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Что меняется", "What changes"),
+						.title = RuEn(
+							"Только стартовые привычки клиента",
+							"Only the client's starter habits"),
+						.description = RuEn(
+							"Пресет не закрывает путь назад: он просто включает полезный набор опций, с которого удобнее стартовать в Astrogram.",
+							"A preset does not close the way back: it just enables a useful option set that makes Astrogram easier to start with."),
+						.footer = RuEn("Любой вариант можно поменять позже", "Any choice can be changed later"),
+						.icon = &st::menuIconSettings,
+						.tone = OnboardingBadgeTone::Pending,
+					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddChoiceButton(
 					container,
 					RuEn("Рекомендованный", "Recommended"),
 					RuEn(
-						"Включает полезные Astrogram-функции без агрессивных изменений интерфейса.",
-						"Enables useful Astrogram features without aggressive interface changes."),
+						"local premium, секунды сообщений, результаты опросов до голосования, anti-recall и нормальные Astrogram-дефолты.",
+						"local premium, message seconds, poll results before voting, anti-recall and sane Astrogram defaults."),
 					&st::menuIconPremium,
 					[=] {
 						if (args.applyPreset) {
@@ -895,8 +1323,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					RuEn("Приватный", "Private"),
 					RuEn(
-						"Делает упор на ghost mode, защиту от удаления и более осторожное поведение клиента.",
-						"Focuses on ghost mode, anti-recall and a more private client setup."),
+						"ghost mode, скрытие read/online/typing, anti-recall и более мягкая история удалённых сообщений.",
+						"ghost mode, hidden read/online/typing, anti-recall and a softer deleted-message history."),
 					&st::menuIconLock,
 					[=] {
 						if (args.applyPreset) {
@@ -909,8 +1337,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					RuEn("Минимальный", "Minimal"),
 					RuEn(
-						"Оставляет интерфейс ближе к Telegram Desktop и включает только базовые улучшения Astrogram.",
-						"Keeps the interface closer to Telegram Desktop and enables only core Astrogram improvements."),
+						"Только чистая база Astrogram и максимальная близость к Telegram Desktop по ощущению.",
+						"Only the clean Astrogram basics and the closest feel to Telegram Desktop."),
 					&st::menuIconPalette,
 					[=] {
 						if (args.applyPreset) {
@@ -927,28 +1355,67 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip);
 			} break;
 			case Step::PluginsInfo: {
+				addStepBadge(Step::PluginsInfo);
 				addTitle(
-					RuEn("Что такое плагины?", "What are plugins?"),
+					RuEn("Плагины внутри Astrogram", "Plugins inside Astrogram"),
 					RuEn(
-						"Плагины расширяют Astrogram: добавляют новые функции, настройки и полезные сценарии прямо внутри клиента.",
-						"Plugins extend Astrogram with extra features, settings and useful workflows directly inside the client."));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddChoiceButton(
+						"Раздел Plugins / Плагины — это встроенный менеджер пакетов, документации и диагностики, а не случайный набор скрытых переключателей.",
+						"The Plugins / Плагины section is a built-in package, documentation and diagnostics manager, not a random pile of hidden switches."));
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
 					container,
-					RuEn("Быстрая установка рекомендуемых плагинов", "Install recommended plugins"),
-					RuEn(
-						"Мы покажем несколько безопасных пакетов и дадим установить их в пару кликов.",
-						"We'll show a few safe packages and let you install them in a couple of clicks."),
-					&st::menuIconCustomize,
-					[=] {
-						state->step = Step::PluginsInstall;
-						(*rebuild)();
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Plugins / Плагины", "Plugins / Плагины"),
+						.title = RuEn(
+							".tgd-пакеты живут прямо в клиенте",
+							".tgd packages live directly in the client"),
+						.description = RuEn(
+							"Установка идёт из менеджера плагинов, а каждый пакет дальше можно открыть отдельно в Settings > Plugins без обходных путей.",
+							"Installation happens through the plugin manager, and each package can then be opened separately in Settings > Plugins without detours."),
+						.footer = RuEn("Встроенный менеджер пакетов", "Built-in package manager"),
+						.icon = &st::menuIconDownload,
+						.tone = OnboardingBadgeTone::Trusted,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Верхнее меню", "Top bar menu"),
+						.title = RuEn(
+							"Documentation, Runtime & Diagnostics, папка и safe mode",
+							"Documentation, Runtime & Diagnostics, folder and safe mode"),
+						.description = RuEn(
+							"В разделе Plugins сверху уже есть реальные точки входа: Documentation, Runtime & Diagnostics, Open Plugins Folder и Enable/Disable Safe Mode.",
+							"The Plugins section already exposes real top-bar entries: Documentation, Runtime & Diagnostics, Open Plugins Folder and Enable/Disable Safe Mode."),
+						.footer = RuEn("Без скрытых unlock-жестов", "No hidden unlock gestures"),
+						.icon = &st::menuIconFaq,
+						.tone = OnboardingBadgeTone::Official,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("AstroPlugins", "AstroPlugins"),
+						.title = RuEn(
+							"Первые 3 рекомендации приходят server-driven",
+							"The first 3 recommendations arrive server-driven"),
+						.description = RuEn(
+							"Onboarding берёт стартовые пакеты из доверенного канала AstroPlugins: @astroplugin / -1003814280064. Ниже покажем их отдельным экраном.",
+							"The onboarding flow pulls starter packages from the trusted AstroPlugins channel: @astroplugin / -1003814280064. We'll show them on a separate screen next."),
+						.footer = RuEn("Доверенный канал рекомендаций", "Trusted recommendation channel"),
+						.icon = &st::menuIconIpAddress,
+						.tone = OnboardingBadgeTone::Pending,
 					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
+				AddPrimaryButton(container, RuEn("Показать 3 рекомендации", "Show 3 recommendations"), [=] {
 					state->step = Step::PluginsInstall;
 					(*rebuild)();
 				});
+				if (args.openAllPlugins) {
+					AddLinkAction(container, RuEn("Открыть раздел Plugins", "Open Plugins"), [=] {
+						args.openAllPlugins();
+					});
+				}
 				AddLinkAction(container, RuEn("Позже", "Later"), [=] {
 					state->step = Step::ShellMode;
 					(*rebuild)();
@@ -959,20 +1426,23 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					state->autoReloadTriggered = true;
 					(*requestPluginsReload)();
 				}
+				addStepBadge(Step::PluginsInstall);
 				addTitle(
-					RuEn("Рекомендуемые плагины", "Recommended plugins"),
+					RuEn("3 рекомендации AstroPlugins", "3 AstroPlugins recommendations"),
 					RuEn(
-						"Список ниже тянется из серверного app config. Можно обновить его прямо сейчас без перезапуска клиента.",
-						"The list below is pulled from server app config. You can refresh it right now without restarting the client."));
+						"Карточка канала и первые пакеты подтягиваются server-driven из app config и живых постов AstroPlugins прямо во время онбординга.",
+						"The channel card and the first packages are pulled server-driven from app config plus live AstroPlugins posts right during onboarding."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				const auto fallbackPluginsTitle = args.pluginsChannelTitle.isEmpty()
 					? RuEn("AstroPlugins", "AstroPlugins")
 					: args.pluginsChannelTitle;
-				AddPeerChoiceButton(
+				AddChannelCard(
 					container,
 					state->pluginsChannelPeer,
+					args.pluginsChannelId,
 					fallbackPluginsTitle,
 					args.pluginsChannelSubtitle,
+					false,
 					[=] {
 						if (args.subscribePluginsChannel) {
 							args.subscribePluginsChannel();
@@ -988,11 +1458,11 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						state->pluginsChannelPeer,
 						args.pluginsChannelId,
 						false));
-				AddPrimaryButton(container, RuEn("Подписаться", "Follow"), [=] {
-					if (args.subscribePluginsChannel) {
+				if (args.subscribePluginsChannel) {
+					AddPrimaryButton(container, RuEn("Открыть AstroPlugins", "Open AstroPlugins"), [=] {
 						args.subscribePluginsChannel();
-					}
-				});
+					});
+				}
 				if (args.reloadPlugins) {
 					AddLinkAction(container, RuEn("Обновить рекомендации с сервера", "Refresh recommendations from server"), [=] {
 						(*requestPluginsReload)();
@@ -1024,6 +1494,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
 						style::al_top);
 				} else {
+					Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+					Ui::AddSubsectionTitle(
+						container,
+						rpl::single(RuEn("3 стартовые рекомендации", "3 starter recommendations")));
+					AddSecondaryNote(
+						container,
+						RuEn(
+							"Каждая карточка ниже собирается из живого поста AstroPlugins и проверенного .tgd-пакета.",
+							"Each card below is assembled from a live AstroPlugins post plus a verified .tgd package."),
+						style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 6));
 					const auto channel = state->pluginsChannelPeer
 						? state->pluginsChannelPeer->asChannel()
 						: nullptr;
@@ -1049,12 +1529,6 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							state->pluginsChannelPeer,
 							plugin,
 							fallbackPluginsTitle);
-						const auto sourceText = [&] {
-							const auto status = pluginStatusText(plugin);
-							return texts.sourceLabel.isEmpty()
-								? status
-								: (texts.sourceLabel + u" · "_q + status);
-						}();
 						const auto action = plugin.invalidServerData
 							? std::function<void()>([requestPluginsReload] {
 								(*requestPluginsReload)();
@@ -1063,15 +1537,15 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						const auto actionText = plugin.invalidServerData
 							? RuEn("Обновить список", "Refresh list")
 							: RuEn("Установить", "Install");
-						AddChoiceButton(
+						AddInfoCard(
 							container,
-							texts.title,
-							texts.description,
-							&st::menuIconDownload,
-							[action] {
-								if (action) {
-									action();
-								}
+							InfoCardDescriptor{
+								.eyebrow = pluginStatusText(plugin),
+								.title = texts.title,
+								.description = texts.description,
+								.footer = texts.sourceLabel,
+								.icon = &st::menuIconDownload,
+								.tone = PluginSourceBadgeTone(plugin),
 							});
 						AddBadgePill(
 							container,
@@ -1080,12 +1554,6 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						AddSecondaryNote(
 							container,
 							PluginSourceBadgeDetailText(plugin));
-						if (!sourceText.isEmpty()) {
-							AddSecondaryNote(
-								container,
-								sourceText,
-								style::margins(26, -2, 26, 2));
-						}
 						AddPrimaryButton(
 							container,
 							actionText,
@@ -1098,65 +1566,140 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					}
 				}
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
+				AddPrimaryButton(container, RuEn("Продолжить к меню", "Continue to menu"), [=] {
 					state->step = Step::ShellMode;
 					(*rebuild)();
 				});
-				AddLinkAction(container, RuEn("Посмотреть все", "View all"), [=] {
-					if (args.openAllPlugins) {
+				if (args.openAllPlugins) {
+					AddLinkAction(container, RuEn("Открыть весь список в Plugins", "Open the full list in Plugins"), [=] {
 						args.openAllPlugins();
-					}
-				});
+					});
+				}
 			} break;
 			case Step::ShellMode: {
+				addStepBadge(Step::ShellMode);
 				addTitle(
-					RuEn("Меню и оболочка Astrogram", "Astrogram menu and shell"),
+					RuEn("Настрой боковое меню", "Configure the side menu"),
 					RuEn(
-						"Выбери стартовую геометрию бокового меню и настроек прямо сейчас. Полный editor останется в Experimental.",
-						"Choose the starting side-menu and settings geometry right now. The full editor remains in Experimental."));
+						"Это явный шаг прямо в гайде: здесь выбирается стартовый shell-пресет, а точная ручная доводка остаётся в Experimental.",
+						"This is an explicit step right inside the guide: you choose the starter shell preset here, while precise manual tuning remains in Experimental."));
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Experimental", "Experimental"),
+						.title = RuEn(
+							"Редактор бокового меню и Visual editor меню",
+							"Side menu editor and Menu visual editor"),
+						.description = RuEn(
+							"Внутри Experimental уже лежат реальные Редактор бокового меню, Visual editor меню и Preview shell. Гайд не редактирует их за тебя, а просто доводит до нужного старта.",
+							"Experimental already contains the real Side menu editor, Menu visual editor and Preview shell. The guide does not edit them for you, it simply gets you to the right starting point."),
+						.footer = RuEn("Experimental -> Редактор бокового меню", "Experimental -> Side menu editor"),
+						.icon = &st::menuIconEdit,
+						.tone = OnboardingBadgeTone::Official,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Экспериментальные режимы оболочки", "Experimental shell modes"),
+						.title = RuEn(
+							"Expanded side panel, widened settings, left-edge и immersive animation",
+							"Expanded side panel, widened settings, left-edge and immersive animation"),
+						.description = RuEn(
+							"Пресеты ниже заранее включают те же runtime-переключатели, которые потом можно дотюнить в Experimental уже по живому shell и preview.",
+							"The presets below pre-apply the same runtime switches that can later be fine-tuned in Experimental against the live shell and preview."),
+						.footer = RuEn("Экспериментальные режимы оболочки / Experimental shell modes", "Experimental shell modes"),
+						.icon = &st::menuIconExperimental,
+						.tone = OnboardingBadgeTone::Pending,
+					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddChoiceButton(
 					container,
 					RuEn("Сбалансированный", "Balanced"),
 					RuEn(
-						"Иммерсивная анимация остаётся включённой, а интерфейс сохраняет компактную ширину.",
-						"Keeps immersive animation on while leaving the interface compact."),
+						"Компактная ширина, иммерсивная анимация и спокойный shell для повседневной работы.",
+						"Compact width, immersive animation and a calm shell for everyday work."),
 					&st::menuIconPalette,
 					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Balanced); });
 				AddChoiceButton(
 					container,
 					RuEn("Фокус на меню", "Focused"),
 					RuEn(
-						"Расширяет боковую панель и делает меню выразительнее без левоторцевых настроек.",
-						"Expands the side panel and makes the shell stronger without left-edge settings."),
+						"Делает боковую панель шире и выразительнее, но не уводит настройки к левому краю.",
+						"Makes the side panel wider and bolder without moving settings to the left edge yet."),
 					&st::menuIconCustomize,
 					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Focused); });
 				AddChoiceButton(
 					container,
 					RuEn("Широкий интерфейс", "Wide shell"),
 					RuEn(
-						"Включает широкие настройки, левый край для settings и максимально выразительную оболочку.",
-						"Enables wide settings, left-edge settings placement and the most expressive shell."),
+						"Максимальный shell: widened settings, left-edge и самая заметная оболочка Astrogram.",
+						"The fullest shell: widened settings, left-edge and the most expressive Astrogram shell."),
 					&st::menuIconExperimental,
 					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Wide); });
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				Ui::AddSubsectionTitle(
-					container,
-					rpl::single(RuEn(
-						"Настроить меню вручную",
-						"Configure the menu manually")));
-				AddSecondaryNote(
-					container,
+				AddPrimaryButton(container, RuEn("Открыть Experimental сейчас", "Open Experimental now"), openExperimental);
+				AddLinkAction(container, RuEn("Продолжить к подсказкам", "Continue to tips"), [=] {
+					state->step = Step::ExperimentalTips;
+					(*rebuild)();
+				});
+			} break;
+			case Step::ExperimentalTips: {
+				addStepBadge(Step::ExperimentalTips);
+				addTitle(
+					RuEn("Живые подсказки по Experimental", "Live Experimental tips"),
 					RuEn(
-						"Если стартового пресета мало, открой полный editor прямо из гайда. Он сразу переведёт в Experimental и откроет живую настройку бокового меню и shell-режимов.",
-						"If the starter preset is not enough, open the full editor directly from the guide. It jumps to Experimental and opens the live side-menu and shell tuning surface."),
-					style::margins(
-						st::boxRowPadding.left(),
-						0,
-						st::boxRowPadding.right(),
-						6));
-				AddPrimaryButton(container, RuEn("Открыть полный editor", "Open full editor"), openExperimental);
-				AddLinkAction(container, RuEn("Выбрать позже", "Choose later"), [=] {
+						"Experimental в Astrogram уже не набор demo-only флажков: онбординг ведёт в реальные runtime-поверхности клиента.",
+						"Experimental in Astrogram is no longer a pile of demo-only flags: onboarding leads you into real runtime surfaces of the client."));
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Редактор бокового меню / Side menu editor", "Side menu editor"),
+						.title = RuEn(
+							"menu_layout.json, restore-tray и live preview",
+							"menu_layout.json, restore tray and live preview"),
+						.description = RuEn(
+							"Редактор уже работает напрямую с menu_layout.json: видимые пункты остаются в основном списке, скрытые уходят в restore-tray, а preview сразу подсвечивает выбранное действие.",
+							"The editor already works directly with menu_layout.json: visible items stay in the main list, hidden ones move into the restore tray, and the preview highlights the selected action immediately."),
+						.footer = RuEn("Редактор бокового меню", "Side menu editor"),
+						.icon = &st::menuIconEdit,
+						.tone = OnboardingBadgeTone::Official,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Экспериментальные режимы оболочки / Experimental shell modes", "Experimental shell modes"),
+						.title = RuEn(
+							"Expanded side panel, left-edge, widened settings и immersive animation уже runtime",
+							"Expanded side panel, left-edge, widened settings and immersive animation are already runtime"),
+						.description = RuEn(
+							"Эти переключатели больше не demo-only: они пишутся в runtime prefs и сразу отражаются и в shell, и в preview.",
+							"These switches are no longer demo-only: they are written into runtime prefs and immediately reflected by both the shell and the preview."),
+						.footer = RuEn("Экспериментальные режимы оболочки", "Experimental shell modes"),
+						.icon = &st::menuIconExperimental,
+						.tone = OnboardingBadgeTone::Pending,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("Visual editor меню / Preview shell", "Menu visual editor / Preview shell"),
+						.title = RuEn(
+							"Сначала shell, потом deeper editor surfaces",
+							"Shell first, then deeper editor surfaces"),
+						.description = RuEn(
+							"Этот гайд специально доводит сначала до бокового меню. Дальше внутри Experimental уже ждут Visual editor меню, Preview shell и Next editor surfaces.",
+							"This guide intentionally gets you to the side menu first. After that, Experimental already exposes Menu visual editor, Preview shell and Next editor surfaces."),
+						.footer = RuEn("Visual editor меню / Preview shell", "Menu visual editor / Preview shell"),
+						.icon = &st::menuIconCustomize,
+						.tone = OnboardingBadgeTone::Trusted,
+					});
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				AddPrimaryButton(container, RuEn("Открыть Experimental", "Open Experimental"), openExperimental);
+				AddLinkAction(container, RuEn("Продолжить к финалу", "Continue to final"), [=] {
 					state->step = Step::Finish;
 					(*rebuild)();
 				});
@@ -1166,16 +1709,18 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					RuEn("Всё готово", "You're all set"),
 					RuEn(
-						"Настройка завершена. Подпишись на официальный канал Astrogram и при желании поддержи разработку.",
-						"Setup is complete. Follow the official Astrogram channel and support development if you want."),
+						"Профиль, плагины и боковое меню уже разложены. Держи рядом официальный канал Astrogram для сборок, новостей и новых функций.",
+						"Your profile, plugins and side menu are already laid out. Keep the official Astrogram channel nearby for builds, news and new features."),
 					QColor(0x08, 0x13, 0x1f),
 					QColor(0x0f, 0x2b, 0x3f),
 					QColor(0x44, 0xc0, 0xff),
 					QColor(0x9c, 0xff, 0xd3));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPeerChoiceButton(
+				addStepBadge(Step::Finish);
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddChannelCard(
 					container,
 					state->officialChannelPeer,
+					args.officialChannelId,
 					args.officialChannelTitle.trimmed().isEmpty()
 						? RuEn("Astrogram", "Astrogram")
 						: args.officialChannelTitle.trimmed(),
@@ -1184,6 +1729,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Получай новости о сборках, клиентах и новых функциях Astrogram.",
 							"Get updates about builds, client changes and new Astrogram features.")
 						: args.officialChannelSubtitle,
+					true,
 					[=] {
 						if (args.openOfficialChannel) {
 							args.openOfficialChannel();
@@ -1199,32 +1745,27 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						state->officialChannelPeer,
 						args.officialChannelId,
 						true));
-				AddChoiceButton(
-					container,
-					RuEn(
-						"Открыть полный editor меню",
-						"Open the full menu editor"),
-					RuEn(
-						"Experimental откроет editor бокового меню, иммерсивную анимацию, расширенную панель и широкие настройки.",
-						"Experimental opens the side-menu editor, immersive animation, expanded panel and wide settings."),
-					&st::menuIconExperimental,
-					openExperimental);
-				AddChoiceButton(
-					container,
-					RuEn(
-						"Поддержать разработку Astrogram",
-						"Support Astrogram development"),
-					RuEn(
-						"Открывает донат-окно Astrogram с серверным значком подписчика.",
-						"Opens the Astrogram support box with the server-side subscriber badge."),
-					&st::menuIconGiftPremium,
-					[=] {
-						if (args.openDonate) {
+				if (args.openDonate) {
+					AddChoiceButton(
+						container,
+						RuEn(
+							"Поддержать разработку Astrogram",
+							"Support Astrogram development"),
+						RuEn(
+							"Открывает донат-окно Astrogram с серверным значком подписчика.",
+							"Opens the Astrogram support box with the server-side subscriber badge."),
+						&st::menuIconGiftPremium,
+						[=] {
 							args.openDonate();
-						}
-					});
+						});
+				}
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Завершить", "Finish"), finish);
+				if (args.openOfficialChannel) {
+					AddLinkAction(container, RuEn("Открыть канал Astrogram", "Open Astrogram channel"), [=] {
+						args.openOfficialChannel();
+					});
+				}
 			} break;
 			}
 		};
