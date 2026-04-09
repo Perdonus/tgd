@@ -130,6 +130,8 @@ public:
 		struct {
 			int sendersCount = 0;
 			int captionsCount = 0;
+			bool dropNames = false;
+			bool dropCaptions = false;
 			bool show = false;
 		} forwardOptions;
 

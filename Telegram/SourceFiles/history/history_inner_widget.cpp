@@ -179,20 +179,10 @@ bool ShowForwardWithoutAuthorValidated(
 		not_null<Window::SessionController*> controller,
 		MessageIdsList ids,
 		Fn<void()> &&successCallback = nullptr) {
-	if (ids.empty()) {
-		controller->showToast(tr::lng_forward_cant(tr::now));
-		return false;
-	}
-	const auto items = controller->session().data().idsToItems(ids);
-	if (items.size() != ids.size() || !CanShareWithoutAuthor(items)) {
-		controller->showToast(tr::lng_forward_cant(tr::now));
-		return false;
-	}
-	Window::ShowForwardWithoutAuthorBox(
+	return Window::ShowForwardWithoutAuthorBoxChecked(
 		controller,
 		std::move(ids),
 		std::move(successCallback));
-	return true;
 }
 
 constexpr auto kScrollDateHideTimeout = 1000;

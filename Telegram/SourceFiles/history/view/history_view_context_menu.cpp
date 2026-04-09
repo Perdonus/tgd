@@ -747,7 +747,7 @@ bool AddForwardSelectedAction(
 			Window::ForwardWithoutAuthorText(),
 			[=] {
 				const auto weak = base::make_weak(list);
-				Window::ShowForwardWithoutAuthorBox(
+				Window::ShowForwardWithoutAuthorBoxChecked(
 					request.navigation,
 					ExtractIdsList(request.selectedItems),
 					[=] {
@@ -830,7 +830,7 @@ bool AddForwardMessageAction(
 			Window::ForwardWithoutAuthorText(),
 			[=] {
 				if (const auto item = owner->message(itemId)) {
-					Window::ShowForwardWithoutAuthorBox(
+					Window::ShowForwardWithoutAuthorBoxChecked(
 						request.navigation,
 						(asGroup
 							? owner->itemOrItsGroup(item)

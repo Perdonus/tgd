@@ -147,6 +147,12 @@ constexpr auto kTopicsSearchMinCount = 1;
 		: QString::fromUtf8(en);
 }
 
+[[nodiscard]] QString ForwardWithoutAuthorLabelText() {
+	return AstrogramUiText(
+		"Forward without author",
+		"Переслать без автора");
+}
+
 [[nodiscard]] QString PeerIdTextForCopy(not_null<PeerData*> peer) {
 	if (peer->isUser()) {
 		return QString::number(peerToUser(peer->id).bare);
@@ -3215,11 +3221,13 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 	const auto owner = &session->data();
 	const auto itemsList = owner->idsToItems(draft.ids);
 	const auto msgIds = owner->itemsToIds(itemsList);
+	const auto forwardWithoutAuthor = (draft.options != Data::ForwardOptions::PreserveInfo);
+	const auto dropCaptions = (draft.options == Data::ForwardOptions::NoNamesAndCaptions);
 	const auto sendersCount = ItemsForwardSendersCount(itemsList);
 	const auto captionsCount = ItemsForwardCaptionsCount(itemsList);
 	if (msgIds.empty()) {
 		return nullptr;
-	} else if (draft.options != Data::ForwardOptions::PreserveInfo) {
+	} else if (forwardWithoutAuthor) {
 		if (const auto error = ShareWithoutAuthorErrorText(itemsList);
 			!error.isEmpty()) {
 			show->showToast(error);
@@ -3437,8 +3445,13 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		boxRaw->setForwardOptions({
 			.sendersCount = sendersCount,
 			.captionsCount = captionsCount,
+			.dropNames = forwardWithoutAuthor,
+			.dropCaptions = dropCaptions,
 		});
 		show->showBox(std::move(box));
+		if (forwardWithoutAuthor) {
+			boxRaw->setTitle(ForwardWithoutAuthorLabelText());
+		}
 		auto state = State{ boxRaw, controllerRaw };
 		return boxRaw->lifetime().make_state<State>(std::move(state));
 	}();
@@ -3762,9 +3775,7 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 }
 
 QString ForwardWithoutAuthorText() {
-	return AstrogramUiText(
-		"Forward without author",
-		"Переслать без автора");
+	return ForwardWithoutAuthorLabelText();
 }
 
 Data::ForwardDraft ForwardWithoutAuthorDraft(MessageIdsList ids) {
@@ -3782,6 +3793,31 @@ base::weak_qptr<Ui::BoxContent> ShowForwardWithoutAuthorBox(
 		navigation,
 		ForwardWithoutAuthorDraft(std::move(items)),
 		std::move(successCallback));
+}
+
+bool ShowForwardWithoutAuthorBoxChecked(
+		not_null<Window::SessionNavigation*> navigation,
+		MessageIdsList items,
+		Fn<void()> &&successCallback) {
+	if (items.empty()) {
+		navigation->showToast(tr::lng_forward_cant(tr::now));
+		return false;
+	}
+	const auto resolved = navigation->session().data().idsToItems(items);
+	if (resolved.size() != items.size()) {
+		navigation->showToast(tr::lng_forward_cant(tr::now));
+		return false;
+	}
+	if (const auto error = ShareWithoutAuthorErrorText(resolved);
+		!error.isEmpty()) {
+		navigation->showToast(error);
+		return false;
+	}
+	ShowForwardWithoutAuthorBox(
+		navigation,
+		std::move(items),
+		std::move(successCallback));
+	return true;
 }
 
 base::weak_qptr<Ui::BoxContent> ShowShareGameBox(

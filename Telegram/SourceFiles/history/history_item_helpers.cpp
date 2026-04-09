@@ -1376,8 +1376,8 @@ QString ShareWithoutAuthorErrorText(const HistoryItemsList &list) {
 			"Одноразовые и самоуничтожающиеся медиа нельзя переслать без автора.");
 	case ShareWithoutAuthorCheck::Unsupported:
 		return AstrogramUiText(
-			"This message type can't be sent without author yet.",
-			"Этот тип сообщения пока нельзя переслать без автора.");
+			"Only regular media like photo, video, voice, video note, music and files are supported without author here yet.",
+			"Без автора пока поддерживаются только обычные фото, видео, голосовые, кружки, музыка и файлы.");
 	}
 	Unexpected("ShareWithoutAuthorCheck value.");
 	return {};

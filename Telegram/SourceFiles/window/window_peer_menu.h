@@ -215,6 +215,10 @@ base::weak_qptr<Ui::BoxContent> ShowForwardWithoutAuthorBox(
 	not_null<Window::SessionNavigation*> navigation,
 	MessageIdsList &&items,
 	Fn<void()> &&successCallback = nullptr);
+[[nodiscard]] bool ShowForwardWithoutAuthorBoxChecked(
+	not_null<Window::SessionNavigation*> navigation,
+	MessageIdsList items,
+	Fn<void()> &&successCallback = nullptr);
 base::weak_qptr<Ui::BoxContent> ShowShareUrlBox(
 	not_null<Window::SessionNavigation*> navigation,
 	const QString &url,

@@ -287,6 +287,12 @@ void ShareBox::prepare() {
 	setTitle(_descriptor.titleOverride
 		? std::move(_descriptor.titleOverride)
 		: tr::lng_share_title());
+	_forwardOptions = {
+		.sendersCount = _descriptor.forwardOptions.sendersCount,
+		.captionsCount = _descriptor.forwardOptions.captionsCount,
+		.dropNames = _descriptor.forwardOptions.dropNames,
+		.dropCaptions = _descriptor.forwardOptions.dropCaptions,
+	};
 
 	_inner = setInnerWidget(
 		object_ptr<Inner>(this, _descriptor, uiShow()),
