@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QPointer>
 
 #include <algorithm>
+#include <map>
 
 namespace AyuRecall {
 namespace {
@@ -55,6 +56,14 @@ constexpr auto kBubbleInnerSkip = 4;
 constexpr auto kBubbleMinWidth = 120;
 constexpr auto kBubbleWidthFactor = 0.72;
 
+struct DeletedMessagesSectionState {
+	int scrollTop = -1;
+	QString searchQuery;
+	int anchorMessageId = 0;
+	int anchorTimestamp = 0;
+	int anchorOffset = 0;
+};
+
 [[nodiscard]] bool RussianUi() {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
 }
@@ -65,9 +74,15 @@ constexpr auto kBubbleWidthFactor = 0.72;
 		: QString::fromUtf8(en);
 }
 
-[[nodiscard]] QString TitleText(int count) {
+[[nodiscard]] QString TitleText(int visibleCount, int totalCount) {
 	const auto base = UiText("Deleted Messages", "Удалённые сообщения");
-	return count > 0 ? (base + u" · "_q + QString::number(count)) : base;
+	if (totalCount <= 0) {
+		return base;
+	}
+	const auto counter = (visibleCount == totalCount)
+		? QString::number(totalCount)
+		: QString::number(visibleCount) + u"/"_q + QString::number(totalCount);
+	return base + u" · "_q + counter;
 }
 
 [[nodiscard]] QString EmptyText(const QString &query) {
@@ -83,6 +98,18 @@ constexpr auto kBubbleWidthFactor = 0.72;
 
 [[nodiscard]] QString OpenHint() {
 	return UiText("Open original message in chat", "Открыть исходное сообщение в чате");
+}
+
+[[nodiscard]] QString LocalCopyHint() {
+	return UiText(
+		"Only the locally saved copy is available.",
+		"Доступна только локально сохранённая копия.");
+}
+
+[[nodiscard]] QString NearestCopyHint() {
+	return UiText(
+		"Opened the nearest available place in chat. The deleted message itself is only saved locally.",
+		"Открыто ближайшее доступное место в чате. Само удалённое сообщение сохранено только локально.");
 }
 
 [[nodiscard]] QString SectionHint() {
@@ -105,6 +132,33 @@ constexpr auto kBubbleWidthFactor = 0.72;
 [[nodiscard]] int TopicIdFor(not_null<Data::Thread*> thread) {
 	const auto topic = thread->asTopic();
 	return topic ? topic->rootId().bare : 0;
+}
+
+[[nodiscard]] QString ThreadStateKey(not_null<Data::Thread*> thread) {
+	return QString::number(SerializePeerId(thread->peer()->id))
+		+ u':'
+		+ QString::number(TopicIdFor(thread));
+}
+
+[[nodiscard]] std::map<QString, DeletedMessagesSectionState> &RememberedStates() {
+	static auto states = std::map<QString, DeletedMessagesSectionState>();
+	return states;
+}
+
+[[nodiscard]] DeletedMessagesSectionState RememberedState(
+		not_null<Data::Thread*> thread) {
+	const auto &states = RememberedStates();
+	const auto key = ThreadStateKey(thread);
+	const auto i = states.find(key);
+	return (i != states.end())
+		? i->second
+		: DeletedMessagesSectionState();
+}
+
+void SaveRememberedState(
+		not_null<Data::Thread*> thread,
+		const DeletedMessagesSectionState &state) {
+	RememberedStates()[ThreadStateKey(thread)] = state;
 }
 
 [[nodiscard]] int DisplayTimestamp(const AyuMessages::MessageSnapshot &snapshot) {
@@ -155,9 +209,13 @@ constexpr auto kBubbleWidthFactor = 0.72;
 		return true;
 	}
 	const auto sender = ResolveSenderName(snapshot, thread);
+	const auto timestamp = DisplayTimestamp(snapshot);
 	return snapshot.text.contains(query, Qt::CaseInsensitive)
 		|| snapshot.senderName.contains(query, Qt::CaseInsensitive)
-		|| sender.contains(query, Qt::CaseInsensitive);
+		|| sender.contains(query, Qt::CaseInsensitive)
+		|| DayLabel(timestamp).contains(query, Qt::CaseInsensitive)
+		|| TimeLabel(timestamp).contains(query, Qt::CaseInsensitive)
+		|| QString::number(snapshot.messageId).contains(query);
 }
 
 [[nodiscard]] bool IsOutgoing(
@@ -201,15 +259,48 @@ constexpr auto kBubbleWidthFactor = 0.72;
 	return thread->peer()->name();
 }
 
+[[nodiscard]] int ResolveJumpTargetMessageId(
+		not_null<Data::Thread*> thread,
+		int messageId) {
+	if (messageId <= 0) {
+		return 0;
+	}
+	auto &data = thread->session().data();
+	const auto peerId = thread->peer()->id;
+	const auto hasLoaded = [&](int candidate) {
+		return candidate > 0
+			&& data.message(FullMsgId(peerId, candidate)) != nullptr;
+	};
+	if (hasLoaded(messageId)) {
+		return messageId;
+	}
+	constexpr auto kProbeRadius = 48;
+	for (auto step = 1; step <= kProbeRadius; ++step) {
+		const auto before = messageId - step;
+		if (hasLoaded(before)) {
+			return before;
+		}
+		const auto after = messageId + step;
+		if (hasLoaded(after)) {
+			return after;
+		}
+	}
+	return 0;
+}
+
 class DeletedMessageRow final : public Ui::RpWidget {
 public:
 	DeletedMessageRow(
 		not_null<Ui::RpWidget*> parent,
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread,
-		AyuMessages::MessageSnapshot snapshot);
+		AyuMessages::MessageSnapshot snapshot,
+		QString senderLabel);
 
 	int resizeGetHeight(int newWidth) override;
+	[[nodiscard]] const AyuMessages::MessageSnapshot &snapshot() const {
+		return _snapshot;
+	}
 
 protected:
 	bool event(QEvent *e) override;
@@ -224,6 +315,7 @@ private:
 	const not_null<Window::SessionController*> _controller;
 	const not_null<Data::Thread*> _thread;
 	const AyuMessages::MessageSnapshot _snapshot;
+	const QString _senderLabel;
 	const bool _outgoing = false;
 
 	style::owned_color _senderColor;
@@ -245,11 +337,13 @@ DeletedMessageRow::DeletedMessageRow(
 		not_null<Ui::RpWidget*> parent,
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread,
-		AyuMessages::MessageSnapshot snapshot)
+		AyuMessages::MessageSnapshot snapshot,
+		QString senderLabel)
 : Ui::RpWidget(parent)
 , _controller(controller)
 , _thread(thread)
 , _snapshot(std::move(snapshot))
+, _senderLabel(std::move(senderLabel))
 , _outgoing(IsOutgoing(_snapshot, _thread))
 , _senderColor(_outgoing ? st::msgOutServiceFg->c : st::msgInServiceFg->c)
 , _textColor(st::windowFg->c)
@@ -261,10 +355,13 @@ DeletedMessageRow::DeletedMessageRow(
 	_metaSt.textFg = _metaColor.color();
 	_metaSt.palette.linkFg = _metaColor.color();
 
-	_sender = Ui::CreateChild<Ui::FlatLabel>(
-		this,
-		rpl::single(ResolveSenderName(_snapshot, _thread)),
-		_senderSt);
+	if (!_senderLabel.isEmpty()) {
+		_sender = Ui::CreateChild<Ui::FlatLabel>(
+			this,
+			rpl::single(_senderLabel),
+			_senderSt);
+		_sender->setAttribute(Qt::WA_TransparentForMouseEvents);
+	}
 	_text = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(_snapshot.text.isEmpty()
@@ -276,7 +373,6 @@ DeletedMessageRow::DeletedMessageRow(
 		rpl::single(TimeLabel(DisplayTimestamp(_snapshot))),
 		_metaSt);
 
-	_sender->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_text->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_meta->setAttribute(Qt::WA_TransparentForMouseEvents);
 	setCursor(style::cur_pointer);
@@ -357,14 +453,18 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 		1,
 		maxBubbleWidth - kBubblePadding.left() - kBubblePadding.right());
 
-	const auto senderWidth = std::min(_sender->naturalWidth(), maxTextWidth);
+	const auto senderWidth = _sender
+		? std::min(_sender->naturalWidth(), maxTextWidth)
+		: 0;
 	const auto textNatural = std::min(_text->naturalWidth(), maxTextWidth);
 	const auto metaWidth = std::min(_meta->naturalWidth(), maxTextWidth);
 	const auto contentWidth = std::max(
 		kBubbleMinWidth - kBubblePadding.left() - kBubblePadding.right(),
 		std::max(senderWidth, std::max(textNatural, metaWidth)));
 
-	_sender->resizeToWidth(contentWidth);
+	if (_sender) {
+		_sender->resizeToWidth(contentWidth);
+	}
 	_text->resizeToWidth(contentWidth);
 	_meta->resizeToWidth(metaWidth);
 
@@ -377,8 +477,10 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 	auto top = kRowOuterTop + kBubblePadding.top();
 	const auto left = bubbleX + kBubblePadding.left();
 
-	_sender->moveToLeft(left, top);
-	top += _sender->height() + kBubbleInnerSkip;
+	if (_sender) {
+		_sender->moveToLeft(left, top);
+		top += _sender->height() + kBubbleInnerSkip;
+	}
 	_text->moveToLeft(left, top);
 	top += _text->height() + kBubbleInnerSkip;
 	_meta->moveToLeft(
@@ -391,14 +493,16 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 
 void DeletedMessageRow::openOriginal() {
 	const auto controller = _controller;
-	const auto missing = !(_thread->session().data().message(
-		FullMsgId(_thread->peer()->id, _snapshot.messageId)));
+	const auto jumpTarget = ResolveJumpTargetMessageId(_thread, _snapshot.messageId);
 	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
-	controller->showThread(_thread, _snapshot.messageId, params);
-	if (missing) {
-		controller->window().showToast(UiText(
-			"Only the locally saved copy is available.",
-			"Доступна только локально сохранённая копия."));
+	controller->showThread(
+		_thread,
+		jumpTarget ? jumpTarget : _snapshot.messageId,
+		params);
+	if (jumpTarget == 0) {
+		controller->window().showToast(LocalCopyHint());
+	} else if (jumpTarget != _snapshot.messageId) {
+		controller->window().showToast(NearestCopyHint());
 	}
 }
 
@@ -410,7 +514,7 @@ public:
 		QWidget *parent,
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread);
-	~DeletedMessagesWidget() override = default;
+	~DeletedMessagesWidget() override;
 
 	Dialogs::RowDescriptor activeChat() const override;
 	bool hasTopBarShadow() const override {
@@ -443,8 +547,14 @@ private:
 	void updateControlsGeometry();
 	void rebuildContent();
 	void applySearchQuery(QString query);
+	[[nodiscard]] DeletedMessagesSectionState captureState() const;
+	void applyState(const DeletedMessagesSectionState &state);
 	void saveState(not_null<DeletedMessagesMemento*> memento);
 	void restoreState(not_null<DeletedMessagesMemento*> memento);
+	[[nodiscard]] bool restoreAnchor(
+		int messageId,
+		int timestamp,
+		int offset);
 
 	const not_null<Data::Thread*> _thread;
 	const not_null<History*> _history;
@@ -453,8 +563,10 @@ private:
 	object_ptr<Ui::PlainShadow> _topBarShadow;
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	QPointer<Ui::VerticalLayout> _content;
+	std::vector<DeletedMessageRow*> _rows;
 	std::vector<AyuMessages::MessageSnapshot> _messages;
 	QString _searchQuery;
+	int _totalMessages = 0;
 
 };
 
@@ -462,6 +574,12 @@ class DeletedMessagesMemento final : public Window::SectionMemento {
 public:
 	explicit DeletedMessagesMemento(not_null<Data::Thread*> thread)
 	: _thread(thread->migrateToOrMe()) {
+		const auto state = RememberedState(_thread);
+		_scrollTop = state.scrollTop;
+		_searchQuery = state.searchQuery;
+		_anchorMessageId = state.anchorMessageId;
+		_anchorTimestamp = state.anchorTimestamp;
+		_anchorOffset = state.anchorOffset;
 	}
 
 	object_ptr<Window::SectionWidget> createWidget(
@@ -495,6 +613,24 @@ public:
 	[[nodiscard]] const QString &searchQuery() const {
 		return _searchQuery;
 	}
+	void setAnchorMessageId(int anchorMessageId) {
+		_anchorMessageId = anchorMessageId;
+	}
+	[[nodiscard]] int anchorMessageId() const {
+		return _anchorMessageId;
+	}
+	void setAnchorTimestamp(int anchorTimestamp) {
+		_anchorTimestamp = anchorTimestamp;
+	}
+	[[nodiscard]] int anchorTimestamp() const {
+		return _anchorTimestamp;
+	}
+	void setAnchorOffset(int anchorOffset) {
+		_anchorOffset = anchorOffset;
+	}
+	[[nodiscard]] int anchorOffset() const {
+		return _anchorOffset;
+	}
 	Data::ForumTopic *topicForRemoveRequests() const override {
 		return _thread->asTopic();
 	}
@@ -506,6 +642,9 @@ private:
 	const not_null<Data::Thread*> _thread;
 	int _scrollTop = -1;
 	QString _searchQuery;
+	int _anchorMessageId = 0;
+	int _anchorTimestamp = 0;
+	int _anchorOffset = 0;
 
 };
 
@@ -566,6 +705,10 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 	_scroll->show();
 
 	rebuildContent();
+}
+
+DeletedMessagesWidget::~DeletedMessagesWidget() {
+	SaveRememberedState(_thread, captureState());
 }
 
 Dialogs::RowDescriptor DeletedMessagesWidget::activeChat() const {
@@ -710,9 +853,16 @@ void DeletedMessagesWidget::applySearchQuery(QString query) {
 	if (_searchQuery == query) {
 		return;
 	}
+	const auto before = captureState();
 	_searchQuery = std::move(query);
 	rebuildContent();
-	_scroll->scrollToY(_scroll->scrollTopMax());
+	if (!restoreAnchor(
+			before.anchorMessageId,
+			before.anchorTimestamp,
+			before.anchorOffset)) {
+		_scroll->scrollToY(_searchQuery.isEmpty() ? _scroll->scrollTopMax() : 0);
+	}
+	SaveRememberedState(_thread, captureState());
 }
 
 void DeletedMessagesWidget::rebuildContent() {
@@ -720,7 +870,9 @@ void DeletedMessagesWidget::rebuildContent() {
 		return;
 	}
 
+	_rows.clear();
 	_messages = LoadMessages(_thread);
+	_totalMessages = int(_messages.size());
 	if (!_searchQuery.isEmpty()) {
 		auto filtered = std::vector<AyuMessages::MessageSnapshot>();
 		filtered.reserve(_messages.size());
@@ -731,7 +883,7 @@ void DeletedMessagesWidget::rebuildContent() {
 		}
 		_messages = std::move(filtered);
 	}
-	_topBar->setCustomTitle(TitleText(int(_messages.size())));
+	_topBar->setCustomTitle(TitleText(int(_messages.size()), _totalMessages));
 	_content->clear();
 	Ui::AddSkip(_content, st::defaultVerticalListSkip);
 
@@ -765,6 +917,11 @@ void DeletedMessagesWidget::rebuildContent() {
 	}
 
 	auto currentDay = QDate();
+	auto previousSender = QString();
+	auto previousOutgoing = false;
+	auto previousDay = QDate();
+	auto havePreviousMessage = false;
+	const auto groupedChat = !_thread->peer()->isUser() && !_thread->peer()->isSelf();
 	for (const auto &message : _messages) {
 		const auto stamp = DisplayTimestamp(message);
 		const auto day = QDateTime::fromSecsSinceEpoch(stamp).toLocalTime().date();
@@ -774,12 +931,26 @@ void DeletedMessagesWidget::rebuildContent() {
 			Ui::AddDividerText(_content, rpl::single(DayLabel(stamp)));
 			Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 		}
-		_content->add(
+		const auto sender = ResolveSenderName(message, _thread);
+		const auto outgoing = IsOutgoing(message, _thread);
+		const auto showSender = groupedChat
+			&& !outgoing
+			&& (!havePreviousMessage
+				|| previousOutgoing
+				|| (previousSender != sender)
+				|| (previousDay != day));
+		const auto row = _content->add(
 			object_ptr<DeletedMessageRow>(
 				_content,
 				controller(),
 				_thread,
-				message));
+				message,
+				showSender ? sender : QString()));
+		_rows.push_back(row);
+		previousSender = sender;
+		previousOutgoing = outgoing;
+		previousDay = day;
+		havePreviousMessage = true;
 	}
 
 	Ui::AddSkip(_content, st::defaultVerticalListSkip);
@@ -788,13 +959,39 @@ void DeletedMessagesWidget::rebuildContent() {
 	}
 }
 
-void DeletedMessagesWidget::saveState(not_null<DeletedMessagesMemento*> memento) {
-	memento->setScrollTop(_scroll->scrollTop());
-	memento->setSearchQuery(_searchQuery);
+DeletedMessagesSectionState DeletedMessagesWidget::captureState() const {
+	auto state = DeletedMessagesSectionState();
+	state.scrollTop = _scroll ? _scroll->scrollTop() : -1;
+	state.searchQuery = _searchQuery;
+	if (!_scroll) {
+		return state;
+	}
+	const auto scrollTop = _scroll->scrollTop();
+	for (const auto row : _rows) {
+		if (!row) {
+			continue;
+		}
+		const auto geometry = row->geometry();
+		if (geometry.bottom() >= scrollTop) {
+			state.anchorMessageId = row->snapshot().messageId;
+			state.anchorTimestamp = DisplayTimestamp(row->snapshot());
+			state.anchorOffset = scrollTop - geometry.top();
+			return state;
+		}
+	}
+	if (!_rows.empty()) {
+		const auto row = _rows.back();
+		if (row) {
+			state.anchorMessageId = row->snapshot().messageId;
+			state.anchorTimestamp = DisplayTimestamp(row->snapshot());
+			state.anchorOffset = std::max(0, scrollTop - row->geometry().top());
+		}
+	}
+	return state;
 }
 
-void DeletedMessagesWidget::restoreState(not_null<DeletedMessagesMemento*> memento) {
-	_searchQuery = memento->searchQuery();
+void DeletedMessagesWidget::applyState(const DeletedMessagesSectionState &state) {
+	_searchQuery = state.searchQuery;
 	if (!_searchQuery.isEmpty() && !_topBar->searchMode()) {
 		_topBar->toggleSearch(true, anim::type::instant);
 	} else if (_searchQuery.isEmpty() && _topBar->searchMode()) {
@@ -804,10 +1001,67 @@ void DeletedMessagesWidget::restoreState(not_null<DeletedMessagesMemento*> memen
 		_topBar->searchSetText(_searchQuery);
 	}
 	rebuildContent();
-	const auto target = (memento->scrollTop() >= 0)
-		? memento->scrollTop()
-		: _scroll->scrollTopMax();
-	_scroll->scrollToY(target);
+	if (!restoreAnchor(
+			state.anchorMessageId,
+			state.anchorTimestamp,
+			state.anchorOffset)) {
+		const auto target = (state.scrollTop >= 0)
+			? std::clamp(state.scrollTop, 0, _scroll->scrollTopMax())
+			: _scroll->scrollTopMax();
+		_scroll->scrollToY(target);
+	}
+	SaveRememberedState(_thread, captureState());
+}
+
+bool DeletedMessagesWidget::restoreAnchor(
+		int messageId,
+		int timestamp,
+		int offset) {
+	if (!_scroll || (messageId <= 0)) {
+		return false;
+	}
+	for (const auto row : _rows) {
+		if (!row) {
+			continue;
+		}
+		const auto &snapshot = row->snapshot();
+		if (snapshot.messageId != messageId) {
+			continue;
+		}
+		if (timestamp && (DisplayTimestamp(snapshot) != timestamp)) {
+			continue;
+		}
+		const auto target = std::clamp(
+			row->geometry().top() + offset,
+			0,
+			_scroll->scrollTopMax());
+		_scroll->scrollToY(target);
+		return true;
+	}
+	if (timestamp) {
+		return restoreAnchor(messageId, 0, offset);
+	}
+	return false;
+}
+
+void DeletedMessagesWidget::saveState(not_null<DeletedMessagesMemento*> memento) {
+	const auto state = captureState();
+	memento->setScrollTop(state.scrollTop);
+	memento->setSearchQuery(state.searchQuery);
+	memento->setAnchorMessageId(state.anchorMessageId);
+	memento->setAnchorTimestamp(state.anchorTimestamp);
+	memento->setAnchorOffset(state.anchorOffset);
+	SaveRememberedState(_thread, state);
+}
+
+void DeletedMessagesWidget::restoreState(not_null<DeletedMessagesMemento*> memento) {
+	auto state = DeletedMessagesSectionState();
+	state.scrollTop = memento->scrollTop();
+	state.searchQuery = memento->searchQuery();
+	state.anchorMessageId = memento->anchorMessageId();
+	state.anchorTimestamp = memento->anchorTimestamp();
+	state.anchorOffset = memento->anchorOffset();
+	applyState(state);
 }
 
 } // namespace

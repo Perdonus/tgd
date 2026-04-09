@@ -9,26 +9,103 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/unixtime.h"
 #include "data/data_peer_id.h"
+#include "lang/lang_instance.h"
 #include "data/data_session.h"
 #include "data/data_peer.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "main/main_session.h"
+#include "storage/storage_shared_media.h"
 
 #include <algorithm>
 #include <optional>
+#include <QDateTime>
+#include <QFileInfo>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QSet>
+#include <type_traits>
 
 namespace AyuMessages {
 namespace {
 
 [[nodiscard]] QString StoragePath() {
 	return u"./tdata/astro_recall_log.jsonl"_q;
+}
+
+struct StorageCache {
+	QString filePath;
+	QDateTime lastModified;
+	qint64 size = -1;
+	std::vector<MessageSnapshot> snapshots;
+	bool loaded = false;
+};
+
+[[nodiscard]] StorageCache &SnapshotsCache() {
+	static auto cache = StorageCache();
+	return cache;
+}
+
+void InvalidateSnapshotsCache() {
+	auto &cache = SnapshotsCache();
+	cache = StorageCache();
+}
+
+[[nodiscard]] bool RussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString StorageText(const char *en, const char *ru) {
+	return RussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString MediaFallbackText(not_null<HistoryItem*> item) {
+	using Type = Storage::SharedMediaType;
+	const auto types = item->sharedMediaTypes();
+	if (types.test(Type::RoundVoiceFile) || types.test(Type::RoundFile)) {
+		return StorageText("Video message", "Видеосообщение");
+	} else if (types.test(Type::VoiceFile)) {
+		return StorageText("Voice message", "Голосовое сообщение");
+	} else if (types.test(Type::MusicFile)) {
+		return StorageText("Music", "Музыка");
+	} else if (types.test(Type::GIF)) {
+		return u"GIF"_q;
+	} else if (types.test(Type::Video)) {
+		return StorageText("Video", "Видео");
+	} else if (types.test(Type::PhotoVideo)) {
+		return StorageText("Photo or video", "Фото или видео");
+	} else if (types.test(Type::Photo) || types.test(Type::ChatPhoto)) {
+		return StorageText("Photo", "Фотография");
+	} else if (types.test(Type::File)) {
+		return StorageText("File", "Файл");
+	} else if (types.test(Type::Link)) {
+		return StorageText("Link", "Ссылка");
+	} else if (types.test(Type::Pinned)) {
+		return StorageText("Pinned message", "Закреплённое сообщение");
+	} else if (item->media()) {
+		return StorageText("Media message", "Медиасообщение");
+	} else if (item->isService()) {
+		return StorageText("Service message", "Служебное сообщение");
+	}
+	return StorageText("Saved message", "Сохранённое сообщение");
+}
+
+[[nodiscard]] QString SnapshotText(not_null<HistoryItem*> item) {
+	auto text = item->originalText().text.trimmed();
+	if (!text.isEmpty()) {
+		return text;
+	}
+	text = item->notificationText().text.trimmed();
+	if (!text.isEmpty()) {
+		return text;
+	}
+	return MediaFallbackText(item);
 }
 
 [[nodiscard]] MessageSnapshot MapSnapshot(
@@ -50,10 +127,7 @@ namespace {
 	snapshot.date = item->date();
 	snapshot.editDate = base::unixtime::now();
 	snapshot.senderName = from ? from->name() : item->history()->peer->name();
-	snapshot.text = item->originalText().text;
-	if (snapshot.text.isEmpty()) {
-		snapshot.text = item->notificationText().text;
-	}
+	snapshot.text = SnapshotText(item);
 	if (const auto edited = item->Get<HistoryMessageEdited>()) {
 		snapshot.editDate = edited->date;
 	}
@@ -86,6 +160,7 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
 	file.write("\n");
 	file.close();
+	InvalidateSnapshotsCache();
 }
 
 [[nodiscard]] bool MatchesItem(
@@ -111,6 +186,20 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		&& (snapshot.messageId == item->id.bare);
 }
 
+template <typename Int>
+[[nodiscard]] Int ParseJsonNumber(const QJsonValue &value) {
+	if (value.isDouble()) {
+		return static_cast<Int>(value.toDouble());
+	} else if (value.isString()) {
+		if constexpr (std::is_unsigned_v<Int>) {
+			return static_cast<Int>(value.toString().toULongLong());
+		} else {
+			return static_cast<Int>(value.toString().toLongLong());
+		}
+	}
+	return 0;
+}
+
 [[nodiscard]] std::optional<MessageSnapshot> ParseSnapshotLine(
 		const QByteArray &line) {
 	if (line.trimmed().isEmpty()) {
@@ -124,26 +213,111 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	const auto object = document.object();
 	auto snapshot = MessageSnapshot();
 	snapshot.kind = object.value(u"kind"_q).toString();
-	snapshot.userId = object.value(u"userId"_q).toString().toLongLong();
-	snapshot.dialogId = object.value(u"dialogId"_q).toString().toLongLong();
-	snapshot.peerId = object.value(u"peerId"_q).toString().toLongLong();
-	snapshot.fromId = object.value(u"fromId"_q).toString().toLongLong();
-	snapshot.topicId = object.value(u"topicId"_q).toString().toLongLong();
-	snapshot.userSerialized = object.value(u"userSerialized"_q)
-		.toString()
-		.toULongLong();
-	snapshot.dialogSerialized = object.value(u"dialogSerialized"_q)
-		.toString()
-		.toULongLong();
-	snapshot.senderSerialized = object.value(u"senderSerialized"_q)
-		.toString()
-		.toULongLong();
-	snapshot.messageId = object.value(u"messageId"_q).toInt();
-	snapshot.date = object.value(u"date"_q).toInt();
-	snapshot.editDate = object.value(u"editDate"_q).toInt();
+	snapshot.userId = ParseJsonNumber<ID>(object.value(u"userId"_q));
+	snapshot.dialogId = ParseJsonNumber<ID>(object.value(u"dialogId"_q));
+	snapshot.peerId = ParseJsonNumber<ID>(object.value(u"peerId"_q));
+	snapshot.fromId = ParseJsonNumber<ID>(object.value(u"fromId"_q));
+	snapshot.topicId = ParseJsonNumber<ID>(object.value(u"topicId"_q));
+	snapshot.userSerialized = ParseJsonNumber<quint64>(
+		object.value(u"userSerialized"_q));
+	snapshot.dialogSerialized = ParseJsonNumber<quint64>(
+		object.value(u"dialogSerialized"_q));
+	snapshot.senderSerialized = ParseJsonNumber<quint64>(
+		object.value(u"senderSerialized"_q));
+	snapshot.messageId = ParseJsonNumber<int>(object.value(u"messageId"_q));
+	snapshot.date = ParseJsonNumber<int>(object.value(u"date"_q));
+	snapshot.editDate = ParseJsonNumber<int>(object.value(u"editDate"_q));
 	snapshot.senderName = object.value(u"senderName"_q).toString();
 	snapshot.text = object.value(u"text"_q).toString();
 	return snapshot;
+}
+
+[[nodiscard]] QString SnapshotDedupKey(const MessageSnapshot &snapshot) {
+	return QString::number(snapshot.userSerialized)
+		+ u'|'
+		+ QString::number(snapshot.dialogSerialized)
+		+ u'|'
+		+ QString::number(snapshot.senderSerialized)
+		+ u'|'
+		+ snapshot.kind
+		+ u'|'
+		+ QString::number(snapshot.topicId)
+		+ u'|'
+		+ QString::number(snapshot.messageId)
+		+ u'|'
+		+ QString::number(snapshot.date)
+		+ u'|'
+		+ QString::number(snapshot.editDate)
+		+ u'|'
+		+ snapshot.senderName
+		+ u'|'
+		+ snapshot.text;
+}
+
+[[nodiscard]] const std::vector<MessageSnapshot> &ReadAllSnapshots() {
+	auto &cache = SnapshotsCache();
+	const auto path = StoragePath();
+	const auto info = QFileInfo(path);
+	const auto filePath = info.exists()
+		? info.canonicalFilePath()
+		: info.absoluteFilePath();
+	const auto lastModified = info.lastModified();
+	const auto size = info.exists() ? info.size() : -1;
+	if (cache.loaded
+		&& (cache.filePath == filePath)
+		&& (cache.lastModified == lastModified)
+		&& (cache.size == size)) {
+		return cache.snapshots;
+	}
+
+	cache = StorageCache();
+	cache.filePath = filePath;
+	cache.lastModified = lastModified;
+	cache.size = size;
+	cache.loaded = true;
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return cache.snapshots;
+	}
+
+	auto seen = QSet<QString>();
+	while (!file.atEnd()) {
+		const auto parsed = ParseSnapshotLine(file.readLine());
+		if (!parsed) {
+			continue;
+		}
+		const auto dedupKey = SnapshotDedupKey(*parsed);
+		if (seen.contains(dedupKey)) {
+			continue;
+		}
+		seen.insert(dedupKey);
+		cache.snapshots.push_back(*parsed);
+	}
+	file.close();
+	return cache.snapshots;
+}
+
+[[nodiscard]] bool MatchesDialog(
+		not_null<PeerData*> peer,
+		const MessageSnapshot &snapshot) {
+	const auto matchesCandidate = [&](not_null<const PeerData*> candidate) {
+		const auto dialogSerialized = SerializePeerId(candidate->id);
+		const auto dialogId = candidate->id.value & PeerId::kChatTypeMask;
+		return snapshot.dialogSerialized
+			? (snapshot.dialogSerialized == dialogSerialized)
+			: (snapshot.dialogId == dialogId);
+	};
+	if (matchesCandidate(peer)) {
+		return true;
+	}
+	if (const auto previous = peer->migrateFrom(); previous
+		&& matchesCandidate(previous)) {
+		return true;
+	}
+	if (const auto next = peer->migrateTo(); next && matchesCandidate(next)) {
+		return true;
+	}
+	return false;
 }
 
 [[nodiscard]] bool MatchesPeer(
@@ -151,18 +325,13 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		ID topicId,
 		const MessageSnapshot &snapshot) {
 	const auto userId = peer->session().userId().bare & PeerId::kChatTypeMask;
-	const auto dialogId = peer->id.value & PeerId::kChatTypeMask;
 	const auto userSerialized = SerializePeerId(peerFromUser(peer->session().userId()));
-	const auto dialogSerialized = SerializePeerId(peer->id);
 	const auto sameUser = snapshot.userSerialized
 		? (snapshot.userSerialized == userSerialized)
 		: (snapshot.userId == userId);
-	const auto sameDialog = snapshot.dialogSerialized
-		? (snapshot.dialogSerialized == dialogSerialized)
-		: (snapshot.dialogId == dialogId);
 	return (snapshot.kind == u"deleted"_q)
 		&& sameUser
-		&& sameDialog
+		&& MatchesDialog(peer, snapshot)
 		&& (snapshot.topicId == topicId);
 }
 
@@ -188,18 +357,12 @@ std::vector<MessageSnapshot> getEditedMessages(
 		not_null<HistoryItem*> item,
 		int totalLimit) {
 	auto result = std::vector<MessageSnapshot>();
-	auto file = QFile(StoragePath());
-	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		return result;
-	}
-	while (!file.atEnd()) {
-		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (!parsed || !MatchesItem(item, *parsed)) {
+	for (const auto &snapshot : ReadAllSnapshots()) {
+		if (!MatchesItem(item, snapshot)) {
 			continue;
 		}
-		result.push_back(*parsed);
+		result.push_back(snapshot);
 	}
-	file.close();
 	SortSnapshots(&result);
 	if (totalLimit > 0 && int(result.size()) > totalLimit) {
 		result.resize(totalLimit);
@@ -208,18 +371,11 @@ std::vector<MessageSnapshot> getEditedMessages(
 }
 
 bool hasRevisions(not_null<HistoryItem*> item) {
-	auto file = QFile(StoragePath());
-	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		return false;
-	}
-	while (!file.atEnd()) {
-		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (parsed && MatchesItem(item, *parsed)) {
-			file.close();
+	for (const auto &snapshot : ReadAllSnapshots()) {
+		if (MatchesItem(item, snapshot)) {
 			return true;
 		}
 	}
-	file.close();
 	return false;
 }
 
@@ -232,18 +388,12 @@ std::vector<MessageSnapshot> getDeletedMessages(
 		ID topicId,
 		int totalLimit) {
 	auto result = std::vector<MessageSnapshot>();
-	auto file = QFile(StoragePath());
-	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		return result;
-	}
-	while (!file.atEnd()) {
-		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (!parsed || !MatchesPeer(peer, topicId, *parsed)) {
+	for (const auto &snapshot : ReadAllSnapshots()) {
+		if (!MatchesPeer(peer, topicId, snapshot)) {
 			continue;
 		}
-		result.push_back(*parsed);
+		result.push_back(snapshot);
 	}
-	file.close();
 	SortSnapshots(&result);
 	if (totalLimit > 0 && int(result.size()) > totalLimit) {
 		result.resize(totalLimit);
@@ -254,18 +404,11 @@ std::vector<MessageSnapshot> getDeletedMessages(
 bool hasDeletedMessages(
 		not_null<PeerData*> peer,
 		ID topicId) {
-	auto file = QFile(StoragePath());
-	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		return false;
-	}
-	while (!file.atEnd()) {
-		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (parsed && MatchesPeer(peer, topicId, *parsed)) {
-			file.close();
+	for (const auto &snapshot : ReadAllSnapshots()) {
+		if (MatchesPeer(peer, topicId, snapshot)) {
 			return true;
 		}
 	}
-	file.close();
 	return false;
 }
 
