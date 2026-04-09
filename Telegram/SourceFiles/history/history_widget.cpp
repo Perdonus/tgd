@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "ayu/data/messages_storage.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
 #include "api/api_chat_participants.h"
@@ -267,6 +268,13 @@ const auto kPsaAboutPrefix = "cloud_lng_about_psa_";
 	TextUtilities::Trim(text);
 	if (!text.empty()) {
 		return text;
+	}
+	if (const auto snapshot = AyuMessages::lookupDeletedMessage(item)) {
+		auto archived = TextWithEntities{ snapshot->text };
+		TextUtilities::Trim(archived);
+		if (!archived.empty()) {
+			return archived;
+		}
 	}
 	auto media = DeletedReplyMediaLabel(item);
 	TextUtilities::Trim(media);

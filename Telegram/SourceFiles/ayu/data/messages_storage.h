@@ -9,7 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ayu/data/entities.h"
 
+#include <optional>
 #include <vector>
+
+#include <rpl/producer.h>
 
 class HistoryItem;
 class PeerData;
@@ -29,5 +32,7 @@ std::vector<MessageSnapshot> getDeletedMessages(
 bool hasDeletedMessages(
 	not_null<PeerData*> peer,
 	ID topicId = 0);
+std::optional<MessageSnapshot> lookupDeletedMessage(not_null<HistoryItem*> item);
+rpl::producer<> deletedMessagesChanged();
 
 } // namespace AyuMessages

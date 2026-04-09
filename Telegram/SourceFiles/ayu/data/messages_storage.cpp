@@ -30,6 +30,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QSet>
 #include <type_traits>
 
+#include <rpl/event_stream.h>
+
 namespace AyuMessages {
 namespace {
 
@@ -48,6 +50,11 @@ struct StorageCache {
 [[nodiscard]] StorageCache &SnapshotsCache() {
 	static auto cache = StorageCache();
 	return cache;
+}
+
+[[nodiscard]] rpl::event_stream<> &DeletedMessagesChangedStream() {
+	static auto stream = rpl::event_stream<>();
+	return stream;
 }
 
 void InvalidateSnapshotsCache() {
@@ -180,6 +187,29 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		? (snapshot.dialogSerialized == dialogSerialized)
 		: (snapshot.dialogId == dialogId);
 	return (snapshot.kind == u"edited"_q)
+		&& sameUser
+		&& sameDialog
+		&& (snapshot.topicId == topicId)
+		&& (snapshot.messageId == item->id.bare);
+}
+
+[[nodiscard]] bool MatchesDeletedItem(
+		not_null<HistoryItem*> item,
+		const MessageSnapshot &snapshot) {
+	const auto userId = item->history()->owner().session().userId().bare
+		& PeerId::kChatTypeMask;
+	const auto dialogId = item->history()->peer->id.value & PeerId::kChatTypeMask;
+	const auto userSerialized = SerializePeerId(peerFromUser(
+		item->history()->owner().session().userId()));
+	const auto dialogSerialized = SerializePeerId(item->history()->peer->id);
+	const auto topicId = item->topic() ? item->topicRootId().bare : 0;
+	const auto sameUser = snapshot.userSerialized
+		? (snapshot.userSerialized == userSerialized)
+		: (snapshot.userId == userId);
+	const auto sameDialog = snapshot.dialogSerialized
+		? (snapshot.dialogSerialized == dialogSerialized)
+		: (snapshot.dialogId == dialogId);
+	return (snapshot.kind == u"deleted"_q)
 		&& sameUser
 		&& sameDialog
 		&& (snapshot.topicId == topicId)
@@ -381,6 +411,7 @@ bool hasRevisions(not_null<HistoryItem*> item) {
 
 void addDeletedMessage(not_null<HistoryItem*> item) {
 	AppendSnapshot(MapSnapshot(item, u"deleted"_q));
+	DeletedMessagesChangedStream().fire({});
 }
 
 std::vector<MessageSnapshot> getDeletedMessages(
@@ -410,6 +441,26 @@ bool hasDeletedMessages(
 		}
 	}
 	return false;
+}
+
+std::optional<MessageSnapshot> lookupDeletedMessage(not_null<HistoryItem*> item) {
+	auto result = std::optional<MessageSnapshot>();
+	for (const auto &snapshot : ReadAllSnapshots()) {
+		if (!MatchesDeletedItem(item, snapshot)) {
+			continue;
+		}
+		if (!result
+			|| (snapshot.editDate > result->editDate)
+			|| ((snapshot.editDate == result->editDate)
+				&& (snapshot.date > result->date))) {
+			result = snapshot;
+		}
+	}
+	return result;
+}
+
+rpl::producer<> deletedMessagesChanged() {
+	return DeletedMessagesChangedStream().events();
 }
 
 } // namespace AyuMessages

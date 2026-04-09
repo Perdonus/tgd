@@ -1928,6 +1928,7 @@ private:
 	void refreshScopeBar();
 	void refreshFooterBar();
 	void applySearchQuery(QString query);
+	void handleStorageChange();
 	[[nodiscard]] DeletedMessageRow *currentVisibleRow() const;
 	[[nodiscard]] DeletedMessagesSectionState captureState() const;
 	void applyState(const DeletedMessagesSectionState &state);
@@ -2098,8 +2099,10 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 	) | rpl::on_next([=] {
 		refreshScopeBar();
 	}, lifetime());
-
-	rebuildContent();
+	AyuMessages::deletedMessagesChanged(
+	) | rpl::start_with_next([=] {
+		handleStorageChange();
+	}, lifetime());
 }
 
 DeletedMessagesWidget::~DeletedMessagesWidget() {
@@ -2341,6 +2344,30 @@ void DeletedMessagesWidget::applySearchQuery(QString query) {
 			before.anchorOffset)) {
 		_scroll->scrollToY(_searchQuery.isEmpty() ? _scroll->scrollTopMax() : 0);
 	}
+	SaveRememberedState(_thread, captureState());
+}
+
+void DeletedMessagesWidget::handleStorageChange() {
+	if (!_scroll || !_content) {
+		rebuildContent();
+		return;
+	}
+	const auto before = captureState();
+	const auto wasNearBottom = (_scroll->scrollTop()
+		>= std::max(0, _scroll->scrollTopMax() - 2));
+	rebuildContent();
+	if (!restoreAnchor(
+			before.anchorMessageId,
+			before.anchorTimestamp,
+			before.anchorOffset)) {
+		const auto target = wasNearBottom
+			? _scroll->scrollTopMax()
+			: (before.scrollTop >= 0)
+			? std::clamp(before.scrollTop, 0, _scroll->scrollTopMax())
+			: _scroll->scrollTopMax();
+		_scroll->scrollToY(target);
+	}
+	refreshScopeBar();
 	SaveRememberedState(_thread, captureState());
 }
 
