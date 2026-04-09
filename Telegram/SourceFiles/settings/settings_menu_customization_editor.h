@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/object_ptr.h"
 
+#include <QtCore/QString>
+
 namespace Ui {
 class VerticalLayout;
 } // namespace Ui
@@ -18,6 +20,18 @@ class SessionController;
 } // namespace Window
 
 namespace Settings {
+
+struct ShellModePreferences {
+	bool immersiveAnimation = true;
+	bool expandedSidePanel = false;
+	bool leftEdgeSettings = false;
+	bool wideSettingsPane = false;
+};
+
+[[nodiscard]] QString ShellModePreferencesPath();
+[[nodiscard]] ShellModePreferences LoadShellModePreferences();
+[[nodiscard]] bool SaveShellModePreferences(
+	const ShellModePreferences &prefs);
 
 void AddMenuCustomizationEditor(
 	not_null<Window::SessionController*> controller,

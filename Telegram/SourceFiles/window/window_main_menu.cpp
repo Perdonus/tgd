@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "mainwidget.h"
 #include "menu/menu_customization.h"
 #include "mtproto/mtproto_config.h"
 #include "plugins/plugins_manager.h"
@@ -45,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_calls.h"
 #include "settings/settings_information.h"
 #include "settings/settings_astrogram.h"
+#include "settings/settings_menu_customization_editor.h"
 #include "storage/localstorage.h"
 #include "storage/storage_account.h"
 #include "support/support_templates.h"
@@ -81,10 +83,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
+#include <QtGui/QMoveEvent>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
+#include <algorithm>
 #include <functional>
 #include <map>
 
@@ -357,6 +361,7 @@ MainMenu::MainMenu(
 	Ui::CreateChild<Ui::FlatLabel>(_footer.get(), st::mainMenuTelegramLabel))
 , _version(AddVersionLabel(_footer)) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
+	refreshShellModePreferences();
 
 	const auto sideMenuOptions = ::Menu::Customization::LoadSideMenuOptions();
 	_footer->setVisible(sideMenuOptions.showFooterText);
@@ -479,9 +484,81 @@ MainMenu::MainMenu(
 	}
 
 	setupSwipe();
+	if (_immersiveAnimation) {
+		_immersiveShiftAnimation.start([=] {
+			if (_immersiveGeometryDriven) {
+				return;
+			}
+			const auto target = std::min(desiredMenuWidth() / 6, 44);
+			const auto progress = _immersiveShiftAnimation.value(1.);
+			_immersiveFallbackShift = int((target * progress) + 0.5);
+			applyImmersiveShift();
+		}, 0., 1., st::slideWrapDuration);
+	}
 }
 
-MainMenu::~MainMenu() = default;
+MainMenu::~MainMenu() {
+	resetImmersiveShift();
+}
+
+void MainMenu::refreshShellModePreferences() {
+	const auto prefs = Settings::LoadShellModePreferences();
+	_immersiveAnimation = prefs.immersiveAnimation;
+	_expandedSidePanel = prefs.expandedSidePanel;
+}
+
+int MainMenu::desiredMenuWidth() const {
+	const auto parentWidth = parentWidget() ? parentWidget()->width() : 0;
+	if (!_expandedSidePanel || !parentWidth) {
+		return st::mainMenuWidth;
+	}
+	return std::clamp(parentWidth * 48 / 100, st::mainMenuWidth, 360);
+}
+
+int MainMenu::visibleMenuWidthForImmersive() const {
+	if (!_immersiveAnimation || !width()) {
+		return 0;
+	}
+	const auto left = x();
+	if (left >= 0) {
+		return width();
+	}
+	return std::clamp(width() + left, 0, width());
+}
+
+void MainMenu::applyImmersiveShift() {
+	const auto main = _controller->widget()->sessionContent();
+	if (!main) {
+		return;
+	}
+	auto shift = 0;
+	if (_immersiveAnimation) {
+		shift = _immersiveGeometryDriven
+			? std::min(visibleMenuWidthForImmersive() / 6, 44)
+			: _immersiveFallbackShift;
+	}
+	auto geometry = main->geometry();
+	geometry.moveLeft(geometry.x() - _appliedImmersiveShift + shift);
+	if (geometry != main->geometry()) {
+		main->setGeometry(geometry);
+	}
+	_appliedImmersiveShift = shift;
+}
+
+void MainMenu::resetImmersiveShift() {
+	_immersiveShiftAnimation.stop();
+	_immersiveFallbackShift = 0;
+	_immersiveGeometryDriven = false;
+	if (!_appliedImmersiveShift) {
+		return;
+	}
+	if (const auto main = _controller->widget()->sessionContent()) {
+		auto geometry = main->geometry();
+		geometry.moveLeft(geometry.x() - _appliedImmersiveShift);
+		main->setGeometry(geometry);
+	}
+	_appliedImmersiveShift = 0;
+}
 
 void MainMenu::moveBadge() {
 	if (!_badge->widget()) {
@@ -660,7 +737,8 @@ void MainMenu::setupSetEmojiStatus() {
 }
 
 void MainMenu::parentResized() {
-	resize(st::mainMenuWidth, parentWidget()->height());
+	resize(desiredMenuWidth(), parentWidget()->height());
+	applyImmersiveShift();
 }
 
 void MainMenu::showFinished() {
@@ -669,6 +747,10 @@ void MainMenu::showFinished() {
 		&& !_accounts->toggled()) {
 		_accounts->toggle(true, anim::type::instant);
 		_toggleAccounts->setToggled(true);
+	}
+	if (!_immersiveGeometryDriven) {
+		_immersiveFallbackShift = std::min(width() / 6, 44);
+		applyImmersiveShift();
 	}
 }
 
@@ -999,9 +1081,20 @@ void MainMenu::setupMenu() {
 	}
 }
 
+void MainMenu::moveEvent(QMoveEvent *e) {
+	Ui::LayerWidget::moveEvent(e);
+	if (_immersiveAnimation && (e->oldPos().x() != e->pos().x())) {
+		_immersiveGeometryDriven = true;
+		_immersiveShiftAnimation.stop();
+		_immersiveFallbackShift = 0;
+	}
+	applyImmersiveShift();
+}
+
 void MainMenu::resizeEvent(QResizeEvent *e) {
 	_inner->resizeToWidth(width());
 	updateControlsGeometry();
+	applyImmersiveShift();
 }
 
 void MainMenu::updateControlsGeometry() {

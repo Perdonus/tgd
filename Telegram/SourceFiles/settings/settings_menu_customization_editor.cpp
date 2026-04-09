@@ -43,36 +43,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 namespace Settings {
-namespace {
-
-constexpr auto kPreviewHeight = 292;
-constexpr auto kFuturePreviewHeight = 214;
-constexpr auto kRowHeight = 64;
-constexpr auto kRowGap = 10;
-constexpr auto kRowPadding = 14;
-constexpr auto kRowRadius = 18;
-constexpr auto kPreviewRadius = 24;
-
-[[nodiscard]] QString RuEn(const char *ru, const char *en) {
-	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
-		? QString::fromUtf8(ru)
-		: QString::fromUtf8(en);
-}
-
-[[nodiscard]] QString PreviewPrefsPath() {
+QString ShellModePreferencesPath() {
 	return cWorkingDir() + QStringLiteral("tdata/menu_editor_preview.json");
 }
 
-struct PreviewPreferences {
-	bool immersiveAnimation = true;
-	bool expandedSidePanel = false;
-	bool leftEdgeSettings = false;
-	bool wideSettingsPane = false;
-};
-
-[[nodiscard]] PreviewPreferences LoadPreviewPreferences() {
-	auto result = PreviewPreferences();
-	auto file = QFile(PreviewPrefsPath());
+ShellModePreferences LoadShellModePreferences() {
+	auto result = ShellModePreferences();
+	auto file = QFile(ShellModePreferencesPath());
 	if (!file.open(QIODevice::ReadOnly)) {
 		return result;
 	}
@@ -92,8 +69,8 @@ struct PreviewPreferences {
 	return result;
 }
 
-[[nodiscard]] bool SavePreviewPreferences(const PreviewPreferences &prefs) {
-	const auto path = PreviewPrefsPath();
+bool SaveShellModePreferences(const ShellModePreferences &prefs) {
+	const auto path = ShellModePreferencesPath();
 	const auto directory = QFileInfo(path).absolutePath();
 	if (!directory.isEmpty() && !QDir().mkpath(directory)) {
 		return false;
@@ -113,6 +90,22 @@ struct PreviewPreferences {
 		return false;
 	}
 	return file.commit();
+}
+
+namespace {
+
+constexpr auto kPreviewHeight = 292;
+constexpr auto kFuturePreviewHeight = 214;
+constexpr auto kRowHeight = 64;
+constexpr auto kRowGap = 10;
+constexpr auto kRowPadding = 14;
+constexpr auto kRowRadius = 18;
+constexpr auto kPreviewRadius = 24;
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
 }
 
 [[nodiscard]] bool IsCustomSeparatorId(const QString &id) {
@@ -317,7 +310,7 @@ public:
 	, _entries(Menu::Customization::LoadSideMenuLayout(
 		supportMode,
 		includeShowLogs))
-	, _preview(LoadPreviewPreferences()) {
+	, _preview(LoadShellModePreferences()) {
 	}
 
 	[[nodiscard]] const std::vector<Menu::Customization::SideMenuEntry> &entries()
@@ -346,7 +339,7 @@ public:
 	}
 
 	[[nodiscard]] QString previewPrefsPath() const {
-		return PreviewPrefsPath();
+		return ShellModePreferencesPath();
 	}
 
 	[[nodiscard]] bool supportMode() const {
@@ -363,7 +356,7 @@ public:
 		}
 		auto updated = _preview;
 		updated.immersiveAnimation = value;
-		if (!SavePreviewPreferences(updated)) {
+		if (!SaveShellModePreferences(updated)) {
 			return false;
 		}
 		_preview = updated;
@@ -377,7 +370,7 @@ public:
 		}
 		auto updated = _preview;
 		updated.wideSettingsPane = value;
-		if (!SavePreviewPreferences(updated)) {
+		if (!SaveShellModePreferences(updated)) {
 			return false;
 		}
 		_preview = updated;
@@ -391,7 +384,7 @@ public:
 		}
 		auto updated = _preview;
 		updated.expandedSidePanel = value;
-		if (!SavePreviewPreferences(updated)) {
+		if (!SaveShellModePreferences(updated)) {
 			return false;
 		}
 		_preview = updated;
@@ -405,7 +398,7 @@ public:
 		}
 		auto updated = _preview;
 		updated.leftEdgeSettings = value;
-		if (!SavePreviewPreferences(updated)) {
+		if (!SaveShellModePreferences(updated)) {
 			return false;
 		}
 		_preview = updated;
@@ -417,7 +410,7 @@ public:
 		_entries = Menu::Customization::LoadSideMenuLayout(
 			_supportMode,
 			_includeShowLogs);
-		_preview = LoadPreviewPreferences();
+		_preview = LoadShellModePreferences();
 		_changes.fire({});
 		return true;
 	}
@@ -501,7 +494,7 @@ private:
 	const bool _supportMode = false;
 	const bool _includeShowLogs = false;
 	std::vector<Menu::Customization::SideMenuEntry> _entries;
-	PreviewPreferences _preview;
+	ShellModePreferences _preview;
 	mutable rpl::event_stream<> _changes;
 };
 
@@ -1372,8 +1365,8 @@ void AddMenuCustomizationEditor(
 			"Расширенная боковая панель",
 			"Expanded side panel"),
 		RuEn(
-			"Пока влияет на native preview editor-а: боковая панель становится шире и готовится под будущие drag/drop и расширенные группы настроек.",
-			"Currently affects the editor's native preview: the side panel becomes wider and is prepared for future drag/drop and expanded settings groups."),
+			"Runtime-хук уже подключён: реальное боковое меню становится шире. Preview тоже сразу повторяет это состояние.",
+			"The runtime hook is now live: the real side menu becomes wider, and the preview mirrors that state immediately."),
 		state->expandedSidePanel(),
 		[=](bool value) {
 			return state->setExpandedSidePanel(value);
@@ -1386,8 +1379,8 @@ void AddMenuCustomizationEditor(
 			"Левоторцевые настройки",
 			"Left-edge settings"),
 		RuEn(
-			"UI-side scaffold для идеи, где settings panes открываются от левого торца как продолжение боковой панели. Runtime hook ещё не подключён.",
-			"UI-side scaffold for the idea where settings panes open from the left edge as an extension of the side panel. The runtime hook is not wired yet."),
+			"Честный MVP уже в runtime: settings/info layers выравниваются к левому краю вместо центрирования. Полное drawer-продолжение боковой панели всё ещё потребует отдельного рефактора.",
+			"An honest runtime MVP is live: settings/info layers align to the left edge instead of staying centered. A full drawer-style continuation of the side menu still needs a separate refactor."),
 		state->leftEdgeSettings(),
 		[=](bool value) {
 			return state->setLeftEdgeSettings(value);
@@ -1400,8 +1393,8 @@ void AddMenuCustomizationEditor(
 			"Иммерсивная анимация бокового меню",
 			"Immersive side menu animation"),
 		RuEn(
-			"Пока влияет только на preview: chat background уезжает вместе с меню, как ты и просил для ETG-style эффекта.",
-			"Currently preview-only: the chat background moves together with the side menu for the ETG-style effect you asked for."),
+			"Runtime-хук уже есть: основная секция клиента уезжает вправо вместе с открытием бокового меню. Полный drawer-level рефактор анимаций всего окна здесь пока не делается.",
+			"The runtime hook is live: the main client section now shifts right together with the side menu opening. A full drawer-level refactor of the entire window animation is still out of scope here."),
 		state->immersiveAnimation(),
 		[=](bool value) {
 			return state->setImmersiveAnimation(value);
@@ -1414,8 +1407,8 @@ void AddMenuCustomizationEditor(
 			"Более широкая панель настроек",
 			"Wider settings pane"),
 		RuEn(
-			"Пока это только editor/preview scaffolding: отдельный runtime hook ещё не протянут в реальные settings panes.",
-			"This is editor/preview scaffolding for now: the runtime hook has not been wired into real settings panes yet."),
+			"Runtime-хук уже подключён для settings/info layers: у настроек появляется более широкий контейнер, чтобы длинные пункты не упирались в узкую колонку.",
+			"The runtime hook is live for settings/info layers: settings now get a wider container so longer rows do not collapse into an overly narrow column."),
 		state->wideSettingsPane(),
 		[=](bool value) {
 			return state->setWideSettingsPane(value);

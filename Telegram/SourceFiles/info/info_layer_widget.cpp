@@ -8,8 +8,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_layer_widget.h"
 
 #include "info/info_content_widget.h"
+#include "info/info_controller.h"
 #include "info/info_top_bar.h"
 #include "info/info_memento.h"
+#include "info/info_wrap_widget.h"
+#include "settings/settings_menu_customization_editor.h"
 #include "ui/rp_widget.h"
 #include "ui/focus_persister.h"
 #include "ui/widgets/buttons.h"
@@ -24,7 +27,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 #include "styles/style_layers.h"
 
+#include <algorithm>
+
 namespace Info {
+namespace {
+
+[[nodiscard]] bool IsSettingsLayerContent(not_null<WrapWidget*> content) {
+	return content->controller()->section().type() == Section::Type::Settings;
+}
+
+[[nodiscard]] int LayerDesiredWidth(
+		int parentWidth,
+		bool settingsContent) {
+	const auto limit = std::max(0, parentWidth - 2 * st::infoMinimalLayerMargin);
+	auto desired = st::infoDesiredWidth;
+	if (settingsContent && Settings::LoadShellModePreferences().wideSettingsPane) {
+		desired = std::max(desired, 520);
+	}
+	return std::min(limit, desired);
+}
+
+} // namespace
 
 LayerWidget::LayerWidget(
 	not_null<Window::SessionController*> controller,
@@ -192,9 +215,9 @@ void LayerWidget::parentResized() {
 	//} else if (_controller->canShowThirdSectionWithoutResize()) {
 	//	takeToThirdSection();
 	} else {
-		auto newWidth = qMin(
-			parentWidth - 2 * st::infoMinimalLayerMargin,
-			st::infoDesiredWidth);
+		const auto newWidth = LayerDesiredWidth(
+			parentWidth,
+			IsSettingsLayerContent(_contentWrap));
 		resizeToWidth(newWidth);
 	}
 }
@@ -235,6 +258,7 @@ bool LayerWidget::showSectionInternal(
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &params) {
 	if (_contentWrap && _contentWrap->showInternal(memento, params)) {
+		parentResized();
 		if (params.activation != anim::activation::background) {
 			_controller->parentController()->hideLayer();
 		}
@@ -282,7 +306,12 @@ QRect LayerWidget::countGeometry(int newWidth) {
 	const auto &parentSize = parentWidget()->size();
 	const auto windowWidth = parentSize.width();
 	const auto windowHeight = parentSize.height();
-	const auto newLeft = (windowWidth - newWidth) / 2;
+	const auto shellModes = Settings::LoadShellModePreferences();
+	const auto leftEdgeSettings = shellModes.leftEdgeSettings
+		&& IsSettingsLayerContent(_contentWrap);
+	const auto newLeft = leftEdgeSettings
+		? st::infoMinimalLayerMargin
+		: (windowWidth - newWidth) / 2;
 	const auto newTop = std::clamp(
 		windowHeight / 24,
 		st::infoLayerTopMinimal,

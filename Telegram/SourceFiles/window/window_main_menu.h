@@ -19,6 +19,8 @@ namespace base {
 enum class EventFilterResult;
 } // namespace base
 
+class QMoveEvent;
+
 namespace Ui {
 class IconButton;
 class FlatLabel;
@@ -59,6 +61,7 @@ private:
 	class ResetScaleButton;
 
 	bool eventHook(QEvent *event) override;
+	void moveEvent(QMoveEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 
@@ -76,6 +79,11 @@ private:
 	void updateControlsGeometry();
 	void updateInnerControlsGeometry();
 	void initResetScaleButton();
+	void refreshShellModePreferences();
+	[[nodiscard]] int desiredMenuWidth() const;
+	[[nodiscard]] int visibleMenuWidthForImmersive() const;
+	void applyImmersiveShift();
+	void resetImmersiveShift();
 	void toggleAccounts();
 	void chooseEmojiStatus();
 	void setupSwipe();
@@ -109,9 +117,15 @@ private:
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
 	Ui::Controls::SwipeBackResult _swipeBackData;
+	Ui::Animations::Simple _immersiveShiftAnimation;
 
 	rpl::variable<bool> _showFinished = false;
 	bool _insideEventRedirect = false;
+	bool _immersiveAnimation = true;
+	bool _expandedSidePanel = false;
+	bool _immersiveGeometryDriven = false;
+	int _immersiveFallbackShift = 0;
+	int _appliedImmersiveShift = 0;
 
 };
 

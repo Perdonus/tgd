@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_main.h"
 #include "settings/settings_chat.h"
 #include "settings/settings_codes.h"
+#include "settings/settings_menu_customization_editor.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/wrap/vertical_layout.h"
@@ -26,8 +27,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_info.h"
 
+#include <algorithm>
+
 namespace Settings {
 namespace {
+
+[[nodiscard]] int IntroDesiredWidth(int parentWidth) {
+	const auto shellModes = LoadShellModePreferences();
+	const auto limit = std::max(0, parentWidth - 2 * st::infoMinimalLayerMargin);
+	auto desired = st::infoDesiredWidth;
+	if (shellModes.wideSettingsPane) {
+		desired = std::max(desired, 520);
+	}
+	return std::min(limit, desired);
+}
+
+[[nodiscard]] int IntroLeftPosition(int parentWidth, int newWidth) {
+	const auto shellModes = LoadShellModePreferences();
+	return shellModes.leftEdgeSettings
+		? st::infoMinimalLayerMargin
+		: (parentWidth - newWidth) / 2;
+}
 
 class TopBar : public Ui::RpWidget {
 public:
@@ -457,9 +477,7 @@ void LayerWidget::parentResized() {
 	const auto parentWidth = parentSize.width();
 	const auto newWidth = (parentWidth < MinimalSupportedWidth())
 		? parentWidth
-		: qMin(
-			parentWidth - 2 * st::infoMinimalLayerMargin,
-			st::infoDesiredWidth);
+		: IntroDesiredWidth(parentWidth);
 	resizeToWidth(newWidth);
 }
 
@@ -478,7 +496,7 @@ int LayerWidget::resizeGetHeight(int newWidth) {
 	auto parentSize = parentWidget()->size();
 	auto windowWidth = parentSize.width();
 	auto windowHeight = parentSize.height();
-	auto newLeft = (windowWidth - newWidth) / 2;
+	auto newLeft = IntroLeftPosition(windowWidth, newWidth);
 	if (!newLeft) {
 		_content->updateGeometry({ 0, 0, windowWidth, windowHeight }, 0);
 		auto newGeometry = QRect(0, 0, windowWidth, windowHeight);
