@@ -222,8 +222,8 @@ void SetupExperimental(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Вступительный гайд теперь не только ведёт сюда напрямую, но и умеет заранее применять стартовые shell-пресеты. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings.",
-			"The onboarding flow can now lead here directly and pre-apply starter shell presets. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container.")));
+			"Вступительный гайд теперь не только ведёт сюда напрямую, но и умеет заранее применять стартовые shell-пресеты. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings. Открытое боковое меню тоже подхватывает эти файлы live, без ручного переоткрытия.",
+			"The onboarding flow can now lead here directly and pre-apply starter shell presets. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container. The opened side menu now hot-reloads these files as well, without a manual reopen.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddMenuCustomizationEditor(controller, container);
 }

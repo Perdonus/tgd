@@ -833,10 +833,52 @@ protected:
 		drawProfileCard(profileRect);
 
 		auto hiddenCount = 0;
-		for (const auto &entry : _state->entries()) {
+		const auto selectedIndex = _state->selectedEntryIndex();
+		auto selectedMeta = EntryDescriptor();
+		auto selectedHidden = false;
+		for (auto actualIndex = 0; actualIndex != int(_state->entries().size()); ++actualIndex) {
+			const auto &entry = _state->entries()[actualIndex];
 			if (!entry.visible) {
 				++hiddenCount;
 			}
+			if (actualIndex == selectedIndex) {
+				selectedMeta = DescribeEntry(entry, _state->supportMode());
+				selectedHidden = !entry.visible;
+			}
+		}
+
+		if (selectedIndex >= 0) {
+			const auto focusWidth = std::min(chatRect.width() - 32, 238);
+			const auto focusRect = QRect(
+				chatRect.left() + 16,
+				height() - 84,
+				focusWidth,
+				56);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(255, 255, 255, 228));
+			p.drawRoundedRect(focusRect, 18, 18);
+			p.setBrush(selectedMeta.color);
+			p.drawEllipse(QRect(focusRect.left() + 12, focusRect.top() + 12, 28, 28));
+			p.setPen(Qt::white);
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				QRect(focusRect.left() + 12, focusRect.top() + 12, 28, 28),
+				Qt::AlignCenter,
+				selectedMeta.glyph.left(1));
+			p.setPen(QColor(0x23, 0x2F, 0x3C));
+			p.setFont(st::semiboldTextStyle.font->f);
+			p.drawText(
+				QRect(focusRect.left() + 50, focusRect.top() + 10, focusRect.width() - 62, 18),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				selectedMeta.title);
+			p.setPen(QColor(0x67, 0x75, 0x84));
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				QRect(focusRect.left() + 50, focusRect.top() + 28, focusRect.width() - 62, 18),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				selectedHidden
+					? RuEn("Сейчас в restore-tray", "Currently in the restore tray")
+					: RuEn("Сейчас в live preview", "Currently in the live preview"));
 		}
 
 		auto top = profileAtBottom ? 24 : (profileRect.bottom() + 16);
@@ -844,7 +886,8 @@ protected:
 			? (profileRect.top() - 14)
 			: (height() - footerHeight - 18);
 		auto shownRows = 0;
-		for (const auto &entry : _state->entries()) {
+		for (auto actualIndex = 0; actualIndex != int(_state->entries().size()); ++actualIndex) {
+			const auto &entry = _state->entries()[actualIndex];
 			if (!entry.visible) {
 				continue;
 			}
@@ -859,12 +902,20 @@ protected:
 				top += 18;
 				continue;
 			}
+			const auto selectedRow = (actualIndex == selectedIndex);
 			const auto rowRect = QRect(18, top, menuWidth - 36, expanded ? 38 : 34);
-			p.setBrush(shownRows == 0
-				? QColor(255, 255, 255, 18)
-				: QColor(255, 255, 255, 8));
+			p.setBrush(selectedRow
+				? QColor(255, 255, 255, 28)
+				: (shownRows == 0
+					? QColor(255, 255, 255, 18)
+					: QColor(255, 255, 255, 8)));
 			p.setPen(Qt::NoPen);
 			p.drawRoundedRect(rowRect, 14, 14);
+			if (selectedRow) {
+				p.setPen(QPen(QColor(0x35, 0xC3, 0x8F, 210), 2));
+				p.drawRoundedRect(rowRect.adjusted(1, 1, -1, -1), 14, 14);
+				p.setPen(Qt::NoPen);
+			}
 
 			p.setBrush(meta.color);
 			p.drawEllipse(QRect(rowRect.left() + 8, rowRect.top() + 6, 22, 22));
@@ -912,33 +963,43 @@ protected:
 					"Astrogram Desktop · footer text",
 					"Astrogram Desktop · footer text"));
 		}
-		if (immersive) {
+		auto chatChipIndex = 0;
+		auto previewChipIndex = 0;
+		auto drawModeChip = [&](const QString &text, int fillAlpha, bool onMenu) {
+			const auto fm = QFontMetrics(st::normalFont->f);
+			const auto chipWidth = std::max(104, fm.horizontalAdvance(text) + 24);
+			const auto chipRect = onMenu
+				? QRect(24 + (previewChipIndex * (chipWidth + 8)), height() - 64, chipWidth, 28)
+				: QRect(chatRect.left() + 12 + (chatChipIndex * (chipWidth + 8)), 12, chipWidth, 28);
 			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(0x35, 0xC3, 0x8F, 48));
-			p.drawRoundedRect(
-				QRect(chatRect.left() + 12, 12, 112, 28),
-				14,
-				14);
-			p.setPen(QColor(0x13, 0x2B, 0x3F));
+			p.setBrush(QColor(0x35, 0xC3, 0x8F, fillAlpha));
+			p.drawRoundedRect(chipRect, 14, 14);
+			p.setPen(onMenu ? QColor(255, 255, 255, 220) : QColor(0x13, 0x2B, 0x3F));
 			p.setFont(st::normalFont->f);
-			p.drawText(
-				QRect(chatRect.left() + 22, 12, 96, 28),
-				Qt::AlignCenter,
-				RuEn("Иммерсивно", "Immersive"));
+			p.drawText(chipRect, Qt::AlignCenter, text);
+			if (onMenu) {
+				++previewChipIndex;
+			} else {
+				++chatChipIndex;
+			}
+		};
+		if (immersive) {
+			drawModeChip(RuEn("Иммерсивно", "Immersive"), 48, false);
+		}
+		if (leftEdgeSettings) {
+			drawModeChip(RuEn("Левый край", "Left-edge"), 42, false);
+		}
+		if (wideSettings) {
+			drawModeChip(RuEn("Шире settings", "Wide settings"), 42, false);
 		}
 		if (expanded) {
-			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(0x35, 0xC3, 0x8F, 38));
-			p.drawRoundedRect(
-				QRect(24, height() - 64, 154, 28),
-				14,
-				14);
-			p.setPen(QColor(255, 255, 255, 220));
-			p.setFont(st::normalFont->f);
-			p.drawText(
-				QRect(24, height() - 64, 154, 28),
-				Qt::AlignCenter,
-				RuEn("Расширенная панель", "Expanded panel"));
+			drawModeChip(RuEn("Расширенная панель", "Expanded panel"), 38, true);
+		}
+		if (!showFooterText) {
+			drawModeChip(RuEn("Без footer", "Footer hidden"), 34, true);
+		}
+		if (profileAtBottom) {
+			drawModeChip(RuEn("Профиль внизу", "Profile bottom"), 34, true);
 		}
 
 		p.setClipping(false);
@@ -1215,7 +1276,7 @@ protected:
 				QRect(0, hiddenSectionTop(), width(), 18),
 				Qt::AlignLeft | Qt::AlignVCenter,
 				RuEn(
-					"Скрытые элементы (%1): restore-tray" ,
+					"Скрытые элементы (%1): restore-tray",
 					"Hidden items (%1): restore tray").arg(hiddenCount));
 			for (const auto &chip : chips) {
 				const auto hovered = chip.restoreAll
@@ -2706,8 +2767,8 @@ void AddMenuCustomizationEditor(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Экспериментальный editor уже редактирует боковое меню напрямую через `menu_layout.json`: можно скрывать пункты, переставлять их, добавлять свои разделители и сразу видеть это на fake Telegram preview.",
-			"This experimental editor already works directly with `menu_layout.json`: you can hide items, reorder them, add custom dividers and immediately see the result on a fake Telegram preview.")));
+			"Экспериментальный editor уже редактирует боковое меню напрямую через `menu_layout.json`: видимые пункты живут в основном списке, скрытые уходят в restore-tray ниже, а fake Telegram preview теперь подчёркивает выбранный пункт и shell-режимы сразу после изменения.",
+			"This experimental editor already works directly with `menu_layout.json`: visible items stay in the main list, hidden ones move into the restore tray below, and the fake Telegram preview now highlights the selected action plus active shell modes right after each change.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 
 	container->add(
@@ -2728,8 +2789,8 @@ void AddMenuCustomizationEditor(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Клик выбирает пункт, а зажатие и движение мышью реально переставляет его. Скрытые элементы ниже можно вернуть одним нажатием, справа остаются быстрые hide/show и fallback-кнопки вверх/вниз.",
-			"Click selects an item, while press-and-drag now actually reorders it. Hidden items can be restored below with a single click, and the right side still keeps quick hide/show and fallback up/down buttons.")));
+			"Клик выбирает пункт, зажатие с drag-handle реально переставляет его среди видимых действий, а скрытые пункты теперь живут в отдельном restore-tray ниже вместе с кнопкой мгновенного восстановления всего меню.",
+			"Click selects an item, press-and-drag on the handle really reorders it among visible actions, and hidden items now live in a dedicated restore tray below together with a one-click restore-all action.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 
 	AddButtonWithLabel(
@@ -2829,6 +2890,11 @@ void AddMenuCustomizationEditor(
 		rpl::single(RuEn(
 			"Вид боковой панели",
 			"Side panel presentation")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Эти переключатели уже применяются к живому боковому меню. Если панель открыта, footer и положение профиля меняются без ручного переоткрытия.",
+			"These switches already apply to the live side menu. If it is open, the footer and profile position update without a manual reopen.")));
 
 	AddPreviewToggle(
 		controller,
@@ -2885,6 +2951,11 @@ void AddMenuCustomizationEditor(
 		rpl::single(RuEn(
 			"Экспериментальные режимы оболочки",
 			"Experimental shell modes")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Ниже уже не просто demo-флажки: widened settings, left-edge, expanded side panel и immersive animation записываются в runtime prefs и сразу отражаются в shell и preview.",
+			"These are no longer demo-only flags: widened settings, left-edge, expanded side panel and immersive animation are written into runtime prefs and immediately reflected by both the shell and the preview.")));
 
 	AddPreviewToggle(
 		controller,
