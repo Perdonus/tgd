@@ -3695,7 +3695,7 @@ void ApiWrap::forwardMessages(
 	if (draft.options != Data::ForwardOptions::PreserveInfo) {
 		for (auto i = begin(draft.items); i != end(draft.items);) {
 			const auto item = *i;
-			if (item->allowsForward() || !CanShareWithoutAuthor(item)) {
+			if (!CanShareWithoutAuthor(item)) {
 				++i;
 				continue;
 			}

@@ -1714,9 +1714,11 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		auto supportedItems = HistoryItemsList();
 		supportedItems.reserve(items.size());
 		for (const auto item : items) {
-			if (item->allowsForward()
-				|| (withoutAuthor
-					&& CanShareWithoutAuthor(item))) {
+			if (withoutAuthor) {
+				if (CanShareWithoutAuthor(item)) {
+					supportedItems.push_back(item);
+				}
+			} else if (item->allowsForward()) {
 				supportedItems.push_back(item);
 			}
 		}
@@ -1733,14 +1735,15 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		auto resendItems = HistoryItemsList();
 		forwardItems.reserve(supportedItems.size());
 		resendItems.reserve(supportedItems.size());
-		for (const auto item : supportedItems) {
-			if (item->allowsForward()) {
-				forwardItems.push_back(item);
-			} else {
-				resendItems.push_back(item);
-			}
+		if (withoutAuthor) {
+			resendItems = supportedItems;
+		} else {
+			forwardItems = supportedItems;
 		}
-		const auto existingIds = history->owner().itemsToIds(forwardItems);
+		auto existingIds = MessageIdsList();
+		if (!withoutAuthor) {
+			existingIds = history->owner().itemsToIds(forwardItems);
+		}
 
 		const auto error = GetErrorForSending(
 			result,
