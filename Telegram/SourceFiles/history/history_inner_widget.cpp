@@ -80,6 +80,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_item_rate_transcribe_session.h"
 #include "menu/menu_sponsored.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "apiwrap.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_suggest_post.h"
@@ -112,6 +113,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QMimeData>
 
 namespace {
+
+[[nodiscard]] int SelectedItemsLimit() {
+	return Core::App().settings().unlockForwardSelectionLimit()
+		? 1000
+		: MaxSelectedItems;
+}
 
 constexpr auto kScrollDateHideTimeout = 1000;
 constexpr auto kUnloadHeavyPartsPages = 2;
@@ -2156,7 +2163,7 @@ void HistoryInner::mouseActionFinish(
 			&& !_dragStateItem->isService()
 			&& _dragStateItem->isRegular()
 			&& inSelectionMode().inSelectionMode) {
-			if (_selected.size() < MaxSelectedItems) {
+			if (_selected.size() < SelectedItemsLimit()) {
 				_selected.emplace(_dragStateItem, FullSelection);
 				repaintItem(_mouseActionItem);
 			}
@@ -2709,7 +2716,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}
 				const auto start = (topToBottom ? nearestItem : toItem);
 				const auto end = (topToBottom ? toItem : nearestItem);
-				const auto left = MaxSelectedItems
+				const auto left = SelectedItemsLimit()
 					- selectedState.count
 					+ (topToBottom ? 0 : 1);
 				if (collectBetween(start, end, left).empty()) {
@@ -4826,7 +4833,7 @@ void HistoryInner::changeSelection(
 	const auto add = (action == SelectAction::Select);
 	if (add
 		&& goodForSelection(toItems, item, total)
-		&& total <= MaxSelectedItems) {
+		&& total <= SelectedItemsLimit()) {
 		addToSelection(toItems, item);
 	} else {
 		removeFromSelection(toItems, item);
@@ -4853,7 +4860,7 @@ void HistoryInner::changeSelectionAsGroup(
 				return false;
 			}
 		}
-		return (total <= MaxSelectedItems);
+		return (total <= SelectedItemsLimit());
 	}();
 	if (action == SelectAction::Select && canSelect) {
 		for (const auto &other : group->items) {
@@ -4966,7 +4973,7 @@ void HistoryInner::addSelectionRange(
 				auto item = block->messages[fromitem]->data();
 				changeSelectionAsGroup(toItems, item, SelectAction::Select);
 			}
-			if (toItems->size() >= MaxSelectedItems) break;
+			if (toItems->size() >= SelectedItemsLimit()) break;
 			fromitem = 0;
 		}
 	}

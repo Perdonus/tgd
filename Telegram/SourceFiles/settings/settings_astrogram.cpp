@@ -845,6 +845,15 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 		[&](bool toggled) { settings.setLocalPremium(toggled); });
 	AddToggle(
 		container,
+		settings.unlockForwardSelectionLimitValue(),
+		RuEn(
+			"Снять лимит 100 сообщений при пересылке",
+			"Unlock 100-message forward limit"),
+		[&](bool toggled) {
+			settings.setUnlockForwardSelectionLimit(toggled);
+		});
+	AddToggle(
+		container,
 		settings.disableAdsValue(),
 		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
 		[&](bool toggled) { settings.setDisableAds(toggled); });

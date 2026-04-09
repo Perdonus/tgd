@@ -90,6 +90,12 @@ constexpr auto kPreloadedScreensCountFull
 	= kPreloadedScreensCount + 1 + kPreloadedScreensCount;
 constexpr auto kClearUserpicsAfter = 50;
 
+[[nodiscard]] int SelectedItemsLimit() {
+	return Core::App().settings().unlockForwardSelectionLimit()
+		? 1000
+		: MaxSelectedItems;
+}
+
 [[nodiscard]] std::unique_ptr<TranslateTracker> MaybeTranslateTracker(
 		History *history) {
 	return history ? std::make_unique<TranslateTracker>(history) : nullptr;
@@ -1344,7 +1350,7 @@ bool ListWidget::isGoodForSelection(
 	} else if (!applyTo.contains(item->fullId())) {
 		++totalCount;
 	}
-	return (totalCount <= MaxSelectedItems);
+	return (totalCount <= SelectedItemsLimit());
 }
 
 bool ListWidget::addToSelection(
@@ -2543,7 +2549,7 @@ void ListWidget::applyDragSelection() {
 void ListWidget::applyDragSelection(SelectedMap &applyTo) const {
 	if (_dragSelectAction == DragSelectAction::Selecting) {
 		for (const auto &itemId : _dragSelected) {
-			if (applyTo.size() >= MaxSelectedItems) {
+			if (applyTo.size() >= SelectedItemsLimit()) {
 				break;
 			} else if (!applyTo.contains(itemId)) {
 				if (const auto item = session().data().message(itemId)) {

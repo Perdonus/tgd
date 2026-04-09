@@ -291,6 +291,19 @@ public:
 		_localPremium = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool unlockForwardSelectionLimit() const {
+		return _unlockForwardSelectionLimit.current();
+	}
+	[[nodiscard]] rpl::producer<bool> unlockForwardSelectionLimitValue() const {
+		return _unlockForwardSelectionLimit.value();
+	}
+	void setUnlockForwardSelectionLimit(bool value) {
+		if (_unlockForwardSelectionLimit.current() == value) {
+			return;
+		}
+		_unlockForwardSelectionLimit = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool disableAds() const {
 		return _disableAds.current();
 	}
@@ -1296,6 +1309,7 @@ private:
 	bool _includeMutedCounterFolders = true;
 	rpl::variable<bool> _ghostMode = false;
 	rpl::variable<bool> _localPremium = false;
+	rpl::variable<bool> _unlockForwardSelectionLimit = false;
 	rpl::variable<bool> _disableAds = true;
 	rpl::variable<bool> _disableStories = false;
 	rpl::variable<bool> _disableOpenLinkWarning = false;

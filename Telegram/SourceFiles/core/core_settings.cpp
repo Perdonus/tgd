@@ -431,7 +431,8 @@ QByteArray Settings::serialize() const {
 			<< _editedMarkText.current()
 			<< qint32(_deletedMarkShowText.current() ? 1 : 0)
 			<< qint32(_deletedMarkShowIcon.current() ? 1 : 0)
-			<< _deletedMarkText.current();
+			<< _deletedMarkText.current()
+			<< qint32(_unlockForwardSelectionLimit.current() ? 1 : 0);
 	}
 
 	if (result.size() != size) {
@@ -587,6 +588,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 deletedMarkShowText = _deletedMarkShowText.current() ? 1 : 0;
 	qint32 deletedMarkShowIcon = _deletedMarkShowIcon.current() ? 1 : 0;
 	QString deletedMarkText = _deletedMarkText.current();
+	qint32 unlockForwardSelectionLimit
+		= _unlockForwardSelectionLimit.current() ? 1 : 0;
 	qint32 ghostHideReadMessages = _ghostHideReadMessages.current() ? 1 : 0;
 	qint32 ghostHideOnlineStatus = _ghostHideOnlineStatus.current() ? 1 : 0;
 	qint32 ghostHideTypingProgress = _ghostHideTypingProgress.current() ? 1 : 0;
@@ -996,6 +999,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> deletedMarkText;
 	}
+	if (!stream.atEnd()) {
+		stream >> unlockForwardSelectionLimit;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1240,6 +1246,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_deletedMarkShowText = (deletedMarkShowText == 1);
 	_deletedMarkShowIcon = (deletedMarkShowIcon == 1);
 	_deletedMarkText = deletedMarkText.trimmed();
+	_unlockForwardSelectionLimit = (unlockForwardSelectionLimit == 1);
 	_ghostHideReadMessages = (ghostHideReadMessages == 1);
 	_ghostHideOnlineStatus = (ghostHideOnlineStatus == 1);
 	_ghostHideTypingProgress = (ghostHideTypingProgress == 1);
