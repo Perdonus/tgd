@@ -18,11 +18,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "lang/lang_keys.h"
 #include "logs.h"
+#include "base/timer.h"
 #include "ui/widgets/buttons.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
 #include "main/main_session.h"
 #include "styles/style_info.h"
+
+#include <algorithm>
 
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
@@ -69,6 +72,15 @@ namespace {
 
 constexpr auto kServerBadgeSuccessTtl = crl::time(5 * 60 * 1000);
 constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
+constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
+
+[[nodiscard]] crl::time ServerBadgeRetryDelay(int retryCount) {
+	auto delay = kServerBadgeRetryTtl;
+	for (auto i = 1; (i < retryCount) && (delay < kServerBadgeRetryMaxTtl); ++i) {
+		delay = std::min(delay * 2, kServerBadgeRetryMaxTtl);
+	}
+	return delay;
+}
 
 [[nodiscard]] QString ServerBadgeLogText(QByteArray body) {
 	auto result = QString::fromUtf8(body.left(512));
@@ -95,6 +107,26 @@ constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 		: peerId.is<ChannelId>()
 		? uint64(peerToChannel(peerId).bare)
 		: 0;
+}
+
+[[nodiscard]] QString PeerRefForServer(PeerId peerId) {
+	const auto bareId = PeerBareId(peerId);
+	return (bareId != 0)
+		? (PeerTypeForLog(peerId) + u':' + QString::number(qulonglong(bareId)))
+		: QString();
+}
+
+[[nodiscard]] QString BadgeTypeForLog(BadgeType type) {
+	switch (type) {
+	case BadgeType::None: return u"none"_q;
+	case BadgeType::Verified: return u"verified"_q;
+	case BadgeType::BotVerified: return u"bot_verified"_q;
+	case BadgeType::Premium: return u"premium"_q;
+	case BadgeType::Scam: return u"scam"_q;
+	case BadgeType::Fake: return u"fake"_q;
+	case BadgeType::Direct: return u"direct"_q;
+	}
+	return u"unknown"_q;
 }
 
 [[nodiscard]] uint64 ServerBadgeEmojiStatusId(const QJsonObject &object);
@@ -251,6 +283,8 @@ private:
 		crl::time nextRequestAt = 0;
 		std::optional<EmojiStatusId> emojiStatusId;
 		rpl::event_stream<> updated;
+		std::unique_ptr<base::Timer> retryTimer;
+		int retryCount = 0;
 	};
 
 	[[nodiscard]] static QUrl BuildRequestUrl(PeerId peerId) {
@@ -263,10 +297,16 @@ private:
 		query.addQueryItem(
 			u"peer_id"_q,
 			QString::number(qulonglong(peerId.value)));
+		if (const auto peerRef = PeerRefForServer(peerId); !peerRef.isEmpty()) {
+			query.addQueryItem(u"peer_ref"_q, peerRef);
+		}
 		query.addQueryItem(
 			u"peer_type"_q,
 			PeerTypeForLog(peerId));
 		if (const auto bareId = PeerBareId(peerId); bareId != 0) {
+			query.addQueryItem(
+				u"bare_id"_q,
+				QString::number(qulonglong(bareId)));
 			query.addQueryItem(
 				u"peer_bare_id"_q,
 				QString::number(qulonglong(bareId)));
@@ -288,23 +328,55 @@ private:
 		return url;
 	}
 
+	void scheduleRetry(PeerId peerId, Entry *entry, const QString &reason) {
+		Expects(entry != nullptr);
+		const auto delay = std::max(entry->nextRequestAt - crl::now(), crl::time(0));
+		if (!entry->retryTimer) {
+			entry->retryTimer = std::make_unique<base::Timer>([=] {
+				const auto i = _entries.find(uint64(peerId.value));
+				if (i == end(_entries)) {
+					return;
+				}
+				requestIfNeeded(peerId, i->second.get());
+			});
+		}
+		entry->retryTimer->callOnce(delay);
+		Logs::writeClient(QString::fromLatin1(
+			"[badge] retry scheduled: peer=%1 delay_ms=%2 attempt=%3 reason=%4")
+			.arg(QString::number(qulonglong(peerId.value)))
+			.arg(QString::number(delay))
+			.arg(QString::number(entry->retryCount))
+			.arg(reason));
+	}
+
 	void requestIfNeeded(PeerId peerId, Entry *entry) {
 		Expects(entry != nullptr);
-		if (entry->inFlight || entry->nextRequestAt > crl::now()) {
+		if (entry->inFlight) {
 			return;
+		}
+		if (entry->nextRequestAt > crl::now()) {
+			scheduleRetry(peerId, entry, u"backoff_window"_q);
+			return;
+		}
+		if (entry->retryTimer) {
+			entry->retryTimer->cancel();
 		}
 		entry->inFlight = true;
 		const auto peerKey = uint64(peerId.value);
+		const auto url = BuildRequestUrl(peerId);
 		Logs::writeClient(QString::fromLatin1(
-			"[badge] request started: peer=%1 bare=%2 type=%3")
+			"[badge] request started: peer=%1 bare=%2 type=%3 ref=%4 url=%5")
 			.arg(QString::number(qulonglong(peerId.value)))
 			.arg(QString::number(qulonglong(PeerBareId(peerId))))
-			.arg(PeerTypeForLog(peerId)));
+			.arg(PeerTypeForLog(peerId))
+			.arg(PeerRefForServer(peerId))
+			.arg(url.toString(QUrl::FullyEncoded)));
 
-		QNetworkRequest request(BuildRequestUrl(peerId));
+		QNetworkRequest request(url);
 		request.setAttribute(
 			QNetworkRequest::RedirectPolicyAttribute,
 			QNetworkRequest::NoLessSafeRedirectPolicy);
+		request.setRawHeader("Accept", "application/json");
 		auto *reply = _manager.get(request);
 		QObject::connect(
 			reply,
@@ -321,7 +393,8 @@ private:
 
 				auto next = stored->emojiStatusId;
 				auto resolved = false;
-				auto nextRequestAt = crl::now() + kServerBadgeRetryTtl;
+				auto nextRequestAt = crl::now() + ServerBadgeRetryDelay(stored->retryCount + 1);
+				auto retryReason = QString();
 				const auto statusCode = reply->attribute(
 					QNetworkRequest::HttpStatusCodeAttribute).toInt();
 				const auto body = reply->readAll();
@@ -332,6 +405,7 @@ private:
 								parsed.object())) {
 							next = *parsedBadge;
 							resolved = true;
+							stored->retryCount = 0;
 							nextRequestAt = crl::now() + kServerBadgeSuccessTtl;
 						}
 					}
@@ -343,26 +417,35 @@ private:
 						.arg(next.has_value() ? u"true"_q : u"false"_q)
 						.arg(next ? QString::number(next->documentId) : QStringLiteral("0")));
 					if (!resolved) {
+						retryReason = u"unrecognized_response"_q;
 						Logs::writeClient(QString::fromLatin1(
 							"[badge] response not recognized: peer=%1 body=%2")
 							.arg(QString::number(qulonglong(peerId.value)))
 							.arg(ServerBadgeLogText(body)));
 					}
 				} else {
+					retryReason = reply->errorString();
 					Logs::writeClient(QString::fromLatin1(
-						"[badge] request failed: peer=%1 http=%2 reason=%3")
+						"[badge] request failed: peer=%1 http=%2 reason=%3 body=%4")
 						.arg(QString::number(qulonglong(peerId.value)))
 						.arg(statusCode)
-						.arg(reply->errorString()));
+						.arg(reply->errorString())
+						.arg(ServerBadgeLogText(body)));
+				}
+				if (!resolved) {
+					stored->retryCount = std::min(stored->retryCount + 1, 16);
+					nextRequestAt = crl::now() + ServerBadgeRetryDelay(stored->retryCount);
 				}
 				stored->nextRequestAt = nextRequestAt;
 				if (resolved && stored->emojiStatusId != next) {
 					stored->emojiStatusId = next;
 					stored->updated.fire({});
 				}
+				if (!resolved) {
+					scheduleRetry(peerId, stored.get(), retryReason);
+				}
 				reply->deleteLater();
 			});
-	}
 	}
 
 	std::map<uint64, std::unique_ptr<Entry>> _entries;
@@ -633,7 +716,15 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 			emojiStatusId = EmojiStatusId();
 		}
 		return Badge::Content{ badge, emojiStatusId };
-	}) | rpl::distinct_until_changed();
+	}) | rpl::distinct_until_changed() | rpl::map([=](Badge::Content content) {
+		Logs::writeClient(QString::fromLatin1(
+			"[badge] content resolved: peer=%1 badge=%2 emojiStatusId=%3 collectible=%4")
+			.arg(QString::number(qulonglong(peer->id.value)))
+			.arg(BadgeTypeForLog(content.badge))
+			.arg(QString::number(content.emojiStatusId.documentId))
+			.arg(content.emojiStatusId.collectible ? u"true"_q : u"false"_q));
+		return content;
+	});
 }
 
 rpl::producer<Badge::Content> VerifiedContentForPeer(
