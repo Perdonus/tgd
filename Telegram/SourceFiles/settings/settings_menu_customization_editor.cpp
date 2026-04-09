@@ -325,11 +325,33 @@ public:
 		includeShowLogs))
 	, _options(Menu::Customization::LoadSideMenuOptions())
 	, _preview(LoadShellModePreferences()) {
+		normalizeSelectedEntry();
 	}
 
 	[[nodiscard]] const std::vector<Menu::Customization::SideMenuEntry> &entries()
 	const {
 		return _entries;
+	}
+
+	[[nodiscard]] int selectedEntryIndex() const {
+		if (_selectedEntryId.isEmpty()) {
+			return -1;
+		}
+		for (auto i = 0; i != int(_entries.size()); ++i) {
+			if (_entries[i].id == _selectedEntryId) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	void setSelectedEntryIndex(int index) {
+		const auto updated = hasIndex(index) ? _entries[index].id : QString();
+		if (_selectedEntryId == updated) {
+			return;
+		}
+		_selectedEntryId = updated;
+		_changes.fire({});
 	}
 
 	[[nodiscard]] bool immersiveAnimation() const {
@@ -461,6 +483,7 @@ public:
 			_includeShowLogs);
 		_options = Menu::Customization::LoadSideMenuOptions();
 		_preview = LoadShellModePreferences();
+		normalizeSelectedEntry();
 		_changes.fire({});
 		return true;
 	}
@@ -478,6 +501,19 @@ public:
 		}
 		auto updated = _entries;
 		updated[index].visible = !updated[index].visible;
+		return applyEntries(updated);
+	}
+
+	[[nodiscard]] bool restoreEntry(int index) {
+		if (!hasIndex(index)) {
+			return false;
+		} else if (_entries[index].visible) {
+			setSelectedEntryIndex(index);
+			return true;
+		}
+		auto updated = _entries;
+		updated[index].visible = true;
+		_selectedEntryId = updated[index].id;
 		return applyEntries(updated);
 	}
 
@@ -505,6 +541,35 @@ public:
 		return applyEntries(updated);
 	}
 
+	[[nodiscard]] bool moveVisibleEntry(int fromVisible, int toVisible) {
+		auto visibleIndexes = std::vector<int>();
+		auto visibleEntries = std::vector<Menu::Customization::SideMenuEntry>();
+		for (auto i = 0; i != int(_entries.size()); ++i) {
+			if (!_entries[i].visible) {
+				continue;
+			}
+			visibleIndexes.push_back(i);
+			visibleEntries.push_back(_entries[i]);
+		}
+		if ((fromVisible < 0) || (fromVisible >= int(visibleEntries.size()))) {
+			return false;
+		}
+		const auto maxTarget = std::max(int(visibleEntries.size()) - 1, 0);
+		const auto insertAt = std::clamp(toVisible, 0, maxTarget);
+		if (fromVisible == insertAt) {
+			return true;
+		}
+		auto reordered = visibleEntries;
+		const auto moved = reordered[fromVisible];
+		reordered.erase(reordered.begin() + fromVisible);
+		reordered.insert(reordered.begin() + insertAt, moved);
+		auto updated = _entries;
+		for (auto i = 0; i != int(visibleIndexes.size()); ++i) {
+			updated[visibleIndexes[i]] = reordered[i];
+		}
+		return applyEntries(updated);
+	}
+
 	[[nodiscard]] int addCustomSeparatorAfter(int index) {
 		auto updated = _entries;
 		const auto insertAt = std::clamp(index + 1, 0, int(updated.size()));
@@ -515,6 +580,7 @@ public:
 				true,
 				true,
 			});
+		_selectedEntryId = updated[insertAt].id;
 		return applyEntries(updated) ? insertAt : -1;
 	}
 
@@ -550,6 +616,7 @@ private:
 			return false;
 		}
 		_entries = updated;
+		normalizeSelectedEntry();
 		_changes.fire({});
 		return true;
 	}
@@ -562,6 +629,20 @@ private:
 		_options = updated;
 		_changes.fire({});
 		return true;
+	}
+
+	void normalizeSelectedEntry() {
+		if (selectedEntryIndex() >= 0) {
+			return;
+		}
+		for (const auto &entry : _entries) {
+			if (!entry.visible) {
+				continue;
+			}
+			_selectedEntryId = entry.id;
+			return;
+		}
+		_selectedEntryId = _entries.empty() ? QString() : _entries.front().id;
 	}
 
 	[[nodiscard]] bool hasIndex(int index) const {
@@ -578,6 +659,7 @@ private:
 	std::vector<Menu::Customization::SideMenuEntry> _entries;
 	Menu::Customization::SideMenuOptions _options;
 	ShellModePreferences _preview;
+	QString _selectedEntryId;
 	mutable rpl::event_stream<> _changes;
 };
 
@@ -1035,6 +1117,12 @@ public:
 	, _state(std::move(state)) {
 		setMouseTracking(true);
 		_state->changes() | rpl::start_with_next([=] {
+			const auto selected = _state->selectedEntryIndex();
+			if ((selected >= 0)
+				&& (selected < int(_state->entries().size()))
+				&& _state->entries()[selected].visible) {
+				_selected = selected;
+			}
 			clampSelection();
 			update();
 			updateGeometry();
@@ -1047,18 +1135,15 @@ public:
 	}
 
 	void setSelectedIndex(int index) {
-		if (_state->entries().empty()) {
-			_selected = -1;
-		} else {
-			_selected = std::clamp(index, 0, int(_state->entries().size()) - 1);
-		}
+		_selected = index;
+		clampSelection();
 		update();
 	}
 
 protected:
 	int resizeGetHeight(int newWidth) override {
-		const auto count = std::max(int(_state->entries().size()), 1);
-		const auto base = 18 + (count * (kRowHeight + kRowGap));
+		const auto visibleCount = std::max(int(visibleEntryIndexes().size()), 1);
+		const auto base = 18 + (visibleCount * (kRowHeight + kRowGap));
 		return base + hiddenSectionHeight(newWidth);
 	}
 
@@ -1067,23 +1152,42 @@ protected:
 
 		auto p = Painter(this);
 		p.setRenderHint(QPainter::Antialiasing);
-		const auto &entries = _state->entries();
-		if (entries.empty()) {
-			return;
-		}
-
-		for (auto i = 0; i != int(entries.size()); ++i) {
-			if (i == _draggingRow) {
-				continue;
+		const auto visible = visibleEntryIndexes();
+		if (visible.empty()) {
+			const auto emptyRect = QRect(0, 8, width(), kRowHeight + 8);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(0xF7, 0xFB, 0xFD));
+			p.drawRoundedRect(emptyRect, kRowRadius, kRowRadius);
+			p.setPen(QColor(0x23, 0x2F, 0x3C));
+			p.setFont(st::semiboldTextStyle.font->f);
+			p.drawText(
+				emptyRect.adjusted(18, 12, -18, -18),
+				Qt::AlignLeft | Qt::AlignTop,
+				RuEn(
+					"Все пункты сейчас скрыты из меню",
+					"All actions are currently hidden"));
+			p.setPen(QColor(0x67, 0x75, 0x84));
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				emptyRect.adjusted(18, 34, -18, -12),
+				Qt::AlignLeft | Qt::AlignTop,
+				RuEn(
+					"Ниже остаётся restore-tray: можно вернуть любой скрытый пункт одним нажатием или сразу восстановить всё меню.",
+					"The restore tray stays below: you can bring back any hidden item with one click or restore the whole menu at once."));
+		} else {
+			for (const auto index : visible) {
+				if (index == _draggingRow) {
+					continue;
+				}
+				const auto row = rowRect(index);
+				paintRow(
+					p,
+					index,
+					row,
+					(index == _hoveredRow),
+					(index == _selected),
+					false);
 			}
-			const auto row = rowRect(i);
-			paintRow(
-				p,
-				i,
-				row,
-				(i == _hoveredRow),
-				(i == _selected),
-				false);
 		}
 
 		if (_draggingRow >= 0) {
@@ -1101,24 +1205,37 @@ protected:
 
 		const auto chips = hiddenChips(width());
 		if (!chips.empty()) {
+			const auto hiddenCount = std::count_if(
+				_state->entries().begin(),
+				_state->entries().end(),
+				[](const auto &entry) { return !entry.visible; });
 			p.setPen(QColor(0x5B, 0x6A, 0x79));
 			p.setFont(st::defaultTextStyle.font->f);
 			p.drawText(
 				QRect(0, hiddenSectionTop(), width(), 18),
 				Qt::AlignLeft | Qt::AlignVCenter,
 				RuEn(
-					"Скрытые элементы: нажми, чтобы вернуть",
-					"Hidden items: click to restore"));
+					"Скрытые элементы (%1): restore-tray" ,
+					"Hidden items (%1): restore tray").arg(hiddenCount));
 			for (const auto &chip : chips) {
-				const auto hovered = (chip.index == _hoveredHiddenEntry);
+				const auto hovered = chip.restoreAll
+					? _hoveredRestoreAll
+					: (chip.index == _hoveredHiddenEntry);
 				p.setPen(Qt::NoPen);
-				p.setBrush(hovered
-					? QColor(chip.color.red(), chip.color.green(), chip.color.blue(), 48)
-					: QColor(0xEC, 0xF5, 0xEF));
+				p.setBrush(chip.restoreAll
+					? (hovered ? QColor(0xD8, 0xF1, 0xE5) : QColor(0xEB, 0xF7, 0xF1))
+					: (hovered
+						? QColor(chip.color.red(), chip.color.green(), chip.color.blue(), 48)
+						: QColor(0xEC, 0xF5, 0xEF)));
 				p.drawRoundedRect(chip.rect, 14, 14);
-				p.setPen(hovered ? QColor(0x1C, 0x8B, 0x62) : QColor(0x2A, 0x4B, 0x57));
+				p.setPen(chip.restoreAll
+					? QColor(0x1C, 0x8B, 0x62)
+					: (hovered ? QColor(0x1C, 0x8B, 0x62) : QColor(0x2A, 0x4B, 0x57)));
 				p.setFont(st::normalFont->f);
-				p.drawText(chip.rect.adjusted(12, 0, -12, 0), Qt::AlignLeft | Qt::AlignVCenter, chip.label);
+				p.drawText(
+					chip.rect.adjusted(12, 0, -12, 0),
+					Qt::AlignLeft | Qt::AlignVCenter,
+					chip.label);
 			}
 		}
 	}
@@ -1131,6 +1248,7 @@ protected:
 			_hoveredRow = -1;
 			_hoveredKind = ActionKind::None;
 			_hoveredHiddenEntry = -1;
+			_hoveredRestoreAll = false;
 			update();
 			return;
 		}
@@ -1155,31 +1273,37 @@ protected:
 			if (!chip.rect.contains(point)) {
 				continue;
 			}
-			if (_state->toggleVisible(chip.index)) {
+			if (chip.restoreAll) {
+				_state->restoreAllHidden();
+				clampSelection();
+			} else if (_state->restoreEntry(chip.index)) {
 				_selected = chip.index;
+				clampSelection();
 			}
 			updateHover(point);
 			return;
 		}
 
-		for (auto i = 0; i != int(_state->entries().size()); ++i) {
-			const auto row = rowRect(i);
+		for (const auto index : visibleEntryIndexes()) {
+			const auto row = rowRect(index);
 			if (!row.contains(point)) {
 				continue;
 			}
-			_selected = i;
+			_selected = index;
+			_state->setSelectedEntryIndex(_selected);
 			_pressPoint = point;
-			_dragGrabOffsetY = point.y() - baseRowRect(i).top();
-			for (const auto &button : actionButtonsForRow(i)) {
+			const auto visibleRow = visibleRowForEntry(index);
+			_dragGrabOffsetY = point.y() - baseRowRect(visibleRow).top();
+			for (const auto &button : actionButtonsForRow(index)) {
 				if (!button.enabled || !button.rect.contains(point)) {
 					continue;
 				}
 				_pressedOnButton = true;
-				handleAction(i, button.kind);
+				handleAction(index, button.kind);
 				updateHover(point);
 				return;
 			}
-			_pressedRow = i;
+			_pressedRow = index;
 			updateHover(point);
 			update();
 			return;
@@ -1208,6 +1332,7 @@ protected:
 		_hoveredRow = -1;
 		_hoveredKind = ActionKind::None;
 		_hoveredHiddenEntry = -1;
+		_hoveredRestoreAll = false;
 		unsetCursor();
 		update();
 	}
@@ -1233,36 +1358,60 @@ private:
 		int index = -1;
 		QString label;
 		QColor color;
+		bool restoreAll = false;
 	};
 
-	[[nodiscard]] QRect baseRowRect(int index) const {
+	[[nodiscard]] std::vector<int> visibleEntryIndexes() const {
+		auto result = std::vector<int>();
+		for (auto i = 0; i != int(_state->entries().size()); ++i) {
+			if (_state->entries()[i].visible) {
+				result.push_back(i);
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]] QRect baseRowRect(int visibleRow) const {
 		return QRect(
 			0,
-			8 + index * (kRowHeight + kRowGap),
+			8 + visibleRow * (kRowHeight + kRowGap),
 			width(),
 			kRowHeight);
 	}
 
-	[[nodiscard]] QRect rowRect(int index) const {
-		auto result = baseRowRect(index);
-		if ((_draggingRow < 0) || (_dragTargetIndex < 0) || (index == _draggingRow)) {
+	[[nodiscard]] int visibleRowForEntry(int index) const {
+		const auto visible = visibleEntryIndexes();
+		const auto i = std::find(visible.begin(), visible.end(), index);
+		return (i == visible.end()) ? -1 : int(i - visible.begin());
+	}
+
+	[[nodiscard]] QRect rowRectByVisibleRow(int visibleRow) const {
+		auto result = baseRowRect(visibleRow);
+		if ((_draggingVisibleRow < 0)
+			|| (_dragTargetIndex < 0)
+			|| (visibleRow == _draggingVisibleRow)) {
 			return result;
 		}
 		const auto delta = kRowHeight + kRowGap;
-		if (_draggingRow < _dragTargetIndex) {
-			if ((index > _draggingRow) && (index <= _dragTargetIndex)) {
+		if (_draggingVisibleRow < _dragTargetIndex) {
+			if ((visibleRow > _draggingVisibleRow) && (visibleRow <= _dragTargetIndex)) {
 				result.translate(0, -delta);
 			}
-		} else if (_draggingRow > _dragTargetIndex) {
-			if ((index >= _dragTargetIndex) && (index < _draggingRow)) {
+		} else if (_draggingVisibleRow > _dragTargetIndex) {
+			if ((visibleRow >= _dragTargetIndex) && (visibleRow < _draggingVisibleRow)) {
 				result.translate(0, delta);
 			}
 		}
 		return result;
 	}
 
+	[[nodiscard]] QRect rowRect(int index) const {
+		const auto visibleRow = visibleRowForEntry(index);
+		return (visibleRow >= 0) ? rowRectByVisibleRow(visibleRow) : QRect();
+	}
+
 	[[nodiscard]] QRect floatingRowRect() const {
-		auto result = baseRowRect(_draggingRow);
+		auto result = baseRowRect(_draggingVisibleRow);
 		result.moveTop(_dragCurrentY - _dragGrabOffsetY);
 		return result;
 	}
@@ -1272,36 +1421,54 @@ private:
 	}
 
 	[[nodiscard]] int hiddenSectionTop() const {
-		const auto count = std::max(int(_state->entries().size()), 1);
-		return 18 + (count * (kRowHeight + kRowGap)) + 4;
+		const auto visibleCount = std::max(int(visibleEntryIndexes().size()), 1);
+		return 18 + (visibleCount * (kRowHeight + kRowGap)) + 4;
 	}
 
 	[[nodiscard]] std::vector<HiddenChip> hiddenChips(int availableWidth) const {
 		auto result = std::vector<HiddenChip>();
 		const auto usableWidth = std::max(availableWidth, 120);
 		const auto fm = QFontMetrics(st::normalFont->f);
-		auto x = 0;
-		auto y = hiddenSectionTop() + 24;
-		for (auto i = 0; i != int(_state->entries().size()); ++i) {
-			const auto &entry = _state->entries()[i];
-			if (entry.visible) {
-				continue;
-			}
-			const auto meta = DescribeEntry(entry, _state->supportMode());
-			const auto chipWidth = std::min(
-				std::max(88, fm.horizontalAdvance(meta.title) + 28),
+		auto pushChip = [&](int index, QString label, QColor color, bool restoreAll) {
+			auto chipWidth = std::min(
+				std::max(96, fm.horizontalAdvance(label) + 28),
 				usableWidth);
-			if (x && (x + chipWidth > usableWidth)) {
-				x = 0;
-				y += 36;
+			auto x = 0;
+			auto y = hiddenSectionTop() + 24;
+			if (!result.empty()) {
+				const auto &last = result.back();
+				x = last.rect.right() + 9;
+				y = last.rect.top();
+				if (x + chipWidth > usableWidth) {
+					x = 0;
+					y += 36;
+				}
 			}
 			result.push_back(HiddenChip{
 				.rect = QRect(x, y, chipWidth, 28),
-				.index = i,
-				.label = meta.title,
-				.color = meta.color,
+				.index = index,
+				.label = std::move(label),
+				.color = color,
+				.restoreAll = restoreAll,
 			});
-			x += chipWidth + 8;
+		};
+		auto hiddenIndexes = std::vector<int>();
+		for (auto i = 0; i != int(_state->entries().size()); ++i) {
+			if (!_state->entries()[i].visible) {
+				hiddenIndexes.push_back(i);
+			}
+		}
+		if (hiddenIndexes.empty()) {
+			return result;
+		}
+		pushChip(
+			-1,
+			RuEn("Вернуть всё", "Restore all"),
+			QColor(0x35, 0xC3, 0x8F),
+			true);
+		for (const auto index : hiddenIndexes) {
+			const auto meta = DescribeEntry(_state->entries()[index], _state->supportMode());
+			pushChip(index, meta.title, meta.color, false);
 		}
 		return result;
 	}
@@ -1320,7 +1487,7 @@ private:
 
 	[[nodiscard]] std::vector<ActionButton> actionButtonsForRow(int index) const {
 		const auto &entries = _state->entries();
-		if ((index < 0) || (index >= int(entries.size()))) {
+		if ((index < 0) || (index >= int(entries.size())) || !entries[index].visible) {
 			return {};
 		}
 		const auto row = rowRect(index);
@@ -1329,6 +1496,8 @@ private:
 		const auto height = 28;
 		auto right = row.right() - kRowPadding;
 		auto result = std::vector<ActionButton>();
+		const auto visibleRow = visibleRowForEntry(index);
+		const auto visibleCount = int(visibleEntryIndexes().size());
 
 		const auto push = [&](QString label, ActionKind kind, bool enabled) {
 			const auto buttonWidth = std::max(44, fm.horizontalAdvance(label) + 22);
@@ -1345,14 +1514,9 @@ private:
 		if (entry.separator && IsCustomSeparatorId(entry.id)) {
 			push(RuEn("Удалить", "Delete"), ActionKind::DeleteCustomSeparator, true);
 		}
-		push(RuEn("Ниже", "Down"), ActionKind::MoveDown, index + 1 < int(entries.size()));
-		push(RuEn("Выше", "Up"), ActionKind::MoveUp, index > 0);
-		push(
-			entry.visible
-				? RuEn("Скрыть", "Hide")
-				: RuEn("Показать", "Show"),
-			ActionKind::ToggleVisible,
-			true);
+		push(RuEn("Ниже", "Down"), ActionKind::MoveDown, (visibleRow + 1) < visibleCount);
+		push(RuEn("Выше", "Up"), ActionKind::MoveUp, visibleRow > 0);
+		push(RuEn("Скрыть", "Hide"), ActionKind::ToggleVisible, true);
 		std::reverse(result.begin(), result.end());
 		return result;
 	}
@@ -1404,7 +1568,6 @@ private:
 			bool floating) const {
 		const auto &entry = _state->entries()[index];
 		const auto meta = DescribeEntry(entry, _state->supportMode());
-		const auto hidden = !entry.visible;
 		p.setPen(Qt::NoPen);
 		p.setBrush(floating
 			? QColor(0xD9, 0xF4, 0xE8)
@@ -1412,11 +1575,11 @@ private:
 				? QColor(0xE7, 0xF8, 0xEF)
 				: hovered
 					? QColor(0xF5, 0xF9, 0xFC)
-					: (hidden ? QColor(0xF5, 0xF7, 0xFA) : QColor(0xFA, 0xFC, 0xFE)));
+					: QColor(0xFA, 0xFC, 0xFE));
 		p.drawRoundedRect(row, kRowRadius, kRowRadius);
 
 		paintDragHandle(p, row, hovered || selected || floating);
-		p.setBrush(hidden ? QColor(0xB2, 0xBC, 0xC6) : meta.color);
+		p.setBrush(meta.color);
 		p.drawEllipse(QRect(row.left() + 36, row.top() + 14, 36, 36));
 		p.setPen(Qt::white);
 		p.setFont(st::semiboldFont->f);
@@ -1425,26 +1588,21 @@ private:
 			Qt::AlignCenter,
 			meta.glyph.left(1));
 
-		p.setPen(hidden ? QColor(0x6B, 0x78, 0x85) : QColor(0x23, 0x2F, 0x3C));
+		p.setPen(QColor(0x23, 0x2F, 0x3C));
 		p.setFont(st::semiboldTextStyle.font->f);
 		p.drawText(
 			QRect(row.left() + 84, row.top() + 12, row.width() - 242, 20),
 			Qt::AlignLeft | Qt::AlignVCenter,
 			meta.title);
 
-		const auto stateText = entry.visible
-			? (entry.separator
-				? RuEn("Виден как разделитель", "Visible as divider")
-				: RuEn("Виден в меню", "Visible in menu"))
-			: (entry.separator
-				? RuEn("Скрыт как разделитель", "Hidden divider")
-				: RuEn("Скрыт из меню", "Hidden from menu"));
 		p.setPen(QColor(0x67, 0x75, 0x84));
 		p.setFont(st::defaultTextStyle.font->f);
 		p.drawText(
 			QRect(row.left() + 84, row.top() + 34, row.width() - 242, 18),
 			Qt::AlignLeft | Qt::AlignVCenter,
-			stateText);
+			entry.separator
+				? RuEn("Виден как разделитель", "Visible as divider")
+				: RuEn("Виден в меню", "Visible in menu"));
 
 		if (!floating) {
 			for (const auto &button : actionButtonsForRow(index)) {
@@ -1454,38 +1612,40 @@ private:
 	}
 
 	[[nodiscard]] int insertionLineY() const {
-		if ((_draggingRow < 0) || (_dragTargetIndex < 0)) {
+		if ((_draggingVisibleRow < 0) || (_dragTargetIndex < 0)) {
 			return 0;
 		}
+		const auto visible = visibleEntryIndexes();
 		auto slot = 0;
-		for (auto i = 0; i != int(_state->entries().size()); ++i) {
-			if (i == _draggingRow) {
+		for (auto visibleRow = 0; visibleRow != int(visible.size()); ++visibleRow) {
+			if (visibleRow == _draggingVisibleRow) {
 				continue;
 			}
 			if (slot == _dragTargetIndex) {
-				return rowRect(i).top() - (kRowGap / 2);
+				return rowRectByVisibleRow(visibleRow).top() - (kRowGap / 2);
 			}
 			++slot;
 		}
-		for (auto i = int(_state->entries().size()) - 1; i >= 0; --i) {
-			if (i == _draggingRow) {
+		for (auto visibleRow = int(visible.size()) - 1; visibleRow >= 0; --visibleRow) {
+			if (visibleRow == _draggingVisibleRow) {
 				continue;
 			}
-			return rowRect(i).bottom() + (kRowGap / 2) + 1;
+			return rowRectByVisibleRow(visibleRow).bottom() + (kRowGap / 2) + 1;
 		}
 		return baseRowRect(0).center().y();
 	}
 
 	void updateDragTarget(int y) {
-		if (_draggingRow < 0) {
+		if (_draggingVisibleRow < 0) {
 			return;
 		}
+		const auto visible = visibleEntryIndexes();
 		auto slot = 0;
-		for (auto i = 0; i != int(_state->entries().size()); ++i) {
-			if (i == _draggingRow) {
+		for (auto visibleRow = 0; visibleRow != int(visible.size()); ++visibleRow) {
+			if (visibleRow == _draggingVisibleRow) {
 				continue;
 			}
-			if (y < rowRect(i).center().y()) {
+			if (y < rowRectByVisibleRow(visibleRow).center().y()) {
 				_dragTargetIndex = slot;
 				return;
 			}
@@ -1499,9 +1659,13 @@ private:
 			return;
 		}
 		_draggingRow = _pressedRow;
-		_dragTargetIndex = _pressedRow;
+		_draggingVisibleRow = visibleRowForEntry(_pressedRow);
+		if (_draggingVisibleRow < 0) {
+			return;
+		}
+		_dragTargetIndex = _draggingVisibleRow;
 		_dragCurrentY = point.y();
-		_dragGrabOffsetY = point.y() - baseRowRect(_pressedRow).top();
+		_dragGrabOffsetY = point.y() - baseRowRect(_draggingVisibleRow).top();
 		_pressedRow = -1;
 		_pressedOnButton = false;
 		grabMouse();
@@ -1511,17 +1675,15 @@ private:
 	}
 
 	void finishDrag() {
-		if (_draggingRow < 0) {
+		if (_draggingVisibleRow < 0) {
 			return;
 		}
-		const auto from = _draggingRow;
-		const auto maxTarget = std::max(int(_state->entries().size()) - 1, 0);
+		const auto maxTarget = std::max(int(visibleEntryIndexes().size()) - 1, 0);
 		const auto target = std::clamp(_dragTargetIndex, 0, maxTarget);
-		_state->moveEntry(from, target);
-		_selected = _state->entries().empty()
-			? -1
-			: std::clamp(target, 0, int(_state->entries().size()) - 1);
+		_state->moveVisibleEntry(_draggingVisibleRow, target);
+		_selected = _state->selectedEntryIndex();
 		_draggingRow = -1;
+		_draggingVisibleRow = -1;
 		_dragTargetIndex = -1;
 		_dragCurrentY = 0;
 		_dragGrabOffsetY = 0;
@@ -1530,28 +1692,34 @@ private:
 		_pressedOnButton = false;
 		_hoveredRow = -1;
 		_hoveredKind = ActionKind::None;
+		_hoveredHiddenEntry = -1;
+		_hoveredRestoreAll = false;
+		clampSelection();
 		unsetCursor();
 		update();
 	}
 
 	void updateHover(QPoint point) {
 		auto newHiddenEntry = -1;
+		auto newRestoreAll = false;
 		for (const auto &chip : hiddenChips(width())) {
-			if (chip.rect.contains(point)) {
-				newHiddenEntry = chip.index;
-				break;
+			if (!chip.rect.contains(point)) {
+				continue;
 			}
+			newRestoreAll = chip.restoreAll;
+			newHiddenEntry = chip.restoreAll ? -1 : chip.index;
+			break;
 		}
 
 		auto newRow = -1;
 		auto newKind = ActionKind::None;
-		if (newHiddenEntry < 0) {
-			for (auto i = 0; i != int(_state->entries().size()); ++i) {
-				if (!rowRect(i).contains(point)) {
+		if (!newRestoreAll && (newHiddenEntry < 0)) {
+			for (const auto index : visibleEntryIndexes()) {
+				if (!rowRect(index).contains(point)) {
 					continue;
 				}
-				newRow = i;
-				for (const auto &button : actionButtonsForRow(i)) {
+				newRow = index;
+				for (const auto &button : actionButtonsForRow(index)) {
 					if (button.enabled && button.rect.contains(point)) {
 						newKind = button.kind;
 						break;
@@ -1563,15 +1731,17 @@ private:
 
 		if ((newRow == _hoveredRow)
 			&& (newKind == _hoveredKind)
-			&& (newHiddenEntry == _hoveredHiddenEntry)) {
+			&& (newHiddenEntry == _hoveredHiddenEntry)
+			&& (newRestoreAll == _hoveredRestoreAll)) {
 			return;
 		}
 		_hoveredRow = newRow;
 		_hoveredKind = newKind;
 		_hoveredHiddenEntry = newHiddenEntry;
-		if (_hoveredHiddenEntry >= 0) {
+		_hoveredRestoreAll = newRestoreAll;
+		if (_hoveredRestoreAll || (_hoveredHiddenEntry >= 0) || ((_hoveredRow >= 0) && (_hoveredKind != ActionKind::None))) {
 			setCursor(Qt::PointingHandCursor);
-		} else if ((_hoveredRow >= 0) && (_hoveredKind == ActionKind::None)) {
+		} else if (_hoveredRow >= 0) {
 			setCursor(Qt::OpenHandCursor);
 		} else {
 			unsetCursor();
@@ -1585,49 +1755,57 @@ private:
 		case ActionKind::ToggleVisible:
 			changed = _state->toggleVisible(index);
 			break;
-		case ActionKind::MoveUp:
-			changed = _state->moveUp(index);
-			if (changed) {
-				_selected = std::max(0, index - 1);
-			}
+		case ActionKind::MoveUp: {
+			const auto visibleRow = visibleRowForEntry(index);
+			changed = (visibleRow > 0) && _state->moveVisibleEntry(visibleRow, visibleRow - 1);
 			break;
-		case ActionKind::MoveDown:
-			changed = _state->moveDown(index);
-			if (changed) {
-				_selected = index + 1;
-			}
+		}
+		case ActionKind::MoveDown: {
+			const auto visibleRow = visibleRowForEntry(index);
+			changed = (visibleRow >= 0)
+				&& _state->moveVisibleEntry(visibleRow, visibleRow + 1);
 			break;
+		}
 		case ActionKind::DeleteCustomSeparator:
 			changed = _state->removeCustomSeparator(index);
-			if (changed) {
-				_selected = std::min(_selected, int(_state->entries().size()) - 1);
-			}
 			break;
 		case ActionKind::None:
 			break;
 		}
-		if (!changed) {
+		if (changed) {
+			_selected = _state->selectedEntryIndex();
+			clampSelection();
+		} else {
 			update();
 		}
 	}
 
 	void clampSelection() {
-		if (_state->entries().empty()) {
+		const auto visible = visibleEntryIndexes();
+		if (visible.empty()) {
 			_selected = -1;
-		} else if ((_selected < 0) || (_selected >= int(_state->entries().size()))) {
-			_selected = std::clamp(_selected, 0, int(_state->entries().size()) - 1);
+			_state->setSelectedEntryIndex(-1);
+			return;
 		}
+		if ((_selected < 0)
+			|| (_selected >= int(_state->entries().size()))
+			|| !_state->entries()[_selected].visible) {
+			_selected = visible.front();
+		}
+		_state->setSelectedEntryIndex(_selected);
 	}
 
 	const std::shared_ptr<SideMenuEditorState> _state;
-	int _selected = 0;
+	int _selected = -1;
 	int _hoveredRow = -1;
 	ActionKind _hoveredKind = ActionKind::None;
 	int _hoveredHiddenEntry = -1;
+	bool _hoveredRestoreAll = false;
 	int _pressedRow = -1;
 	bool _pressedOnButton = false;
 	QPoint _pressPoint;
 	int _draggingRow = -1;
+	int _draggingVisibleRow = -1;
 	int _dragTargetIndex = -1;
 	int _dragCurrentY = 0;
 	int _dragGrabOffsetY = 0;

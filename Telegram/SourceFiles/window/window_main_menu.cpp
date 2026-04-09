@@ -85,6 +85,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QScreen>
 #include <QtGui/QMoveEvent>
 
+#include <QtCore/QFileInfo>
+#include <QtCore/QFileSystemWatcher>
+
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -356,6 +359,7 @@ MainMenu::MainMenu(
 , _menu(_inner->add(
 	object_ptr<Ui::VerticalLayout>(_inner.get()),
 	{ 0, st::mainMenuSkip / 2, 0, 0 }))
+, _menuActions(_menu->add(object_ptr<Ui::VerticalLayout>(_menu.get())))
 , _footer(_inner->add(object_ptr<Ui::RpWidget>(_inner.get())))
 , _telegram(
 	Ui::CreateChild<Ui::FlatLabel>(_footer.get(), st::mainMenuTelegramLabel))
@@ -370,6 +374,7 @@ MainMenu::MainMenu(
 	setupAccounts();
 	setupArchive();
 	setupMenu();
+	setupCustomizationWatcher();
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	rpl::combine(
@@ -513,6 +518,76 @@ void MainMenu::refreshSideMenuOptions() {
 	_showFooterText = options.showFooterText;
 	_profileBlockPosition = options.profileBlockPosition;
 	_footer->setVisible(_showFooterText);
+}
+
+void MainMenu::watchCustomizationPath(const QString &path) {
+	if (!_customizationWatcher) {
+		return;
+	}
+	const auto info = QFileInfo(path);
+	const auto absolute = info.absoluteFilePath();
+	if (absolute.isEmpty()) {
+		return;
+	}
+	const auto directory = info.absolutePath();
+	if (!directory.isEmpty()
+		&& !_customizationWatcher->directories().contains(directory)) {
+		_customizationWatcher->addPath(directory);
+	}
+	if (QFileInfo::exists(absolute)
+		&& !_customizationWatcher->files().contains(absolute)) {
+		_customizationWatcher->addPath(absolute);
+	}
+}
+
+void MainMenu::reloadCustomizationFromDisk() {
+	watchCustomizationPath(::Menu::Customization::SideMenuLayoutPath());
+	watchCustomizationPath(Settings::ShellModePreferencesPath());
+	refreshShellModePreferences();
+	refreshSideMenuOptions();
+	setupMenu();
+	const auto targetHeight = parentWidget() ? parentWidget()->height() : height();
+	const auto targetWidth = desiredMenuWidth();
+	if ((width() != targetWidth) || (height() != targetHeight)) {
+		resize(targetWidth, targetHeight);
+	}
+	updateControlsGeometry();
+	updateInnerControlsGeometry();
+	if (!_immersiveAnimation) {
+		resetImmersiveShift();
+	} else {
+		if (!_immersiveGeometryDriven) {
+			_immersiveFallbackShift = _showFinished.current()
+				? std::min(width() / 6, 44)
+				: 0;
+		}
+		applyImmersiveShift();
+	}
+	update();
+}
+
+void MainMenu::setupCustomizationWatcher() {
+	_customizationWatcher = std::make_unique<QFileSystemWatcher>();
+	_customizationReloadTimer.setCallback([=] {
+		reloadCustomizationFromDisk();
+	});
+	const auto scheduleReload = [=](const QString &) {
+		watchCustomizationPath(::Menu::Customization::SideMenuLayoutPath());
+		watchCustomizationPath(Settings::ShellModePreferencesPath());
+		_customizationReloadTimer.callOnce(80);
+	};
+	QObject::connect(
+		_customizationWatcher.get(),
+		&QFileSystemWatcher::fileChanged,
+		this,
+		scheduleReload);
+	QObject::connect(
+		_customizationWatcher.get(),
+		&QFileSystemWatcher::directoryChanged,
+		this,
+		scheduleReload);
+	watchCustomizationPath(::Menu::Customization::SideMenuLayoutPath());
+	watchCustomizationPath(Settings::ShellModePreferencesPath());
 }
 
 bool MainMenu::profileBlockAtBottom() const {
@@ -777,12 +852,15 @@ void MainMenu::setupMenu() {
 	using namespace Settings;
 
 	const auto controller = _controller;
+	const auto menu = _menuActions;
+	menu->clear();
+	_nightThemeToggle = nullptr;
 	Core::UpdateChecker checker;
 	const auto addAction = [&](
 			rpl::producer<QString> text,
 			IconDescriptor &&descriptor) {
 		return AddButtonWithIcon(
-			_menu,
+			menu,
 			std::move(text),
 			st::mainMenuButton,
 			std::move(descriptor));
@@ -794,8 +872,8 @@ void MainMenu::setupMenu() {
 		QStringLiteral("astro.show_logs"));
 	const auto hasLogsAction = !logActions.empty();
 	const auto addSeparator = [&] {
-		_menu->add(
-			object_ptr<Ui::PlainShadow>(_menu),
+		menu->add(
+			object_ptr<Ui::PlainShadow>(menu),
 			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
 	};
 
@@ -808,9 +886,9 @@ void MainMenu::setupMenu() {
 		registerRenderer(
 			::Menu::Customization::SideMenuItemId::MyProfile,
 			[=] {
-				_menu->add(
+				menu->add(
 					CreateButtonWithIcon(
-						_menu,
+						menu,
 						tr::lng_menu_my_profile(),
 						st::mainMenuButton,
 						{ &st::menuIconProfile })
@@ -822,7 +900,7 @@ void MainMenu::setupMenu() {
 		registerRenderer(
 			::Menu::Customization::SideMenuItemId::Bots,
 			[=] {
-				SetupMenuBots(_menu, controller);
+				SetupMenuBots(menu, controller);
 			});
 		registerRenderer(
 			::Menu::Customization::SideMenuItemId::NewGroup,
@@ -901,7 +979,7 @@ void MainMenu::setupMenu() {
 				) | rpl::on_next([=](bool fix) {
 					_controller->session().settings().setSupportFixChatsOrder(fix);
 					_controller->session().saveSettings();
-				}, _menu->lifetime());
+				}, menu->lifetime());
 			});
 		registerRenderer(
 			::Menu::Customization::SideMenuItemId::ReloadTemplates,
@@ -1029,7 +1107,7 @@ void MainMenu::setupMenu() {
 			) | rpl::on_next([=](bool enabled) {
 				Core::App().settings().setGhostMode(enabled);
 				Core::App().saveSettingsDelayed();
-			}, _menu->lifetime());
+			}, menu->lifetime());
 		});
 	registerRenderer(
 		::Menu::Customization::SideMenuItemId::NightMode,

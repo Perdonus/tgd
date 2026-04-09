@@ -22,6 +22,7 @@ enum class EventFilterResult;
 } // namespace base
 
 class QMoveEvent;
+class QFileSystemWatcher;
 
 namespace Ui {
 class IconButton;
@@ -83,6 +84,9 @@ private:
 	void initResetScaleButton();
 	void refreshShellModePreferences();
 	void refreshSideMenuOptions();
+	void reloadCustomizationFromDisk();
+	void setupCustomizationWatcher();
+	void watchCustomizationPath(const QString &path);
 	void syncAccountsVisibility(bool shown, bool animated);
 	[[nodiscard]] bool profileBlockAtBottom() const;
 	[[nodiscard]] int profileBlockTop() const;
@@ -114,6 +118,7 @@ private:
 	not_null<Ui::SlideWrap<Ui::VerticalLayout>*> _accounts;
 	not_null<Ui::SlideWrap<Ui::PlainShadow>*> _shadow;
 	not_null<Ui::VerticalLayout*> _menu;
+	not_null<Ui::VerticalLayout*> _menuActions;
 	not_null<Ui::RpWidget*> _footer;
 	not_null<Ui::FlatLabel*> _telegram;
 	not_null<Ui::FlatLabel*> _version;
@@ -124,6 +129,8 @@ private:
 
 	Ui::Controls::SwipeBackResult _swipeBackData;
 	Ui::Animations::Simple _immersiveShiftAnimation;
+	std::unique_ptr<QFileSystemWatcher> _customizationWatcher;
+	base::Timer _customizationReloadTimer;
 
 	rpl::variable<bool> _showFinished = false;
 	bool _insideEventRedirect = false;
