@@ -203,6 +203,8 @@ PRIVATE
     ayu/data/entities.h
     ayu/data/messages_storage.cpp
     ayu/data/messages_storage.h
+    ayu/recall/deleted_messages_section.cpp
+    ayu/recall/deleted_messages_section.h
     boxes/filters/edit_filter_box.cpp
     boxes/filters/edit_filter_box.h
     boxes/filters/edit_filter_chats_list.cpp
@@ -1329,6 +1331,8 @@ PRIVATE
     media/system_media_controls_manager.cpp
     menu/menu_antispam_validator.cpp
     menu/menu_antispam_validator.h
+    menu/menu_customization.cpp
+    menu/menu_customization.h
     menu/menu_item_download_files.cpp
     menu/menu_item_download_files.h
     menu/menu_item_rate_transcribe_session.cpp

@@ -36,9 +36,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "menu/menu_customization.h"
 #include "mtproto/mtproto_config.h"
 #include "plugins/plugins_manager.h"
 #include "settings/settings_advanced.h"
+#include "settings/settings_plugins.h"
 #include "settings/settings_calls.h"
 #include "settings/settings_information.h"
 #include "settings/settings_astrogram.h"
@@ -81,6 +83,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
+
+#include <functional>
+#include <map>
 
 namespace Window {
 namespace {
@@ -367,10 +372,8 @@ MainMenu::MainMenu(
 	}, shadow->lifetime());
 
 	_nightThemeSwitch.setCallback([this] {
-		Expects(_nightThemeToggle != nullptr);
-
 		const auto nightMode = Window::Theme::IsNightMode();
-		if (_nightThemeToggle->toggled() != nightMode) {
+		if (_nightThemeToggle && (_nightThemeToggle->toggled() != nightMode)) {
 			Window::Theme::ToggleNightMode();
 			Window::Theme::KeepApplied();
 		}
@@ -667,154 +670,252 @@ void MainMenu::setupMenu() {
 			st::mainMenuButton,
 			std::move(descriptor));
 	};
-	if (!_controller->session().supportMode()) {
-		_menu->add(
-			CreateButtonWithIcon(
-				_menu,
-				tr::lng_menu_my_profile(),
-				st::mainMenuButton,
-				{ &st::menuIconProfile })
-		)->setClickedCallback([=] {
-			controller->showSection(
-				Info::Stories::Make(controller->session().user()));
-		});
+	using Render = std::function<void()>;
 
-		SetupMenuBots(_menu, controller);
-
+	const auto supportMode = _controller->session().supportMode();
+	const auto logActions = Core::App().plugins().actionsFor(
+		QStringLiteral("astro.show_logs"));
+	const auto hasLogsAction = !logActions.empty();
+	const auto addSeparator = [&] {
 		_menu->add(
 			object_ptr<Ui::PlainShadow>(_menu),
 			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
+	};
 
-		AddMyChannelsBox(addAction(
-			tr::lng_create_group_title(),
-			{ &st::menuIconGroups }
-		), controller, true)->addClickHandler([=](Qt::MouseButton which) {
-			if (which == Qt::LeftButton) {
-				controller->showNewGroup();
-			}
-		});
+	auto renderers = std::map<QString, Render>();
+	const auto registerRenderer = [&](const char *id, Render render) {
+		renderers.emplace(QString::fromLatin1(id), std::move(render));
+	};
 
-		AddMyChannelsBox(addAction(
-			tr::lng_create_channel_title(),
-			{ &st::menuIconChannel }
-		), controller, false)->addClickHandler([=](Qt::MouseButton which) {
-			if (which == Qt::LeftButton) {
-				controller->showNewChannel();
-			}
-		});
-
-		addAction(
-			tr::lng_menu_contacts(),
-			{ &st::menuIconUserShow }
-		)->setClickedCallback([=] {
-			controller->show(PrepareContactsBox(controller));
-		});
-		addAction(
-			tr::lng_menu_calls(),
-			{ &st::menuIconPhone }
-		)->setClickedCallback([=] {
-			::Calls::ShowCallsBox(controller);
-		});
-		addAction(
-			tr::lng_saved_messages(),
-			{ &st::menuIconSavedMessages }
-		)->setClickedCallback([=] {
-			controller->showPeerHistory(controller->session().user());
-		});
+	if (!supportMode) {
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::MyProfile,
+			[=] {
+				_menu->add(
+					CreateButtonWithIcon(
+						_menu,
+						tr::lng_menu_my_profile(),
+						st::mainMenuButton,
+						{ &st::menuIconProfile })
+				)->setClickedCallback([=] {
+					controller->showSection(
+						Info::Stories::Make(controller->session().user()));
+				});
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::Bots,
+			[=] {
+				SetupMenuBots(_menu, controller);
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::NewGroup,
+			[=] {
+				AddMyChannelsBox(addAction(
+					tr::lng_create_group_title(),
+					{ &st::menuIconGroups }
+				), controller, true)->addClickHandler([=](Qt::MouseButton which) {
+					if (which == Qt::LeftButton) {
+						controller->showNewGroup();
+					}
+				});
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::NewChannel,
+			[=] {
+				AddMyChannelsBox(addAction(
+					tr::lng_create_channel_title(),
+					{ &st::menuIconChannel }
+				), controller, false)->addClickHandler([=](Qt::MouseButton which) {
+					if (which == Qt::LeftButton) {
+						controller->showNewChannel();
+					}
+				});
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::Contacts,
+			[=] {
+				addAction(
+					tr::lng_menu_contacts(),
+					{ &st::menuIconUserShow }
+				)->setClickedCallback([=] {
+					controller->show(PrepareContactsBox(controller));
+				});
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::Calls,
+			[=] {
+				addAction(
+					tr::lng_menu_calls(),
+					{ &st::menuIconPhone }
+				)->setClickedCallback([=] {
+					::Calls::ShowCallsBox(controller);
+				});
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::SavedMessages,
+			[=] {
+				addAction(
+					tr::lng_saved_messages(),
+					{ &st::menuIconSavedMessages }
+				)->setClickedCallback([=] {
+					controller->showPeerHistory(controller->session().user());
+				});
+			});
 	} else {
-		addAction(
-			tr::lng_profile_add_contact(),
-			{ &st::menuIconProfile }
-		)->setClickedCallback([=] {
-			controller->showAddContact();
-		});
-		addAction(
-			rpl::single(u"Fix chats order"_q),
-			{ &st::menuIconPin }
-		)->toggleOn(rpl::single(
-			_controller->session().settings().supportFixChatsOrder()
-		))->toggledChanges(
-		) | rpl::on_next([=](bool fix) {
-			_controller->session().settings().setSupportFixChatsOrder(fix);
-			_controller->session().saveSettings();
-		}, _menu->lifetime());
-		addAction(
-			rpl::single(u"Reload templates"_q),
-			{ &st::menuIconRestore }
-		)->setClickedCallback([=] {
-			_controller->session().supportTemplates().reload();
-		});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::AddContact,
+			[=] {
+				addAction(
+					tr::lng_profile_add_contact(),
+					{ &st::menuIconProfile }
+				)->setClickedCallback([=] {
+					controller->showAddContact();
+				});
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::FixChatsOrder,
+			[=] {
+				addAction(
+					rpl::single(u"Fix chats order"_q),
+					{ &st::menuIconPin }
+				)->toggleOn(rpl::single(
+					_controller->session().settings().supportFixChatsOrder()
+				))->toggledChanges(
+				) | rpl::on_next([=](bool fix) {
+					_controller->session().settings().setSupportFixChatsOrder(fix);
+					_controller->session().saveSettings();
+				}, _menu->lifetime());
+			});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::ReloadTemplates,
+			[=] {
+				addAction(
+					rpl::single(u"Reload templates"_q),
+					{ &st::menuIconRestore }
+				)->setClickedCallback([=] {
+					_controller->session().supportTemplates().reload();
+				});
+			});
 	}
-	addAction(
-		tr::lng_menu_settings(),
-		{ &st::menuIconSettings }
-	)->setClickedCallback([=] {
-		controller->showSettings();
-	});
-	if (const auto logActions = Core::App().plugins().actionsFor(
-			QStringLiteral("astro.show_logs"));
-		!logActions.empty()) {
+
+	registerRenderer(
+		::Menu::Customization::SideMenuItemId::Settings,
+		[=] {
+			addAction(
+				tr::lng_menu_settings(),
+				{ &st::menuIconSettings }
+			)->setClickedCallback([=] {
+				controller->showSettings();
+			});
+		});
+	registerRenderer(
+		::Menu::Customization::SideMenuItemId::Plugins,
+		[=] {
+			addAction(
+				rpl::single(RuEn("Плагины", "Plugins")),
+				{ &st::menuIconCustomize }
+			)->setClickedCallback([=] {
+				controller->showSettings(::Settings::Plugins::Id());
+			});
+		});
+	if (hasLogsAction) {
 		const auto action = logActions.front();
-		addAction(
-			rpl::single(action.title.isEmpty()
-				? RuEn("Показать логи", "Show Logs")
-				: action.title),
-			{ &st::menuIconIpAddress }
-		)->setClickedCallback([=] {
-			if (!Core::App().plugins().triggerAction(action.id)) {
-				controller->window().showToast(RuEn(
-					"Не удалось открыть окно логов.",
-					"Could not open the logs overlay."));
-			}
-		});
+		registerRenderer(
+			::Menu::Customization::SideMenuItemId::ShowLogs,
+			[=] {
+				addAction(
+					rpl::single(action.title.isEmpty()
+						? RuEn("Показать логи", "Show Logs")
+						: action.title),
+					{ &st::menuIconIpAddress }
+				)->setClickedCallback([=] {
+					if (!Core::App().plugins().triggerAction(action.id)) {
+						controller->window().showToast(RuEn(
+							"Не удалось открыть окно логов.",
+							"Could not open the logs overlay."));
+					}
+				});
+			});
 	}
-	addAction(
-		rpl::single(RuEn("Режим призрака", "Ghost mode")),
-		{ &st::menuIconLock }
-	)->toggleOn(Core::App().settings().ghostModeValue())->toggledChanges(
-	) | rpl::on_next([=](bool enabled) {
-		Core::App().settings().setGhostMode(enabled);
-		Core::App().saveSettingsDelayed();
-	}, _menu->lifetime());
+	registerRenderer(
+		::Menu::Customization::SideMenuItemId::GhostMode,
+		[=] {
+			addAction(
+				rpl::single(RuEn("Режим призрака", "Ghost mode")),
+				{ &st::menuIconLock }
+			)->toggleOn(Core::App().settings().ghostModeValue())->toggledChanges(
+			) | rpl::on_next([=](bool enabled) {
+				Core::App().settings().setGhostMode(enabled);
+				Core::App().saveSettingsDelayed();
+			}, _menu->lifetime());
+		});
+	registerRenderer(
+		::Menu::Customization::SideMenuItemId::NightMode,
+		[=] {
+			_nightThemeToggle = addAction(
+				tr::lng_menu_night_mode(),
+				{ &st::menuIconNightMode }
+			)->toggleOn(_nightThemeSwitches.events_starting_with(
+				Window::Theme::IsNightMode()
+			));
+			_nightThemeToggle->toggledChanges(
+			) | rpl::filter([=](bool night) {
+				return (night != Window::Theme::IsNightMode());
+			}) | rpl::on_next([=](bool night) {
+				if (Window::Theme::Background()->editingTheme()) {
+					_nightThemeSwitches.fire(!night);
+					controller->show(Ui::MakeInformBox(
+						tr::lng_theme_editor_cant_change_theme()));
+					return;
+				}
+				const auto weak = base::make_weak(this);
+				const auto toggle = [=] {
+					if (!weak) {
+						Window::Theme::ToggleNightMode();
+						Window::Theme::KeepApplied();
+					} else {
+						_nightThemeSwitch.callOnce(
+							st::mainMenu.itemToggle.duration);
+					}
+				};
+				Window::Theme::ToggleNightModeWithConfirmation(
+					&_controller->window(),
+					toggle);
+			}, _nightThemeToggle->lifetime());
 
-	_nightThemeToggle = addAction(
-		tr::lng_menu_night_mode(),
-		{ &st::menuIconNightMode }
-	)->toggleOn(_nightThemeSwitches.events_starting_with(
-		Window::Theme::IsNightMode()
-	));
-	_nightThemeToggle->toggledChanges(
-	) | rpl::filter([=](bool night) {
-		return (night != Window::Theme::IsNightMode());
-	}) | rpl::on_next([=](bool night) {
-		if (Window::Theme::Background()->editingTheme()) {
-			_nightThemeSwitches.fire(!night);
-			controller->show(Ui::MakeInformBox(
-				tr::lng_theme_editor_cant_change_theme()));
-			return;
-		}
-		const auto weak = base::make_weak(this);
-		const auto toggle = [=] {
-			if (!weak) {
-				Window::Theme::ToggleNightMode();
-				Window::Theme::KeepApplied();
-			} else {
-				_nightThemeSwitch.callOnce(st::mainMenu.itemToggle.duration);
-			}
-		};
-		Window::Theme::ToggleNightModeWithConfirmation(
-			&_controller->window(),
-			toggle);
-	}, _nightThemeToggle->lifetime());
+			Core::App().settings().systemDarkModeValue(
+			) | rpl::on_next([=](std::optional<bool> darkMode) {
+				const auto darkModeEnabled
+					= Core::App().settings().systemDarkModeEnabled();
+				if (darkModeEnabled && darkMode.has_value()) {
+					_nightThemeSwitches.fire_copy(*darkMode);
+				}
+			}, _nightThemeToggle->lifetime());
+		});
 
-	Core::App().settings().systemDarkModeValue(
-	) | rpl::on_next([=](std::optional<bool> darkMode) {
-		const auto darkModeEnabled
-			= Core::App().settings().systemDarkModeEnabled();
-		if (darkModeEnabled && darkMode.has_value()) {
-			_nightThemeSwitches.fire_copy(*darkMode);
+	const auto layout = ::Menu::Customization::LoadSideMenuLayout(
+		supportMode,
+		hasLogsAction);
+	auto hasRenderedAction = false;
+	auto pendingSeparator = false;
+	for (const auto &entry : layout) {
+		if (!entry.visible) {
+			continue;
+		} else if (entry.separator) {
+			pendingSeparator = hasRenderedAction;
+			continue;
 		}
-	}, _nightThemeToggle->lifetime());
+		const auto i = renderers.find(entry.id);
+		if (i == renderers.end()) {
+			continue;
+		}
+		if (pendingSeparator) {
+			addSeparator();
+			pendingSeparator = false;
+		}
+		i->second();
+		hasRenderedAction = true;
+	}
 }
 
 void MainMenu::resizeEvent(QResizeEvent *e) {

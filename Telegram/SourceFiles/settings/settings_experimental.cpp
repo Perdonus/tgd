@@ -7,8 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_experimental.h"
 
+#include "menu/menu_customization.h"
 #include "data/components/passkeys.h"
 #include "main/main_session.h"
+#include "plugins/plugins_manager.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
@@ -26,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_widget.h"
 #include "history/history_item_components.h"
 #include "info/profile/info_profile_actions.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "media/player/media_player_instance.h"
@@ -42,8 +45,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 #include "styles/style_layers.h"
 
+#include <QtCore/QDir>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
+
 namespace Settings {
 namespace {
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
 
 void AddOption(
 		not_null<Window::Controller*> window,
@@ -102,9 +115,74 @@ void AddOption(
 	}
 }
 
-void SetupExperimental(
-		not_null<Window::Controller*> window,
+void SetupMenuCustomization(
+		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
+	Ui::AddDivider(container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(RuEn(
+				"Кастомизация меню",
+				"Menu customization")),
+			st::boxLabel),
+		st::defaultBoxDividerLabelPadding);
+
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Раскладка бокового меню уже хранится в отдельном JSON. Сейчас поддерживаются видимость пунктов, пользовательские разделители и кнопка Plugins. Позже сюда можно будет положить визуальный редактор.",
+			"The side menu layout is now stored in a dedicated JSON file. It already supports item visibility, custom separators and the Plugins button. A visual editor can be added here later.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+
+	const auto layoutPath = QDir::toNativeSeparators(
+		::Menu::Customization::SideMenuLayoutPath());
+	AddButtonWithLabel(
+		container,
+		rpl::single(RuEn(
+			"Файл раскладки бокового меню",
+			"Side menu layout file")),
+		rpl::single(layoutPath),
+		st::settingsButton,
+		{ &st::menuIconFile }
+	)->addClickHandler([=] {
+		QGuiApplication::clipboard()->setText(layoutPath);
+		controller->window().showToast(RuEn(
+			"Путь к раскладке скопирован.",
+			"Layout path copied."));
+	});
+
+	AddButtonWithIcon(
+		container,
+		rpl::single(RuEn(
+			"Сбросить раскладку бокового меню",
+			"Reset side menu layout")),
+		st::settingsButton,
+		{ &st::menuIconRestore }
+	)->addClickHandler([=] {
+		const auto hasLogsAction = !Core::App().plugins().actionsFor(
+			QStringLiteral("astro.show_logs")).empty();
+		if (::Menu::Customization::ResetSideMenuLayout(
+				controller->session().supportMode(),
+				hasLogsAction)) {
+			controller->window().showToast(RuEn(
+				"Раскладка бокового меню сброшена.",
+				"Side menu layout reset."));
+		} else {
+			controller->window().showToast(RuEn(
+				"Не удалось сбросить раскладку бокового меню.",
+				"Could not reset the side menu layout."));
+		}
+	});
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
+
+void SetupExperimental(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	const auto window = &controller->window();
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 
 	container->add(
@@ -175,6 +253,8 @@ void SetupExperimental(
 	addToggle(Window::kOptionDisableTouchbar);
 	addToggle(Info::kAlternativeScrollProcessing);
 	addToggle(kModerateCommonGroups);
+
+	SetupMenuCustomization(controller, container);
 }
 
 } // namespace
@@ -194,7 +274,7 @@ void Experimental::setupContent(
 		not_null<Window::SessionController*> controller) {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
-	SetupExperimental(&controller->window(), content);
+	SetupExperimental(controller, content);
 
 	Ui::ResizeFitChild(this, content);
 }
