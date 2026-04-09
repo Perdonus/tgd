@@ -316,6 +316,7 @@ void ShowAstrogramUpdateChannelBox(
 	};
 
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
 		SingleChoiceBox(box, {
 			.title = rpl::single(RuEn(
 				"Скрытый канал обновлений Astrogram",
@@ -329,6 +330,28 @@ void ShowAstrogramUpdateChannelBox(
 				applyChannel(index == 1);
 			},
 		});
+		const auto summary = Core::ActiveDevUpdateHooksSummary();
+		const auto configPath = QDir::toNativeSeparators(
+			Core::DevUpdateHooksConfigPath());
+		if (cInstallBetaVersion() || (summary.isEmpty() == false)) {
+			const auto info = summary.isEmpty()
+				? RuEn(
+					"Файл dev hook: %1",
+					"Dev hook file: %1").arg(configPath)
+				: RuEn(
+					"Активный dev hook: %1\nФайл: %2",
+					"Active dev hook: %1\nFile: %2").arg(summary, configPath);
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(info),
+				st::boxLabel),
+				style::margins(
+					st::boxPadding.left(),
+					0,
+					st::boxPadding.right(),
+					st::boxPadding.bottom() / 2),
+				style::al_top);
+		}
 	}));
 }
 
