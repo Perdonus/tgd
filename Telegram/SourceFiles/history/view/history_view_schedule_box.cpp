@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_common.h"
 #include "chat_helpers/compose/compose_show.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_peer.h"
 #include "data/data_peer_values.h"
 #include "data/data_user.h"
@@ -148,9 +150,16 @@ void ScheduleBox(
 			: tr::lng_schedule_button();
 	}();
 	const auto description = IsLocalScheduledEdit(initialOptions, details)
-		? rpl::single(RuEn(
-			"Локальная отложенная правка сработает, пока Astrogram остаётся запущен.",
-			"Local scheduled edits work while Astrogram stays open."))
+		? Core::App().settings().persistLocalScheduledEditsValue()
+			| rpl::map([](bool persisted) {
+				return persisted
+					? RuEn(
+						"Локальная отложенная правка хранится на этом устройстве, восстанавливается после перезапуска Astrogram и при необходимости пытается заново догрузить сообщение перед применением.",
+						"Local scheduled edits are stored on this device, restored after Astrogram restarts, and will try to reload the message before applying if needed.")
+					: RuEn(
+						"Локальная отложенная правка сработает, пока Astrogram остаётся запущен.",
+						"Local scheduled edits work while Astrogram stays open.");
+			})
 		: rpl::producer<QString>();
 	auto descriptor = Ui::ChooseDateTimeBox(box, {
 		.title = std::move(title),

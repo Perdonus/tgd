@@ -399,6 +399,48 @@ void ShowSingleLineTextEditBox(
 	}));
 }
 
+void ShowNonNegativeIntEditBox(
+		not_null<Window::SessionController*> controller,
+		const QString &title,
+		const QString &placeholder,
+		int current,
+		Fn<void(int)> save) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWideWidth);
+		box->setTitle(rpl::single(title));
+
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			Ui::InputField::Mode::NoNewlines,
+			placeholder,
+			TextWithTags{ current > 0 ? QString::number(current) : QString(), {} }));
+
+		box->addButton(tr::lng_settings_save(), [=] {
+			const auto trimmed = field->getLastText().trimmed();
+			auto ok = trimmed.isEmpty();
+			const auto value = trimmed.isEmpty() ? 0 : trimmed.toInt(&ok);
+			if (!ok || (value < 0)) {
+				controller->showToast(RuEn(
+					"Введите 0 или положительное число.",
+					"Enter 0 or a positive number."));
+				return;
+			}
+			box->closeBox();
+			save(value);
+		});
+		box->addButton(tr::lng_cancel(), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
+[[nodiscard]] QString LimitOverrideLabel(int value) {
+	return (value > 0)
+		? RuEn("До %1 локально", "Up to %1 locally").arg(value)
+		: RuEn("Авто (лимит Telegram)", "Auto (Telegram limit)");
+}
+
 void AddSectionButton(
 			not_null<Window::SessionController*> controller,
 			not_null<Ui::VerticalLayout*> container,
@@ -848,7 +890,9 @@ void SetupAstrogramHome(
 	AddLinksSection(controller, container);
 }
 
-void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
+void SetupAstrogramCore(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
@@ -877,13 +921,82 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 		[&](bool toggled) {
 			settings.setUnlockForwardSelectionLimit(toggled);
 		});
+	AddToggle(
+		forwardingCard,
+		settings.persistLocalScheduledEditsValue(),
+		RuEn(
+			"Сохранять локальные отложенные правки после перезапуска",
+			"Keep local scheduled edits after restart"),
+		[&](bool toggled) {
+			settings.setPersistLocalScheduledEdits(toggled);
+		});
+	AddButtonWithLabel(
+		forwardingCard,
+		rpl::single(RuEn("Локальный лимит сохранённых GIF", "Local saved GIF limit")),
+		settings.localSavedGifsLimitOverrideValue() | rpl::map([](int value) {
+			return LimitOverrideLabel(value);
+		}),
+		st::settingsButton,
+		{ &st::menuIconGif }
+	)->addClickHandler([=] {
+		ShowNonNegativeIntEditBox(
+			controller,
+			RuEn("Локальный лимит сохранённых GIF", "Local saved GIF limit"),
+			RuEn("0 = авто, число = локальный лимит", "0 = auto, number = local limit"),
+			Core::App().settings().localSavedGifsLimitOverride(),
+			[](int value) {
+				auto &settings = Core::App().settings();
+				settings.setLocalSavedGifsLimitOverride(value);
+				Core::App().saveSettings();
+			});
+	});
+	AddButtonWithLabel(
+		forwardingCard,
+		rpl::single(RuEn("Локальный лимит избранных стикеров", "Local favourite stickers limit")),
+		settings.localFavedStickersLimitOverrideValue() | rpl::map([](int value) {
+			return LimitOverrideLabel(value);
+		}),
+		st::settingsButton,
+		{ &st::menuIconStickers }
+	)->addClickHandler([=] {
+		ShowNonNegativeIntEditBox(
+			controller,
+			RuEn("Локальный лимит избранных стикеров", "Local favourite stickers limit"),
+			RuEn("0 = авто, число = локальный лимит", "0 = auto, number = local limit"),
+			Core::App().settings().localFavedStickersLimitOverride(),
+			[](int value) {
+				auto &settings = Core::App().settings();
+				settings.setLocalFavedStickersLimitOverride(value);
+				Core::App().saveSettings();
+			});
+	});
+	AddButtonWithLabel(
+		forwardingCard,
+		rpl::single(RuEn("Локальный лимит недавних стикеров", "Local recent stickers limit")),
+		settings.localRecentStickersLimitOverrideValue() | rpl::map([](int value) {
+			return LimitOverrideLabel(value);
+		}),
+		st::settingsButton,
+		{ &st::menuIconStickers }
+	)->addClickHandler([=] {
+		ShowNonNegativeIntEditBox(
+			controller,
+			RuEn("Локальный лимит недавних стикеров", "Local recent stickers limit"),
+			RuEn("0 = авто, число = локальный лимит", "0 = auto, number = local limit"),
+			Core::App().settings().localRecentStickersLimitOverride(),
+			[](int value) {
+				auto &settings = Core::App().settings();
+				settings.setLocalRecentStickersLimitOverride(value);
+				Core::App().saveSettings();
+			});
+	});
 	Ui::AddSkip(forwardingCard, st::settingsCheckboxesSkip / 4);
 	forwardingCard->add(
 		object_ptr<Ui::FlatLabel>(
 			forwardingCard,
 			rpl::single(RuEn(
-				"Снимает только клиентский лимит на выделение. Большие пересылки всё равно идут пачками, а серверные ограничения Telegram остаются.",
-				"Removes only the client-side selection cap. Large forwards still go in batches, and Telegram server-side limits still remain.")),
+				"Пересылка снимает только клиентский лимит выделения. GIF и стикерные override работают локально: Astrogram удерживает расширенный хвост на этом устройстве, но серверные лимиты Telegram и синхронизация всё равно могут быть ниже.",
+				"Forwarding removes only the client-side selection cap. GIF and sticker overrides are local: Astrogram keeps an extended tail on this device, but Telegram server limits and sync may still stay lower.")),
 			st::defaultFlatLabel),
 		style::margins(14, 0, 14, 0),
 		style::al_top);
@@ -1223,9 +1336,8 @@ rpl::producer<QString> AstrogramCore::title() {
 
 void AstrogramCore::setupContent(
 		not_null<Window::SessionController*> controller) {
-	Q_UNUSED(controller);
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-	SetupAstrogramCore(content);
+	SetupAstrogramCore(controller, content);
 	Ui::ResizeFitChild(this, content);
 }
 
