@@ -691,8 +691,15 @@ void SetupSections(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
 		Fn<void(Type)> showOther) {
+	const auto showPhoneSuggestion = controller->session().promoSuggestions().current(
+		kSugValidatePhone.utf8());
+	const auto showPasswordSuggestion = !showPhoneSuggestion
+		&& controller->session().promoSuggestions().current(
+			Data::PromoSuggestions::SugValidatePassword());
 	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	if (showPhoneSuggestion || showPasswordSuggestion) {
+		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	}
 
 	SetupValidatePhoneNumberSuggestion(
 		controller,
