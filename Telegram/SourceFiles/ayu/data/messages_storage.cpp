@@ -51,6 +51,9 @@ namespace {
 	snapshot.editDate = base::unixtime::now();
 	snapshot.senderName = from ? from->name() : item->history()->peer->name();
 	snapshot.text = item->originalText().text;
+	if (snapshot.text.isEmpty()) {
+		snapshot.text = item->notificationText().text;
+	}
 	if (const auto edited = item->Get<HistoryMessageEdited>()) {
 		snapshot.editDate = edited->date;
 	}
@@ -58,10 +61,6 @@ namespace {
 }
 
 void AppendSnapshot(const MessageSnapshot &snapshot) {
-	if (snapshot.text.isEmpty()) {
-		return;
-	}
-
 	QDir().mkpath(u"./tdata"_q);
 	auto file = QFile(StoragePath());
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
@@ -195,7 +194,7 @@ std::vector<MessageSnapshot> getEditedMessages(
 	}
 	while (!file.atEnd()) {
 		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (!parsed || !MatchesItem(item, *parsed) || parsed->text.isEmpty()) {
+		if (!parsed || !MatchesItem(item, *parsed)) {
 			continue;
 		}
 		result.push_back(*parsed);
@@ -215,7 +214,7 @@ bool hasRevisions(not_null<HistoryItem*> item) {
 	}
 	while (!file.atEnd()) {
 		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (parsed && MatchesItem(item, *parsed) && !parsed->text.isEmpty()) {
+		if (parsed && MatchesItem(item, *parsed)) {
 			file.close();
 			return true;
 		}
@@ -239,7 +238,7 @@ std::vector<MessageSnapshot> getDeletedMessages(
 	}
 	while (!file.atEnd()) {
 		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (!parsed || !MatchesPeer(peer, topicId, *parsed) || parsed->text.isEmpty()) {
+		if (!parsed || !MatchesPeer(peer, topicId, *parsed)) {
 			continue;
 		}
 		result.push_back(*parsed);
@@ -261,7 +260,7 @@ bool hasDeletedMessages(
 	}
 	while (!file.atEnd()) {
 		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (parsed && MatchesPeer(peer, topicId, *parsed) && !parsed->text.isEmpty()) {
+		if (parsed && MatchesPeer(peer, topicId, *parsed)) {
 			file.close();
 			return true;
 		}

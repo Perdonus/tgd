@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_window.h"
+#include "ui/effects/animations.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
@@ -69,7 +70,12 @@ constexpr auto kBubbleWidthFactor = 0.72;
 	return count > 0 ? (base + u" · "_q + QString::number(count)) : base;
 }
 
-[[nodiscard]] QString EmptyText() {
+[[nodiscard]] QString EmptyText(const QString &query) {
+	if (!query.isEmpty()) {
+		return UiText(
+			"Nothing was found in the saved deleted messages for this chat.",
+			"По этому запросу среди сохранённых удалённых сообщений ничего не найдено.");
+	}
 	return UiText(
 		"No locally saved deleted messages were found for this chat.",
 		"Для этого чата не найдено локально сохранённых удалённых сообщений.");
@@ -79,8 +85,21 @@ constexpr auto kBubbleWidthFactor = 0.72;
 	return UiText("Open original message in chat", "Открыть исходное сообщение в чате");
 }
 
+[[nodiscard]] QString SectionHint() {
+	return UiText(
+		"Click a saved message to open its place in the chat.",
+		"Нажмите на сохранённое сообщение, чтобы открыть его место в чате.");
+}
+
 [[nodiscard]] QString DeletedMessagePlaceholder() {
 	return UiText("Saved deleted message", "Сохранённое удалённое сообщение");
+}
+
+[[nodiscard]] QString ScopeLabel(not_null<Data::Thread*> thread) {
+	if (const auto topic = thread->asTopic()) {
+		return UiText("Topic: %1", "Тема: %1").arg(topic->title());
+	}
+	return QString();
 }
 
 [[nodiscard]] int TopicIdFor(not_null<Data::Thread*> thread) {
@@ -103,6 +122,10 @@ constexpr auto kBubbleWidthFactor = 0.72;
 	return QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime().toString(u"HH:mm"_q);
 }
 
+[[nodiscard]] QString ResolveSenderName(
+		const AyuMessages::MessageSnapshot &snapshot,
+		not_null<Data::Thread*> thread);
+
 [[nodiscard]] std::vector<AyuMessages::MessageSnapshot> LoadMessages(
 		not_null<Data::Thread*> thread) {
 	auto result = AyuMessages::getDeletedMessages(
@@ -122,6 +145,19 @@ constexpr auto kBubbleWidthFactor = 0.72;
 			return a.editDate < b.editDate;
 		});
 	return result;
+}
+
+[[nodiscard]] bool MatchesSearchQuery(
+		const AyuMessages::MessageSnapshot &snapshot,
+		not_null<Data::Thread*> thread,
+		const QString &query) {
+	if (query.isEmpty()) {
+		return true;
+	}
+	const auto sender = ResolveSenderName(snapshot, thread);
+	return snapshot.text.contains(query, Qt::CaseInsensitive)
+		|| snapshot.senderName.contains(query, Qt::CaseInsensitive)
+		|| sender.contains(query, Qt::CaseInsensitive);
 }
 
 [[nodiscard]] bool IsOutgoing(
@@ -357,7 +393,7 @@ void DeletedMessageRow::openOriginal() {
 	const auto controller = _controller;
 	const auto missing = !(_thread->session().data().message(
 		FullMsgId(_thread->peer()->id, _snapshot.messageId)));
-	const auto params = Window::SectionShow(Window::SectionShow::Way::ClearStack);
+	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
 	controller->showThread(_thread, _snapshot.messageId, params);
 	if (missing) {
 		controller->window().showToast(UiText(
@@ -406,6 +442,7 @@ private:
 	void recountChatWidth();
 	void updateControlsGeometry();
 	void rebuildContent();
+	void applySearchQuery(QString query);
 	void saveState(not_null<DeletedMessagesMemento*> memento);
 	void restoreState(not_null<DeletedMessagesMemento*> memento);
 
@@ -417,6 +454,7 @@ private:
 	std::unique_ptr<Ui::ScrollArea> _scroll;
 	QPointer<Ui::VerticalLayout> _content;
 	std::vector<AyuMessages::MessageSnapshot> _messages;
+	QString _searchQuery;
 
 };
 
@@ -451,6 +489,12 @@ public:
 	[[nodiscard]] int scrollTop() const {
 		return _scrollTop;
 	}
+	void setSearchQuery(QString searchQuery) {
+		_searchQuery = std::move(searchQuery);
+	}
+	[[nodiscard]] const QString &searchQuery() const {
+		return _searchQuery;
+	}
 	Data::ForumTopic *topicForRemoveRequests() const override {
 		return _thread->asTopic();
 	}
@@ -461,6 +505,7 @@ public:
 private:
 	const not_null<Data::Thread*> _thread;
 	int _scrollTop = -1;
+	QString _searchQuery;
 
 };
 
@@ -505,6 +550,17 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 	) | rpl::on_next([=] {
 		updateAdaptiveLayout();
 	}, lifetime());
+	_topBar->searchRequest(
+	) | rpl::on_next([=] {
+		if (!_topBar->searchMode()) {
+			_topBar->toggleSearch(true, anim::type::normal);
+		}
+		_topBar->searchSetFocus();
+	}, lifetime());
+	_topBar->searchQuery(
+	) | rpl::distinct_until_changed() | rpl::on_next([=](const QString &query) {
+		applySearchQuery(query.trimmed());
+	}, lifetime());
 
 	_content = _scroll->setOwnedWidget(object_ptr<Ui::VerticalLayout>(this));
 	_scroll->show();
@@ -538,7 +594,6 @@ bool DeletedMessagesWidget::showInternal(
 	if (const auto deleted = dynamic_cast<DeletedMessagesMemento*>(memento.get())) {
 		if (deleted->thread() == _thread
 			|| deleted->thread()->migrateToOrMe() == _thread) {
-			rebuildContent();
 			restoreState(deleted);
 			return true;
 		}
@@ -651,21 +706,54 @@ void DeletedMessagesWidget::updateControlsGeometry() {
 	updateAdaptiveLayout();
 }
 
+void DeletedMessagesWidget::applySearchQuery(QString query) {
+	if (_searchQuery == query) {
+		return;
+	}
+	_searchQuery = std::move(query);
+	rebuildContent();
+	_scroll->scrollToY(_scroll->scrollTopMax());
+}
+
 void DeletedMessagesWidget::rebuildContent() {
 	if (!_content) {
 		return;
 	}
 
 	_messages = LoadMessages(_thread);
+	if (!_searchQuery.isEmpty()) {
+		auto filtered = std::vector<AyuMessages::MessageSnapshot>();
+		filtered.reserve(_messages.size());
+		for (const auto &message : _messages) {
+			if (MatchesSearchQuery(message, _thread, _searchQuery)) {
+				filtered.push_back(message);
+			}
+		}
+		_messages = std::move(filtered);
+	}
 	_topBar->setCustomTitle(TitleText(int(_messages.size())));
 	_content->clear();
 	Ui::AddSkip(_content, st::defaultVerticalListSkip);
+
+	const auto scope = ScopeLabel(_thread);
+	if (!scope.isEmpty()) {
+		Ui::AddDividerText(_content, rpl::single(scope));
+		Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
+	}
+	const auto hint = _content->add(
+		object_ptr<Ui::FlatLabel>(
+			_content,
+			rpl::single(SectionHint()),
+			st::sessionDateLabel),
+		st::boxRowPadding);
+	hint->setTryMakeSimilarLines(true);
+	Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 
 	if (_messages.empty()) {
 		const auto empty = _content->add(
 			object_ptr<Ui::FlatLabel>(
 				_content,
-				rpl::single(EmptyText()),
+				rpl::single(EmptyText(_searchQuery)),
 				st::boxLabel),
 			st::boxRowPadding + QMargins(0, st::defaultVerticalListSkip, 0, 0));
 		empty->setTryMakeSimilarLines(true);
@@ -702,9 +790,20 @@ void DeletedMessagesWidget::rebuildContent() {
 
 void DeletedMessagesWidget::saveState(not_null<DeletedMessagesMemento*> memento) {
 	memento->setScrollTop(_scroll->scrollTop());
+	memento->setSearchQuery(_searchQuery);
 }
 
 void DeletedMessagesWidget::restoreState(not_null<DeletedMessagesMemento*> memento) {
+	_searchQuery = memento->searchQuery();
+	if (!_searchQuery.isEmpty() && !_topBar->searchMode()) {
+		_topBar->toggleSearch(true, anim::type::instant);
+	} else if (_searchQuery.isEmpty() && _topBar->searchMode()) {
+		_topBar->toggleSearch(false, anim::type::instant);
+	}
+	if (_topBar->searchQueryCurrent() != _searchQuery) {
+		_topBar->searchSetText(_searchQuery);
+	}
+	rebuildContent();
 	const auto target = (memento->scrollTop() >= 0)
 		? memento->scrollTop()
 		: _scroll->scrollTopMax();
