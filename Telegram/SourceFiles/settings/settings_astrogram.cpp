@@ -484,20 +484,41 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		auto modelsDir = QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
 		QDir().mkpath(modelsDir);
 
-		const auto specs = std::array<ModelSpec, 12>{{
-			{ u"Русский · Vosk small"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q },
-			{ u"English · Vosk small"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q },
-			{ u"Українська · Vosk small"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q },
-			{ u"Deutsch · Vosk small"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q },
-			{ u"Français · Vosk small"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q },
-			{ u"Español · Vosk small"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q },
-			{ u"Italiano · Vosk small"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q },
-			{ u"Português · Vosk small"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q },
-			{ u"Türkçe · Vosk small"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q },
-			{ u"Polski · Vosk small"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q },
-			{ u"日本語 · Vosk small"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q },
-			{ u"Қазақша · Vosk small"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q },
-		}};
+		const auto specs = std::vector<ModelSpec>{
+			{ u"Русский · Vosk"_q, u"vosk-model-small-ru-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"_q },
+			{ u"English (US) · Vosk"_q, u"vosk-model-small-en-us-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"_q },
+			{ u"English (India) · Vosk"_q, u"vosk-model-small-en-in-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip"_q },
+			{ u"中文 · Vosk"_q, u"vosk-model-small-cn-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"_q },
+			{ u"Українська · Vosk"_q, u"vosk-model-small-uk-v3-small"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uk-v3-small.zip"_q },
+			{ u"Deutsch · Vosk"_q, u"vosk-model-small-de-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"_q },
+			{ u"Français · Vosk"_q, u"vosk-model-small-fr-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip"_q },
+			{ u"Español · Vosk"_q, u"vosk-model-small-es-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"_q },
+			{ u"Português · Vosk"_q, u"vosk-model-small-pt-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip"_q },
+			{ u"Ελληνικά · Vosk"_q, u"vosk-model-el-gr-0.7"_q, u"https://alphacephei.com/vosk/models/vosk-model-el-gr-0.7.zip"_q },
+			{ u"Türkçe · Vosk"_q, u"vosk-model-small-tr-0.3"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"_q },
+			{ u"Tiếng Việt · Vosk"_q, u"vosk-model-small-vn-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-vn-0.4.zip"_q },
+			{ u"Italiano · Vosk"_q, u"vosk-model-small-it-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip"_q },
+			{ u"Nederlands · Vosk"_q, u"vosk-model-small-nl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-nl-0.22.zip"_q },
+			{ u"Català · Vosk"_q, u"vosk-model-small-ca-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ca-0.4.zip"_q },
+			{ u"العربية · Vosk"_q, u"vosk-model-ar-mgb2-0.4"_q, u"https://alphacephei.com/vosk/models/vosk-model-ar-mgb2-0.4.zip"_q },
+			{ u"العربية (تونس) · Vosk"_q, u"vosk-model-small-ar-tn-0.1-linto"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ar-tn-0.1-linto.zip"_q },
+			{ u"فارسی · Vosk"_q, u"vosk-model-small-fa-0.5"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-fa-0.5.zip"_q },
+			{ u"Filipino · Vosk"_q, u"vosk-model-tl-ph-generic-0.6"_q, u"https://alphacephei.com/vosk/models/vosk-model-tl-ph-generic-0.6.zip"_q },
+			{ u"Қазақша · Vosk"_q, u"vosk-model-small-kz-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-kz-0.42.zip"_q },
+			{ u"Svenska · Vosk"_q, u"vosk-model-small-sv-rhasspy-0.15"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-sv-rhasspy-0.15.zip"_q },
+			{ u"日本語 · Vosk"_q, u"vosk-model-small-ja-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"_q },
+			{ u"Esperanto · Vosk"_q, u"vosk-model-small-eo-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-eo-0.42.zip"_q },
+			{ u"हिन्दी · Vosk"_q, u"vosk-model-small-hi-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip"_q },
+			{ u"Čeština · Vosk"_q, u"vosk-model-small-cs-0.4-rhasspy"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-cs-0.4-rhasspy.zip"_q },
+			{ u"Polski · Vosk"_q, u"vosk-model-small-pl-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"_q },
+			{ u"O'zbekcha · Vosk"_q, u"vosk-model-small-uz-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-uz-0.22.zip"_q },
+			{ u"한국어 · Vosk"_q, u"vosk-model-small-ko-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ko-0.22.zip"_q },
+			{ u"Brezhoneg · Vosk"_q, u"vosk-model-br-0.8"_q, u"https://alphacephei.com/vosk/models/vosk-model-br-0.8.zip"_q },
+			{ u"ગુજરાતી · Vosk"_q, u"vosk-model-small-gu-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-gu-0.42.zip"_q },
+			{ u"Тоҷикӣ · Vosk"_q, u"vosk-model-small-tg-0.22"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-tg-0.22.zip"_q },
+			{ u"తెలుగు · Vosk"_q, u"vosk-model-small-te-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-te-0.42.zip"_q },
+			{ u"Кыргызча · Vosk"_q, u"vosk-model-small-ky-0.42"_q, u"https://alphacephei.com/vosk/models/vosk-model-small-ky-0.42.zip"_q },
+		};
 
 		const auto addModel = [&](const ModelSpec &spec) {
 			auto state = std::make_shared<ModelRowState>();
@@ -567,8 +588,8 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		container->add(object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Скачайте языковые модели локально. Повторная загрузка скрыта после установки, прогресс показывается на нижней границе строки, а на Windows для языка может понадобиться системный speech pack.",
-				"Download language models locally. Re-download is hidden after install, progress is shown on the bottom edge of each row, and Windows may also require the matching system speech pack.")),
+				"Все языковые модели показаны сразу. У не скачанных моделей справа есть кнопка загрузки, повторная загрузка скрыта после установки, а прогресс идёт тонкой полосой по нижнему торцу карточки. На Windows для языка может дополнительно понадобиться системный speech pack.",
+				"All language models are shown in one list. Not-downloaded models keep a download action on the right, re-download is hidden after install, and progress is shown as a thin bar on the bottom edge of the row. Windows may also require the matching system speech pack.")),
 			st::boxDividerLabel),
 			st::boxRowPadding);
 		Ui::AddSkip(container);
@@ -601,7 +622,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 					: QColor(0xe1, 0x6b, 0x6b));
 				p.setFont(st::defaultFlatLabel.style.font->f);
 				p.drawText(QRect(14, 28, rect.width() - 90, 16), Qt::AlignLeft | Qt::AlignVCenter, state->status);
-				if (!state->installed && !state->downloading && !state->extracting) {
+				if (!state->installed && !state->downloading && !state->extracting && !hasArchive(state)) {
 					st::menuIconDownload.paint(p, rect.width() - 14 - st::menuIconDownload.width(), (rect.height() - st::menuIconDownload.height()) / 2, rect.width(), st::windowSubTextFg->c);
 				} else if (state->installed) {
 					p.setPen(QColor(0x21, 0xc7, 0x6a));
