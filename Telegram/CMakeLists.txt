@@ -895,6 +895,8 @@ PRIVATE
     history/view/history_view_chat_section.h
     history/view/history_view_contact_status.cpp
     history/view/history_view_contact_status.h
+    history/view/history_view_context_icon_strip.cpp
+    history/view/history_view_context_icon_strip.h
     history/view/history_view_context_menu.cpp
     history/view/history_view_context_menu.h
     history/view/history_view_corner_buttons.cpp

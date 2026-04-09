@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/reactions/history_view_reactions.h"
 #include "history/view/reactions/history_view_reactions_button.h"
 #include "history/view/reactions/history_view_reactions_selector.h"
+#include "history/view/history_view_context_icon_strip.h"
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_emoji_interactions.h"
@@ -2915,7 +2916,8 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				_overItemExact ? _overItemExact : _overElement->data().get(),
 				_overState));
 
-	_menu = FillContextMenu(this, request);
+	auto resolvedContextLayout = ContextMenuResolvedLayout();
+	_menu = FillContextMenu(this, request, &resolvedContextLayout);
 	if (_menu->empty()) {
 		_menu = nullptr;
 		return;
@@ -2939,7 +2941,22 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	if (attached == AttachSelectorResult::Failed) {
 		_menu = nullptr;
 		return;
-	} else if (attached == AttachSelectorResult::Attached) {
+	}
+	// TODO(astrogram): swap the default DTO below for persisted editor data.
+	const auto customizationLayout = DefaultContextMenuCustomizationLayout();
+	const auto stripAttached = AttachContextIconStripToMenu(
+		_menu.get(),
+		desiredPosition,
+		LookupContextMenuSurfaceLayout(
+			customizationLayout,
+			resolvedContextLayout.surface),
+		resolvedContextLayout);
+	if (stripAttached == AttachContextIconStripResult::Failed) {
+		_menu = nullptr;
+		return;
+	}
+	if (attached == AttachSelectorResult::Attached
+		|| stripAttached == AttachContextIconStripResult::Attached) {
 		_menu->popupPrepared();
 	} else {
 		_menu->popup(desiredPosition);

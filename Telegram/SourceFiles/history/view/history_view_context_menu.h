@@ -10,9 +10,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "history/view/history_view_element.h"
 
+#include <QtCore/QJsonObject>
+#include <QtCore/QString>
+
+#include <memory>
+#include <vector>
+
 namespace Data {
 struct ReactionId;
 } // namespace Data
+
+namespace style {
+struct icon;
+} // namespace style
 
 namespace Main {
 class Session;
@@ -38,6 +48,40 @@ class Element;
 struct SelectedItem;
 using SelectedItems = std::vector<SelectedItem>;
 
+enum class ContextMenuSurface : char {
+	Message,
+	Selection,
+};
+
+struct ContextMenuLayoutEntry {
+	QString id;
+	bool visible = true;
+};
+
+struct ContextMenuSurfaceLayout {
+	std::vector<ContextMenuLayoutEntry> menu;
+	std::vector<ContextMenuLayoutEntry> strip;
+};
+
+struct ContextMenuCustomizationLayout {
+	int version = 1;
+	ContextMenuSurfaceLayout message;
+	ContextMenuSurfaceLayout selection;
+};
+
+struct ContextMenuResolvedAction {
+	QString id;
+	QString text;
+	const style::icon *icon = nullptr;
+	std::shared_ptr<Fn<void()>> trigger;
+	bool stripEligible = false;
+};
+
+struct ContextMenuResolvedLayout {
+	ContextMenuSurface surface = ContextMenuSurface::Message;
+	std::vector<ContextMenuResolvedAction> actions;
+};
+
 struct ContextMenuRequest {
 	explicit ContextMenuRequest(
 		not_null<Window::SessionNavigation*> navigation);
@@ -53,9 +97,20 @@ struct ContextMenuRequest {
 	PointState pointState = PointState();
 };
 
+[[nodiscard]] ContextMenuCustomizationLayout
+DefaultContextMenuCustomizationLayout();
+[[nodiscard]] ContextMenuCustomizationLayout
+ParseContextMenuCustomizationLayout(const QJsonObject &json);
+[[nodiscard]] QJsonObject SerializeContextMenuCustomizationLayout(
+	const ContextMenuCustomizationLayout &layout);
+[[nodiscard]] const ContextMenuSurfaceLayout &LookupContextMenuSurfaceLayout(
+	const ContextMenuCustomizationLayout &layout,
+	ContextMenuSurface surface);
+
 base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	not_null<ListWidget*> list,
-	const ContextMenuRequest &request);
+	const ContextMenuRequest &request,
+	ContextMenuResolvedLayout *resolved = nullptr);
 
 void CopyPostLink(
 	not_null<Window::SessionController*> controller,
