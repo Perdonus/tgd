@@ -33,6 +33,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
+#include <QtCore/QRegularExpression>
+#include <QtCore/QUrl>
 
 #include <ksandbox.h>
 
@@ -290,14 +292,193 @@ QString ExtractFilename(const QString &url) {
 	return QString();
 }
 
-QString GenericReleaseUrl() {
-	return QString::fromLatin1(kGitHubReleasesPage);
-}
-
 QString RuEn(const char *ru, const char *en) {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
+}
+
+struct DevUpdateHooks {
+	QString autoupdatePrefix;
+	QString releasesApi;
+	QString releasesPage;
+	QString mtpFeed;
+	QStringList enabled;
+};
+
+QString DevUpdateHooksConfigPathValue() {
+	return cWorkingDir() + u"tdata/astrogram_update_dev.json"_q;
+}
+
+QString TrimTrailingSlashes(QString value) {
+	while (value.endsWith(u'/'_q)) {
+		value.chop(1);
+	}
+	return value;
+}
+
+QString NormalizeHttpUrl(QString value, bool trimSlash = false) {
+	value = value.trimmed();
+	if (value.isEmpty()) {
+		return QString();
+	}
+	auto url = QUrl(value);
+	if (!url.isValid()) {
+		return QString();
+	}
+	const auto scheme = url.scheme().toLower();
+	if ((scheme != u"http"_q) && (scheme != u"https"_q)) {
+		return QString();
+	}
+	if (url.host().trimmed().isEmpty()) {
+		return QString();
+	}
+	url.setFragment(QString());
+	value = url.toString();
+	return trimSlash ? TrimTrailingSlashes(value) : value;
+}
+
+QString NormalizeGitHubRepo(QString value) {
+	value = value.trimmed();
+	if (value.isEmpty()) {
+		return QString();
+	}
+	static const auto expression = QRegularExpression(
+		u"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"_q);
+	return expression.match(value).hasMatch() ? value : QString();
+}
+
+QString NormalizeMtpFeed(QString value) {
+	value = value.trimmed();
+	if (value.isEmpty()) {
+		return QString();
+	}
+	static const auto expression = QRegularExpression(
+		u"^[A-Za-z0-9_]{3,96}$"_q);
+	return expression.match(value).hasMatch() ? value : QString();
+}
+
+void AppendUnique(QStringList &list, QString value) {
+	if (!value.isEmpty() && !list.contains(value)) {
+		list.push_back(value);
+	}
+}
+
+QString BuildGitHubReleasesApi(const QString &repo) {
+	return u"https://api.github.com/repos/%1/releases?per_page=20"_q.arg(repo);
+}
+
+QString BuildGitHubReleasesPage(const QString &repo) {
+	return u"https://github.com/%1/releases"_q.arg(repo);
+}
+
+DevUpdateHooks ReadDevUpdateHooks() {
+	auto result = DevUpdateHooks();
+	if (!cInstallBetaVersion()) {
+		return result;
+	}
+	QFile file(DevUpdateHooksConfigPathValue());
+	if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+		return result;
+	}
+	auto error = QJsonParseError{ 0, QJsonParseError::NoError };
+	const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+	if ((error.error != QJsonParseError::NoError) || !document.isObject()) {
+		return result;
+	}
+	const auto object = document.object();
+	result.autoupdatePrefix = NormalizeHttpUrl(
+		object.value(u"autoupdatePrefix"_q).toString(),
+		true);
+	if (!result.autoupdatePrefix.isEmpty()) {
+		AppendUnique(result.enabled, RuEn(
+			"канал бинарных обновлений",
+			"binary update feed"));
+	}
+	result.releasesApi = NormalizeHttpUrl(
+		object.value(u"releasesApi"_q).toString());
+	result.releasesPage = NormalizeHttpUrl(
+		object.value(u"releasesPage"_q).toString(),
+		true);
+	const auto repo = NormalizeGitHubRepo(
+		object.value(u"githubRepo"_q).toString());
+	if (!repo.isEmpty()) {
+		if (result.releasesApi.isEmpty()) {
+			result.releasesApi = BuildGitHubReleasesApi(repo);
+		}
+		if (result.releasesPage.isEmpty()) {
+			result.releasesPage = BuildGitHubReleasesPage(repo);
+		}
+		AppendUnique(result.enabled, RuEn(
+			"GitHub релизы",
+			"GitHub releases"));
+	}
+	if (!result.releasesApi.isEmpty()) {
+		AppendUnique(result.enabled, RuEn(
+			"API changelog",
+			"release API"));
+	}
+	if (!result.releasesPage.isEmpty()) {
+		AppendUnique(result.enabled, RuEn(
+			"страница релизов",
+			"release page"));
+	}
+	result.mtpFeed = NormalizeMtpFeed(
+		object.value(u"mtpFeed"_q).toString());
+	if (!result.mtpFeed.isEmpty()) {
+		AppendUnique(result.enabled, RuEn(
+			"MTP feed",
+			"MTP feed"));
+	}
+	return result;
+}
+
+QString DevUpdateHooksSummary(const DevUpdateHooks &hooks) {
+	return hooks.enabled.join(u", "_q);
+}
+
+QString CurrentAutoupdatePrefix() {
+	const auto hooks = ReadDevUpdateHooks();
+	return !hooks.autoupdatePrefix.isEmpty()
+		? hooks.autoupdatePrefix
+		: TrimTrailingSlashes(Local::readAutoupdatePrefix());
+}
+
+QString CurrentReleasesApiUrl() {
+	const auto hooks = ReadDevUpdateHooks();
+	return !hooks.releasesApi.isEmpty()
+		? hooks.releasesApi
+		: QString::fromLatin1(kGitHubReleasesApi);
+}
+
+QString CurrentReleasesPageUrl() {
+	const auto hooks = ReadDevUpdateHooks();
+	return !hooks.releasesPage.isEmpty()
+		? hooks.releasesPage
+		: QString::fromLatin1(kGitHubReleasesPage);
+}
+
+QString CurrentMtpFeedName() {
+	const auto hooks = ReadDevUpdateHooks();
+	if (!hooks.mtpFeed.isEmpty()) {
+		return hooks.mtpFeed;
+	}
+	const auto updaterVersion = Platform::AutoUpdateVersion();
+	return u"tdhbcfeed"_q
+		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+}
+
+QString LocalDevHookLabel() {
+	const auto summary = DevUpdateHooksSummary(ReadDevUpdateHooks());
+	return summary.isEmpty()
+		? QString()
+		: RuEn(
+			"Локальный dev hook: %1",
+			"Local dev hook: %1").arg(summary);
+}
+
+QString GenericReleaseUrl() {
+	return CurrentReleasesPageUrl();
 }
 
 QString UpdateChannelLabel(UpdateChannel channel) {
@@ -347,13 +528,27 @@ QString UpdaterBinaryLabel() {
 }
 
 QString BuildReleaseMetadataTitle(const ReleaseCandidate &candidate) {
-	return RuEn(
-		"Текущая версия: %1\nКанал: %2\n%3\n%4",
-		"Current version: %1\nChannel: %2\n%3\n%4").arg(
+	auto result = RuEn(
+		"Доступная версия: %1\n"
+		"Текущая версия: %2\n"
+		"Канал: %3\n"
+		"%4\n"
+		"%5",
+		"Available version: %1\n"
+		"Current version: %2\n"
+		"Channel: %3\n"
+		"%4\n"
+		"%5").arg(
+			FormatVersionWithBuild(candidate.version),
 			FormatVersionWithBuild(AppVersion),
 			UpdateChannelLabel(candidate.channel),
 			UpdateFeedLabel(candidate.channel),
 			UpdaterBinaryLabel());
+	if (const auto localHook = LocalDevHookLabel(); localHook.isEmpty() == false) {
+		result += u'\n';
+		result += localHook;
+	}
+	return result;
 }
 
 QString NormalizeReleaseMarkdown(QString text) {
@@ -928,7 +1123,7 @@ HttpChecker::HttpChecker(bool testing) : Checker(testing) {
 
 void HttpChecker::start() {
 	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto path = Local::readAutoupdatePrefix()
+	const auto path = CurrentAutoupdatePrefix()
 		+ qstr("/current")
 		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
 	auto url = QUrl(path);
@@ -1060,7 +1255,7 @@ std::optional<QString> HttpChecker::parseResponse(
 	const auto finalUrl = validateLatestUrl(
 		bestAvailableVersion,
 		bestIsAvailableAlpha,
-		Local::readAutoupdatePrefix() + bestLink);
+		CurrentAutoupdatePrefix() + bestLink);
 	if (!finalUrl.isEmpty()) {
 		setCandidate(ReleaseCandidate{
 			.version = int(bestAvailableVersion),
@@ -1232,9 +1427,7 @@ void MtpChecker::start() {
 		crl::on_main(this, [=] { fail(); });
 		return;
 	}
-	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto feed = "tdhbcfeed"
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+	const auto feed = CurrentMtpFeedName();
 	MTP::ResolveChannel(&_mtp, feed, [=](
 			const MTPInputChannel &channel) {
 		_mtp.send(
@@ -1362,6 +1555,14 @@ Fn<void(const MTP::Error &error)> MtpChecker::failHandler() {
 }
 
 } // namespace
+
+QString DevUpdateHooksConfigPath() {
+	return DevUpdateHooksConfigPathValue();
+}
+
+QString ActiveDevUpdateHooksSummary() {
+	return DevUpdateHooksSummary(ReadDevUpdateHooks());
+}
 
 bool UpdaterDisabled() {
 	return UpdaterIsDisabled;
@@ -1626,7 +1827,7 @@ void Updater::requestReleaseNotes(ReleaseCandidate candidate) {
 		_releaseNotesManager = std::make_unique<QNetworkAccessManager>();
 	}
 	const auto requestId = _releaseNotesRequestId;
-	auto request = QNetworkRequest(QUrl(QString::fromLatin1(kGitHubReleasesApi)));
+	auto request = QNetworkRequest(QUrl(CurrentReleasesApiUrl()));
 	request.setRawHeader("Accept", "application/vnd.github+json");
 	request.setRawHeader("User-Agent", kGitHubUserAgent);
 	_releaseNotesReply = _releaseNotesManager->get(request);

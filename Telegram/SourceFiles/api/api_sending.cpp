@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_sending.h"
 
+#include "api/api_polls.h"
 #include "api/api_text_entities.h"
 #include "base/random.h"
 #include "base/unixtime.h"
@@ -23,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_changes.h"
 #include "data/data_types.h"
 #include "data/stickers/data_stickers.h"
+#include "data/data_poll.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h" // NewMessageFlags.
@@ -646,13 +648,20 @@ void SendExistingPhoto(
 		return true;
 	}
 	if (const auto point = media->locationPoint()) {
-		if (media->locationLivePeriod() > 0) {
-			return false;
-		} else if (const auto venue = media->venue()) {
+		if (const auto venue = media->venue()) {
 			SendVenue(action, *venue);
 		} else {
 			SendLocation(action, point->lat(), point->lon());
 		}
+		return true;
+	}
+	if (const auto poll = media->poll()) {
+		action.history->session().api().polls().create(
+			*poll,
+			action,
+			[] {},
+			[] {});
+		action.history->session().api().finishForwarding(action);
 		return true;
 	}
 	const auto reupload = NeedsForwardlessReupload(item)

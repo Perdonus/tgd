@@ -1342,9 +1342,9 @@ ShareWithoutAuthorCheck CheckShareWithoutAuthor(not_null<HistoryItem*> item) {
 	} else if (media->sharedContact()) {
 		return ShareWithoutAuthorCheck::Allowed;
 	} else if (media->locationPoint()) {
-		return media->locationLivePeriod() > 0
-			? ShareWithoutAuthorCheck::LiveLocation
-			: ShareWithoutAuthorCheck::Allowed;
+		return ShareWithoutAuthorCheck::Allowed;
+	} else if (media->poll()) {
+		return ShareWithoutAuthorCheck::Allowed;
 	}
 	return (media->photo() || media->document())
 		? ShareWithoutAuthorCheck::Allowed
@@ -1378,12 +1378,12 @@ QString ShareWithoutAuthorErrorText(const HistoryItemsList &list) {
 			"Одноразовые и самоуничтожающиеся медиа нельзя переслать без автора.");
 	case ShareWithoutAuthorCheck::LiveLocation:
 		return AstrogramUiText(
-			"Live locations can't be sent without author.",
-			"Live-геопозицию нельзя переслать без автора.");
+			"Live locations are sent without author as a static point snapshot.",
+			"Live-геопозиция без автора отправляется как статичная точка.");
 	case ShareWithoutAuthorCheck::Unsupported:
 		return AstrogramUiText(
-			"Only regular text, contacts, static locations, venues, photos and document-based media are supported without author here.",
-			"Без автора здесь поддерживаются только обычный текст, контакты, статичная геопозиция, места, фото и медиа на базе документов.");
+			"Only regular text, contacts, locations, venues, polls, photos and document-based media are supported without author here.",
+			"Без автора здесь поддерживаются только обычный текст, контакты, геопозиция, места, опросы, фото и медиа на базе документов.");
 	}
 	Unexpected("ShareWithoutAuthorCheck value.");
 	return {};

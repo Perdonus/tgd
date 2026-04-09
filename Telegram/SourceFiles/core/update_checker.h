@@ -20,6 +20,8 @@ namespace Core {
 bool UpdaterDisabled();
 void SetUpdaterDisabledAtStartup();
 [[nodiscard]] QString FormatVersionWithBuild(int version);
+[[nodiscard]] QString DevUpdateHooksConfigPath();
+[[nodiscard]] QString ActiveDevUpdateHooksSummary();
 
 enum class UpdateChannel {
 	Stable,
