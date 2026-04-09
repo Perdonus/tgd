@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 
 #include "ayu/data/messages_storage.h"
+#include "ayu/recall/deleted_messages_section.h"
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
 #include "boxes/about_box.h"
@@ -143,85 +144,12 @@ constexpr auto kTopicsSearchMinCount = 1;
 		: QString::fromUtf8(en);
 }
 
-[[nodiscard]] QString FormatRecallTimestamp(int timestamp) {
-	const auto dt = QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime();
-	return AstrogramRussianUi()
-		? dt.toString(u"dd.MM.yyyy HH:mm:ss"_q)
-		: QLocale().toString(dt, QLocale::LongFormat);
-}
-
-void ShowDeletedMessagesBox(
+void ShowDeletedMessagesSection(
 		not_null<SessionController*> controller,
-		not_null<PeerData*> peer,
-		Data::Thread *thread) {
-	const auto topic = peer->isForum() && thread ? thread->asTopic() : nullptr;
-	const auto topicId = topic ? topic->rootId().bare : 0;
-	const auto messages = AyuMessages::getDeletedMessages(peer, topicId, 150);
-	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setWidth(st::boxWideWidth);
-		box->setTitle(rpl::single(AstrogramUiText(
-			"Deleted Messages",
-			"Удалённые сообщения")));
-		box->addLeftButton(
-			rpl::single(AstrogramUiText("Copy", "Копировать")),
-			[=] {
-				auto lines = QStringList();
-				for (const auto &message : messages) {
-					lines.push_back(FormatRecallTimestamp(
-						message.editDate ? message.editDate : message.date));
-					lines.push_back(message.text);
-					lines.push_back(QString());
-				}
-				if (const auto clipboard = QGuiApplication::clipboard()) {
-					clipboard->setText(lines.join(u"\n"_q).trimmed());
-				}
-				controller->window().showToast(AstrogramUiText(
-					"Deleted messages copied.",
-					"Удалённые сообщения скопированы."));
-			});
-		if (messages.empty()) {
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				rpl::single(AstrogramUiText(
-					"No saved deleted messages.",
-					"Сохранённых удалённых сообщений нет.")),
-				st::boxLabel),
-				style::margins(
-					st::boxPadding.left(),
-					0,
-					st::boxPadding.right(),
-					0),
-				style::al_top);
-			return;
-		}
-		for (auto i = 0, count = int(messages.size()); i != count; ++i) {
-			const auto &message = messages[i];
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				rpl::single(AstrogramUiText(
-					"Message %1 • %2",
-					"Сообщение %1 • %2"
-				).arg(i + 1).arg(FormatRecallTimestamp(
-					message.editDate ? message.editDate : message.date))),
-				st::sessionDateLabel),
-				style::margins(
-					st::boxPadding.left(),
-					i ? (st::boxPadding.bottom() / 2) : 0,
-					st::boxPadding.right(),
-					0),
-				style::al_top);
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				rpl::single(message.text),
-				st::boxLabel),
-				style::margins(
-					st::boxPadding.left(),
-					0,
-					st::boxPadding.right(),
-					0),
-				style::al_top);
-		}
-	}));
+		not_null<Data::Thread*> thread) {
+	controller->showSection(
+		AyuRecall::MakeDeletedMessagesSection(thread),
+		Window::SectionShow::Way::Forward);
 }
 
 void ShareBotGame(
@@ -1049,12 +977,16 @@ void Filler::addDeletedMessages() {
 		return;
 	}
 	const auto controller = _controller;
-	const auto peer = _peer;
-	const auto thread = _thread;
+	const auto thread = _thread
+		? _thread
+		: _peer->owner().history(_peer).get();
+	if (!thread) {
+		return;
+	}
 	_addAction(AstrogramUiText(
 		"Deleted messages",
 		"Удалённые сообщения"), [=] {
-		ShowDeletedMessagesBox(controller, peer, thread);
+		ShowDeletedMessagesSection(controller, thread);
 	}, &st::menuIconArchive);
 }
 

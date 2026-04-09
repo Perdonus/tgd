@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QString>
+#include <QtGlobal>
 
 namespace AyuMessages {
 
@@ -20,9 +21,13 @@ struct MessageSnapshot {
 	ID peerId = 0;
 	ID fromId = 0;
 	ID topicId = 0;
+	quint64 userSerialized = 0;
+	quint64 dialogSerialized = 0;
+	quint64 senderSerialized = 0;
 	int messageId = 0;
 	int date = 0;
 	int editDate = 0;
+	QString senderName;
 	QString text;
 };
 

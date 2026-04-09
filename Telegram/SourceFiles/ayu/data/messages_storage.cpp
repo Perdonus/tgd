@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/data/messages_storage.h"
 
 #include "base/unixtime.h"
+#include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_peer.h"
 #include "history/history.h"
@@ -34,16 +35,21 @@ namespace {
 		not_null<HistoryItem*> item,
 		const QString &kind) {
 	auto snapshot = MessageSnapshot();
+	const auto sessionUserId = item->history()->owner().session().userId();
+	const auto from = item->from();
 	snapshot.kind = kind;
-	snapshot.userId = item->history()->owner().session().userId().bare
-		& PeerId::kChatTypeMask;
+	snapshot.userId = sessionUserId.bare & PeerId::kChatTypeMask;
 	snapshot.dialogId = item->history()->peer->id.value & PeerId::kChatTypeMask;
 	snapshot.peerId = item->history()->peer->id.value & PeerId::kChatTypeMask;
-	snapshot.fromId = item->from()->id.value & PeerId::kChatTypeMask;
+	snapshot.fromId = from ? (from->id.value & PeerId::kChatTypeMask) : 0;
 	snapshot.topicId = item->topic() ? item->topicRootId().bare : 0;
+	snapshot.userSerialized = SerializePeerId(peerFromUser(sessionUserId));
+	snapshot.dialogSerialized = SerializePeerId(item->history()->peer->id);
+	snapshot.senderSerialized = from ? SerializePeerId(from->id) : 0;
 	snapshot.messageId = item->id.bare;
 	snapshot.date = item->date();
 	snapshot.editDate = base::unixtime::now();
+	snapshot.senderName = from ? from->name() : item->history()->peer->name();
 	snapshot.text = item->originalText().text;
 	if (const auto edited = item->Get<HistoryMessageEdited>()) {
 		snapshot.editDate = edited->date;
@@ -69,9 +75,13 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		{ u"peerId"_q, QString::number(snapshot.peerId) },
 		{ u"fromId"_q, QString::number(snapshot.fromId) },
 		{ u"topicId"_q, QString::number(snapshot.topicId) },
+		{ u"userSerialized"_q, QString::number(snapshot.userSerialized) },
+		{ u"dialogSerialized"_q, QString::number(snapshot.dialogSerialized) },
+		{ u"senderSerialized"_q, QString::number(snapshot.senderSerialized) },
 		{ u"messageId"_q, snapshot.messageId },
 		{ u"date"_q, snapshot.date },
 		{ u"editDate"_q, snapshot.editDate },
+		{ u"senderName"_q, snapshot.senderName },
 		{ u"text"_q, snapshot.text },
 	};
 	file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
@@ -85,10 +95,19 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	const auto userId = item->history()->owner().session().userId().bare
 		& PeerId::kChatTypeMask;
 	const auto dialogId = item->history()->peer->id.value & PeerId::kChatTypeMask;
+	const auto userSerialized = SerializePeerId(peerFromUser(
+		item->history()->owner().session().userId()));
+	const auto dialogSerialized = SerializePeerId(item->history()->peer->id);
 	const auto topicId = item->topic() ? item->topicRootId().bare : 0;
+	const auto sameUser = snapshot.userSerialized
+		? (snapshot.userSerialized == userSerialized)
+		: (snapshot.userId == userId);
+	const auto sameDialog = snapshot.dialogSerialized
+		? (snapshot.dialogSerialized == dialogSerialized)
+		: (snapshot.dialogId == dialogId);
 	return (snapshot.kind == u"edited"_q)
-		&& (snapshot.userId == userId)
-		&& (snapshot.dialogId == dialogId)
+		&& sameUser
+		&& sameDialog
 		&& (snapshot.topicId == topicId)
 		&& (snapshot.messageId == item->id.bare);
 }
@@ -111,9 +130,19 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	snapshot.peerId = object.value(u"peerId"_q).toString().toLongLong();
 	snapshot.fromId = object.value(u"fromId"_q).toString().toLongLong();
 	snapshot.topicId = object.value(u"topicId"_q).toString().toLongLong();
+	snapshot.userSerialized = object.value(u"userSerialized"_q)
+		.toString()
+		.toULongLong();
+	snapshot.dialogSerialized = object.value(u"dialogSerialized"_q)
+		.toString()
+		.toULongLong();
+	snapshot.senderSerialized = object.value(u"senderSerialized"_q)
+		.toString()
+		.toULongLong();
 	snapshot.messageId = object.value(u"messageId"_q).toInt();
 	snapshot.date = object.value(u"date"_q).toInt();
 	snapshot.editDate = object.value(u"editDate"_q).toInt();
+	snapshot.senderName = object.value(u"senderName"_q).toString();
 	snapshot.text = object.value(u"text"_q).toString();
 	return snapshot;
 }
@@ -124,9 +153,17 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		const MessageSnapshot &snapshot) {
 	const auto userId = peer->session().userId().bare & PeerId::kChatTypeMask;
 	const auto dialogId = peer->id.value & PeerId::kChatTypeMask;
+	const auto userSerialized = SerializePeerId(peerFromUser(peer->session().userId()));
+	const auto dialogSerialized = SerializePeerId(peer->id);
+	const auto sameUser = snapshot.userSerialized
+		? (snapshot.userSerialized == userSerialized)
+		: (snapshot.userId == userId);
+	const auto sameDialog = snapshot.dialogSerialized
+		? (snapshot.dialogSerialized == dialogSerialized)
+		: (snapshot.dialogId == dialogId);
 	return (snapshot.kind == u"deleted"_q)
-		&& (snapshot.userId == userId)
-		&& (snapshot.dialogId == dialogId)
+		&& sameUser
+		&& sameDialog
 		&& (snapshot.topicId == topicId);
 }
 
