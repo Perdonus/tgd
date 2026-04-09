@@ -98,11 +98,13 @@ namespace {
 constexpr auto kPreviewHeight = 292;
 constexpr auto kFuturePreviewHeight = 214;
 constexpr auto kContextPreviewHeight = 322;
+constexpr auto kCustomizationStatusDeckHeight = 186;
 constexpr auto kRowHeight = 64;
 constexpr auto kRowGap = 10;
 constexpr auto kRowPadding = 14;
 constexpr auto kRowRadius = 18;
 constexpr auto kPreviewRadius = 24;
+constexpr auto kContextStripPreviewLimit = 4;
 
 [[nodiscard]] QString RuEn(const char *ru, const char *en) {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
@@ -136,6 +138,108 @@ struct EntryDescriptor {
 	QString glyph;
 	QColor color;
 };
+
+struct SideMenuLayoutStats {
+	int visibleActions = 0;
+	int hiddenActions = 0;
+	int visibleSeparators = 0;
+	int customSeparators = 0;
+	bool pluginsVisible = false;
+	bool showLogsVisible = false;
+	bool ghostModeVisible = false;
+};
+
+struct ContextLayoutStats {
+	int visibleMenu = 0;
+	int hiddenMenu = 0;
+	int visibleStrip = 0;
+	int hiddenStrip = 0;
+	bool forwardWithoutAuthorVisible = false;
+};
+
+[[nodiscard]] bool HasVisibleSideMenuEntry(
+		const std::vector<Menu::Customization::SideMenuEntry> &entries,
+		const QString &id) {
+	for (const auto &entry : entries) {
+		if (entry.visible && !entry.separator && (entry.id == id)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool IsForwardWithoutAuthorAction(const QString &id) {
+	using Id = Menu::Customization::ContextMenuItemId;
+	return (id == QString::fromLatin1(Id::SelectionForwardWithoutAuthor))
+		|| (id == QString::fromLatin1(Id::MessageForwardWithoutAuthor));
+}
+
+[[nodiscard]] SideMenuLayoutStats ComputeSideMenuLayoutStats(
+		const std::vector<Menu::Customization::SideMenuEntry> &entries) {
+	auto result = SideMenuLayoutStats();
+	for (const auto &entry : entries) {
+		if (entry.separator) {
+			if (entry.visible) {
+				++result.visibleSeparators;
+				if (IsCustomSeparatorId(entry.id)) {
+					++result.customSeparators;
+				}
+			}
+			continue;
+		}
+		if (entry.visible) {
+			++result.visibleActions;
+		} else {
+			++result.hiddenActions;
+		}
+	}
+	result.pluginsVisible = HasVisibleSideMenuEntry(
+		entries,
+		QString::fromLatin1(Menu::Customization::SideMenuItemId::Plugins));
+	result.showLogsVisible = HasVisibleSideMenuEntry(
+		entries,
+		QString::fromLatin1(Menu::Customization::SideMenuItemId::ShowLogs));
+	result.ghostModeVisible = HasVisibleSideMenuEntry(
+		entries,
+		QString::fromLatin1(Menu::Customization::SideMenuItemId::GhostMode));
+	return result;
+}
+
+[[nodiscard]] ContextLayoutStats ComputeContextLayoutStats(
+		const std::vector<HistoryView::ContextMenuLayoutEntry> &menu,
+		const std::vector<HistoryView::ContextMenuLayoutEntry> &strip) {
+	auto result = ContextLayoutStats();
+	for (const auto &entry : menu) {
+		if (entry.visible) {
+			++result.visibleMenu;
+		} else {
+			++result.hiddenMenu;
+		}
+		if (entry.visible && IsForwardWithoutAuthorAction(entry.id)) {
+			result.forwardWithoutAuthorVisible = true;
+		}
+	}
+	for (const auto &entry : strip) {
+		if (entry.visible) {
+			++result.visibleStrip;
+		} else {
+			++result.hiddenStrip;
+		}
+		if (entry.visible && IsForwardWithoutAuthorAction(entry.id)) {
+			result.forwardWithoutAuthorVisible = true;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] ContextLayoutStats ComputeContextLayoutStats(
+		const HistoryView::ContextMenuCustomizationLayout &layout,
+		HistoryView::ContextMenuSurface surface) {
+	const auto &surfaceLayout = HistoryView::LookupContextMenuSurfaceLayout(
+		layout,
+		surface);
+	return ComputeContextLayoutStats(surfaceLayout.menu, surfaceLayout.strip);
+}
 
 [[nodiscard]] EntryDescriptor DescribeEntry(
 		const Menu::Customization::SideMenuEntry &entry,
@@ -716,6 +820,7 @@ protected:
 		const auto wideSettings = _state->wideSettingsPane();
 		const auto showFooterText = _state->showFooterText();
 		const auto profileAtBottom = _state->profileAtBottom();
+		const auto stats = ComputeSideMenuLayoutStats(_state->entries());
 		const auto menuWidth = expanded
 			? std::clamp(width() * 48 / 100, 270, 360)
 			: std::clamp(width() * 42 / 100, 230, 320);
@@ -902,19 +1007,37 @@ protected:
 			}
 			const auto meta = DescribeEntry(entry, _state->supportMode());
 			if (entry.separator) {
+				const auto separatorColor = IsCustomSeparatorId(entry.id)
+					? QColor(0x35, 0xC3, 0x8F, 108)
+					: (entry.id == QString::fromLatin1(Menu::Customization::SideMenuItemId::SeparatorSystem))
+						? QColor(0x4D, 0xB7, 0x88, 92)
+						: QColor(255, 255, 255, 64);
 				p.fillRect(
 					QRect(26, top + 13, menuWidth - 52, 1),
-					QColor(255, 255, 255, 44));
+					separatorColor);
+				p.setPen(QColor(255, 255, 255, 124));
+				p.setFont(st::normalFont->f);
+				p.drawText(
+					QRect(menuWidth - 118, top + 2, 92, 18),
+					Qt::AlignRight | Qt::AlignVCenter,
+					IsCustomSeparatorId(entry.id)
+						? RuEn("custom divider", "custom divider")
+						: RuEn("runtime divider", "runtime divider"));
 				top += 18;
 				continue;
 			}
 			const auto selectedRow = (actualIndex == selectedIndex);
+			const auto astroHookRow = (entry.id == QString::fromLatin1(Menu::Customization::SideMenuItemId::Plugins))
+				|| (entry.id == QString::fromLatin1(Menu::Customization::SideMenuItemId::ShowLogs))
+				|| (entry.id == QString::fromLatin1(Menu::Customization::SideMenuItemId::GhostMode));
 			const auto rowRect = QRect(18, top, menuWidth - 36, expanded ? 38 : 34);
 			p.setBrush(selectedRow
 				? QColor(255, 255, 255, 28)
-				: (shownRows == 0
-					? QColor(255, 255, 255, 18)
-					: QColor(255, 255, 255, 8)));
+				: astroHookRow
+					? QColor(0x35, 0xC3, 0x8F, shownRows == 0 ? 34 : 26)
+					: (shownRows == 0
+						? QColor(255, 255, 255, 18)
+						: QColor(255, 255, 255, 8)));
 			p.setPen(Qt::NoPen);
 			p.drawRoundedRect(rowRect, 14, 14);
 			if (selectedRow) {
@@ -937,10 +1060,26 @@ protected:
 				QRect(
 					rowRect.left() + 42,
 					rowRect.top(),
-					rowRect.width() - 50,
+					rowRect.width() - 126,
 					rowRect.height()),
 				Qt::AlignVCenter | Qt::AlignLeft,
 				meta.title);
+			if (astroHookRow) {
+				const auto pillRect = QRect(rowRect.right() - 74, rowRect.top() + 7, 56, 20);
+				p.setPen(Qt::NoPen);
+				p.setBrush(QColor(255, 255, 255, 32));
+				p.drawRoundedRect(pillRect, 10, 10);
+				p.setPen(QColor(255, 255, 255, 220));
+				p.setFont(st::normalFont->f);
+				p.drawText(
+					pillRect,
+					Qt::AlignCenter,
+					(entry.id == QString::fromLatin1(Menu::Customization::SideMenuItemId::Plugins))
+						? RuEn("Plugins", "Plugins")
+						: (entry.id == QString::fromLatin1(Menu::Customization::SideMenuItemId::ShowLogs))
+							? RuEn("Logs", "Logs")
+							: RuEn("Ghost", "Ghost"));
+			}
 			top += expanded ? 44 : 40;
 			++shownRows;
 		}
@@ -1000,6 +1139,18 @@ protected:
 		}
 		if (expanded) {
 			drawModeChip(RuEn("Расширенная панель", "Expanded panel"), 38, true);
+		}
+		if (stats.pluginsVisible) {
+			drawModeChip(RuEn("Кнопка Plugins", "Plugins button"), 34, true);
+		}
+		if (stats.showLogsVisible) {
+			drawModeChip(RuEn("Show Logs", "Show Logs"), 34, true);
+		}
+		if (stats.visibleSeparators > 0) {
+			drawModeChip(
+				RuEn("Разделители %1", "Dividers %1").arg(stats.visibleSeparators),
+				36,
+				false);
 		}
 		if (!showFooterText) {
 			drawModeChip(RuEn("Без footer", "Footer hidden"), 34, true);
@@ -1314,12 +1465,14 @@ protected:
 			updateDragTarget(point.y());
 			_hoveredRow = -1;
 			_hoveredKind = ActionKind::None;
+			_hoveredOnHandle = false;
 			_hoveredHiddenEntry = -1;
 			_hoveredRestoreAll = false;
 			update();
 			return;
 		}
 		if ((_pressedRow >= 0)
+			&& _pressedOnHandle
 			&& !_pressedOnButton
 			&& ((point - _pressPoint).manhattanLength() >= 8)) {
 			startDrag(point);
@@ -1335,6 +1488,7 @@ protected:
 		const auto point = e->position().toPoint();
 		_pressedRow = -1;
 		_pressedOnButton = false;
+		_pressedOnHandle = false;
 
 		for (const auto &chip : hiddenChips(width())) {
 			if (!chip.rect.contains(point)) {
@@ -1361,6 +1515,7 @@ protected:
 			_pressPoint = point;
 			const auto visibleRow = visibleRowForEntry(index);
 			_dragGrabOffsetY = point.y() - baseRowRect(visibleRow).top();
+			_pressedOnHandle = dragHandleRect(row).contains(point);
 			for (const auto &button : actionButtonsForRow(index)) {
 				if (!button.enabled || !button.rect.contains(point)) {
 					continue;
@@ -1388,6 +1543,7 @@ protected:
 		}
 		_pressedRow = -1;
 		_pressedOnButton = false;
+		_pressedOnHandle = false;
 		updateHover(e->position().toPoint());
 	}
 
@@ -1398,6 +1554,7 @@ protected:
 		}
 		_hoveredRow = -1;
 		_hoveredKind = ActionKind::None;
+		_hoveredOnHandle = false;
 		_hoveredHiddenEntry = -1;
 		_hoveredRestoreAll = false;
 		unsetCursor();
@@ -1759,8 +1916,10 @@ private:
 		releaseMouse();
 		_pressedRow = -1;
 		_pressedOnButton = false;
+		_pressedOnHandle = false;
 		_hoveredRow = -1;
 		_hoveredKind = ActionKind::None;
+		_hoveredOnHandle = false;
 		_hoveredHiddenEntry = -1;
 		_hoveredRestoreAll = false;
 		clampSelection();
@@ -1782,12 +1941,15 @@ private:
 
 		auto newRow = -1;
 		auto newKind = ActionKind::None;
+		auto newOnHandle = false;
 		if (!newRestoreAll && (newHiddenEntry < 0)) {
 			for (const auto index : visibleEntryIndexes()) {
-				if (!rowRect(index).contains(point)) {
+				const auto row = rowRect(index);
+				if (!row.contains(point)) {
 					continue;
 				}
 				newRow = index;
+				newOnHandle = dragHandleRect(row).contains(point);
 				for (const auto &button : actionButtonsForRow(index)) {
 					if (button.enabled && button.rect.contains(point)) {
 						newKind = button.kind;
@@ -1800,17 +1962,19 @@ private:
 
 		if ((newRow == _hoveredRow)
 			&& (newKind == _hoveredKind)
+			&& (newOnHandle == _hoveredOnHandle)
 			&& (newHiddenEntry == _hoveredHiddenEntry)
 			&& (newRestoreAll == _hoveredRestoreAll)) {
 			return;
 		}
 		_hoveredRow = newRow;
 		_hoveredKind = newKind;
+		_hoveredOnHandle = newOnHandle;
 		_hoveredHiddenEntry = newHiddenEntry;
 		_hoveredRestoreAll = newRestoreAll;
 		if (_hoveredRestoreAll || (_hoveredHiddenEntry >= 0) || ((_hoveredRow >= 0) && (_hoveredKind != ActionKind::None))) {
 			setCursor(Qt::PointingHandCursor);
-		} else if (_hoveredRow >= 0) {
+		} else if (_hoveredOnHandle) {
 			setCursor(Qt::OpenHandCursor);
 		} else {
 			unsetCursor();
@@ -1868,10 +2032,12 @@ private:
 	int _selected = -1;
 	int _hoveredRow = -1;
 	ActionKind _hoveredKind = ActionKind::None;
+	bool _hoveredOnHandle = false;
 	int _hoveredHiddenEntry = -1;
 	bool _hoveredRestoreAll = false;
 	int _pressedRow = -1;
 	bool _pressedOnButton = false;
+	bool _pressedOnHandle = false;
 	QPoint _pressPoint;
 	int _draggingRow = -1;
 	int _draggingVisibleRow = -1;
@@ -2271,6 +2437,26 @@ public:
 		return applyLayout(updated);
 	}
 
+	[[nodiscard]] bool moveEntry(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int from,
+			int to) {
+		if (!hasIndex(surface, lane, from)) {
+			return false;
+		}
+		auto updated = _layout;
+		auto &entries = ContextEntries(updated, surface, lane);
+		const auto insertAt = std::clamp(to, 0, std::max(int(entries.size()) - 1, 0));
+		if (from == insertAt) {
+			return true;
+		}
+		const auto moved = entries[from];
+		entries.erase(entries.begin() + from);
+		entries.insert(entries.begin() + insertAt, moved);
+		return applyLayout(updated);
+	}
+
 private:
 	[[nodiscard]] bool applyLayout(
 			const HistoryView::ContextMenuCustomizationLayout &updated) {
@@ -2292,6 +2478,175 @@ private:
 
 	HistoryView::ContextMenuCustomizationLayout _layout;
 	mutable rpl::event_stream<> _changes;
+};
+
+
+class CustomizationStatusDeck final : public Ui::RpWidget {
+public:
+	CustomizationStatusDeck(
+		QWidget *parent,
+		std::shared_ptr<SideMenuEditorState> state,
+		std::shared_ptr<ContextMenuEditorState> contextState)
+	: RpWidget(parent)
+	, _state(std::move(state))
+	, _contextState(std::move(contextState)) {
+		_state->changes() | rpl::start_with_next([=] {
+			update();
+			updateGeometry();
+		}, lifetime());
+		_contextState->changes() | rpl::start_with_next([=] {
+			update();
+			updateGeometry();
+		}, lifetime());
+	}
+
+protected:
+	int resizeGetHeight(int newWidth) override {
+		const auto columns = (newWidth > 920) ? 4 : (newWidth > 560) ? 2 : 1;
+		if (columns == 2) {
+			return kCustomizationStatusDeckHeight;
+		}
+		const auto rows = (4 + columns - 1) / columns;
+		return 18 + (rows * 68) + ((rows - 1) * 12) + 18;
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		Q_UNUSED(e);
+
+		auto p = Painter(this);
+		p.setRenderHint(QPainter::Antialiasing);
+
+		const auto side = ComputeSideMenuLayoutStats(_state->entries());
+		const auto message = ComputeContextLayoutStats(
+			_contextState->layout(),
+			HistoryView::ContextMenuSurface::Message);
+		const auto selection = ComputeContextLayoutStats(
+			_contextState->layout(),
+			HistoryView::ContextMenuSurface::Selection);
+		const auto columns = (width() > 920) ? 4 : (width() > 560) ? 2 : 1;
+		const auto gap = 12;
+		const auto margin = 6;
+		const auto cardHeight = 68;
+		const auto cardWidth = std::max(
+			160,
+			(width() - (margin * 2) - ((columns - 1) * gap)) / columns);
+
+		auto drawCard = [&](int index,
+				QColor top,
+				QColor bottom,
+				QColor accent,
+				const QString &eyebrow,
+				const QString &title,
+				const QString &body) {
+			const auto row = index / columns;
+			const auto column = index % columns;
+			const auto rect = QRect(
+				margin + column * (cardWidth + gap),
+				18 + row * (cardHeight + gap),
+				cardWidth,
+				cardHeight);
+			auto gradient = QLinearGradient(
+				QPointF(rect.left(), rect.top()),
+				QPointF(rect.right(), rect.bottom()));
+			gradient.setColorAt(0., top);
+			gradient.setColorAt(1., bottom);
+			p.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 88), 1.));
+			p.setBrush(gradient);
+			p.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 18, 18);
+			p.setPen(accent);
+			p.setFont(st::normalFont->f);
+			p.drawText(
+				QRect(rect.left() + 14, rect.top() + 10, rect.width() - 28, 14),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				eyebrow);
+			p.setPen(QColor(0x20, 0x2d, 0x3a));
+			p.setFont(st::semiboldTextStyle.font->f);
+			p.drawText(
+				QRect(rect.left() + 14, rect.top() + 26, rect.width() - 28, 18),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				title);
+			p.setPen(QColor(0x5f, 0x6d, 0x7c));
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				QRect(rect.left() + 14, rect.top() + 44, rect.width() - 28, 18),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				QFontMetrics(st::defaultTextStyle.font->f).elidedText(
+					body,
+					Qt::ElideRight,
+					rect.width() - 28));
+		};
+
+		drawCard(
+			0,
+			QColor(0xEE, 0xF9, 0xF2),
+			QColor(0xE5, 0xF5, 0xEC),
+			QColor(0x22, 0x9D, 0x68),
+			RuEn("Side menu runtime", "Side menu runtime"),
+			RuEn(
+				"%1 видимых · %2 скрыто",
+				"%1 visible · %2 hidden").arg(side.visibleActions).arg(side.hiddenActions),
+			RuEn(
+				"Footer %1 · профиль %2",
+				"Footer %1 · profile %2")
+					.arg(_state->showFooterText() ? RuEn("on", "on") : RuEn("off", "off"))
+					.arg(_state->profileAtBottom() ? RuEn("снизу", "bottom") : RuEn("сверху", "top")));
+
+		drawCard(
+			1,
+			QColor(0xEF, 0xF4, 0xFF),
+			QColor(0xE6, 0xEF, 0xFF),
+			QColor(0x4F, 0x8D, 0xFF),
+			RuEn("Hooks Astrogram", "Astrogram hooks"),
+			RuEn(
+				"Plugins %1 · Ghost %2",
+				"Plugins %1 · Ghost %2")
+					.arg(side.pluginsVisible ? RuEn("в меню", "shown") : RuEn("скрыт", "hidden"))
+					.arg(side.ghostModeVisible ? RuEn("в меню", "shown") : RuEn("скрыт", "hidden")),
+			RuEn(
+				"Show Logs %1",
+				"Show Logs %1")
+					.arg(side.showLogsVisible ? RuEn("подхвачен", "hooked") : RuEn("не показан", "not shown")));
+
+		drawCard(
+			2,
+			QColor(0xFF, 0xF7, 0xEA),
+			QColor(0xFF, 0xF1, 0xDD),
+			QColor(0xE3, 0x93, 0x23),
+			RuEn("Dividers & layout", "Dividers & layout"),
+			RuEn(
+				"%1 разделителей · %2 custom",
+				"%1 dividers · %2 custom").arg(side.visibleSeparators).arg(side.customSeparators),
+			RuEn(
+				"Expanded %1 · immersive %2",
+				"Expanded %1 · immersive %2")
+					.arg(_state->expandedSidePanel() ? RuEn("on", "on") : RuEn("off", "off"))
+					.arg(_state->immersiveAnimation() ? RuEn("on", "on") : RuEn("off", "off")));
+
+		drawCard(
+			3,
+			QColor(0xF2, 0xF8, 0xFF),
+			QColor(0xE9, 0xF2, 0xFF),
+			QColor(0x4C, 0x7E, 0xE6),
+			RuEn("Bottom strips", "Bottom strips"),
+			RuEn(
+				"msg %1/%2 · sel %3/%4",
+				"msg %1/%2 · sel %3/%4")
+					.arg(message.visibleStrip)
+					.arg(kContextStripPreviewLimit)
+					.arg(selection.visibleStrip)
+					.arg(kContextStripPreviewLimit),
+			(message.forwardWithoutAuthorVisible || selection.forwardWithoutAuthorVisible)
+				? RuEn(
+					"Кнопка «без автора» уже заведена в runtime layout",
+					"The no-author action is already wired into the runtime layout")
+				: RuEn(
+					"Нижняя полоска готова принимать иконки и reorder",
+					"The bottom strip is ready for icons and reordering"));
+	}
+
+private:
+	const std::shared_ptr<SideMenuEditorState> _state;
+	const std::shared_ptr<ContextMenuEditorState> _contextState;
 };
 
 class ContextMenuPreview final : public Ui::RpWidget {
@@ -2384,6 +2739,33 @@ private:
 			Qt::AlignCenter,
 			ContextSurfaceTitle(surface));
 
+		const auto stats = ComputeContextLayoutStats(_state->layout(), surface);
+		auto badgeRight = rect.right() - 14;
+		auto drawBadge = [&](QString text, QColor fill, QColor fg) {
+			const auto fm = QFontMetrics(st::normalFont->f);
+			const auto badgeWidth = std::max(68, fm.horizontalAdvance(text) + 22);
+			const auto badge = QRect(badgeRight - badgeWidth, rect.top() + 12, badgeWidth, 22);
+			badgeRight = badge.left() - 6;
+			p->setPen(Qt::NoPen);
+			p->setBrush(fill);
+			p->drawRoundedRect(badge, 11, 11);
+			p->setPen(fg);
+			p->setFont(st::normalFont->f);
+			p->drawText(badge, Qt::AlignCenter, text);
+		};
+		drawBadge(
+			RuEn("Strip %1/%2", "Strip %1/%2")
+				.arg(stats.visibleStrip)
+				.arg(kContextStripPreviewLimit),
+			QColor(0xE8, 0xF6, 0xEE),
+			QColor(0x1C, 0x8B, 0x62));
+		if (stats.forwardWithoutAuthorVisible) {
+			drawBadge(
+				RuEn("Без автора", "No author"),
+				QColor(0xEE, 0xF4, 0xFF),
+				QColor(0x3F, 0x74, 0xD7));
+		}
+
 		const auto visibleMenu = visibleEntries(surface, ContextEditorLane::Menu, 3);
 		auto rowTop = popup.top() + 40;
 		for (const auto &entry : visibleMenu) {
@@ -2406,8 +2788,11 @@ private:
 			rowTop += 20;
 		}
 
-		const auto visibleStrip = visibleEntries(surface, ContextEditorLane::Strip, 4);
+		const auto visibleStrip = visibleEntries(surface, ContextEditorLane::Strip, kContextStripPreviewLimit);
 		if (!visibleStrip.empty()) {
+			p->setPen(Qt::NoPen);
+			p->setBrush(QColor(0xC7, 0xDA, 0xE8));
+			p->drawRect(QRect(popup.left() + 18, popup.bottom() + 4, popup.width() - 36, 1));
 			const auto strip = QRect(popup.left() + 10, popup.bottom() + 8, popup.width() - 20, 28);
 			p->setPen(Qt::NoPen);
 			p->setBrush(QColor(0xE7, 0xF8, 0xEF));
@@ -2464,6 +2849,9 @@ public:
 		setMouseTracking(true);
 		_state->changes() | rpl::start_with_next([=] {
 			clampSelection();
+			_hoveredRow = -1;
+			_hoveredKind = ActionKind::None;
+			_hoveredOnHandle = false;
 			update();
 			updateGeometry();
 		}, lifetime());
@@ -2488,61 +2876,51 @@ protected:
 		}
 
 		for (auto i = 0; i != int(entries.size()); ++i) {
-			const auto row = rowRect(i);
-			const auto hovered = (i == _hoveredRow);
-			const auto selected = (i == _selected);
-			const auto meta = DescribeContextAction(entries[i].id);
-
-			p.setPen(Qt::NoPen);
-			p.setBrush(selected
-				? QColor(0xE7, 0xF8, 0xEF)
-				: hovered
-					? QColor(0xF5, 0xF9, 0xFC)
-					: QColor(0xFA, 0xFC, 0xFE));
-			p.drawRoundedRect(row, kRowRadius, kRowRadius);
-
-			p.setBrush(meta.color);
-			p.drawEllipse(QRect(row.left() + 14, row.top() + 14, 36, 36));
-			p.setPen(Qt::white);
-			p.setFont(st::semiboldFont->f);
-			p.drawText(
-				QRect(row.left() + 14, row.top() + 14, 36, 36),
-				Qt::AlignCenter,
-				meta.glyph.left(1));
-
-			p.setPen(QColor(0x23, 0x2F, 0x3C));
-			p.setFont(st::semiboldTextStyle.font->f);
-			p.drawText(
-				QRect(row.left() + 62, row.top() + 12, row.width() - 220, 20),
-				Qt::AlignLeft | Qt::AlignVCenter,
-				meta.title);
-
-			const auto stateText = entries[i].visible
-				? (_lane == ContextEditorLane::Strip
-					? RuEn("Показывается в нижней полоске", "Shown in the bottom strip")
-					: RuEn("Показывается в контекстном меню", "Shown in the context menu"))
-				: (_lane == ContextEditorLane::Strip
-					? RuEn("Скрыто из нижней полоски", "Hidden from the bottom strip")
-					: RuEn("Скрыто из контекстного меню", "Hidden from the context menu"));
-			const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
-				stateText + u" · "_q + meta.subtitle,
-				Qt::ElideRight,
-				row.width() - 220);
-			p.setPen(QColor(0x67, 0x75, 0x84));
-			p.setFont(st::defaultTextStyle.font->f);
-			p.drawText(
-				QRect(row.left() + 62, row.top() + 34, row.width() - 220, 18),
-				Qt::AlignLeft | Qt::AlignVCenter,
-				subtitle);
-
-			for (const auto &button : actionButtonsForRow(i)) {
-				paintActionButton(p, button);
+			if (i == _draggingIndex) {
+				continue;
 			}
+			paintRow(
+				p,
+				i,
+				rowRect(i),
+				(i == _hoveredRow),
+				(i == _selected),
+				false);
+		}
+
+		if (_draggingIndex >= 0) {
+			p.setPen(QPen(QColor(0x35, 0xC3, 0x8F), 3));
+			const auto y = insertionLineY();
+			p.drawLine(QPoint(8, y), QPoint(width() - 8, y));
+			paintRow(
+				p,
+				_draggingIndex,
+				floatingRowRect(),
+				false,
+				true,
+				true);
 		}
 	}
 
 	void mouseMoveEvent(QMouseEvent *e) override {
-		updateHover(e->position().toPoint());
+		const auto point = e->position().toPoint();
+		if (_draggingIndex >= 0) {
+			_dragCurrentY = point.y();
+			updateDragTarget(point.y());
+			_hoveredRow = -1;
+			_hoveredKind = ActionKind::None;
+			_hoveredOnHandle = false;
+			update();
+			return;
+		}
+		if ((_pressedRow >= 0)
+			&& _pressedOnHandle
+			&& !_pressedOnButton
+			&& ((point - _pressPoint).manhattanLength() >= 8)) {
+			startDrag(point);
+			return;
+		}
+		updateHover(point);
 	}
 
 	void mousePressEvent(QMouseEvent *e) override {
@@ -2550,6 +2928,9 @@ protected:
 			return;
 		}
 		const auto point = e->position().toPoint();
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
 		const auto &entries = _state->entries(_surface, _lane);
 		for (auto i = 0; i != int(entries.size()); ++i) {
 			const auto row = rowRect(i);
@@ -2557,23 +2938,48 @@ protected:
 				continue;
 			}
 			_selected = i;
+			_pressPoint = point;
+			_pressedOnHandle = dragHandleRect(row).contains(point);
 			for (const auto &button : actionButtonsForRow(i)) {
 				if (!button.enabled || !button.rect.contains(point)) {
 					continue;
 				}
+				_pressedOnButton = true;
 				handleAction(i, button.kind);
 				updateHover(point);
 				return;
 			}
+			_pressedRow = i;
+			updateHover(point);
 			update();
 			return;
 		}
+		updateHover(point);
+	}
+
+	void mouseReleaseEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		if (_draggingIndex >= 0) {
+			finishDrag();
+			return;
+		}
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
+		updateHover(e->position().toPoint());
 	}
 
 	void leaveEventHook(QEvent *e) override {
 		Q_UNUSED(e);
+		if (_draggingIndex >= 0) {
+			return;
+		}
 		_hoveredRow = -1;
 		_hoveredKind = ActionKind::None;
+		_hoveredOnHandle = false;
+		unsetCursor();
 		update();
 	}
 
@@ -2592,12 +2998,42 @@ private:
 		bool enabled = true;
 	};
 
-	[[nodiscard]] QRect rowRect(int index) const {
+	[[nodiscard]] QRect baseRowRect(int index) const {
 		return QRect(
 			0,
 			8 + index * (kRowHeight + kRowGap),
 			width(),
 			kRowHeight);
+	}
+
+	[[nodiscard]] QRect rowRect(int index) const {
+		auto result = baseRowRect(index);
+		if ((_draggingIndex < 0)
+			|| (_dragTargetIndex < 0)
+			|| (index == _draggingIndex)) {
+			return result;
+		}
+		const auto delta = kRowHeight + kRowGap;
+		if (_draggingIndex < _dragTargetIndex) {
+			if ((index > _draggingIndex) && (index <= _dragTargetIndex)) {
+				result.translate(0, -delta);
+			}
+		} else if (_draggingIndex > _dragTargetIndex) {
+			if ((index >= _dragTargetIndex) && (index < _draggingIndex)) {
+				result.translate(0, delta);
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]] QRect floatingRowRect() const {
+		auto result = baseRowRect(_draggingIndex);
+		result.moveTop(_dragCurrentY - _dragGrabOffsetY);
+		return result;
+	}
+
+	[[nodiscard]] QRect dragHandleRect(const QRect &row) const {
+		return QRect(row.left() + 10, row.top() + 14, 18, row.height() - 28);
 	}
 
 	[[nodiscard]] std::vector<ActionButton> actionButtonsForRow(int index) const {
@@ -2634,6 +3070,84 @@ private:
 		return result;
 	}
 
+	void paintDragHandle(Painter &p, const QRect &row, bool active) const {
+		const auto handle = dragHandleRect(row);
+		p.setPen(Qt::NoPen);
+		p.setBrush(active ? QColor(0x35, 0xC3, 0x8F) : QColor(0xA7, 0xB3, 0xBE));
+		for (auto column = 0; column != 2; ++column) {
+			for (auto line = 0; line != 3; ++line) {
+				p.drawEllipse(
+					QRect(
+						handle.left() + (column * 6),
+						handle.top() + 2 + (line * 8),
+						3,
+						3));
+			}
+		}
+	}
+
+	void paintRow(
+			Painter &p,
+			int index,
+			const QRect &row,
+			bool hovered,
+			bool selected,
+			bool floating) const {
+		const auto &entry = _state->entries(_surface, _lane)[index];
+		const auto meta = DescribeContextAction(entry.id);
+
+		p.setPen(Qt::NoPen);
+		p.setBrush(floating
+			? QColor(0xD9, 0xF4, 0xE8)
+			: selected
+				? QColor(0xE7, 0xF8, 0xEF)
+				: hovered
+					? QColor(0xF5, 0xF9, 0xFC)
+					: QColor(0xFA, 0xFC, 0xFE));
+		p.drawRoundedRect(row, kRowRadius, kRowRadius);
+
+		paintDragHandle(p, row, hovered || selected || floating);
+		p.setBrush(meta.color);
+		p.drawEllipse(QRect(row.left() + 36, row.top() + 14, 36, 36));
+		p.setPen(Qt::white);
+		p.setFont(st::semiboldFont->f);
+		p.drawText(
+			QRect(row.left() + 36, row.top() + 14, 36, 36),
+			Qt::AlignCenter,
+			meta.glyph.left(1));
+
+		p.setPen(QColor(0x23, 0x2F, 0x3C));
+		p.setFont(st::semiboldTextStyle.font->f);
+		p.drawText(
+			QRect(row.left() + 84, row.top() + 12, row.width() - 242, 20),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			meta.title);
+
+		const auto stateText = entry.visible
+			? (_lane == ContextEditorLane::Strip
+				? RuEn("Показывается в нижней полоске", "Shown in the bottom strip")
+				: RuEn("Показывается в контекстном меню", "Shown in the context menu"))
+			: (_lane == ContextEditorLane::Strip
+				? RuEn("Скрыто из нижней полоски", "Hidden from the bottom strip")
+				: RuEn("Скрыто из контекстного меню", "Hidden from the context menu"));
+		const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
+			stateText + u" · "_q + meta.subtitle,
+			Qt::ElideRight,
+			row.width() - 242);
+		p.setPen(QColor(0x67, 0x75, 0x84));
+		p.setFont(st::defaultTextStyle.font->f);
+		p.drawText(
+			QRect(row.left() + 84, row.top() + 34, row.width() - 242, 18),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			subtitle);
+
+		if (!floating) {
+			for (const auto &button : actionButtonsForRow(index)) {
+				paintActionButton(p, button);
+			}
+		}
+	}
+
 	void paintActionButton(QPainter &p, const ActionButton &button) const {
 		const auto hovered = (_hoveredRow >= 0)
 			&& (button.kind == _hoveredKind)
@@ -2650,15 +3164,105 @@ private:
 		p.drawText(button.rect, Qt::AlignCenter, button.label);
 	}
 
+	[[nodiscard]] int insertionLineY() const {
+		if ((_draggingIndex < 0) || (_dragTargetIndex < 0)) {
+			return 0;
+		}
+		const auto count = int(_state->entries(_surface, _lane).size());
+		auto slot = 0;
+		for (auto index = 0; index != count; ++index) {
+			if (index == _draggingIndex) {
+				continue;
+			}
+			if (slot == _dragTargetIndex) {
+				return rowRect(index).top() - (kRowGap / 2);
+			}
+			++slot;
+		}
+		for (auto index = count - 1; index >= 0; --index) {
+			if (index == _draggingIndex) {
+				continue;
+			}
+			return rowRect(index).bottom() + (kRowGap / 2) + 1;
+		}
+		return baseRowRect(0).center().y();
+	}
+
+	void updateDragTarget(int y) {
+		if (_draggingIndex < 0) {
+			return;
+		}
+		const auto count = int(_state->entries(_surface, _lane).size());
+		auto slot = 0;
+		for (auto index = 0; index != count; ++index) {
+			if (index == _draggingIndex) {
+				continue;
+			}
+			if (y < rowRect(index).center().y()) {
+				_dragTargetIndex = slot;
+				return;
+			}
+			++slot;
+		}
+		_dragTargetIndex = slot;
+	}
+
+	void startDrag(QPoint point) {
+		if (_pressedRow < 0) {
+			return;
+		}
+		_draggingIndex = _pressedRow;
+		_dragTargetIndex = _draggingIndex;
+		_dragCurrentY = point.y();
+		_dragGrabOffsetY = point.y() - baseRowRect(_draggingIndex).top();
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
+		grabMouse();
+		setCursor(Qt::ClosedHandCursor);
+		updateDragTarget(point.y());
+		update();
+	}
+
+	void finishDrag() {
+		if (_draggingIndex < 0) {
+			return;
+		}
+		const auto maxTarget = std::max(
+			int(_state->entries(_surface, _lane).size()) - 1,
+			0);
+		const auto target = std::clamp(_dragTargetIndex, 0, maxTarget);
+		if (_state->moveEntry(_surface, _lane, _draggingIndex, target)) {
+			_selected = target;
+		}
+		_draggingIndex = -1;
+		_dragTargetIndex = -1;
+		_dragCurrentY = 0;
+		_dragGrabOffsetY = 0;
+		releaseMouse();
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
+		_hoveredRow = -1;
+		_hoveredKind = ActionKind::None;
+		_hoveredOnHandle = false;
+		unsetCursor();
+		clampSelection();
+		update();
+	}
+
 	void updateHover(QPoint point) {
 		auto newRow = -1;
 		auto newKind = ActionKind::None;
+		auto newOnHandle = false;
 		const auto &entries = _state->entries(_surface, _lane);
 		for (auto i = 0; i != int(entries.size()); ++i) {
-			if (!rowRect(i).contains(point)) {
+			const auto row = rowRect(i);
+			if (!row.contains(point)) {
 				continue;
 			}
 			newRow = i;
+			newOnHandle = dragHandleRect(row).contains(point);
 			for (const auto &button : actionButtonsForRow(i)) {
 				if (button.enabled && button.rect.contains(point)) {
 					newKind = button.kind;
@@ -2667,11 +3271,21 @@ private:
 			}
 			break;
 		}
-		if ((newRow == _hoveredRow) && (newKind == _hoveredKind)) {
+		if ((newRow == _hoveredRow)
+			&& (newKind == _hoveredKind)
+			&& (newOnHandle == _hoveredOnHandle)) {
 			return;
 		}
 		_hoveredRow = newRow;
 		_hoveredKind = newKind;
+		_hoveredOnHandle = newOnHandle;
+		if ((_hoveredRow >= 0) && (_hoveredKind != ActionKind::None)) {
+			setCursor(Qt::PointingHandCursor);
+		} else if (_hoveredOnHandle) {
+			setCursor(Qt::OpenHandCursor);
+		} else {
+			unsetCursor();
+		}
 		update();
 	}
 
@@ -2690,7 +3304,9 @@ private:
 		case ActionKind::MoveDown:
 			changed = _state->moveDown(_surface, _lane, index);
 			if (changed) {
-				_selected = index + 1;
+				_selected = std::min(
+					index + 1,
+					int(_state->entries(_surface, _lane).size()) - 1);
 			}
 			break;
 		case ActionKind::None:
@@ -2724,6 +3340,15 @@ private:
 	int _selected = 0;
 	int _hoveredRow = -1;
 	ActionKind _hoveredKind = ActionKind::None;
+	bool _hoveredOnHandle = false;
+	int _pressedRow = -1;
+	bool _pressedOnButton = false;
+	bool _pressedOnHandle = false;
+	QPoint _pressPoint;
+	int _draggingIndex = -1;
+	int _dragTargetIndex = -1;
+	int _dragCurrentY = 0;
+	int _dragGrabOffsetY = 0;
 };
 
 void AddPreviewToggle(
@@ -2781,6 +3406,16 @@ void AddMenuCustomizationEditor(
 		rpl::single(RuEn(
 			"Экспериментальный editor уже редактирует боковое меню напрямую через `menu_layout.json`: видимые пункты живут в основном списке, скрытые уходят в restore-tray ниже, а fake Telegram preview теперь подчёркивает выбранный пункт и shell-режимы сразу после изменения.",
 			"This experimental editor already works directly with `menu_layout.json`: visible items stay in the main list, hidden ones move into the restore tray below, and the fake Telegram preview now highlights the selected action plus active shell modes right after each change.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	container->add(
+		object_ptr<CustomizationStatusDeck>(container, state, contextState),
+		style::margins(6, 0, 6, 0),
+		style::al_top);
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Status deck выше теперь живой: он собирается из текущего `menu_layout.json`, shell preview prefs и `context_menu_layout.json`, так что сразу показывает, какие runtime-хуки уже реально активны, а не просто нарисованы в preview.",
+			"The status deck above is now live: it reads the current `menu_layout.json`, shell preview prefs and `context_menu_layout.json`, so it immediately shows which runtime hooks are truly active instead of merely being drawn in the preview.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 
 	container->add(
@@ -3096,8 +3731,8 @@ void AddMenuCustomizationEditor(
 						"Hide/Show управляет попаданием в нижнюю полоску. Runtime жёстко держит лимит в 4 видимых иконки, а строка уже оформлена в том же ритме, что и side editor, чтобы потом спокойно принять drag-style сортировку.",
 						"Hide/Show controls whether the action appears in the bottom strip. Runtime strictly keeps the limit at 4 visible icons, and the row already follows the same rhythm as the side editor so it can accept drag-style sorting later.")
 					: RuEn(
-						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности. Drag-style слой пока не включён, но геометрия и preview уже под него разложены.",
-						"Hide/Show and ordering here directly change the popup action list for this surface. The drag-style layer is not enabled yet, but the geometry and preview are already arranged for it.")));
+						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности. Drag-handle слева теперь реально переставляет строки, так что runtime и preview смотрят на один и тот же порядок.",
+						"Hide/Show and ordering here directly change the popup action list for this surface. The left drag handle now really reorders rows, so runtime and preview read the exact same order.")));
 		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	};
 
