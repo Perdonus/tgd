@@ -39,9 +39,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QDateTime>
 #include <QLocale>
 #include <QMouseEvent>
+#include <QPainterPath>
 #include <QPointer>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 namespace AyuRecall {
@@ -51,10 +53,13 @@ constexpr auto kRowOuterLeft = 16;
 constexpr auto kRowOuterRight = 16;
 constexpr auto kRowOuterTop = 6;
 constexpr auto kRowOuterBottom = 6;
+constexpr auto kGroupedOuterSkip = 1;
 constexpr auto kBubblePadding = QMargins(14, 10, 14, 10);
 constexpr auto kBubbleInnerSkip = 4;
 constexpr auto kBubbleMinWidth = 120;
 constexpr auto kBubbleWidthFactor = 0.72;
+constexpr auto kClusterGapSeconds = 15 * 60;
+constexpr auto kIntroCardPadding = QMargins(18, 14, 18, 14);
 
 struct DeletedMessagesSectionState {
 	int scrollTop = -1;
@@ -62,6 +67,11 @@ struct DeletedMessagesSectionState {
 	int anchorMessageId = 0;
 	int anchorTimestamp = 0;
 	int anchorOffset = 0;
+};
+
+struct DeletedMessageVisualGroup {
+	bool groupedWithPrevious = false;
+	bool groupedWithNext = false;
 };
 
 [[nodiscard]] bool RussianUi() {
@@ -100,6 +110,16 @@ struct DeletedMessagesSectionState {
 	return UiText("Open original message in chat", "Открыть исходное сообщение в чате");
 }
 
+[[nodiscard]] QString OpenAttemptHint(not_null<Data::Thread*> thread) {
+	return thread->asTopic()
+		? UiText(
+			"Trying to open this place in the topic.",
+			"Пробую открыть это место в теме.")
+		: UiText(
+			"Trying to open this place in the chat.",
+			"Пробую открыть это место в чате.");
+}
+
 [[nodiscard]] QString LocalCopyHint() {
 	return UiText(
 		"Only the locally saved copy is available.",
@@ -112,21 +132,74 @@ struct DeletedMessagesSectionState {
 		"Открыто ближайшее доступное место в чате. Само удалённое сообщение сохранено только локально.");
 }
 
-[[nodiscard]] QString SectionHint() {
-	return UiText(
-		"Click a saved message to open its place in the chat.",
-		"Нажмите на сохранённое сообщение, чтобы открыть его место в чате.");
-}
-
 [[nodiscard]] QString DeletedMessagePlaceholder() {
 	return UiText("Saved deleted message", "Сохранённое удалённое сообщение");
 }
 
-[[nodiscard]] QString ScopeLabel(not_null<Data::Thread*> thread) {
+[[nodiscard]] QString ScopeHeadline() {
+	return UiText("Deleted Messages", "Удалённые сообщения");
+}
+
+[[nodiscard]] QString ScopeSubtitle(not_null<Data::Thread*> thread) {
 	if (const auto topic = thread->asTopic()) {
-		return UiText("Topic: %1", "Тема: %1").arg(topic->title());
+		return UiText(
+			"Topic %1 in %2",
+			"Тема %1 в %2").arg(topic->title(), thread->peer()->name());
 	}
-	return QString();
+	return UiText(
+		"Saved deleted messages from %1",
+		"Сохранённые удалённые сообщения из %1").arg(thread->peer()->name());
+}
+
+[[nodiscard]] QString RangeLabel(int oldestTimestamp, int newestTimestamp) {
+	if (oldestTimestamp <= 0 || newestTimestamp <= 0) {
+		return QString();
+	}
+	const auto oldest = QDateTime::fromSecsSinceEpoch(
+		oldestTimestamp).toLocalTime().date();
+	const auto newest = QDateTime::fromSecsSinceEpoch(
+		newestTimestamp).toLocalTime().date();
+	if (oldest == newest) {
+		return RussianUi()
+			? oldest.toString(u"d MMMM yyyy"_q)
+			: QLocale().toString(oldest, QLocale::LongFormat);
+	}
+	const auto left = RussianUi()
+		? oldest.toString(oldest.year() == newest.year()
+			? u"d MMMM"_q
+			: u"d MMMM yyyy"_q)
+		: QLocale().toString(oldest, QLocale::ShortFormat);
+	const auto right = RussianUi()
+		? newest.toString(u"d MMMM yyyy"_q)
+		: QLocale().toString(newest, QLocale::ShortFormat);
+	return left + u" — "_q + right;
+}
+
+[[nodiscard]] QString ScopeDetails(
+		int visibleCount,
+		int totalCount,
+		int oldestTimestamp,
+		int newestTimestamp) {
+	const auto counter = (totalCount <= 0)
+		? UiText("No saved messages yet", "Пока нет сохранённых сообщений")
+		: (visibleCount == totalCount)
+		? UiText("%1 saved locally", "%1 сохранено локально")
+			.arg(totalCount)
+		: UiText("Showing %1 of %2 saved locally", "Показано %1 из %2 локально сохранённых")
+			.arg(visibleCount)
+			.arg(totalCount);
+	const auto range = RangeLabel(oldestTimestamp, newestTimestamp);
+	return range.isEmpty() ? counter : (counter + u" · "_q + range);
+}
+
+[[nodiscard]] QString ScopeHint(not_null<Data::Thread*> thread) {
+	return thread->asTopic()
+		? UiText(
+			"Only this topic is shown here. Tap a bubble to open its place in the real topic.",
+			"Здесь показаны только сообщения из этой темы. Нажмите на пузырь, чтобы открыть это место в реальной теме.")
+		: UiText(
+			"Only locally saved deleted messages from this chat are shown here. Tap a bubble to open its place in the real chat.",
+			"Здесь показаны только локально сохранённые удалённые сообщения из этого чата. Нажмите на пузырь, чтобы открыть это место в реальном чате.");
 }
 
 [[nodiscard]] int TopicIdFor(not_null<Data::Thread*> thread) {
@@ -174,6 +247,16 @@ void SaveRememberedState(
 
 [[nodiscard]] QString TimeLabel(int timestamp) {
 	return QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime().toString(u"HH:mm"_q);
+}
+
+[[nodiscard]] QString DateTimeLabel(int timestamp) {
+	if (timestamp <= 0) {
+		return QString();
+	}
+	const auto moment = QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime();
+	return RussianUi()
+		? moment.toString(u"d MMMM yyyy, HH:mm"_q)
+		: QLocale().toString(moment, QLocale::LongFormat);
 }
 
 [[nodiscard]] QString ResolveSenderName(
@@ -229,6 +312,65 @@ void SaveRememberedState(
 	return snapshot.fromId == selfBare;
 }
 
+[[nodiscard]] QString SenderGroupingKey(
+		const AyuMessages::MessageSnapshot &snapshot,
+		not_null<Data::Thread*> thread) {
+	if (IsOutgoing(snapshot, thread)) {
+		return u"self"_q;
+	}
+	if (snapshot.senderSerialized) {
+		return u"peer:"_q + QString::number(snapshot.senderSerialized);
+	}
+	if (snapshot.fromId) {
+		return u"legacy:"_q + QString::number(snapshot.fromId);
+	}
+	if (!snapshot.senderName.isEmpty()) {
+		return u"name:"_q + snapshot.senderName;
+	}
+	return u"thread:"_q + thread->peer()->name();
+}
+
+[[nodiscard]] bool SameVisualCluster(
+		const AyuMessages::MessageSnapshot &a,
+		const AyuMessages::MessageSnapshot &b,
+		not_null<Data::Thread*> thread) {
+	if (IsOutgoing(a, thread) != IsOutgoing(b, thread)) {
+		return false;
+	}
+	if (SenderGroupingKey(a, thread) != SenderGroupingKey(b, thread)) {
+		return false;
+	}
+	const auto left = QDateTime::fromSecsSinceEpoch(
+		DisplayTimestamp(a)).toLocalTime().date();
+	const auto right = QDateTime::fromSecsSinceEpoch(
+		DisplayTimestamp(b)).toLocalTime().date();
+	if (left != right) {
+		return false;
+	}
+	return std::abs(DisplayTimestamp(b) - DisplayTimestamp(a)) <= kClusterGapSeconds;
+}
+
+[[nodiscard]] QString MetaText(const AyuMessages::MessageSnapshot &snapshot) {
+	const auto original = TimeLabel(DisplayTimestamp(snapshot));
+	if (snapshot.editDate <= 0
+		|| (std::abs(snapshot.editDate - DisplayTimestamp(snapshot)) < 60)) {
+		return original;
+	}
+	return UiText("%1 · deleted %2", "%1 · удалено %2").arg(
+		original,
+		TimeLabel(snapshot.editDate));
+}
+
+[[nodiscard]] QString OpenTooltip(const AyuMessages::MessageSnapshot &snapshot) {
+	const auto deleted = DateTimeLabel(snapshot.editDate);
+	if (deleted.isEmpty()) {
+		return OpenHint();
+	}
+	return OpenHint() + u"\n"_q + UiText(
+		"Deleted at %1",
+		"Удалено %1").arg(deleted);
+}
+
 [[nodiscard]] QString ResolveSenderName(
 		const AyuMessages::MessageSnapshot &snapshot,
 		not_null<Data::Thread*> thread) {
@@ -274,7 +416,7 @@ void SaveRememberedState(
 	if (hasLoaded(messageId)) {
 		return messageId;
 	}
-	constexpr auto kProbeRadius = 48;
+	constexpr auto kProbeRadius = 256;
 	for (auto step = 1; step <= kProbeRadius; ++step) {
 		const auto before = messageId - step;
 		if (hasLoaded(before)) {
@@ -288,6 +430,202 @@ void SaveRememberedState(
 	return 0;
 }
 
+[[nodiscard]] QPainterPath BubblePath(
+		const QRectF &rect,
+		float64 topLeft,
+		float64 topRight,
+		float64 bottomRight,
+		float64 bottomLeft) {
+	auto path = QPainterPath();
+	const auto left = rect.left();
+	const auto top = rect.top();
+	const auto right = rect.right();
+	const auto bottom = rect.bottom();
+
+	path.moveTo(left + topLeft, top);
+	path.lineTo(right - topRight, top);
+	if (topRight > 0.) {
+		path.quadTo(right, top, right, top + topRight);
+	}
+	path.lineTo(right, bottom - bottomRight);
+	if (bottomRight > 0.) {
+		path.quadTo(right, bottom, right - bottomRight, bottom);
+	}
+	path.lineTo(left + bottomLeft, bottom);
+	if (bottomLeft > 0.) {
+		path.quadTo(left, bottom, left, bottom - bottomLeft);
+	}
+	path.lineTo(left, top + topLeft);
+	if (topLeft > 0.) {
+		path.quadTo(left, top, left + topLeft, top);
+	}
+	path.closeSubpath();
+	return path;
+}
+
+[[nodiscard]] QPainterPath BubblePath(
+		const QRect &rect,
+		bool outgoing,
+		const DeletedMessageVisualGroup &group) {
+	const auto radius = float64(st::boxRadius);
+	const auto compactRadius = std::max(4., radius * 0.45);
+	auto topLeft = radius;
+	auto topRight = radius;
+	auto bottomRight = radius;
+	auto bottomLeft = radius;
+	if (outgoing) {
+		if (group.groupedWithPrevious) {
+			topRight = compactRadius;
+		}
+		if (group.groupedWithNext) {
+			bottomRight = compactRadius;
+		}
+	} else {
+		if (group.groupedWithPrevious) {
+			topLeft = compactRadius;
+		}
+		if (group.groupedWithNext) {
+			bottomLeft = compactRadius;
+		}
+	}
+	return BubblePath(rect, topLeft, topRight, bottomRight, bottomLeft);
+}
+
+class DeletedMessagesIntroCard final : public Ui::RpWidget {
+public:
+	DeletedMessagesIntroCard(
+		not_null<Ui::RpWidget*> parent,
+		not_null<Data::Thread*> thread,
+		int visibleCount,
+		int totalCount,
+		int oldestTimestamp,
+		int newestTimestamp);
+
+	int resizeGetHeight(int newWidth) override;
+
+protected:
+	void resizeEvent(QResizeEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	void layoutChildren(int newWidth);
+
+	Ui::FlatLabel *_title = nullptr;
+	Ui::FlatLabel *_scope = nullptr;
+	Ui::FlatLabel *_details = nullptr;
+	Ui::FlatLabel *_hint = nullptr;
+	QRect _cardRect;
+};
+
+DeletedMessagesIntroCard::DeletedMessagesIntroCard(
+		not_null<Ui::RpWidget*> parent,
+		not_null<Data::Thread*> thread,
+		int visibleCount,
+		int totalCount,
+		int oldestTimestamp,
+		int newestTimestamp)
+: Ui::RpWidget(parent) {
+	_title = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(ScopeHeadline()),
+		st::boxTitle);
+	_scope = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(ScopeSubtitle(thread)),
+		st::boxLabel);
+	_details = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(ScopeDetails(
+			visibleCount,
+			totalCount,
+			oldestTimestamp,
+			newestTimestamp)),
+		st::sessionDateLabel);
+	_hint = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(ScopeHint(thread)),
+		st::sessionDateLabel);
+
+	_title->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_scope->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_details->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_hint->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_scope->setTryMakeSimilarLines(true);
+	_details->setTryMakeSimilarLines(true);
+	_hint->setTryMakeSimilarLines(true);
+	_title->setTextColorOverride(st::windowFgActive->c);
+	_scope->setTextColorOverride(st::windowFg->c);
+	_details->setTextColorOverride(st::windowSubTextFg->c);
+	_hint->setTextColorOverride(st::windowSubTextFg->c);
+}
+
+int DeletedMessagesIntroCard::resizeGetHeight(int newWidth) {
+	layoutChildren(newWidth);
+	return _cardRect.isNull() ? 0 : (_cardRect.bottom() + 1);
+}
+
+void DeletedMessagesIntroCard::resizeEvent(QResizeEvent *e) {
+	Ui::RpWidget::resizeEvent(e);
+	layoutChildren(e->size().width());
+}
+
+void DeletedMessagesIntroCard::paintEvent(QPaintEvent *e) {
+	auto p = Painter(this);
+	if (_cardRect.isNull()) {
+		return;
+	}
+	p.setPen(Qt::NoPen);
+	p.setBrush(st::msgServiceBg);
+	p.setOpacity(0.9);
+	p.setRenderHint(QPainter::Antialiasing);
+	p.drawPath(BubblePath(_cardRect, st::boxRadius, st::boxRadius, st::boxRadius, st::boxRadius));
+	p.setOpacity(1.);
+	p.setBrush(Qt::NoBrush);
+	p.setPen(anim::with_alpha(st::windowSubTextFg->c, 0.18));
+	p.drawPath(BubblePath(_cardRect.adjusted(0, 0, -1, -1), st::boxRadius, st::boxRadius, st::boxRadius, st::boxRadius));
+}
+
+void DeletedMessagesIntroCard::layoutChildren(int newWidth) {
+	if (newWidth <= 0) {
+		_cardRect = {};
+		return;
+	}
+	const auto outer = QRect(
+		kRowOuterLeft,
+		0,
+		std::max(0, newWidth - kRowOuterLeft - kRowOuterRight),
+		0);
+	if (outer.width() <= 0) {
+		_cardRect = {};
+		return;
+	}
+	const auto innerWidth = std::max(
+		1,
+		outer.width() - kIntroCardPadding.left() - kIntroCardPadding.right());
+
+	_title->resizeToWidth(innerWidth);
+	_scope->resizeToWidth(innerWidth);
+	_details->resizeToWidth(innerWidth);
+	_hint->resizeToWidth(innerWidth);
+
+	auto top = kIntroCardPadding.top();
+	const auto left = outer.left() + kIntroCardPadding.left();
+	_title->moveToLeft(left, top);
+	top += _title->height() + 6;
+	_scope->moveToLeft(left, top);
+	top += _scope->height() + 4;
+	_details->moveToLeft(left, top);
+	top += _details->height() + 8;
+	_hint->moveToLeft(left, top);
+	top += _hint->height() + kIntroCardPadding.bottom();
+
+	_cardRect = QRect(
+		outer.left(),
+		0,
+		outer.width(),
+		top);
+}
+
 class DeletedMessageRow final : public Ui::RpWidget {
 public:
 	DeletedMessageRow(
@@ -295,7 +633,8 @@ public:
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread,
 		AyuMessages::MessageSnapshot snapshot,
-		QString senderLabel);
+		QString senderLabel,
+		DeletedMessageVisualGroup group);
 
 	int resizeGetHeight(int newWidth) override;
 	[[nodiscard]] const AyuMessages::MessageSnapshot &snapshot() const {
@@ -316,6 +655,7 @@ private:
 	const not_null<Data::Thread*> _thread;
 	const AyuMessages::MessageSnapshot _snapshot;
 	const QString _senderLabel;
+	const DeletedMessageVisualGroup _group;
 	const bool _outgoing = false;
 
 	style::owned_color _senderColor;
@@ -338,12 +678,14 @@ DeletedMessageRow::DeletedMessageRow(
 		not_null<Window::SessionController*> controller,
 		not_null<Data::Thread*> thread,
 		AyuMessages::MessageSnapshot snapshot,
-		QString senderLabel)
+		QString senderLabel,
+		DeletedMessageVisualGroup group)
 : Ui::RpWidget(parent)
 , _controller(controller)
 , _thread(thread)
 , _snapshot(std::move(snapshot))
 , _senderLabel(std::move(senderLabel))
+, _group(group)
 , _outgoing(IsOutgoing(_snapshot, _thread))
 , _senderColor(_outgoing ? st::msgOutServiceFg->c : st::msgInServiceFg->c)
 , _textColor(st::windowFg->c)
@@ -370,20 +712,22 @@ DeletedMessageRow::DeletedMessageRow(
 		_textSt);
 	_meta = Ui::CreateChild<Ui::FlatLabel>(
 		this,
-		rpl::single(TimeLabel(DisplayTimestamp(_snapshot))),
+		rpl::single(MetaText(_snapshot)),
 		_metaSt);
 
 	_text->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_meta->setAttribute(Qt::WA_TransparentForMouseEvents);
 	setCursor(style::cur_pointer);
-	setToolTip(OpenHint());
+	setToolTip(OpenTooltip(_snapshot));
 }
 
 int DeletedMessageRow::resizeGetHeight(int newWidth) {
 	layoutChildren(newWidth);
 	return _bubbleRect.isNull()
 		? (kRowOuterTop + kRowOuterBottom)
-		: (_bubbleRect.bottom() + kRowOuterBottom + 1);
+		: (_bubbleRect.bottom()
+			+ (_group.groupedWithNext ? kGroupedOuterSkip : kRowOuterBottom)
+			+ 1);
 }
 
 bool DeletedMessageRow::event(QEvent *e) {
@@ -427,15 +771,16 @@ void DeletedMessageRow::paintEvent(QPaintEvent *e) {
 	p.setBrush(_outgoing
 		? (_hovered ? st::msgOutBgSelected : st::msgOutBg)
 		: (_hovered ? st::msgInBgSelected : st::msgInBg));
-	p.drawRoundedRect(_bubbleRect, st::boxRadius, st::boxRadius);
+	p.setRenderHint(QPainter::Antialiasing);
+	p.drawPath(BubblePath(_bubbleRect, _outgoing, _group));
 
 	if (_hovered) {
 		p.setBrush(Qt::NoBrush);
 		p.setPen(_outgoing ? st::msgOutDateFg : st::msgInDateFg);
-		p.drawRoundedRect(
+		p.drawPath(BubblePath(
 			_bubbleRect.adjusted(0, 0, -1, -1),
-			st::boxRadius,
-			st::boxRadius);
+			_outgoing,
+			_group));
 	}
 }
 
@@ -474,7 +819,10 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 	const auto bubbleX = _outgoing
 		? std::max(kRowOuterLeft, newWidth - kRowOuterRight - bubbleWidth)
 		: kRowOuterLeft;
-	auto top = kRowOuterTop + kBubblePadding.top();
+	const auto outerTop = _group.groupedWithPrevious
+		? kGroupedOuterSkip
+		: kRowOuterTop;
+	auto top = outerTop + kBubblePadding.top();
 	const auto left = bubbleX + kBubblePadding.left();
 
 	if (_sender) {
@@ -488,11 +836,15 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 		top);
 	top += _meta->height() + kBubblePadding.bottom();
 
-	_bubbleRect = QRect(bubbleX, kRowOuterTop, bubbleWidth, top - kRowOuterTop);
+	_bubbleRect = QRect(bubbleX, outerTop, bubbleWidth, top - outerTop);
 }
 
 void DeletedMessageRow::openOriginal() {
 	const auto controller = _controller;
+	if (_snapshot.messageId <= 0) {
+		controller->window().showToast(LocalCopyHint());
+		return;
+	}
 	const auto jumpTarget = ResolveJumpTargetMessageId(_thread, _snapshot.messageId);
 	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
 	controller->showThread(
@@ -500,7 +852,7 @@ void DeletedMessageRow::openOriginal() {
 		jumpTarget ? jumpTarget : _snapshot.messageId,
 		params);
 	if (jumpTarget == 0) {
-		controller->window().showToast(LocalCopyHint());
+		controller->window().showToast(OpenAttemptHint(_thread));
 	} else if (jumpTarget != _snapshot.messageId) {
 		controller->window().showToast(NearestCopyHint());
 	}
@@ -567,6 +919,8 @@ private:
 	std::vector<AyuMessages::MessageSnapshot> _messages;
 	QString _searchQuery;
 	int _totalMessages = 0;
+	int _oldestTimestamp = 0;
+	int _newestTimestamp = 0;
 
 };
 
@@ -873,6 +1227,8 @@ void DeletedMessagesWidget::rebuildContent() {
 	_rows.clear();
 	_messages = LoadMessages(_thread);
 	_totalMessages = int(_messages.size());
+	_oldestTimestamp = _messages.empty() ? 0 : DisplayTimestamp(_messages.front());
+	_newestTimestamp = _messages.empty() ? 0 : DisplayTimestamp(_messages.back());
 	if (!_searchQuery.isEmpty()) {
 		auto filtered = std::vector<AyuMessages::MessageSnapshot>();
 		filtered.reserve(_messages.size());
@@ -887,19 +1243,15 @@ void DeletedMessagesWidget::rebuildContent() {
 	_content->clear();
 	Ui::AddSkip(_content, st::defaultVerticalListSkip);
 
-	const auto scope = ScopeLabel(_thread);
-	if (!scope.isEmpty()) {
-		Ui::AddDividerText(_content, rpl::single(scope));
-		Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
-	}
-	const auto hint = _content->add(
-		object_ptr<Ui::FlatLabel>(
+	_content->add(
+		object_ptr<DeletedMessagesIntroCard>(
 			_content,
-			rpl::single(SectionHint()),
-			st::sessionDateLabel),
-		st::boxRowPadding);
-	hint->setTryMakeSimilarLines(true);
-	Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
+			_thread,
+			int(_messages.size()),
+			_totalMessages,
+			_oldestTimestamp,
+			_newestTimestamp));
+	Ui::AddSkip(_content, st::defaultVerticalListSkip);
 
 	if (_messages.empty()) {
 		const auto empty = _content->add(
@@ -922,7 +1274,8 @@ void DeletedMessagesWidget::rebuildContent() {
 	auto previousDay = QDate();
 	auto havePreviousMessage = false;
 	const auto groupedChat = !_thread->peer()->isUser() && !_thread->peer()->isSelf();
-	for (const auto &message : _messages) {
+	for (auto i = 0, count = int(_messages.size()); i != count; ++i) {
+		const auto &message = _messages[i];
 		const auto stamp = DisplayTimestamp(message);
 		const auto day = QDateTime::fromSecsSinceEpoch(stamp).toLocalTime().date();
 		if (day != currentDay) {
@@ -933,19 +1286,28 @@ void DeletedMessagesWidget::rebuildContent() {
 		}
 		const auto sender = ResolveSenderName(message, _thread);
 		const auto outgoing = IsOutgoing(message, _thread);
+		const auto groupedWithPrevious = (i > 0)
+			&& SameVisualCluster(_messages[i - 1], message, _thread);
+		const auto groupedWithNext = (i + 1 < count)
+			&& SameVisualCluster(message, _messages[i + 1], _thread);
 		const auto showSender = groupedChat
 			&& !outgoing
 			&& (!havePreviousMessage
 				|| previousOutgoing
 				|| (previousSender != sender)
-				|| (previousDay != day));
+				|| (previousDay != day)
+				|| !groupedWithPrevious);
 		const auto row = _content->add(
 			object_ptr<DeletedMessageRow>(
 				_content,
 				controller(),
 				_thread,
 				message,
-				showSender ? sender : QString()));
+				showSender ? sender : QString(),
+				DeletedMessageVisualGroup{
+					.groupedWithPrevious = groupedWithPrevious,
+					.groupedWithNext = groupedWithNext,
+				}));
 		_rows.push_back(row);
 		previousSender = sender;
 		previousOutgoing = outgoing;
