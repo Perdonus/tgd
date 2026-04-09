@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
 #include "core/sandbox.h"
+#include "logs.h"
 #include "base/concurrent_timer.h"
 #include "base/options.h"
 
@@ -227,6 +228,12 @@ struct RuntimeApiCommandState {
 	int port = 37080;
 };
 
+struct RuntimeApiPathSyncResult {
+	bool sessionPathUpdated = false;
+	bool userPathUpdated = false;
+	bool userPathContainsCommand = false;
+};
+
 QString NormalizePathKey(QString path) {
 	if (path.isEmpty()) {
 		return QString();
@@ -293,13 +300,16 @@ if not defined ASTRO_BASE_URL set "ASTRO_BASE_URL=http://%ASTRO_RUNTIME_HOST%:%A
 if not defined ASTRO_CLIENT_LOG if defined ASTRO_WORKING_DIR set "ASTRO_CLIENT_LOG=%ASTRO_WORKING_DIR%client.log"
 if not defined ASTRO_PLUGINS_LOG if defined ASTRO_WORKING_DIR set "ASTRO_PLUGINS_LOG=%ASTRO_WORKING_DIR%tdata\plugins.log"
 if not defined ASTRO_PLUGINS_CONFIG if defined ASTRO_WORKING_DIR set "ASTRO_PLUGINS_CONFIG=%ASTRO_WORKING_DIR%tdata\plugins.json"
+if not defined ASTRO_COMMAND_DIR set "ASTRO_COMMAND_DIR=%~dp0"
 
 if "%~1"=="" goto help
 if /I "%~1"=="help" goto help
+if /I "%~1"=="api" goto api_root
 if /I "%~1"=="status" goto status
 if /I "%~1"=="health" goto health
 if /I "%~1"=="host" goto host
 if /I "%~1"=="system" goto system
+if /I "%~1"=="diagnostics" goto diagnostics
 if /I "%~1"=="runtime" goto runtime
 if /I "%~1"=="plugins" goto plugins
 if /I "%~1"=="plugin" goto plugins
@@ -313,6 +323,13 @@ echo Unknown command: %~1
 echo.
 goto help
 
+:api_root
+set "ASTRO_METHOD=GET"
+set "ASTRO_PATH=/v1"
+set "ASTRO_BODY_KIND="
+call :api_request
+exit /b %errorlevel%
+
 :status
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
@@ -323,7 +340,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "if ($configPath -and (Test-Path $configPath)) { try { $doc = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json; if ($null -ne $doc.runtimeApi) { if ($null -ne $doc.runtimeApi.enabled) { $configuredEnabled = [bool]$doc.runtimeApi.enabled }; if ($doc.runtimeApi.port) { $configuredPort = [int]$doc.runtimeApi.port } } } catch {} }" ^
   "$reachable = $false; $health = $null;" ^
   "try { $health = Invoke-RestMethod -Method GET -Uri ($base + '/v1/health'); $reachable = $true } catch {}" ^
-  "[pscustomobject]@{ runtimeReachable = $reachable; baseUrl = $base; configuredEnabled = $configuredEnabled; configuredPort = $configuredPort; workingDir = $env:ASTRO_WORKING_DIR; clientLog = $env:ASTRO_CLIENT_LOG; pluginsLog = $env:ASTRO_PLUGINS_LOG; health = $health } | ConvertTo-Json -Depth 16"
+  "[pscustomobject]@{ runtimeReachable = $reachable; baseUrl = $base; configuredEnabled = $configuredEnabled; configuredPort = $configuredPort; workingDir = $env:ASTRO_WORKING_DIR; commandDir = $env:ASTRO_COMMAND_DIR; clientLog = $env:ASTRO_CLIENT_LOG; pluginsLog = $env:ASTRO_PLUGINS_LOG; pluginsConfig = $env:ASTRO_PLUGINS_CONFIG; health = $health } | ConvertTo-Json -Depth 16"
 exit /b %errorlevel%
 
 :health
@@ -343,6 +360,13 @@ exit /b %errorlevel%
 :system
 set "ASTRO_METHOD=GET"
 set "ASTRO_PATH=/v1/system"
+set "ASTRO_BODY_KIND="
+call :api_request
+exit /b %errorlevel%
+
+:diagnostics
+set "ASTRO_METHOD=GET"
+set "ASTRO_PATH=/v1/diagnostics"
 set "ASTRO_BODY_KIND="
 call :api_request
 exit /b %errorlevel%
@@ -494,6 +518,7 @@ if "%~1"=="" (
   set "ASTRO_LOG_LINES=200"
   goto logs_dispatch
 )
+if /I "%~1"=="paths" goto logs_paths
 if /I "%~1"=="client" (
   shift
   set "ASTRO_LOG_TARGET=client"
@@ -534,6 +559,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "if (-not $path) { Write-Error 'ASTRO_CLIENT_LOG is not configured.'; exit 1 }" ^
   "if (-not (Test-Path $path)) { Write-Error ('client.log was not found: ' + $path); exit 1 }" ^
   "Get-Content -LiteralPath $path -Tail $lines"
+exit /b %errorlevel%
+
+:logs_paths
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "[pscustomobject]@{ commandDir = $env:ASTRO_COMMAND_DIR; workingDir = $env:ASTRO_WORKING_DIR; clientLog = $env:ASTRO_CLIENT_LOG; pluginsLog = $env:ASTRO_PLUGINS_LOG; pluginsConfig = $env:ASTRO_PLUGINS_CONFIG; baseUrl = $env:ASTRO_BASE_URL } | ConvertTo-Json -Depth 8"
 exit /b %errorlevel%
 
 :runtime_config_fallback
@@ -595,10 +625,12 @@ exit /b 1
 :help
 echo Astrogram Runtime API CLI
 echo.
+echo   astro api
 echo   astro status
 echo   astro health
 echo   astro host
 echo   astro system
+echo   astro diagnostics
 echo   astro runtime on [port]
 echo   astro runtime off
 echo   astro plugins
@@ -613,6 +645,7 @@ echo   astro send ^<peerId^> ^<text...^>
 echo   astro logs [lines]
 echo   astro logs client [lines]
 echo   astro logs plugins [lines]
+echo   astro logs paths
 echo.
 echo Runtime API commands work live when the client runtime server is enabled.
 echo If it is currently offline, astro runtime on/off updates the saved config for the next Astrogram start.
@@ -659,7 +692,10 @@ RuntimeApiCommandState ReadRuntimeApiCommandState() {
 }
 
 QString RuntimeApiEnvContents(const RuntimeApiCommandState &state) {
-	const auto workingDir = QDir::toNativeSeparators(QDir::cleanPath(cWorkingDir()));
+	auto workingDir = QDir::toNativeSeparators(QDir::cleanPath(cWorkingDir()));
+	if (!workingDir.endsWith(QDir::separator()) && !workingDir.endsWith(u'/')) {
+		workingDir += QDir::separator();
+	}
 	const auto clientLog = QDir::toNativeSeparators(
 		QDir(cWorkingDir()).absoluteFilePath(u"client.log"_q));
 	const auto pluginsLog = QDir::toNativeSeparators(
@@ -667,9 +703,13 @@ QString RuntimeApiEnvContents(const RuntimeApiCommandState &state) {
 	const auto pluginsConfig = QDir::toNativeSeparators(
 		QDir(cWorkingDir()).absoluteFilePath(u"tdata/plugins.json"_q));
 	const auto baseUrl = u"http://127.0.0.1:%1"_q.arg(state.port);
+	const auto commandDir = QDir::toNativeSeparators(
+		QDir(RuntimeApiUserBinDir()).absolutePath());
 	return QString::fromLatin1("@echo off\r\n")
 		+ u"set \"ASTRO_WORKING_DIR=%1\"\r\n"_q.arg(
 			EscapeBatchValue(workingDir))
+		+ u"set \"ASTRO_COMMAND_DIR=%1\"\r\n"_q.arg(
+			EscapeBatchValue(commandDir))
 		+ u"set \"ASTRO_RUNTIME_HOST=127.0.0.1\"\r\n"_q
 		+ u"set \"ASTRO_RUNTIME_PORT=%1\"\r\n"_q.arg(state.port)
 		+ u"set \"ASTRO_RUNTIME_ENABLED=%1\"\r\n"_q.arg(
@@ -683,7 +723,6 @@ QString RuntimeApiEnvContents(const RuntimeApiCommandState &state) {
 		+ u"set \"ASTRO_PLUGINS_CONFIG=%1\"\r\n"_q.arg(
 			EscapeBatchValue(pluginsConfig));
 }
-
 bool WriteTextIfChanged(const QString &path, const QString &contents) {
 	const auto data = contents.toUtf8();
 	QFile existing(path);
@@ -700,6 +739,15 @@ bool WriteTextIfChanged(const QString &path, const QString &contents) {
 		return false;
 	}
 	return file.commit();
+}
+
+void WriteLauncherClientLog(
+		const QString &scope,
+		const QString &message) {
+	if (!Logs::started()) {
+		return;
+	}
+	Logs::writeClient(u"[%1] %2"_q.arg(scope, message));
 }
 
 bool PathListContains(const QString &pathValue, const QString &entry) {
@@ -724,9 +772,10 @@ void BroadcastEnvironmentChanged() {
 		&result);
 }
 
-void EnsureRuntimeApiPath(const QString &dir) {
+RuntimeApiPathSyncResult EnsureRuntimeApiPath(const QString &dir) {
+	auto result = RuntimeApiPathSyncResult();
 	if (dir.isEmpty()) {
-		return;
+		return result;
 	}
 	const auto nativeDir = QDir::toNativeSeparators(dir);
 	const auto currentPath = qEnvironmentVariable("PATH");
@@ -737,26 +786,35 @@ void EnsureRuntimeApiPath(const QString &dir) {
 		}
 		updated += nativeDir;
 		qputenv("PATH", updated.toUtf8());
+		result.sessionPathUpdated = true;
 	}
-	QSettings settings(u"HKEY_CURRENT_USER\Environment"_q, QSettings::NativeFormat);
+	QSettings settings(u"HKEY_CURRENT_USER\\Environment"_q, QSettings::NativeFormat);
 	const auto userPath = settings.value(u"Path"_q).toString();
-	if (PathListContains(userPath, nativeDir)) {
-		return;
+	if (!PathListContains(userPath, nativeDir)) {
+		auto updated = userPath;
+		if (!updated.isEmpty() && !updated.endsWith(';')) {
+			updated += ';';
+		}
+		updated += nativeDir;
+		settings.setValue(u"Path"_q, updated);
+		settings.sync();
+		result.userPathUpdated = true;
+		BroadcastEnvironmentChanged();
 	}
-	auto updated = userPath;
-	if (!updated.isEmpty() && !updated.endsWith(';')) {
-		updated += ';';
-	}
-	updated += nativeDir;
-	settings.setValue(u"Path"_q, updated);
-	settings.sync();
-	BroadcastEnvironmentChanged();
+	result.userPathContainsCommand = PathListContains(
+		settings.value(u"Path"_q).toString(),
+		nativeDir);
+	return result;
 }
 
-QString FindWindowsUpdaterAliasInExeDir() {
+QString CanonicalWindowsUpdaterPathInDir(const QString &dir) {
+	return QDir(dir).absoluteFilePath(u"Updater.exe"_q);
+}
+
+QString FindWindowsUpdaterAliasInDir(const QString &dir) {
 	const auto candidates = {
-		QDir(cExeDir()).absoluteFilePath(u"AstrogramUpdater.exe"_q),
-		QDir(cExeDir()).absoluteFilePath(u"astrogram_updater.exe"_q),
+		QDir(dir).absoluteFilePath(u"AstrogramUpdater.exe"_q),
+		QDir(dir).absoluteFilePath(u"astrogram_updater.exe"_q),
 	};
 	for (const auto &candidate : candidates) {
 		if (QFileInfo::exists(candidate)) {
@@ -767,39 +825,79 @@ QString FindWindowsUpdaterAliasInExeDir() {
 }
 
 void EnsureCanonicalWindowsUpdaterBinary() {
-	const auto canonical = QDir(cExeDir()).absoluteFilePath(u"Updater.exe"_q);
-	if (QFileInfo::exists(canonical)) {
-		return;
-	}
-	const auto alias = FindWindowsUpdaterAliasInExeDir();
+	const auto canonical = CanonicalWindowsUpdaterPathInDir(cExeDir());
+	const auto alias = FindWindowsUpdaterAliasInDir(cExeDir());
 	if (alias.isEmpty()) {
 		return;
 	}
+	const auto canonicalInfo = QFileInfo(canonical);
+	const auto aliasInfo = QFileInfo(alias);
+	const auto needsRestore = !canonicalInfo.exists()
+		|| (canonicalInfo.size() != aliasInfo.size())
+		|| (canonicalInfo.lastModified() < aliasInfo.lastModified());
+	if (!needsRestore) {
+		return;
+	}
+	QFile::remove(canonical);
 	if (QFile::copy(alias, canonical)) {
 		LOG(("Update Info: restored canonical Updater.exe from '%1'").arg(alias));
+		WriteLauncherClientLog(
+			u"updater"_q,
+			u"restored canonical Updater.exe from '%1'"_q.arg(alias));
 	} else {
 		LOG(("Update Error: could not restore canonical Updater.exe from '%1'").arg(alias));
+		WriteLauncherClientLog(
+			u"updater"_q,
+			u"failed to restore canonical Updater.exe from '%1'"_q.arg(alias));
 	}
 }
 
 void EnsureRuntimeApiWindowsCommand() {
+	const auto state = ReadRuntimeApiCommandState();
 	const auto script = LoadRuntimeApiWindowsScript();
-	const auto env = RuntimeApiEnvContents(ReadRuntimeApiCommandState());
+	const auto env = RuntimeApiEnvContents(state);
+	auto writtenDirs = QStringList();
+	auto failedPaths = QStringList();
 	for (const auto &dir : RuntimeApiInstallDirs()) {
 		if (!QDir().mkpath(dir)) {
 			LOG(("Runtime API: could not create command dir '%1'").arg(dir));
+			failedPaths.push_back(dir + u" (mkdir)"_q);
 			continue;
 		}
 		const auto commandPath = QDir(dir).absoluteFilePath(u"astro.bat"_q);
+		const auto commandAliasPath = QDir(dir).absoluteFilePath(u"astro.cmd"_q);
 		const auto envPath = QDir(dir).absoluteFilePath(u"astro.env"_q);
 		if (!WriteTextIfChanged(commandPath, script)) {
 			LOG(("Runtime API: could not write '%1'").arg(commandPath));
+			failedPaths.push_back(commandPath);
+		}
+		if (!WriteTextIfChanged(commandAliasPath, script)) {
+			LOG(("Runtime API: could not write '%1'").arg(commandAliasPath));
+			failedPaths.push_back(commandAliasPath);
 		}
 		if (!WriteTextIfChanged(envPath, env)) {
 			LOG(("Runtime API: could not write '%1'").arg(envPath));
+			failedPaths.push_back(envPath);
+		} else {
+			writtenDirs.push_back(dir);
 		}
 	}
-	EnsureRuntimeApiPath(RuntimeApiUserBinDir());
+	const auto pathResult = EnsureRuntimeApiPath(RuntimeApiUserBinDir());
+	WriteLauncherClientLog(
+		u"runtime-cli"_q,
+		u"astro command prepared in %1 dir(s), path=session:%2 user:%3 contains:%4, runtimeEnabled:%5 port:%6"_q
+			.arg(writtenDirs.size())
+			.arg(pathResult.sessionPathUpdated ? u"1"_q : u"0"_q)
+			.arg(pathResult.userPathUpdated ? u"1"_q : u"0"_q)
+			.arg(pathResult.userPathContainsCommand ? u"1"_q : u"0"_q)
+			.arg(state.enabled ? u"1"_q : u"0"_q)
+			.arg(state.port));
+	if (!failedPaths.isEmpty()) {
+		WriteLauncherClientLog(
+			u"runtime-cli"_q,
+			u"astro command write issues: %1"_q.arg(
+				failedPaths.join(u", "_q)));
+	}
 }
 #endif // Q_OS_WIN
 
