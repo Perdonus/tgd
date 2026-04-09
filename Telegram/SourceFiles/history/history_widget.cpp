@@ -8806,21 +8806,28 @@ void HistoryWidget::setReplyFieldsFromProcessing() {
 
 	const auto id = base::take(_processingReplyTo);
 	const auto item = base::take(_processingReplyItem);
+	auto replyTo = id;
+	// Preserve context when replying to a locally saved deleted message:
+	// the server can carry quote text even if the original message is gone.
+	if (item->isDeleted() && replyTo.quote.empty()) {
+		replyTo.quote = item->inReplyText();
+		replyTo.quoteOffset = 0;
+	}
 	if (_editMsgId) {
 		if (const auto localDraft = _history->localDraft({}, {})) {
-			localDraft->reply = id;
+			localDraft->reply = replyTo;
 			localDraft->suggest = SuggestOptions();
 		} else {
 			_history->setLocalDraft(std::make_unique<Data::Draft>(
 				TextWithTags(),
-				id,
+				replyTo,
 				SuggestOptions(),
 				MessageCursor(),
 				Data::WebPageDraft()));
 		}
 	} else {
 		_replyEditMsg = item;
-		_replyTo = id;
+		_replyTo = replyTo;
 		cancelSuggestPost();
 		updateReplyEditText(_replyEditMsg);
 		updateCanSendMessage();
