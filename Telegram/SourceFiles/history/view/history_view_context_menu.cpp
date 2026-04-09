@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_cursor_state.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_helpers.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
 #include "history/view/history_view_schedule_box.h"
@@ -241,30 +242,6 @@ private:
 	return AstrogramRussianUi()
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
-}
-
-[[nodiscard]] QString ForwardWithoutAuthorText() {
-	return AstrogramUiText(
-		"Forward without author",
-		"Переслать без автора");
-}
-
-[[nodiscard]] Data::ForwardDraft ForwardWithoutAuthorDraft(
-		MessageIdsList ids) {
-	return Data::ForwardDraft{
-		.ids = std::move(ids),
-		.options = Data::ForwardOptions::NoSenderNames,
-	};
-}
-
-void ShowForwardWithoutAuthorBox(
-		not_null<Window::SessionNavigation*> navigation,
-		MessageIdsList ids,
-		Fn<void()> &&successCallback = nullptr) {
-	Window::ShowForwardMessagesBox(
-		navigation,
-		ForwardWithoutAuthorDraft(std::move(ids)),
-		std::move(successCallback));
 }
 
 [[nodiscard]] QString FormatRevisionTime(int timestamp) {
@@ -616,63 +593,76 @@ bool AddForwardSelectedAction(
 	if (!request.overSelection || request.selectedItems.empty()) {
 		return false;
 	}
-	if (!ranges::all_of(request.selectedItems, &SelectedItem::canForward)) {
+	const auto ids = ExtractIdsList(request.selectedItems);
+	const auto items = request.navigation->session().data().idsToItems(ids);
+	const auto canForward = ranges::all_of(
+		request.selectedItems,
+		&SelectedItem::canForward);
+	const auto canForwardWithoutAuthor = (items.size() == ids.size())
+		&& CanShareWithoutAuthor(items);
+	if (!canForward && !canForwardWithoutAuthor) {
 		return false;
 	}
 
-	menu->addAction(kContextMenuActionSelectionForward, tr::lng_context_forward_selected(tr::now), [=] {
-		const auto weak = base::make_weak(list);
-		const auto callback = [=] {
-			if (const auto strong = weak.get()) {
-				strong->cancelSelection();
-			}
-		};
-		Window::ShowForwardMessagesBox(
-			request.navigation,
-			ExtractIdsList(request.selectedItems),
-			callback);
-	}, &st::menuIconForward, true);
-	menu->addAction(
-		kContextMenuActionSelectionForwardWithoutAuthor,
-		ForwardWithoutAuthorText(),
-		[=] {
-		const auto weak = base::make_weak(list);
-		ShowForwardWithoutAuthorBox(
-			request.navigation,
-			ExtractIdsList(request.selectedItems),
-			[=] {
+	if (canForward) {
+		menu->addAction(kContextMenuActionSelectionForward, tr::lng_context_forward_selected(tr::now), [=] {
+			const auto weak = base::make_weak(list);
+			const auto callback = [=] {
 				if (const auto strong = weak.get()) {
 					strong->cancelSelection();
 				}
-			});
-	}, &st::menuIconForward, true);
-	menu->addAction(
-		kContextMenuActionSelectionForwardSaved,
-		AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"),
-		[=] {
-		const auto weak = base::make_weak(list);
-		const auto ids = ExtractIdsList(request.selectedItems);
-		if (ids.empty()) {
-			return;
-		}
-		const auto first = request.navigation->session().data().message(ids.front());
-		if (!first) {
-			return;
-		}
-		const auto api = &first->history()->peer->session().api();
-		const auto self = api->session().user()->asUser();
-		auto action = Api::SendAction(first->history()->peer->owner().history(self));
-		action.clearDraft = false;
-		action.generateLocal = false;
-		const auto history = first->history()->peer->owner().history(self);
-		auto resolved = history->resolveForwardDraft(Data::ForwardDraft{ .ids = ids });
-		api->forwardMessages(std::move(resolved), action, [=] {
-			Ui::Toast::Show(AstrogramUiText("Forwarded to Saved Messages.", "Переслано в Избранное."));
-			if (const auto strong = weak.get()) {
-				strong->cancelSelection();
-			}
-		});
-	}, &st::menuIconFave, true);
+			};
+			Window::ShowForwardMessagesBox(
+				request.navigation,
+				ExtractIdsList(request.selectedItems),
+				callback);
+		}, &st::menuIconForward, true);
+	}
+	if (canForwardWithoutAuthor) {
+		menu->addAction(
+			kContextMenuActionSelectionForwardWithoutAuthor,
+			Window::ForwardWithoutAuthorText(),
+			[=] {
+				const auto weak = base::make_weak(list);
+				Window::ShowForwardWithoutAuthorBox(
+					request.navigation,
+					ExtractIdsList(request.selectedItems),
+					[=] {
+						if (const auto strong = weak.get()) {
+							strong->cancelSelection();
+						}
+					});
+			}, &st::menuIconForward, true);
+	}
+	if (canForward) {
+		menu->addAction(
+			kContextMenuActionSelectionForwardSaved,
+			AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"),
+			[=] {
+				const auto weak = base::make_weak(list);
+				const auto ids = ExtractIdsList(request.selectedItems);
+				if (ids.empty()) {
+					return;
+				}
+				const auto first = request.navigation->session().data().message(ids.front());
+				if (!first) {
+					return;
+				}
+				const auto api = &first->history()->peer->session().api();
+				const auto self = api->session().user()->asUser();
+				auto action = Api::SendAction(first->history()->peer->owner().history(self));
+				action.clearDraft = false;
+				action.generateLocal = false;
+				const auto history = first->history()->peer->owner().history(self);
+				auto resolved = history->resolveForwardDraft(Data::ForwardDraft{ .ids = ids });
+				api->forwardMessages(std::move(resolved), action, [=] {
+					Ui::Toast::Show(AstrogramUiText("Forwarded to Saved Messages.", "Переслано в Избранное."));
+					if (const auto strong = weak.get()) {
+						strong->cancelSelection();
+					}
+				});
+			}, &st::menuIconFave, true);
+	}
 	return true;
 }
 
@@ -683,61 +673,71 @@ bool AddForwardMessageAction(
 	const auto item = request.item;
 	if (!request.selectedItems.empty()) {
 		return false;
-	} else if (!item || !item->allowsForward()) {
+	} else if (!item) {
 		return false;
 	}
 	const auto owner = &item->history()->owner();
 	const auto asGroup = (request.pointState != PointState::GroupPart);
-	if (asGroup) {
-		if (const auto group = owner->groups().find(item)) {
-			if (!ranges::all_of(group->items, &HistoryItem::allowsForward)) {
-				return false;
-			}
-		}
-	}
 	const auto itemId = item->fullId();
-	menu->addAction(kContextMenuActionMessageForward, tr::lng_context_forward_msg(tr::now), [=] {
-		if (const auto item = owner->message(itemId)) {
-			Window::ShowForwardMessagesBox(
-				request.navigation,
-				(asGroup
-					? owner->itemOrItsGroup(item)
-					: MessageIdsList{ 1, itemId }));
-		}
-	}, &st::menuIconForward, true);
-	menu->addAction(
-		kContextMenuActionMessageForwardWithoutAuthor,
-		ForwardWithoutAuthorText(),
-		[=] {
-		if (const auto item = owner->message(itemId)) {
-			ShowForwardWithoutAuthorBox(
-				request.navigation,
-				(asGroup
-					? owner->itemOrItsGroup(item)
-					: MessageIdsList{ 1, itemId }));
-		}
-	}, &st::menuIconForward, true);
-	menu->addAction(
-		kContextMenuActionMessageForwardSaved,
-		AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"),
-		[=] {
-		if (const auto item = owner->message(itemId)) {
-			const auto api = &item->history()->peer->session().api();
-			const auto self = api->session().user()->asUser();
-			auto action = Api::SendAction(item->history()->peer->owner().history(self));
-			action.clearDraft = false;
-			action.generateLocal = false;
-			const auto history = item->history()->peer->owner().history(self);
-			auto resolved = history->resolveForwardDraft(Data::ForwardDraft{
-				.ids = (asGroup
-					? owner->itemOrItsGroup(item)
-					: MessageIdsList{ 1, itemId })
-			});
-			api->forwardMessages(std::move(resolved), action, [] {
-				Ui::Toast::Show(AstrogramUiText("Forwarded to Saved Messages.", "Переслано в Избранное."));
-			});
-		}
-	}, &st::menuIconFave, true);
+	const auto ids = (asGroup
+		? owner->itemOrItsGroup(item)
+		: MessageIdsList{ 1, itemId });
+	const auto items = owner->idsToItems(ids);
+	const auto canForward = (items.size() == ids.size())
+		&& ranges::all_of(items, &HistoryItem::allowsForward);
+	const auto canForwardWithoutAuthor = (items.size() == ids.size())
+		&& CanShareWithoutAuthor(items);
+	if (!canForward && !canForwardWithoutAuthor) {
+		return false;
+	}
+	if (canForward) {
+		menu->addAction(kContextMenuActionMessageForward, tr::lng_context_forward_msg(tr::now), [=] {
+			if (const auto item = owner->message(itemId)) {
+				Window::ShowForwardMessagesBox(
+					request.navigation,
+					(asGroup
+						? owner->itemOrItsGroup(item)
+						: MessageIdsList{ 1, itemId }));
+			}
+		}, &st::menuIconForward, true);
+	}
+	if (canForwardWithoutAuthor) {
+		menu->addAction(
+			kContextMenuActionMessageForwardWithoutAuthor,
+			Window::ForwardWithoutAuthorText(),
+			[=] {
+				if (const auto item = owner->message(itemId)) {
+					Window::ShowForwardWithoutAuthorBox(
+						request.navigation,
+						(asGroup
+							? owner->itemOrItsGroup(item)
+							: MessageIdsList{ 1, itemId }));
+				}
+			}, &st::menuIconForward, true);
+	}
+	if (canForward) {
+		menu->addAction(
+			kContextMenuActionMessageForwardSaved,
+			AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"),
+			[=] {
+				if (const auto item = owner->message(itemId)) {
+					const auto api = &item->history()->peer->session().api();
+					const auto self = api->session().user()->asUser();
+					auto action = Api::SendAction(item->history()->peer->owner().history(self));
+					action.clearDraft = false;
+					action.generateLocal = false;
+					const auto history = item->history()->peer->owner().history(self);
+					auto resolved = history->resolveForwardDraft(Data::ForwardDraft{
+						.ids = (asGroup
+							? owner->itemOrItsGroup(item)
+							: MessageIdsList{ 1, itemId })
+					});
+					api->forwardMessages(std::move(resolved), action, [] {
+						Ui::Toast::Show(AstrogramUiText("Forwarded to Saved Messages.", "Переслано в Избранное."));
+					});
+				}
+			}, &st::menuIconFave, true);
+	}
 	return true;
 }
 

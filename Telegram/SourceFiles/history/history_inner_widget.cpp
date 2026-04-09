@@ -2854,6 +2854,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_widget->forwardSelected();
 				}, &st::menuIconForward);
 			}
+			if (const auto ids = getSelectedItems(); !ids.empty()) {
+				const auto items = session().data().idsToItems(ids);
+				if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+						Window::ShowForwardWithoutAuthorBox(_controller, getSelectedItems(), [=] {
+							_widget->clearSelected();
+						});
+					}, &st::menuIconForward);
+				}
+			}
 			if (selectedState.count > 0 && selectedState.canDeleteCount == selectedState.count) {
 				_menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
 					_widget->confirmDeleteSelected();
@@ -2872,6 +2882,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				if (item->allowsForward()) {
 					_menu->addAction(tr::lng_context_forward_msg(tr::now), [=] {
 						forwardItem(itemId);
+					}, &st::menuIconForward);
+				}
+				if (CanShareWithoutAuthor(item)) {
+					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+						forwardItemWithoutAuthor(itemId);
 					}, &st::menuIconForward);
 				}
 				if (HistoryView::CanAddOfferToMessage(item)) {
@@ -3117,6 +3132,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_widget->forwardSelected();
 				}, &st::menuIconForward);
 			}
+			if (const auto ids = getSelectedItems(); !ids.empty()) {
+				const auto items = session().data().idsToItems(ids);
+				if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+					_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+						Window::ShowForwardWithoutAuthorBox(_controller, getSelectedItems(), [=] {
+							_widget->clearSelected();
+						});
+					}, &st::menuIconForward);
+				}
+			}
 			if (selectedState.count > 0 && selectedState.count == selectedState.canDeleteCount) {
 				_menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
 					_widget->confirmDeleteSelected();
@@ -3134,6 +3159,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_menu->addAction(tr::lng_context_forward_msg(tr::now), [=] {
 						forwardAsGroup(itemId);
 					}, &st::menuIconForward);
+				}
+				if (const auto ids = session().data().itemOrItsGroup(item); !ids.empty()) {
+					const auto items = session().data().idsToItems(ids);
+					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
+						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
+							forwardAsGroupWithoutAuthor(itemId);
+						}, &st::menuIconForward);
+					}
 				}
 				if (HistoryView::CanAddOfferToMessage(item)) {
 					_menu->addAction(tr::lng_context_add_offer(tr::now), [=] {
@@ -4877,9 +4910,21 @@ void HistoryInner::forwardItem(FullMsgId itemId) {
 	Window::ShowForwardMessagesBox(_controller, { 1, itemId });
 }
 
+void HistoryInner::forwardItemWithoutAuthor(FullMsgId itemId) {
+	Window::ShowForwardWithoutAuthorBox(_controller, { 1, itemId });
+}
+
 void HistoryInner::forwardAsGroup(FullMsgId itemId) {
 	if (const auto item = session().data().message(itemId)) {
 		Window::ShowForwardMessagesBox(
+			_controller,
+			session().data().itemOrItsGroup(item));
+	}
+}
+
+void HistoryInner::forwardAsGroupWithoutAuthor(FullMsgId itemId) {
+	if (const auto item = session().data().message(itemId)) {
+		Window::ShowForwardWithoutAuthorBox(
 			_controller,
 			session().data().itemOrItsGroup(item));
 	}

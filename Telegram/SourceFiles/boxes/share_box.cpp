@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/share_box.h"
 
+#include "api/api_sending.h"
 #include "api/api_premium.h"
 #include "base/random.h"
 #include "lang/lang_keys.h"
@@ -1678,6 +1679,29 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		bool failed = false;
 	};
 	const auto state = std::make_shared<State>();
+	const auto resendExistingWithoutAuthor = [](
+			not_null<Data::Thread*> thread,
+			not_null<HistoryItem*> item,
+			Api::SendOptions options,
+			Data::ForwardOptions forwardOptions) {
+		auto action = Api::SendAction(thread, options);
+		action.replyTo.monoforumPeerId = thread->monoforumPeerId();
+		auto message = Api::MessageToSend(action);
+		if (forwardOptions != Data::ForwardOptions::NoNamesAndCaptions) {
+			const auto caption = item->originalText();
+			message.textWithTags = TextWithTags{
+				caption.text,
+				TextUtilities::ConvertEntitiesToTextTags(caption.entities),
+			};
+		}
+		if (const auto media = item->media()) {
+			if (const auto photo = media->photo()) {
+				Api::SendExistingPhoto(std::move(message), photo);
+			} else if (const auto document = media->document()) {
+				Api::SendExistingDocument(std::move(message), document);
+			}
+		}
+	};
 	return [=](
 			std::vector<not_null<Data::Thread*>> &&result,
 			Fn<bool()> checkPaid,
@@ -1690,14 +1714,37 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		state->failed = false;
 
 		const auto items = history->owner().idsToItems(msgIds);
-		const auto existingIds = history->owner().itemsToIds(items);
-		if (existingIds.empty() || result.empty()) {
+		if (items.empty() || result.empty()) {
 			return;
 		}
+		auto supportedItems = HistoryItemsList();
+		supportedItems.reserve(items.size());
+		for (const auto item : items) {
+			if (item->allowsForward()
+				|| ((forwardOptions != Data::ForwardOptions::PreserveInfo)
+					&& CanShareWithoutAuthor(item))) {
+				supportedItems.push_back(item);
+			}
+		}
+		if (supportedItems.empty() || supportedItems.size() != items.size()) {
+			return;
+		}
+		auto forwardItems = HistoryItemsList();
+		auto resendItems = HistoryItemsList();
+		forwardItems.reserve(supportedItems.size());
+		resendItems.reserve(supportedItems.size());
+		for (const auto item : supportedItems) {
+			if (item->allowsForward()) {
+				forwardItems.push_back(item);
+			} else {
+				resendItems.push_back(item);
+			}
+		}
+		const auto existingIds = history->owner().itemsToIds(forwardItems);
 
 		const auto error = GetErrorForSending(
 			result,
-			{ .forward = &items, .text = &comment });
+			{ .forward = &supportedItems, .text = &comment });
 		if (error.error) {
 			show->showBox(MakeSendErrorBox(error, result.size() > 1));
 			return;
@@ -1762,6 +1809,21 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				: topicRootId;
 			const auto peer = thread->peer();
 			const auto threadHistory = thread->owningHistory();
+			for (const auto item : resendItems) {
+				const auto starsPaid = std::min(
+					peer->starsPerMessageChecked(),
+					options.starsApproved);
+				if (starsPaid) {
+					options.starsApproved -= starsPaid;
+				}
+				auto sendOptions = options;
+				sendOptions.starsApproved = starsPaid;
+				resendExistingWithoutAuthor(
+					thread,
+					item,
+					sendOptions,
+					forwardOptions);
+			}
 			for (auto offset = 0, count = mtpMsgIds.size(); offset < count; offset += batchLimit) {
 				const auto batchSize = std::min(batchLimit, count - offset);
 				const auto batchIds = mtpMsgIds.mid(offset, batchSize);
@@ -1848,6 +1910,14 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 				});
 				state->requests.insert(threadHistory->sendRequestId);
 			}
+		}
+		if (state->requests.empty() && !state->failed && show->valid()) {
+			auto phrase = rpl::variable<TextWithEntities>(
+				ChatHelpers::ForwardedMessagePhrase(donePhraseArgs)).current();
+			if (!phrase.empty()) {
+				show->showToast(std::move(phrase));
+			}
+			show->hideLayer();
 		}
 	};
 }

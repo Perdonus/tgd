@@ -264,3 +264,5 @@ void ShowTrialTranscribesToast(int left, TimeId until);
 
 [[nodiscard]] int ItemsForwardSendersCount(const HistoryItemsList &list);
 [[nodiscard]] int ItemsForwardCaptionsCount(const HistoryItemsList &list);
+[[nodiscard]] bool CanShareWithoutAuthor(not_null<HistoryItem*> item);
+[[nodiscard]] bool CanShareWithoutAuthor(const HistoryItemsList &list);

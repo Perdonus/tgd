@@ -3727,6 +3727,29 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		std::move(successCallback));
 }
 
+QString ForwardWithoutAuthorText() {
+	return AstrogramUiText(
+		"Forward without author",
+		"Переслать без автора");
+}
+
+Data::ForwardDraft ForwardWithoutAuthorDraft(MessageIdsList ids) {
+	return Data::ForwardDraft{
+		.ids = std::move(ids),
+		.options = Data::ForwardOptions::NoSenderNames,
+	};
+}
+
+base::weak_qptr<Ui::BoxContent> ShowForwardWithoutAuthorBox(
+		not_null<Window::SessionNavigation*> navigation,
+		MessageIdsList &&items,
+		Fn<void()> &&successCallback) {
+	return ShowForwardMessagesBox(
+		navigation,
+		ForwardWithoutAuthorDraft(std::move(items)),
+		std::move(successCallback));
+}
+
 base::weak_qptr<Ui::BoxContent> ShowShareGameBox(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<UserData*> bot,

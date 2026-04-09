@@ -1316,3 +1316,19 @@ int ItemsForwardCaptionsCount(const HistoryItemsList &list) {
 	}
 	return result;
 }
+
+bool CanShareWithoutAuthor(not_null<HistoryItem*> item) {
+	if (item->allowsForward()) {
+		return true;
+	} else if (!item->isRegular() || item->isService() || item->forbidsForward()) {
+		return false;
+	}
+	const auto media = item->media();
+	return media && (media->photo() || media->document());
+}
+
+bool CanShareWithoutAuthor(const HistoryItemsList &list) {
+	return !list.empty() && ranges::all_of(list, [](not_null<HistoryItem*> item) {
+		return CanShareWithoutAuthor(item);
+	});
+}
