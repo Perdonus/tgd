@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_experimental.h"
 #include "settings/settings_plugins.h"
 #include "settings.h"
+#include "storage/localstorage.h"
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"
@@ -125,6 +126,110 @@ constexpr auto kSecretChannelClickWindowMs = 1500;
 	return QString::fromLatin1("Astrogram Desktop %1 (%2)").arg(
 		QString::fromLatin1(AppVersionStr),
 		QString::number(AppVersion));
+}
+
+[[nodiscard]] QString AstrogramCurrentBuildText() {
+	return RuEn(
+		"Текущая сборка: %1",
+		"Current build: %1").arg(Core::FormatVersionWithBuild(AppVersion));
+}
+
+[[nodiscard]] QString AstrogramUpdateChannelText() {
+	if (cAlphaVersion()) {
+		return RuEn("Alpha", "Alpha");
+	}
+	return cInstallBetaVersion()
+		? RuEn("Dev (beta)", "Dev (beta)")
+		: RuEn("Stable", "Stable");
+}
+
+[[nodiscard]] QString AstrogramLastUpdateCheckText() {
+	if (const auto value = cLastUpdateCheck(); value > 0) {
+		const auto date = QDateTime::fromSecsSinceEpoch(value).toLocalTime();
+		return RuEn(
+			"Последняя проверка: %1",
+			"Last checked: %1").arg(date.toString(Qt::DefaultLocaleShortDate));
+	}
+	return RuEn(
+		"Проверка обновлений ещё не запускалась.",
+		"Update check has not run yet.");
+}
+
+[[nodiscard]] QString AstrogramUpdateProgressText(int ready, int total) {
+	if (total <= 0) {
+		return RuEn(
+			"Скачивание обновления Astrogram...",
+			"Downloading Astrogram update...");
+	}
+	const auto percent = std::clamp(
+		int(std::llround((double(ready) * 100.) / double(total))),
+		0,
+		100);
+	return RuEn(
+		"Скачивание обновления Astrogram: %1%",
+		"Downloading Astrogram update: %1%").arg(percent);
+}
+
+[[nodiscard]] QString AstrogramUpdateHeadline(
+		const Core::UpdateChecker &checker,
+		const Core::UpdateReleaseInfo &info) {
+	using State = Core::UpdateChecker::State;
+	switch (checker.state()) {
+	case State::Download:
+		return AstrogramUpdateProgressText(
+			checker.already(),
+			checker.size());
+	case State::Ready:
+		return RuEn(
+			"Обновление Astrogram готово к установке.",
+			"Astrogram update is ready to install.");
+	case State::None:
+	default:
+		break;
+	}
+	if (info.available) {
+		const auto version = info.versionText.isEmpty()
+			? Core::FormatVersionWithBuild(info.version)
+			: info.versionText;
+		return RuEn(
+			"Доступно обновление Astrogram: %1",
+			"Astrogram update available: %1").arg(version);
+	}
+	return cAutoUpdate()
+		? RuEn(
+			"Автообновления Astrogram включены.",
+			"Astrogram auto-updates are enabled.")
+		: RuEn(
+			"Автообновления Astrogram выключены.",
+			"Astrogram auto-updates are disabled.");
+}
+
+[[nodiscard]] QString AstrogramUpdateDetails(
+		const Core::UpdateReleaseInfo &info) {
+	if (!info.title.isEmpty()) {
+		return info.title;
+	}
+	return AstrogramCurrentBuildText()
+		+ u'\n'
+		+ RuEn("Канал: %1", "Channel: %1").arg(AstrogramUpdateChannelText())
+		+ u'\n'
+		+ AstrogramLastUpdateCheckText();
+}
+
+[[nodiscard]] QString AstrogramUpdateChangelogText(
+		const Core::UpdateReleaseInfo &info) {
+	if (info.changelogLoading) {
+		return RuEn(
+			"Загружаю changelog из GitHub...",
+			"Loading changelog from GitHub...");
+	} else if (!info.changelog.isEmpty()) {
+		return info.changelog;
+	} else if (info.available && info.changelogFailed) {
+		return RuEn(
+			"Для этой сборки changelog пока пустой или недоступен.",
+			"Changelog is empty or unavailable for this build.");
+	}
+	return QString();
 }
 
 struct SpeechModelSpec {
@@ -1083,11 +1188,150 @@ void FinishSettingsCard(not_null<Ui::VerticalLayout*> card) {
 	Ui::AddSkip(card, st::settingsCheckboxesSkip / 2);
 }
 
+void AddAstrogramUpdateSection(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	if (Core::UpdaterDisabled()) {
+		return;
+	}
+
+	AddSectionGroupTitle(container, RuEn(
+		"Обновления Astrogram",
+		"Astrogram updates"));
+	const auto card = AddSettingsCard(container);
+	const auto checker = card->lifetime().make_state<Core::UpdateChecker>();
+	const auto statusText = card->lifetime().make_state<rpl::variable<QString>>(
+		QString());
+	const auto detailsText = card->lifetime().make_state<rpl::variable<QString>>(
+		QString());
+	const auto hookText = card->lifetime().make_state<rpl::variable<QString>>(
+		QString());
+	const auto changelogText = card->lifetime().make_state<rpl::variable<QString>>(
+		QString());
+	const auto releaseUrl = card->lifetime().make_state<QString>(
+		Core::CurrentUpdateFeedPageUrl());
+
+	AddToggle(
+		card,
+		rpl::single(cAutoUpdate()),
+		RuEn("Автообновления Astrogram", "Astrogram auto-updates"),
+		[=](bool toggled) {
+			cSetAutoUpdate(toggled);
+			Local::writeSettings();
+			if (toggled) {
+				cSetLastUpdateCheck(0);
+				checker->start();
+			} else {
+				checker->stop();
+			}
+		});
+	Ui::AddSkip(card, st::settingsCheckboxesSkip / 4);
+
+	card->add(
+		object_ptr<Ui::FlatLabel>(
+			card,
+			statusText->value(),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+	const auto detailsLabel = card->add(
+		object_ptr<Ui::FlatLabel>(
+			card,
+			detailsText->value(),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+	const auto hookLabel = card->add(
+		object_ptr<Ui::FlatLabel>(
+			card,
+			hookText->value(),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+	const auto changelogLabel = card->add(
+		object_ptr<Ui::FlatLabel>(
+			card,
+			changelogText->value(),
+			st::defaultFlatLabel),
+		style::margins(14, 0, 14, 0),
+		style::al_top);
+	Ui::AddSkip(card, st::settingsCheckboxesSkip / 4);
+
+	AddActionButton(
+		card,
+		RuEn("Проверить обновления сейчас", "Check for updates now"),
+		[=] {
+			if (!cAutoUpdate()) {
+				controller->showToast(RuEn(
+					"Сначала включите автообновления Astrogram.",
+					"Enable Astrogram auto-updates first."));
+				return;
+			}
+			cSetLastUpdateCheck(0);
+			Local::writeSettings();
+			checker->start();
+		},
+		{ &st::menuIconRestore });
+	const auto openRelease = AddButtonWithIcon(
+		card,
+		rpl::single(RuEn(
+			"Открыть страницу релизов",
+			"Open releases page")),
+		st::settingsButton,
+		{ &st::menuIconIpAddress });
+	openRelease->addClickHandler([=] {
+		if (!releaseUrl->isEmpty()) {
+			QDesktopServices::openUrl(QUrl(*releaseUrl));
+		}
+	});
+	const auto installUpdate = AddButtonWithIcon(
+		card,
+		rpl::single(RuEn(
+			"Установить обновление",
+			"Install update")),
+		st::settingsButton,
+		{ &st::menuIconDownload });
+	installUpdate->addClickHandler([=] {
+		if (!Core::UpdaterDisabled()) {
+			Core::checkReadyUpdate();
+		}
+		Core::Restart();
+	});
+
+	const auto refresh = [=] {
+		const auto info = checker->releaseInfo();
+		*releaseUrl = info.url.isEmpty()
+			? Core::CurrentUpdateFeedPageUrl()
+			: info.url;
+		statusText->force_assign(AstrogramUpdateHeadline(*checker, info));
+		detailsText->force_assign(AstrogramUpdateDetails(info));
+		hookText->force_assign(Core::DescribeDevUpdateHooksState());
+		changelogText->force_assign(AstrogramUpdateChangelogText(info));
+		detailsLabel->setVisible(detailsText->current().isEmpty() == false);
+		hookLabel->setVisible(hookText->current().isEmpty() == false);
+		changelogLabel->setVisible(changelogText->current().isEmpty() == false);
+		openRelease->setVisible(releaseUrl->isEmpty() == false);
+		installUpdate->setVisible(
+			checker->state() == Core::UpdateChecker::State::Ready);
+	};
+
+	checker->checking() | rpl::start_with_next(refresh, card->lifetime());
+	checker->progress() | rpl::start_with_next([=](auto) {
+		refresh();
+	}, card->lifetime());
+	checker->isLatest() | rpl::start_with_next(refresh, card->lifetime());
+	checker->failed() | rpl::start_with_next(refresh, card->lifetime());
+	checker->ready() | rpl::start_with_next(refresh, card->lifetime());
+	checker->releaseInfoChanged() | rpl::start_with_next(refresh, card->lifetime());
+}
+
 void SetupAstrogramHome(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	AddAstrogramHeader(controller, container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddAstrogramUpdateSection(controller, container);
+	Ui::AddSkip(container);
 	AddSectionGroup(
 		controller,
 		container,

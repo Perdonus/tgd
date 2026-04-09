@@ -33,6 +33,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QUrl>
 
@@ -1562,6 +1564,35 @@ QString DevUpdateHooksConfigPath() {
 
 QString ActiveDevUpdateHooksSummary() {
 	return DevUpdateHooksSummary(ReadDevUpdateHooks());
+}
+
+QString DescribeDevUpdateHooksState() {
+	const auto configPath = QDir::toNativeSeparators(
+		DevUpdateHooksConfigPathValue());
+	const auto fileExists = QFileInfo::exists(DevUpdateHooksConfigPathValue());
+	const auto summary = DevUpdateHooksSummary(ReadDevUpdateHooks());
+	if (summary.isEmpty() == false) {
+		return RuEn(
+			"Активный dev hook: %1\nФайл: %2",
+			"Active dev hook: %1\nFile: %2").arg(summary, configPath);
+	} else if (cInstallBetaVersion()) {
+		return fileExists
+			? RuEn(
+				"Dev (beta) включён, но локальный dev hook пока не дал ни одного override.\nФайл: %1",
+				"Dev (beta) is enabled, but the local dev hook did not provide any override yet.\nFile: %1").arg(configPath)
+			: RuEn(
+				"Dev (beta) включён. Локальный dev hook будет читаться из файла:\n%1",
+				"Dev (beta) is enabled. The local dev hook will be read from:\n%1").arg(configPath);
+	}
+	return fileExists
+		? RuEn(
+			"Найден локальный dev hook файл, но он не активен пока выключен Dev (beta).\nФайл: %1",
+			"A local dev hook file was found, but it stays inactive until Dev (beta) is enabled.\nFile: %1").arg(configPath)
+		: QString();
+}
+
+QString CurrentUpdateFeedPageUrl() {
+	return CurrentReleasesPageUrl();
 }
 
 bool UpdaterDisabled() {

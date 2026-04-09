@@ -22,6 +22,8 @@ void SetUpdaterDisabledAtStartup();
 [[nodiscard]] QString FormatVersionWithBuild(int version);
 [[nodiscard]] QString DevUpdateHooksConfigPath();
 [[nodiscard]] QString ActiveDevUpdateHooksSummary();
+[[nodiscard]] QString DescribeDevUpdateHooksState();
+[[nodiscard]] QString CurrentUpdateFeedPageUrl();
 
 enum class UpdateChannel {
 	Stable,
