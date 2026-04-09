@@ -16,10 +16,43 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "ui/chat/chat_style.h"
 
+#include <algorithm>
+
 namespace Main {
 namespace {
 
 constexpr auto kRefreshTimeout = 3600 * crl::time(1000);
+
+template <typename Value, typename Validator>
+[[nodiscard]] std::vector<Value> NormalizeUniqueVector(
+		std::vector<Value> values,
+		Validator &&validator) {
+	std::vector<Value> result;
+	result.reserve(values.size());
+	for (const auto &value : values) {
+		if (!validator(value)) {
+			continue;
+		}
+		if (std::find(result.begin(), result.end(), value) == result.end()) {
+			result.push_back(value);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<QString> NormalizeTrimmedVector(
+		std::vector<QString> values,
+		bool keepEmpty = true) {
+	for (auto &value : values) {
+		value = value.trimmed();
+	}
+	if (keepEmpty) {
+		return values;
+	}
+	return NormalizeUniqueVector(
+		std::move(values),
+		[](const QString &value) { return !value.isEmpty(); });
+}
 
 } // namespace
 
@@ -265,33 +298,42 @@ int64 AppConfig::astrogramOfficialChannelId() const {
 }
 
 std::vector<int64> AppConfig::astrogramOnboardingPluginPostIds() const {
-	return get<std::vector<int64>>(
-		u"astrogram_onboarding_plugin_post_ids"_q,
-		std::vector<int64>());
+	return NormalizeUniqueVector(
+		get<std::vector<int64>>(
+			u"astrogram_onboarding_plugin_post_ids"_q,
+			std::vector<int64>()),
+		[](int64 postId) { return (postId > 0); });
 }
 
 std::vector<QString> AppConfig::astrogramOnboardingPluginTitles() const {
-	return get<std::vector<QString>>(
+	return NormalizeTrimmedVector(get<std::vector<QString>>(
 		u"astrogram_onboarding_plugin_titles"_q,
-		std::vector<QString>());
+		std::vector<QString>()));
 }
 
 std::vector<QString> AppConfig::astrogramOnboardingPluginDescriptions() const {
-	return get<std::vector<QString>>(
+	return NormalizeTrimmedVector(get<std::vector<QString>>(
 		u"astrogram_onboarding_plugin_descriptions"_q,
-		std::vector<QString>());
+		std::vector<QString>()));
 }
 
 std::vector<int64> AppConfig::astrogramTrustedPluginChannelIds() const {
-	return get<std::vector<int64>>(
+	auto values = get<std::vector<int64>>(
 		u"astrogram_trusted_plugin_channel_ids"_q,
-		std::vector<int64>{ astrogramPluginsChannelId() });
+		std::vector<int64>());
+	const auto defaultChannelId = astrogramPluginsChannelId();
+	if (defaultChannelId) {
+		values.insert(values.begin(), defaultChannelId);
+	}
+	return NormalizeUniqueVector(
+		std::move(values),
+		[](int64 channelId) { return (channelId != 0); });
 }
 
 std::vector<QString> AppConfig::astrogramTrustedPluginRecords() const {
-	return get<std::vector<QString>>(
+	return NormalizeTrimmedVector(get<std::vector<QString>>(
 		u"astrogram_trusted_plugin_records"_q,
-		std::vector<QString>());
+		std::vector<QString>()), false);
 }
 
 int AppConfig::storiesAlbumsLimit() const {

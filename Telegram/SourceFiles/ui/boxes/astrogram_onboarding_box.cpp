@@ -12,12 +12,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
+#include "data/data_document.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "history/history_item.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_common.h"
+#include "settings/settings_experimental.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/effects/ministar_particles.h"
 #include "ui/layers/generic_box.h"
@@ -36,6 +39,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 #include "styles/style_window.h"
+
+#include <QtCore/QFileInfo>
+#include <QtCore/QSet>
+#include <QtCore/QTimer>
 
 #include <memory>
 #include <optional>
@@ -69,6 +76,78 @@ struct PeerCardTexts {
 	QString title;
 	QString status;
 };
+
+struct PluginCardTexts {
+	QString title;
+	QString description;
+	QString sourceLabel;
+};
+
+[[nodiscard]] bool IsAstrogramPluginPackage(DocumentData *document) {
+	if (!document) {
+		return false;
+	}
+	const auto filename = document->filename().trimmed();
+	return !filename.isEmpty()
+		&& filename.endsWith(u".tgd"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString AstrogramPluginTitle(
+		DocumentData *document,
+		QString fallbackTitle) {
+	fallbackTitle = fallbackTitle.trimmed();
+	if (!fallbackTitle.isEmpty()) {
+		return fallbackTitle;
+	}
+	auto filename = document ? document->filename().trimmed() : QString();
+	if (filename.isEmpty()) {
+		return RuEn("Плагин Astrogram", "Astrogram plugin");
+	}
+	if (filename.endsWith(u".tgd"_q, Qt::CaseInsensitive)) {
+		filename.chop(4);
+	}
+	filename = QFileInfo(filename).completeBaseName().trimmed();
+	return filename.isEmpty()
+		? RuEn("Плагин Astrogram", "Astrogram plugin")
+		: filename;
+}
+
+[[nodiscard]] QString AstrogramPluginDescription(
+		HistoryItem *item,
+		QString fallbackDescription,
+		qint64 postId) {
+	fallbackDescription = fallbackDescription.trimmed();
+	if (!fallbackDescription.isEmpty()) {
+		return fallbackDescription;
+	}
+	if (item) {
+		const auto message = item->originalText().text.simplified();
+		if (!message.isEmpty()) {
+			return message;
+		}
+		const auto notification = item->notificationText().text.simplified();
+		if (!notification.isEmpty()) {
+			return notification;
+		}
+	}
+	return RuEn(
+		"Пакет плагина из поста #%1",
+		"Plugin package from post #%1").arg(postId);
+}
+
+[[nodiscard]] QString AstrogramPluginSourceLabel(
+		QString channelTitle,
+		qint64 postId) {
+	channelTitle = channelTitle.trimmed();
+	if (channelTitle.isEmpty()) {
+		channelTitle = RuEn(
+			"Astrogram Plugins",
+			"Astrogram Plugins");
+	}
+	return RuEn(
+		"Источник: %1 · пост #%2",
+		"Source: %1 · post #%2").arg(channelTitle).arg(postId);
+}
 
 [[nodiscard]] QString PeerAudienceText(not_null<PeerData*> peer) {
 	const auto channel = peer->asChannel();
@@ -108,6 +187,37 @@ struct PeerCardTexts {
 	return {
 		.title = title,
 		.status = status,
+	};
+}
+
+[[nodiscard]] PluginCardTexts ResolvePluginCardTexts(
+		not_null<Window::SessionController*> controller,
+		PeerData *peer,
+		const AstrogramOnboardingPlugin &plugin,
+		QString fallbackChannelTitle) {
+	const auto channel = peer ? peer->asChannel() : nullptr;
+	const auto item = (channel && (plugin.postId > 0))
+		? controller->session().data().message(channel, MsgId(plugin.postId))
+		: nullptr;
+	const auto media = item ? item->media() : nullptr;
+	const auto document = media ? media->document() : nullptr;
+	const auto effectiveChannelTitle = ComputePeerCardTexts(
+		peer,
+		std::move(fallbackChannelTitle),
+		QString()).title;
+	return {
+		.title = AstrogramPluginTitle(
+			IsAstrogramPluginPackage(document) ? document : nullptr,
+			plugin.title),
+		.description = AstrogramPluginDescription(
+			item,
+			plugin.description,
+			plugin.postId),
+		.sourceLabel = (plugin.postId > 0)
+			? AstrogramPluginSourceLabel(
+				effectiveChannelTitle,
+				plugin.postId)
+			: plugin.sourceLabel.trimmed(),
 	};
 }
 
@@ -402,18 +512,32 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			Step step = Step::Welcome;
 			PeerData *pluginsChannelPeer = nullptr;
 			PeerData *officialChannelPeer = nullptr;
+			QSet<qint64> requestedPluginPosts;
 		};
 		const auto state = box->lifetime().make_state<State>(State{
 			.pluginsChannelPeer = args.pluginsChannelPeer,
 			.officialChannelPeer = args.officialChannelPeer,
 		});
 		const auto weak = base::make_weak(box);
+		const auto controller = args.controller;
 
 		const auto finish = [=] {
 			if (args.finished) {
 				args.finished();
 			}
 			box->closeBox();
+		};
+		const auto openExperimental = [=] {
+			if (args.finished) {
+				args.finished();
+			}
+			box->closeBox();
+			const auto weakController = base::make_weak(controller);
+			QTimer::singleShot(0, [=] {
+				if (const auto controller = weakController.get()) {
+					controller->showSettings(Settings::Experimental::Id());
+				}
+			});
 		};
 
 		const auto rebuild = std::make_shared<Fn<void()>>();
@@ -539,19 +663,20 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					(*rebuild)();
 				});
 			} break;
-				case Step::PluginsInstall: {
-					addTitle(
-						RuEn("Рекомендуемые плагины", "Recommended plugins"),
+			case Step::PluginsInstall: {
+				addTitle(
+					RuEn("Рекомендуемые плагины", "Recommended plugins"),
 					RuEn(
 						"Выбирай, что поставить сразу. Позже можно вернуться к этому списку из раздела плагинов и канала с пакетами.",
 						"Choose what to install right now. You can come back to this list later from the plugins section and the packages channel."));
-					Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
-					AddPeerChoiceButton(
-						container,
-						state->pluginsChannelPeer,
-						args.pluginsChannelTitle.isEmpty()
-							? RuEn("AstroPlugins", "AstroPlugins")
-							: args.pluginsChannelTitle,
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				const auto fallbackPluginsTitle = args.pluginsChannelTitle.isEmpty()
+					? RuEn("AstroPlugins", "AstroPlugins")
+					: args.pluginsChannelTitle;
+				AddPeerChoiceButton(
+					container,
+					state->pluginsChannelPeer,
+					fallbackPluginsTitle,
 					args.pluginsChannelSubtitle,
 					[=] {
 						if (args.subscribePluginsChannel) {
@@ -574,23 +699,47 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
 						style::al_top);
 				} else {
+					const auto channel = state->pluginsChannelPeer
+						? state->pluginsChannelPeer->asChannel()
+						: nullptr;
 					for (const auto &plugin : args.plugins) {
+						if (channel
+							&& (plugin.postId > 0)
+							&& !state->requestedPluginPosts.contains(plugin.postId)
+							&& !controller->session().data().message(
+								channel,
+								MsgId(plugin.postId))) {
+							state->requestedPluginPosts.insert(plugin.postId);
+							controller->session().api().requestMessageData(
+								channel,
+								MsgId(plugin.postId),
+								[weak, rebuild] {
+									if (weak.get()) {
+										(*rebuild)();
+									}
+								});
+						}
+						const auto texts = ResolvePluginCardTexts(
+							controller,
+							state->pluginsChannelPeer,
+							plugin,
+							fallbackPluginsTitle);
 						const auto install = plugin.install;
 						AddChoiceButton(
 							container,
-							plugin.title,
-							plugin.description,
+							texts.title,
+							texts.description,
 							&st::menuIconDownload,
 							[install] {
 								if (install) {
 									install();
 								}
 							});
-						if (!plugin.sourceLabel.trimmed().isEmpty()) {
+						if (!texts.sourceLabel.isEmpty()) {
 							container->add(
 								object_ptr<Ui::FlatLabel>(
 									container,
-									rpl::single(plugin.sourceLabel.trimmed()),
+									rpl::single(texts.sourceLabel),
 									st::defaultFlatLabel),
 								style::margins(26, -2, 26, 4),
 								style::al_top);
@@ -628,13 +777,13 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					QColor(0x0f, 0x2b, 0x3f),
 					QColor(0x44, 0xc0, 0xff),
 					QColor(0x9c, 0xff, 0xd3));
-					Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-					AddPeerChoiceButton(
-						container,
-						state->officialChannelPeer,
-						args.officialChannelTitle.trimmed().isEmpty()
-							? RuEn("Astrogram", "Astrogram")
-							: args.officialChannelTitle.trimmed(),
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				AddPeerChoiceButton(
+					container,
+					state->officialChannelPeer,
+					args.officialChannelTitle.trimmed().isEmpty()
+						? RuEn("Astrogram", "Astrogram")
+						: args.officialChannelTitle.trimmed(),
 					args.officialChannelSubtitle.trimmed().isEmpty()
 						? RuEn(
 							"Получай новости о сборках, клиентах и новых функциях Astrogram.",
@@ -645,6 +794,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.openOfficialChannel();
 						}
 					});
+				AddChoiceButton(
+					container,
+					RuEn(
+						"Настроить меню и режимы оболочки",
+						"Customize menu and shell modes"),
+					RuEn(
+						"Откроет Experimental: editor бокового меню, иммерсивную анимацию, расширенную панель и широкие настройки.",
+						"Opens Experimental with the side menu editor, immersive animation, expanded panel and wider settings."),
+					&st::menuIconExperimental,
+					openExperimental);
 				AddChoiceButton(
 					container,
 					RuEn(
@@ -662,7 +821,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Завершить", "Finish"), finish);
 			} break;
-				}
+			}
 			};
 
 			if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
@@ -690,6 +849,5 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 		};
 		(*rebuild)();
 	}));
-	}
 
 } // namespace Ui

@@ -191,6 +191,18 @@ void SetupExperimental(
 	addToggle(Info::kAlternativeScrollProcessing);
 	addToggle(kModerateCommonGroups);
 
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn(
+			"Меню Astrogram и режимы оболочки",
+			"Astrogram menu and shell modes")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Вступительный гайд теперь может приводить сюда напрямую. Ниже живёт editor бокового меню и preview/runtime-связка для иммерсивной анимации, расширенной боковой панели, левоторцевых настроек и широкого контейнера settings.",
+			"The onboarding flow can now lead here directly. Below lives the side menu editor and the preview/runtime bridge for immersive animation, the expanded side panel, left-edge settings and a wider settings container.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddMenuCustomizationEditor(controller, container);
 }
 
