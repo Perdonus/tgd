@@ -216,6 +216,21 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 	return QString::number(peer->id.value & PeerId::kChatTypeMask);
 }
 
+[[nodiscard]] TextWithEntities CopyableIdText(const QString &id) {
+	return tr::link(id, u"internal:~peer_id~:copy:"_q + id);
+}
+
+[[nodiscard]] QString TopicIdText(not_null<Data::ForumTopic*> topic) {
+	return QString::number(topic->rootId().bare);
+}
+
+[[nodiscard]] QString TopicPeerIdLabel(not_null<PeerData*> peer) {
+	if (peer->isChannel()) {
+		return peer->isMegagroup() ? u"Group ID"_q : u"Channel ID"_q;
+	}
+	return u"ID"_q;
+}
+
 [[nodiscard]] rpl::producer<TextWithEntities> AboutWithAdvancedValue(
 		not_null<PeerData*> peer) {
 
@@ -1517,13 +1532,13 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		result.text->setContextCopyText(contextCopyText);
 		return result;
 	};
-	const auto addIdLine = [&] {
-		if (!ShowPeerIdBelowAbout.value()) {
+	const auto addIdLine = [&](v::text::data &&label, const QString &id) {
+		if (!ShowPeerIdBelowAbout.value() || id.isEmpty()) {
 			return;
 		}
 		addInfoOneLine(
-			u"ID"_q,
-			rpl::single(TextWithEntities{ .text = PeerIdText(_peer) }),
+			std::move(label),
+			rpl::single(CopyableIdText(id)),
 			u"Copy ID"_q);
 	};
 	const auto fitLabelToButton = [&](
@@ -1668,6 +1683,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		const auto qrButton = Ui::CreateChild<Ui::IconButton>(
 			usernameLine.text->parentWidget(),
 			st::infoProfileLabeledButtonQr);
+		qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
 		UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
 			qrButton->setVisible(!u.empty());
 		}, qrButton->lifetime());
@@ -1678,7 +1694,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			Ui::DefaultShowFillPeerQrBoxCallback(show, user);
 			return false;
 		});
-		addIdLine();
+		addIdLine(u"ID"_q, PeerIdText(_peer));
 
 		if (!user->isBot()) {
 			tracker.track(result->add(
@@ -1749,6 +1765,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			const auto qr = Ui::CreateChild<Ui::IconButton>(
 				linkLine.text->parentWidget(),
 				st::infoProfileLabeledButtonQr);
+			qr->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
 			UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
 				qr->setVisible(!u.empty());
 			}, qr->lifetime());
@@ -1761,7 +1778,12 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 				return false;
 			});
 		}
-		addIdLine();
+		if (_topic) {
+			addIdLine(TopicPeerIdLabel(_peer), PeerIdText(_peer));
+			addIdLine(u"Topic ID"_q, TopicIdText(_topic));
+		} else {
+			addIdLine(u"ID"_q, PeerIdText(_peer));
+		}
 
 		if (const auto channel = _topic ? nullptr : _peer->asChannel()) {
 			auto locationText = LocationValue(

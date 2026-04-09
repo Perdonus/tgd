@@ -394,6 +394,72 @@ void ListController::scrollTo(int y) {
 	_scrollToRequests.fire_copy(y);
 }
 
+void AddAnswerSummaryRow(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Main::Session*> session,
+		not_null<PollData*> poll,
+		const PollAnswer &answer) {
+	const auto totalVotes = (poll->totalVoters > 0) ? poll->totalVoters : 1;
+	const auto percent = answer.votes * 100 / totalVotes;
+	const auto phrase = poll->quiz()
+		? tr::lng_polls_answers_count
+		: tr::lng_polls_votes_count;
+	const auto sampleText = phrase(
+			tr::now,
+			lt_count_decimal,
+			answer.votes);
+	const auto &font = st::boxDividerLabel.style.font;
+	const auto rightSkip = font->width(sampleText) + font->spacew * 4;
+	const auto headerWrap = container->add(object_ptr<Ui::RpWidget>(container));
+	const auto header = Ui::CreateChild<Ui::DividerLabel>(
+		container.get(),
+		object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(
+				TextWithEntities(answer.text)
+					.append(QString::fromUtf8(" \xe2\x80\x94 "))
+					.append(QString::number(percent))
+					.append('%')),
+			st::boxDividerLabel,
+			st::defaultPopupMenu,
+			Core::TextContext({ .session = session })),
+		style::margins(
+			st::pollResultsHeaderPadding.left(),
+			st::pollResultsHeaderPadding.top(),
+			st::pollResultsHeaderPadding.right() + rightSkip,
+			st::pollResultsHeaderPadding.bottom()));
+
+	const auto votes = Ui::CreateChild<Ui::FlatLabel>(
+		header,
+		phrase(
+			lt_count_decimal,
+			rpl::single(float64(answer.votes))),
+		st::pollResultsVotesCount);
+
+	headerWrap->widthValue(
+	) | rpl::on_next([=](int width) {
+		header->resizeToWidth(width);
+		votes->moveToRight(
+			st::pollResultsHeaderPadding.right(),
+			st::pollResultsHeaderPadding.top(),
+			width);
+	}, header->lifetime());
+
+	header->heightValue(
+	) | rpl::on_next([=](int height) {
+		headerWrap->resize(headerWrap->width(), height);
+	}, header->lifetime());
+
+	headerWrap->geometryValue(
+	) | rpl::on_next([=](const QRect &geometry) {
+		header->move(0, geometry.y());
+	}, header->lifetime());
+
+	container->add(object_ptr<Ui::FixedHeightWidget>(
+		container,
+		st::boxLittleSkip));
+}
+
 ListController *CreateAnswerRows(
 		not_null<Ui::VerticalLayout*> container,
 		rpl::producer<int> visibleTop,
@@ -627,8 +693,13 @@ void InnerWidget::setupContent() {
 			st::boxDividerLabel),
 		st::boxRowPadding);
 	Ui::AddSkip(_content, st::boxLittleSkip);
+	const auto showVoters = _poll->publicVotes() && _poll->voted();
 	for (const auto &answer : _poll->answers) {
 		const auto session = &_controller->session();
+		if (!showVoters) {
+			AddAnswerSummaryRow(_content, session, _poll, answer);
+			continue;
+		}
 		const auto controller = CreateAnswerRows(
 			_content,
 			_visibleTop.value(),

@@ -208,6 +208,44 @@ constexpr auto kContextMenuActionMessageReschedule =
 	};
 }
 
+enum class ContextActionSection {
+	Identity,
+	Copy,
+	Forward,
+	Manage,
+};
+
+[[nodiscard]] ContextActionSection ContextActionSectionFor(const QString &id) {
+	using Id = Menu::Customization::ContextMenuItemId;
+	if ((id == QString::fromLatin1(Id::SelectionCopy))
+		|| (id == QString::fromLatin1(Id::SelectionTranslate))
+		|| (id == QString::fromLatin1(Id::SelectionSearch))
+		|| (id == QString::fromLatin1(Id::MessageCopyText))
+		|| (id == QString::fromLatin1(Id::MessageTranslate))
+		|| (id == QString::fromLatin1(Id::LinkCopy))
+		|| (id == QString::fromLatin1(Id::MessageCopyPostLink))) {
+		return ContextActionSection::Copy;
+	} else if ((id == QString::fromLatin1(Id::SelectionForward))
+		|| (id == QString::fromLatin1(Id::SelectionForwardWithoutAuthor))
+		|| (id == QString::fromLatin1(Id::SelectionForwardSaved))
+		|| (id == QString::fromLatin1(Id::SelectionSendNow))
+		|| (id == QString::fromLatin1(Id::MessageForward))
+		|| (id == QString::fromLatin1(Id::MessageForwardWithoutAuthor))
+		|| (id == QString::fromLatin1(Id::MessageForwardSaved))
+		|| (id == QString::fromLatin1(Id::MessageSendNow))
+		|| (id == QString::fromLatin1(Id::MessageReschedule))) {
+		return ContextActionSection::Forward;
+	} else if ((id == QString::fromLatin1(Id::SelectionDelete))
+		|| (id == QString::fromLatin1(Id::SelectionDownloadFiles))
+		|| (id == QString::fromLatin1(Id::SelectionClear))
+		|| (id == QString::fromLatin1(Id::MessageDelete))
+		|| (id == QString::fromLatin1(Id::MessageReport))
+		|| (id == QString::fromLatin1(Id::MessageSelect))) {
+		return ContextActionSection::Manage;
+	}
+	return ContextActionSection::Identity;
+}
+
 class ContextMenuBuilder final {
 public:
 	ContextMenuBuilder(
@@ -266,6 +304,17 @@ public:
 	void finalize(const ContextMenuSurfaceLayout &layout) {
 		publishResolved();
 		auto handled = base::flat_set<QString>();
+		auto hasLastSection = false;
+		auto lastSection = ContextActionSection::Identity;
+		auto appendAction = [&](const PendingAction &action) {
+			const auto section = ContextActionSectionFor(action.id);
+			if (hasLastSection && (section != lastSection) && !_menu->empty()) {
+				_menu->addSeparator(&st::expandedMenuSeparator);
+			}
+			action.append(_menu);
+			hasLastSection = true;
+			lastSection = section;
+		};
 		auto appendById = [&](const QString &id) {
 			if (id.isEmpty() || handled.contains(id)) {
 				return false;
@@ -275,7 +324,7 @@ public:
 					continue;
 				}
 				handled.emplace(id);
-				action.append(_menu);
+				appendAction(action);
 				return true;
 			}
 			return false;
@@ -300,7 +349,7 @@ public:
 			if (!action.id.isEmpty()) {
 				handled.emplace(action.id);
 			}
-			action.append(_menu);
+			appendAction(action);
 		}
 	}
 
@@ -2300,7 +2349,11 @@ void AddPollActions(
 		return;
 	}
 	const auto itemId = item->fullId();
-	if (!poll->quiz() || poll->closed() || poll->voted()) {
+	const auto canPreviewResults = !poll->quiz()
+		&& !poll->closed()
+		&& !poll->voted()
+		&& item->isRegular();
+	if (canPreviewResults || poll->closed() || poll->voted()) {
 		menu->addAction(tr::lng_polls_view_results(tr::now), [=] {
 			controller->showPollResults(poll, itemId);
 		});

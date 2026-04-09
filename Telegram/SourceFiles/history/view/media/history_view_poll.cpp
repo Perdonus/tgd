@@ -623,6 +623,9 @@ void Poll::sendMultiOptions() {
 }
 
 void Poll::showResults() {
+	if (!showVotes() && !canPreviewResults()) {
+		return;
+	}
 	_parent->delegate()->elementShowPollResults(
 		_poll,
 		_parent->data()->fullId());
@@ -751,7 +754,8 @@ void Poll::draw(Painter &p, const PaintContext &context) const {
 	auto paintw = width();
 
 	checkSendingAnimation();
-	if (_poll->checkResultsReload(context.now)) {
+	if ((showVotes() || canPreviewResults())
+		&& _poll->checkResultsReload(context.now)) {
 		history()->session().api().polls().reloadResults(_parent->data());
 	}
 
