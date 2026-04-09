@@ -102,6 +102,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QImage>
 #include <QLinearGradient>
 #include <QPainterPath>
+#include <QRadialGradient>
 
 #include <optional>
 #include <vector>
@@ -129,15 +130,46 @@ using Match = qthelp::RegularExpressionMatch;
 	return result;
 }
 
+[[nodiscard]] QString AstrogramSupportHandle() {
+	return u"@astrogram_support"_q;
+}
+
+[[nodiscard]] QString AstrogramSupportPriceLine() {
+	return RuEn(
+		"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN",
+		"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN");
+}
+
+[[nodiscard]] QString AstrogramSupportSubtitle() {
+	return AstrogramSupportPriceLine()
+		+ u"\n"_q
+		+ RuEn(
+			"Поддержите Astrogram и получите <b>серверный значок подписчика</b>, который видят другие пользователи клиента.",
+			"Support Astrogram and receive a <b>server-side subscriber badge</b> visible to other client users.");
+}
+
+[[nodiscard]] QString AstrogramSupportBadgeNote() {
+	return RuEn(
+		"<b>Серверный значок</b> выдаётся вручную после доната через <b>@astrogram_support</b>. Это не локальная косметика: значок видят другие пользователи Astrogram.",
+		"The <b>server-side badge</b> is activated manually after your donation via <b>@astrogram_support</b>. This is not a local cosmetic tweak: other Astrogram users can see it.");
+}
+
 void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 	const auto cover = container->add(object_ptr<Ui::RpWidget>(container));
 
-	static const auto gradientEdge = QColor(0x05, 0x12, 0x0d);
-	static const auto gradientCenter = QColor(0x08, 0x22, 0x15);
-	static const auto gradientLeft = QColor(0x27, 0xc2, 0x73);
-	static const auto gradientRight = QColor(0x8e, 0xf7, 0xb7);
-	static const auto textColor = QColor(0xc2, 0xf7, 0xd7);
+	static const auto gradientEdge = QColor(0x03, 0x10, 0x0a);
+	static const auto gradientCenter = QColor(0x07, 0x20, 0x14);
+	static const auto gradientLeft = QColor(0x20, 0xd5, 0x81);
+	static const auto gradientRight = QColor(0xb0, 0xff, 0xd3);
+	static const auto textColor = QColor(0xcf, 0xfa, 0xe0);
 	static const auto boldColor = QColor(0xff, 0xff, 0xff);
+	static const auto pillText = QColor(0xf2, 0xff, 0xf7);
+	static const auto pillBg = QColor(0x0e, 0x39, 0x22, 210);
+	static const auto pillBorder = QColor(0x6e, 0xf1, 0xa7, 105);
+	static const auto noteBg = QColor(0x0d, 0x29, 0x1a, 210);
+	static const auto noteBorder = QColor(0x83, 0xf6, 0xb6, 80);
+	static const auto glowInner = QColor(0x77, 0xff, 0xc0, 80);
+	static const auto glowOuter = QColor(0x37, 0xdf, 0x8f, 0);
 
 	const auto logoTop = st::cocoonLogoTop;
 	const auto logoSize = st::cocoonLogoSize;
@@ -168,13 +200,23 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 		QImage logo;
 		Ui::Animations::Basic animation;
 		std::optional<Ui::StarParticles> particles;
+		std::optional<Ui::Premium::ColoredMiniStars> ministars;
 		style::owned_color subtitleFg = style::owned_color{ textColor };
 		style::owned_color subtitleBoldFg = style::owned_color{ boldColor };
+		style::owned_color pillFg = style::owned_color{ pillText };
+		style::owned_color noteFg = style::owned_color{ textColor };
+		style::owned_color noteBoldFg = style::owned_color{ boldColor };
 		style::FlatLabel subtitleSt = st::cocoonSubtitle;
+		style::FlatLabel pillSt = st::cocoonJoinLabel;
+		style::FlatLabel noteSt = st::cocoonSubtitle;
 	};
 	const auto state = cover->lifetime().make_state<State>();
 	state->subtitleSt.textFg = state->subtitleFg.color();
 	state->subtitleSt.palette.linkFg = state->subtitleBoldFg.color();
+	state->pillSt.textFg = state->pillFg.color();
+	state->pillSt.palette.linkFg = state->pillFg.color();
+	state->noteSt.textFg = state->noteFg.color();
+	state->noteSt.palette.linkFg = state->noteBoldFg.color();
 	state->animation.init([=] {
 		cover->update();
 		if (anim::Disabled()) {
@@ -201,14 +243,62 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 		QColor(0x63, 0xe0, 0x9c),
 		QColor(0xad, 0xff, 0xcf),
 	});
+	state->ministars.emplace(
+		cover,
+		false,
+		Ui::Premium::MiniStarsType::SlowStars);
+	state->ministars->setColorOverride(QGradientStops{
+		{ 0., QColor(0x2c, 0xd8, 0x82) },
+		{ 0.55, QColor(0x79, 0xf6, 0xaf) },
+		{ 1., QColor(0xd4, 0xff, 0xe6) },
+	});
 
 	const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		colorizeBold(RuEn(
-			"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nПоддержите клиент и получите серверный значок подписчика Astrogram.",
-			"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nSupport the client and receive an Astrogram server-side subscriber badge.")),
+		colorizeBold(AstrogramSupportSubtitle()),
 		state->subtitleSt);
 	subtitle->setTryMakeSimilarLines(true);
+
+	const auto badgePill = Ui::CreateChild<Ui::FlatLabel>(
+		cover,
+		rpl::single(RuEn("Серверный значок", "Server-side badge")),
+		state->pillSt);
+	badgePill->paintOn([=](QPainter &p) {
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(QPen(pillBorder, 1.));
+		p.setBrush(pillBg);
+		const auto radius = badgePill->height() / 2.;
+		p.drawRoundedRect(badgePill->rect(), radius, radius);
+	});
+
+	const auto contactPill = Ui::CreateChild<Ui::FlatLabel>(
+		cover,
+		rpl::single(AstrogramSupportHandle()),
+		state->pillSt);
+	contactPill->paintOn([=](QPainter &p) {
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(QPen(pillBorder, 1.));
+		p.setBrush(pillBg);
+		const auto radius = contactPill->height() / 2.;
+		p.drawRoundedRect(contactPill->rect(), radius, radius);
+	});
+
+	const auto noteWrap = Ui::CreateChild<Ui::RpWidget>(cover);
+	const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
+		noteWrap,
+		colorizeBold(AstrogramSupportBadgeNote()),
+		state->noteSt);
+	noteLabel->setTryMakeSimilarLines(true);
+	noteWrap->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(noteWrap);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(QPen(noteBorder, 1.));
+		p.setBrush(noteBg);
+		p.drawRoundedRect(
+			noteWrap->rect().adjusted(0, 0, -1, -1),
+			st::buttonRadius,
+			st::buttonRadius);
+	}, noteWrap->lifetime());
 
 	cover->widthValue() | rpl::on_next([=](int width) {
 		const auto available = width
@@ -216,9 +306,55 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 			- st::boxRowPadding.right();
 		subtitle->resizeToWidth(available);
 		subtitle->moveToLeft(st::boxRowPadding.left(), subtitleTop);
+
+		badgePill->resizeToNaturalWidth(available);
+		contactPill->resizeToNaturalWidth(available);
+		const auto pillGap = st::normalFont->spacew * 2;
+		const auto pillTop = subtitle->y()
+			+ subtitle->height()
+			+ st::defaultVerticalListSkip;
+		const auto combinedWidth = badgePill->width()
+			+ pillGap
+			+ contactPill->width();
+		auto pillsBottom = pillTop;
+		if (combinedWidth <= available) {
+			const auto left = st::boxRowPadding.left()
+				+ (available - combinedWidth) / 2;
+			badgePill->moveToLeft(left, pillTop);
+			contactPill->moveToLeft(
+				left + badgePill->width() + pillGap,
+				pillTop);
+			pillsBottom = pillTop
+				+ ((badgePill->height() > contactPill->height())
+					? badgePill->height()
+					: contactPill->height());
+		} else {
+			badgePill->moveToLeft(
+				st::boxRowPadding.left() + (available - badgePill->width()) / 2,
+				pillTop);
+			contactPill->moveToLeft(
+				st::boxRowPadding.left() + (available - contactPill->width()) / 2,
+				pillTop + badgePill->height() + st::normalFont->spacew);
+			pillsBottom = contactPill->y() + contactPill->height();
+		}
+
+		const auto notePadding = QMargins(
+			st::defaultVerticalListSkip,
+			st::defaultVerticalListSkip,
+			st::defaultVerticalListSkip,
+			st::defaultVerticalListSkip);
+		noteLabel->resizeToWidth(
+			available - notePadding.left() - notePadding.right());
+		noteLabel->moveToLeft(notePadding.left(), notePadding.top());
+		noteWrap->resize(
+			available,
+			noteLabel->height() + notePadding.top() + notePadding.bottom());
+		noteWrap->moveToLeft(
+			st::boxRowPadding.left(),
+			pillsBottom + st::defaultVerticalListSkip);
 		cover->resize(
 			width,
-			subtitle->y() + subtitle->height() + st::cocoonSubtitleBottom);
+			noteWrap->y() + noteWrap->height() + st::cocoonSubtitleBottom);
 	}, cover->lifetime());
 
 	cover->paintRequest() | rpl::on_next([=] {
@@ -263,7 +399,27 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 		const auto particlesRect = logoRect.marginsAdded(
 			{ paddingAdd, paddingAdd, paddingAdd, paddingAdd });
 
+		auto hq = PainterHighQualityEnabler(p);
+		auto halo = QRadialGradient(
+			logoRect.center(),
+			logoSize * 0.95);
+		halo.setColorAt(0., glowInner);
+		halo.setColorAt(1., glowOuter);
+		p.setPen(Qt::NoPen);
+		p.setBrush(halo);
+		p.drawEllipse(logoRect.marginsAdded({
+			logoSize / 2,
+			logoSize / 2,
+			logoSize / 2,
+			logoSize / 2,
+		}));
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(QColor(0xc4, 0xff, 0xde, 95), 1.5));
+		p.drawEllipse(logoRect.adjusted(-8, -8, 8, 8));
+
 		state->particles->paint(p, particlesRect, crl::now(), false);
+		state->ministars->setCenter(particlesRect);
+		state->ministars->paint(p);
 		if (!anim::Disabled() && !state->animation.animating()) {
 			state->animation.start();
 		}
@@ -448,31 +604,82 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		const auto features = std::vector<Ui::FeatureListEntry>{
 			{
 				st::menuIconGiftPremium,
-				RuEn("Серверный значок", "Server badge"),
+				RuEn("Серверный значок", "Server-side badge"),
 				TextWithEntities{ RuEn(
-					"После поддержки вы получаете серверный значок подписчика Astrogram, который видят другие пользователи клиента.",
-					"After supporting the project you receive an Astrogram server-side subscriber badge visible to other client users.") },
+					"Это не локальная косметика: значок включается на стороне Astrogram и виден другим пользователям клиента.",
+					"This is not a local cosmetic tweak: the badge is enabled server-side and is visible to other Astrogram users.") },
 			},
 			{
 				st::menuIconUsername,
-				RuEn("Как получить", "How to get it"),
+				RuEn("Кому писать", "Who to contact"),
 				TextWithEntities{ RuEn(
-					"Напишите @astrogram_support, отправьте свой Telegram ID и вам активируют значок.",
-					"Message @astrogram_support, send your Telegram ID and the badge will be activated for you.") },
+					"Напишите @astrogram_support, отправьте свой Telegram ID и после подтверждения доната вам вручную активируют значок.",
+					"Message @astrogram_support, send your Telegram ID, and after the donation is confirmed your badge will be activated manually.") },
+			},
+			{
+				st::menuIconStats,
+				RuEn("Цена", "Price"),
+				TextWithEntities{ RuEn(
+					"50 ₽ • примерно $0.55 • 22 UAH • 265 KZT • 1.80 BYN.",
+					"50 RUB • about $0.55 • 22 UAH • 265 KZT • 1.80 BYN.") },
 			},
 			{
 				st::menuIconInfo,
-				RuEn("Что входит", "What is included"),
+				RuEn("Зачем это нужно", "What your support does"),
 				TextWithEntities{ RuEn(
-					"50 ₽ поддерживают разработку Astrogram и помогают быстрее выпускать новые сборки и функции.",
-					"50 RUB supports Astrogram development and helps ship new builds and features faster.") },
+					"Донат помогает оплачивать разработку Astrogram, инфраструктуру, сборки и выпуск новых функций быстрее.",
+					"Your donation helps pay for Astrogram development, infrastructure, builds, and shipping new features faster.") },
 			},
 		};
 		auto margin = QMargins(0, st::defaultVerticalListSkip, 0, 0);
 		for (const auto &feature : features) {
-			box->addRow(Ui::MakeFeatureListEntry(box, feature), st::boxRowPadding + margin);
+			box->addRow(
+				Ui::MakeFeatureListEntry(box, feature),
+				st::boxRowPadding + margin);
 			margin = {};
 		}
+
+		style::owned_color noteFg = style::owned_color{ QColor(0x12, 0x3f, 0x26) };
+		style::owned_color noteBoldFg = style::owned_color{ QColor(0x06, 0x22, 0x13) };
+		style::FlatLabel noteSt = st::cocoonSubtitle;
+		noteSt.textFg = noteFg.color();
+		noteSt.palette.linkFg = noteBoldFg.color();
+		const auto noteWrap = box->addRow(
+			object_ptr<Ui::RpWidget>(box),
+			style::margins(
+				st::boxRowPadding.left(),
+				st::defaultVerticalListSkip,
+				st::boxRowPadding.right(),
+				0));
+		const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
+			noteWrap,
+			tr::rich(RuEn(
+				"<b>Как это работает:</b> донат оформляется через <b>@astrogram_support</b>, а затем значок подписчика Astrogram выдаётся на сервере вручную.",
+				"<b>How it works:</b> the donation is handled via <b>@astrogram_support</b>, then the Astrogram subscriber badge is issued manually on the server.")),
+			noteSt);
+		noteLabel->setTryMakeSimilarLines(true);
+		noteWrap->paintRequest() | rpl::on_next([=] {
+			auto p = Painter(noteWrap);
+			auto hq = PainterHighQualityEnabler(p);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(0xe0, 0xff, 0xec));
+			p.drawRoundedRect(
+				noteWrap->rect().adjusted(0, 0, -1, -1),
+				st::buttonRadius,
+				st::buttonRadius);
+		}, noteWrap->lifetime());
+		noteWrap->widthValue() | rpl::on_next([=](int width) {
+			const auto padding = QMargins(
+				st::defaultVerticalListSkip,
+				st::defaultVerticalListSkip,
+				st::defaultVerticalListSkip,
+				st::defaultVerticalListSkip);
+			noteLabel->resizeToWidth(width - padding.left() - padding.right());
+			noteLabel->moveToLeft(padding.left(), padding.top());
+			noteWrap->resize(
+				width,
+				noteLabel->height() + padding.top() + padding.bottom());
+		}, noteWrap->lifetime());
 
 		box->addRow(object_ptr<Ui::PlainShadow>(box), st::cocoonJoinSeparatorPadding);
 
@@ -486,7 +693,7 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		button->setText(rpl::single(
 			Ui::Text::IconEmoji(&st::infoStarsUnderstood)
 				.append(' ')
-				.append(RuEn("Написать @astrogram_support", "Message @astrogram_support"))));
+				.append(RuEn("Открыть чат с @astrogram_support", "Open chat with @astrogram_support"))));
 	}));
 }
 
