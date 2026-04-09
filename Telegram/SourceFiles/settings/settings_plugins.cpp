@@ -223,14 +223,47 @@ QString PluginSourceBadgeText(const ::Plugins::PluginState &state) {
 			u"Неподтверждённый источник"_q);
 }
 
+QString KnownAstrogramSourceChannelTitle(int64 channelId) {
+	switch (channelId) {
+	case -1003814280064LL: return u"AstroPlugins"_q;
+	case -1003641835839LL: return u"Astrogram"_q;
+	}
+	return QString();
+}
+
+QString KnownAstrogramSourceChannelUsername(int64 channelId) {
+	switch (channelId) {
+	case -1003814280064LL: return u"astroplugin"_q;
+	case -1003641835839LL: return u"astrogramchannel"_q;
+	}
+	return QString();
+}
+
+QString PluginSourceChannelLabel(int64 channelId) {
+	const auto title = KnownAstrogramSourceChannelTitle(channelId).trimmed();
+	const auto username = KnownAstrogramSourceChannelUsername(channelId).trimmed();
+	if (!title.isEmpty() && !username.isEmpty()) {
+		return title + u" · @"_q + username;
+	}
+	if (!title.isEmpty()) {
+		return title;
+	}
+	if (!username.isEmpty()) {
+		return u"@"_q + username;
+	}
+	return PluginUiText(
+		u"Channel %1"_q,
+		u"Канал %1"_q).arg(QString::number(channelId));
+}
+
 QString PluginSourceOriginText(const ::Plugins::PluginState &state) {
 	if (!state.sourceChannelId || (state.sourceMessageId <= 0)) {
 		return QString();
 	}
 	return PluginUiText(
-		u"Trusted channel %1 · post %2"_q,
-		u"Доверенный канал %1 · пост %2"_q)
-			.arg(QString::number(state.sourceChannelId))
+		u"Source channel: %1 · post %2"_q,
+		u"Канал-источник: %1 · пост %2"_q)
+			.arg(PluginSourceChannelLabel(state.sourceChannelId))
 			.arg(QString::number(state.sourceMessageId));
 }
 
@@ -383,15 +416,16 @@ void AddPluginSourceBadge(
 		style::al_top);
 	const auto text = PluginSourceBadgeText(state);
 	const auto fill = state.sourceVerified
-		? QColor(0x2e, 0xa4, 0xff, 36)
-		: QColor(0xeb, 0x57, 0x57, 30);
+		? QColor(0x2e, 0xa4, 0xff, 44)
+		: QColor(0xeb, 0x57, 0x57, 34);
 	const auto border = state.sourceVerified
 		? QColor(0x5c, 0xba, 0xff)
 		: QColor(0xeb, 0x57, 0x57);
 	const auto fg = state.sourceVerified
-		? QColor(0x37, 0x8e, 0xff)
-		: QColor(0xd8, 0x48, 0x48);
+		? QColor(0x1d, 0x7f, 0xff)
+		: QColor(0xcf, 0x45, 0x45);
 	const auto badgeHeight = st::semiboldFont->height + 12;
+	const auto horizontalPadding = 12;
 	container->widthValue() | rpl::on_next([=](int width) {
 		badge->resize(std::max(0, width), badgeHeight);
 	}, badge->lifetime());
@@ -402,7 +436,7 @@ void AddPluginSourceBadge(
 		p.setFont(st::semiboldFont);
 		const auto pillWidth = std::min(
 			badge->width(),
-			st::semiboldFont->width(text) + 22);
+			st::semiboldFont->width(text) + (horizontalPadding * 2));
 		const auto rect = QRectF(0, 0, pillWidth, badge->height() - 1)
 			.adjusted(0.5, 0.5, -0.5, -0.5);
 		p.setPen(QPen(border, 1.));
@@ -410,8 +444,12 @@ void AddPluginSourceBadge(
 		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
 		p.setPen(fg);
 		p.drawText(
-			QRect(0, 0, pillWidth, badge->height()),
-			Qt::AlignCenter,
+			QRect(
+				horizontalPadding,
+				0,
+				std::max(1, pillWidth - (horizontalPadding * 2)),
+				badge->height()),
+			Qt::AlignLeft | Qt::AlignVCenter,
 			text);
 	}, badge->lifetime());
 

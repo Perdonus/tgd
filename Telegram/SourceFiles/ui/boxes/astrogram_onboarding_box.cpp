@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 
@@ -83,6 +84,183 @@ struct PluginCardTexts {
 	QString description;
 	QString sourceLabel;
 };
+
+enum class OnboardingBadgeTone {
+	Trusted,
+	Official,
+	Pending,
+	Warning,
+};
+
+struct BadgePalette {
+	QColor fill;
+	QColor border;
+	QColor fg;
+};
+
+void AppendInlinePart(QString &base, QString part) {
+	part = part.trimmed();
+	if (part.isEmpty()) {
+		return;
+	}
+	if (!base.isEmpty()) {
+		base += u" \u00b7 "_q;
+	}
+	base += part;
+}
+
+[[nodiscard]] QString AppendLine(QString base, QString line) {
+	base = base.trimmed();
+	line = line.trimmed();
+	if (line.isEmpty()) {
+		return base;
+	}
+	return base.isEmpty() ? line : (base + u"\n"_q + line);
+}
+
+[[nodiscard]] BadgePalette BadgeColors(OnboardingBadgeTone tone) {
+	switch (tone) {
+	case OnboardingBadgeTone::Trusted:
+		return {
+			.fill = QColor(0x2e, 0xa4, 0xff, 44),
+			.border = QColor(0x5c, 0xba, 0xff),
+			.fg = QColor(0x1d, 0x7f, 0xff),
+		};
+	case OnboardingBadgeTone::Official:
+		return {
+			.fill = QColor(0x27, 0xc9, 0x83, 46),
+			.border = QColor(0x46, 0xe0, 0x98),
+			.fg = QColor(0x1e, 0xa8, 0x6b),
+		};
+	case OnboardingBadgeTone::Pending:
+		return {
+			.fill = QColor(0xf2, 0xc9, 0x4c, 42),
+			.border = QColor(0xe6, 0xb8, 0x2f),
+			.fg = QColor(0xb7, 0x82, 0x00),
+		};
+	case OnboardingBadgeTone::Warning:
+		return {
+			.fill = QColor(0xeb, 0x57, 0x57, 34),
+			.border = QColor(0xeb, 0x57, 0x57),
+			.fg = QColor(0xcf, 0x45, 0x45),
+		};
+	}
+	Unexpected("Unknown onboarding badge tone.");
+}
+
+[[nodiscard]] QString AstrogramKnownChannelUsername(qint64 channelId) {
+	switch (channelId) {
+	case -1003814280064LL: return u"astroplugin"_q;
+	case -1003641835839LL: return u"astrogramchannel"_q;
+	}
+	return QString();
+}
+
+[[nodiscard]] QString ChannelHandleText(PeerData *peer, qint64 channelId) {
+	auto username = peer ? peer->username().trimmed() : QString();
+	if (username.isEmpty()) {
+		username = AstrogramKnownChannelUsername(channelId);
+	}
+	return username.isEmpty() ? QString() : (u"@"_q + username);
+}
+
+[[nodiscard]] QString ChannelMetaText(PeerData *peer, qint64 channelId) {
+	auto result = QString();
+	AppendInlinePart(result, ChannelHandleText(peer, channelId));
+	if (channelId) {
+		AppendInlinePart(
+			result,
+			RuEn("ID %1", "ID %1").arg(QString::number(channelId)));
+	}
+	return result;
+}
+
+[[nodiscard]] QString ChannelCardBadgeText(
+		PeerData *peer,
+		bool official) {
+	if (!peer) {
+		return RuEn(
+			"Карточка канала загружается",
+			"Channel card is loading");
+	}
+	return official
+		? RuEn(
+			"Официальный канал Astrogram",
+			"Official Astrogram channel")
+		: RuEn(
+			"Подтверждённый канал Astrogram",
+			"Trusted Astrogram channel");
+}
+
+[[nodiscard]] OnboardingBadgeTone ChannelCardBadgeTone(
+		PeerData *peer,
+		bool official) {
+	if (!peer) {
+		return OnboardingBadgeTone::Pending;
+	}
+	return official
+		? OnboardingBadgeTone::Official
+		: OnboardingBadgeTone::Trusted;
+}
+
+[[nodiscard]] QString ChannelCardDetailText(
+		PeerData *peer,
+		qint64 channelId,
+		bool official) {
+	auto result = ChannelMetaText(peer, channelId);
+	result = AppendLine(
+		result,
+		official
+			? RuEn(
+				"Название, аватар и аудитория подгружаются прямо из канала, поэтому карточка остаётся актуальной.",
+				"The title, avatar and audience are fetched from the channel itself, so the card stays current.")
+			: RuEn(
+				"Эта карточка живёт от server-driven app config: название, аватар и подписчики подставляются прямо из доверенного канала.",
+				"This card is driven by server app config: the title, avatar and audience come directly from the trusted channel."));
+	return result;
+}
+
+[[nodiscard]] QString PluginSourceBadgeText(
+		const AstrogramOnboardingPlugin &plugin) {
+	if (plugin.invalidServerData) {
+		return RuEn(
+			"Неподтверждённый источник",
+			"Unverified source");
+	} else if (plugin.pendingServerData) {
+		return RuEn(
+			"Карточка загружается с сервера",
+			"Server card is loading");
+	}
+	return RuEn(
+		"Подтверждённый источник",
+		"Verified source");
+}
+
+[[nodiscard]] OnboardingBadgeTone PluginSourceBadgeTone(
+		const AstrogramOnboardingPlugin &plugin) {
+	if (plugin.invalidServerData) {
+		return OnboardingBadgeTone::Warning;
+	} else if (plugin.pendingServerData) {
+		return OnboardingBadgeTone::Pending;
+	}
+	return OnboardingBadgeTone::Trusted;
+}
+
+[[nodiscard]] QString PluginSourceBadgeDetailText(
+		const AstrogramOnboardingPlugin &plugin) {
+	if (plugin.invalidServerData) {
+		return RuEn(
+			"Сервер отдал пост, но в этой карточке пока нет корректного .tgd-пакета. Обнови рекомендации или поправь пост-источник.",
+			"The server returned a post, but this card still has no valid .tgd package. Refresh the recommendations or fix the source post.");
+	} else if (plugin.pendingServerData) {
+		return RuEn(
+			"Server app config уже передал post id. Сейчас подтягиваем сам пост, описание и .tgd-пакет без перезапуска клиента.",
+			"Server app config already provided the post id. The post, description and .tgd package are being fetched right now without restarting the client.");
+	}
+	return RuEn(
+		"Эта рекомендация приходит из доверенного Astrogram-канала, а название и описание читаются прямо из живой карточки поста.",
+		"This recommendation comes from a trusted Astrogram channel, and its title and description are taken straight from the live post card.");
+}
 
 [[nodiscard]] bool IsAstrogramPluginPackage(DocumentData *document) {
 	if (!document) {
@@ -400,6 +578,60 @@ not_null<Ui::SettingsButton*> AddChoiceButton(
 			style::al_top);
 	}
 	return button;
+}
+
+not_null<Ui::RpWidget*> AddBadgePill(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text,
+		OnboardingBadgeTone tone,
+		style::margins margins = style::margins(26, 4, 26, 0)) {
+	const auto badge = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		margins,
+		style::al_top);
+	const auto palette = BadgeColors(tone);
+	const auto badgeHeight = st::semiboldFont->height + 12;
+	const auto horizontalPadding = 12;
+	container->widthValue() | rpl::on_next([=](int width) {
+		badge->resize(std::max(0, width), badgeHeight);
+	}, badge->lifetime());
+	badge->resize(std::max(0, container->width()), badgeHeight);
+	badge->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(badge);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setFont(st::semiboldFont);
+		const auto pillWidth = std::min(
+			badge->width(),
+			st::semiboldFont->width(text) + (horizontalPadding * 2));
+		const auto rect = QRectF(0, 0, pillWidth, badge->height() - 1)
+			.adjusted(0.5, 0.5, -0.5, -0.5);
+		p.setPen(QPen(palette.border, 1.));
+		p.setBrush(palette.fill);
+		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
+		p.setPen(palette.fg);
+		p.drawText(
+			QRect(
+				horizontalPadding,
+				0,
+				std::max(1, pillWidth - (horizontalPadding * 2)),
+				badge->height()),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			text);
+	}, badge->lifetime());
+	return badge;
+}
+
+not_null<Ui::FlatLabel*> AddSecondaryNote(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text,
+		style::margins margins = style::margins(26, -2, 26, 4)) {
+	return container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(text),
+			st::defaultFlatLabel),
+		margins,
+		style::al_top);
 }
 
 not_null<Ui::AbstractButton*> AddPeerChoiceButton(
@@ -746,6 +978,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.subscribePluginsChannel();
 						}
 					});
+				AddBadgePill(
+					container,
+					ChannelCardBadgeText(state->pluginsChannelPeer, false),
+					ChannelCardBadgeTone(state->pluginsChannelPeer, false));
+				AddSecondaryNote(
+					container,
+					ChannelCardDetailText(
+						state->pluginsChannelPeer,
+						args.pluginsChannelId,
+						false));
 				AddPrimaryButton(container, RuEn("Подписаться", "Follow"), [=] {
 					if (args.subscribePluginsChannel) {
 						args.subscribePluginsChannel();
@@ -831,14 +1073,18 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 									action();
 								}
 							});
+						AddBadgePill(
+							container,
+							PluginSourceBadgeText(plugin),
+							PluginSourceBadgeTone(plugin));
+						AddSecondaryNote(
+							container,
+							PluginSourceBadgeDetailText(plugin));
 						if (!sourceText.isEmpty()) {
-							container->add(
-								object_ptr<Ui::FlatLabel>(
-									container,
-									rpl::single(sourceText),
-									st::defaultFlatLabel),
-								style::margins(26, -2, 26, 4),
-								style::al_top);
+							AddSecondaryNote(
+								container,
+								sourceText,
+								style::margins(26, -2, 26, 2));
 						}
 						AddPrimaryButton(
 							container,
@@ -894,6 +1140,21 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					&st::menuIconExperimental,
 					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Wide); });
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+				Ui::AddSubsectionTitle(
+					container,
+					rpl::single(RuEn(
+						"Настроить меню вручную",
+						"Configure the menu manually")));
+				AddSecondaryNote(
+					container,
+					RuEn(
+						"Если стартового пресета мало, открой полный editor прямо из гайда. Он сразу переведёт в Experimental и откроет живую настройку бокового меню и shell-режимов.",
+						"If the starter preset is not enough, open the full editor directly from the guide. It jumps to Experimental and opens the live side-menu and shell tuning surface."),
+					style::margins(
+						st::boxRowPadding.left(),
+						0,
+						st::boxRowPadding.right(),
+						6));
 				AddPrimaryButton(container, RuEn("Открыть полный editor", "Open full editor"), openExperimental);
 				AddLinkAction(container, RuEn("Выбрать позже", "Choose later"), [=] {
 					state->step = Step::Finish;
@@ -928,6 +1189,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.openOfficialChannel();
 						}
 					});
+				AddBadgePill(
+					container,
+					ChannelCardBadgeText(state->officialChannelPeer, true),
+					ChannelCardBadgeTone(state->officialChannelPeer, true));
+				AddSecondaryNote(
+					container,
+					ChannelCardDetailText(
+						state->officialChannelPeer,
+						args.officialChannelId,
+						true));
 				AddChoiceButton(
 					container,
 					RuEn(
