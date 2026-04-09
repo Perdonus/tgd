@@ -597,12 +597,18 @@ Fn<void(Action, Details)> DefaultCallback(
 			send(action.options);
 			return;
 		}
+		const auto scheduleTime = (action.options.scheduled
+			&& (action.options.scheduled
+				!= Api::kScheduledUntilOnlineTimestamp))
+			? action.options.scheduled
+			: HistoryView::DefaultScheduleTime();
 		auto box = HistoryView::PrepareScheduleBox(
 			guard,
 			show,
 			details,
 			send,
-			action.options);
+			action.options,
+			scheduleTime);
 		const auto weak = base::make_weak(box.data());
 		show->showBox(std::move(box));
 		if (const auto strong = weak.get()) {
@@ -738,7 +744,9 @@ FillMenuResult FillSendMenu(
 		? *iconsOverride
 		: st::defaultComposeIcons;
 
-	if (sending && type != Type::Reminder) {
+	if (sending
+		&& type != Type::Reminder
+		&& type != Type::EditScheduled) {
 		menu->addAction(
 			tr::lng_send_silent_message(tr::now),
 			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
@@ -855,6 +863,7 @@ void SetupMenuAndShortcuts(
 			return;
 		}
 		((now != Type::Reminder)
+			&& (now != Type::EditScheduled)
 			&& request->check(Command::SendSilentMessage)
 			&& request->handle([=] {
 				action({ Api::SendOptions{ .silent = true } }, details());

@@ -130,6 +130,30 @@ constexpr auto kPublicPostLinkToastDuration = 4 * crl::time(1000);
 		: QString::fromUtf8(en);
 }
 
+[[nodiscard]] QString ForwardWithoutAuthorText() {
+	return AstrogramUiText(
+		"Forward without author",
+		"Переслать без автора");
+}
+
+[[nodiscard]] Data::ForwardDraft ForwardWithoutAuthorDraft(
+		MessageIdsList ids) {
+	return Data::ForwardDraft{
+		.ids = std::move(ids),
+		.options = Data::ForwardOptions::NoSenderNames,
+	};
+}
+
+void ShowForwardWithoutAuthorBox(
+		not_null<Window::SessionNavigation*> navigation,
+		MessageIdsList ids,
+		Fn<void()> &&successCallback = nullptr) {
+	Window::ShowForwardMessagesBox(
+		navigation,
+		ForwardWithoutAuthorDraft(std::move(ids)),
+		std::move(successCallback));
+}
+
 [[nodiscard]] QString FormatRevisionTime(int timestamp) {
 	const auto dt = QDateTime::fromSecsSinceEpoch(timestamp).toLocalTime();
 	return AstrogramRussianUi()
@@ -493,14 +517,11 @@ bool AddForwardSelectedAction(
 			ExtractIdsList(request.selectedItems),
 			callback);
 	}, &st::menuIconForward);
-	menu->addAction(AstrogramUiText("Forward without quote", "Переслать без цитаты"), [=] {
+	menu->addAction(ForwardWithoutAuthorText(), [=] {
 		const auto weak = base::make_weak(list);
-		Window::ShowForwardMessagesBox(
+		ShowForwardWithoutAuthorBox(
 			request.navigation,
-			Data::ForwardDraft{
-				.ids = ExtractIdsList(request.selectedItems),
-				.options = Data::ForwardOptions::NoNamesAndCaptions,
-			},
+			ExtractIdsList(request.selectedItems),
 			[=] {
 				if (const auto strong = weak.get()) {
 					strong->cancelSelection();
@@ -563,16 +584,13 @@ bool AddForwardMessageAction(
 					: MessageIdsList{ 1, itemId }));
 		}
 	}, &st::menuIconForward);
-	menu->addAction(AstrogramUiText("Forward without quote", "Переслать без цитаты"), [=] {
+	menu->addAction(ForwardWithoutAuthorText(), [=] {
 		if (const auto item = owner->message(itemId)) {
-			Window::ShowForwardMessagesBox(
+			ShowForwardWithoutAuthorBox(
 				request.navigation,
-				Data::ForwardDraft{
-					.ids = (asGroup
-						? owner->itemOrItsGroup(item)
-						: MessageIdsList{ 1, itemId }),
-					.options = Data::ForwardOptions::NoNamesAndCaptions,
-				});
+				(asGroup
+					? owner->itemOrItsGroup(item)
+					: MessageIdsList{ 1, itemId }));
 		}
 	}, &st::menuIconForward);
 	menu->addAction(AstrogramUiText("Forward to Saved Messages", "Переслать в Избранное"), [=] {
@@ -1753,10 +1771,15 @@ void AddPollActions(
 		&& (context != Context::ScheduledTopic)) {
 		return;
 	}
+	const auto itemId = item->fullId();
+	if (!poll->quiz() || poll->closed() || poll->voted()) {
+		menu->addAction(tr::lng_polls_view_results(tr::now), [=] {
+			controller->showPollResults(poll, itemId);
+		});
+	}
 	if (poll->closed()) {
 		return;
 	}
-	const auto itemId = item->fullId();
 	if (poll->voted() && !poll->quiz()) {
 		menu->addAction(tr::lng_polls_retract(tr::now), [=] {
 			poll->session().api().polls().sendVotes(itemId, {});

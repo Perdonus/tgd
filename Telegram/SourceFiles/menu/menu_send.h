@@ -36,6 +36,7 @@ enum class Type : uchar {
 	Scheduled,
 	ScheduledToUser, // For "Send when online".
 	Reminder,
+	EditScheduled,
 	EditCommentPrice,
 };
 

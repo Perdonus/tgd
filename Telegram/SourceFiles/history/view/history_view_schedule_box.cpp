@@ -161,7 +161,8 @@ void ScheduleBox(
 	}
 
 	using namespace SendMenu;
-	const auto childType = (details.type == Type::Disabled)
+	const auto childType = ((details.type == Type::Disabled)
+		|| (details.type == Type::EditScheduled))
 		? Type::Disabled
 		: Type::SilentOnly;
 	const auto childDetails = Details{

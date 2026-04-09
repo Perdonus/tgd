@@ -877,6 +877,7 @@ MessageToEdit FieldHeader::queryToEdit() {
 		.fullId = item->fullId(),
 		.options = {
 			.scheduled = item->isScheduled() ? item->date() : 0,
+			.scheduleRepeatPeriod = item->scheduleRepeatPeriod(),
 			.shortcutId = item->shortcutId(),
 			.invertCaption = _mediaEditManager.invertCaption(),
 			.suggest = suggestOptions(),
@@ -886,9 +887,12 @@ MessageToEdit FieldHeader::queryToEdit() {
 }
 
 SendMenu::Details FieldHeader::saveMenuDetails(bool hasSendText) const {
-	return isEditingMessage()
-		? _mediaEditManager.sendMenuDetails(hasSendText)
-		: SendMenu::Details();
+	if (!isEditingMessage()) {
+		return {};
+	}
+	auto result = _mediaEditManager.sendMenuDetails(hasSendText);
+	result.type = SendMenu::Type::EditScheduled;
+	return result;
 }
 
 struct ComposeControls::StarEffect {
@@ -1783,9 +1787,19 @@ rpl::producer<MessageToEdit> ComposeControls::editRequests() const {
 	auto filter = rpl::filter([=] {
 		return _send->type() == Ui::SendButton::Type::Save;
 	});
+	auto customFilter = rpl::filter([=](const Api::SendOptions &) {
+		return _send->type() == Ui::SendButton::Type::Save;
+	});
+	auto customToValue = rpl::map([=](const Api::SendOptions &options) {
+		auto result = _header->queryToEdit();
+		result.options.scheduled = options.scheduled;
+		result.options.scheduleRepeatPeriod = options.scheduleRepeatPeriod;
+		return result;
+	});
 	return rpl::merge(
 		_send->clicks() | filter | toValue,
-		_field->submits() | filter | toValue);
+		_field->submits() | filter | toValue,
+		_sendCustomRequests.events() | customFilter | customToValue);
 }
 
 rpl::producer<std::optional<bool>> ComposeControls::attachRequests() const {

@@ -386,9 +386,7 @@ void ScheduledWidget::setupComposeControls() {
 		if (const auto item = session().data().message(data.fullId)) {
 			if (item->isScheduled()) {
 				const auto spoiler = data.spoilered;
-				auto &options = data.options;
-				options.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
-				edit(item, options, saveEditMsgRequestId, spoiler);
+				edit(item, data.options, saveEditMsgRequestId, spoiler);
 			}
 		}
 	}, lifetime());

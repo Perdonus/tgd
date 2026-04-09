@@ -4536,6 +4536,10 @@ void HistoryWidget::saveEditMessage(Api::SendOptions options) {
 		cancelEdit();
 		return;
 	}
+	if (item->isScheduled() && !options.scheduled) {
+		options.scheduled = item->date();
+		options.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
+	}
 	const auto webPageDraft = _preview->draft();
 	const auto sending = prepareTextForEditMsg();
 
@@ -4753,7 +4757,7 @@ void HistoryWidget::send(Api::SendOptions options) {
 	if (!_history) {
 		return;
 	} else if (_editMsgId) {
-		saveEditMessage({});
+		saveEditMessage(options);
 		return;
 	} else if (!options.scheduled && showSlowmodeError()) {
 		return;
@@ -4830,19 +4834,38 @@ void HistoryWidget::sendScheduled(Api::SendOptions initialOptions) {
 	if (!_list) {
 		return;
 	}
-	const auto ignoreSlowmodeCountdown = true;
-	if (showSendMessageError(
-			_field->getTextWithAppliedMarkdown(),
-			ignoreSlowmodeCountdown)) {
-		return;
+	if (_editMsgId) {
+		if (const auto item = session().data().message(_history->peer, _editMsgId)) {
+			if (item->isScheduled()) {
+				if (!initialOptions.scheduled) {
+					initialOptions.scheduled = item->date();
+				}
+				if (!initialOptions.scheduleRepeatPeriod) {
+					initialOptions.scheduleRepeatPeriod = item->scheduleRepeatPeriod();
+				}
+			}
+		}
 	}
+	if (!_editMsgId) {
+		const auto ignoreSlowmodeCountdown = true;
+		if (showSendMessageError(
+				_field->getTextWithAppliedMarkdown(),
+				ignoreSlowmodeCountdown)) {
+			return;
+		}
+	}
+	const auto scheduleTime = (initialOptions.scheduled
+		&& (initialOptions.scheduled != Api::kScheduledUntilOnlineTimestamp))
+		? initialOptions.scheduled
+		: HistoryView::DefaultScheduleTime();
 	controller()->show(
 		HistoryView::PrepareScheduleBox(
 			_list,
 			controller()->uiShow(),
-			sendButtonDefaultDetails(),
+			sendButtonMenuDetails(),
 			[=](Api::SendOptions options) { send(options); },
-			initialOptions));
+			initialOptions,
+			scheduleTime));
 }
 
 SendMenu::Details HistoryWidget::sendMenuDetails() const {
@@ -4860,9 +4883,12 @@ SendMenu::Details HistoryWidget::sendMenuDetails() const {
 }
 
 SendMenu::Details HistoryWidget::saveMenuDetails() const {
-	return (_editMsgId && _replyEditMsg)
-		? _mediaEditManager.sendMenuDetails(HasSendText(_field))
-		: SendMenu::Details();
+	if (!_editMsgId || !_replyEditMsg) {
+		return {};
+	}
+	auto result = _mediaEditManager.sendMenuDetails(HasSendText(_field));
+	result.type = SendMenu::Type::EditScheduled;
+	return result;
 }
 
 auto HistoryWidget::computeSendButtonType() const {

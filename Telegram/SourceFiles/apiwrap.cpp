@@ -3551,8 +3551,15 @@ void ApiWrap::forwardMessages(
 	auto ids = QVector<MTPint>();
 	auto randomIds = QVector<MTPlong>();
 	auto localIds = std::shared_ptr<base::flat_map<uint64, FullMsgId>>();
+	const auto batchLimit = [&] {
+		const auto limit = _session->serverConfig().forwardedCountMax;
+		return (limit > 0) ? limit : 100;
+	}();
 
 	const auto sendAccumulated = [&] {
+		if (ids.isEmpty()) {
+			return;
+		}
 		if (shared) {
 			++shared->requestsLeft;
 		}
@@ -3661,6 +3668,9 @@ void ApiWrap::forwardMessages(
 		}
 		ids.push_back(MTP_int(item->id));
 		randomIds.push_back(MTP_long(randomId));
+		if (ids.size() >= batchLimit) {
+			sendAccumulated();
+		}
 	}
 	sendAccumulated();
 	_session->data().sendHistoryChangeNotifications();
