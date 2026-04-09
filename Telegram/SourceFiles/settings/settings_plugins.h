@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "settings/settings_common_session.h"
 
+#include <rpl/lifetime.h>
+
 namespace Window {
 class SessionController;
 } // namespace Window
@@ -39,6 +41,7 @@ private:
 	not_null<Ui::VerticalLayout*> _list;
 	bool _rebuildScheduled = false;
 	bool _listRefreshPending = true;
+	rpl::lifetime _stateChangesLifetime;
 };
 
 class PluginsDocumentation : public Section<PluginsDocumentation> {

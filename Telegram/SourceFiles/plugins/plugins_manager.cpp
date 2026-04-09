@@ -1579,6 +1579,10 @@ std::vector<PluginState> Manager::plugins() const {
 	return result;
 }
 
+rpl::producer<ManagerStateChange> Manager::stateChanges() const {
+	return _stateChanges.events();
+}
+
 bool Manager::safeModeEnabled() const {
 	if (CommandLineSafeModeRequested()) {
 		return true;
@@ -1643,6 +1647,7 @@ bool Manager::setRuntimeApiEnabled(bool enabled) {
 			{ u"enabled"_q, enabled },
 			{ u"port"_q, _runtimeApiPort },
 		});
+	notifyStateChanged(u"runtime-api"_q, QString(), false, false);
 	return true;
 }
 
@@ -2821,10 +2826,10 @@ bool Manager::triggerAction(ActionId id) {
 			});
 		return false;
 	}
+	const auto previousPluginId = _registeringPluginId;
 	try {
 		if (it->handlerWithContext) {
 			startRecoveryOperation(u"action"_q, { it->pluginId }, it->title);
-			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = it->pluginId;
 			auto context = ActionContext();
 			context.window = activeWindow();
@@ -2860,11 +2865,11 @@ bool Manager::triggerAction(ActionId id) {
 					{ u"title"_q, it->title },
 				});
 			finishRecoveryOperation();
+			notifyStateChanged(u"action"_q, it->pluginId, false, false);
 			return true;
 		}
 		if (it->handler) {
 			startRecoveryOperation(u"action"_q, { it->pluginId }, it->title);
-			const auto previousPluginId = _registeringPluginId;
 			_registeringPluginId = it->pluginId;
 			logEvent(
 				u"action"_q,
@@ -2887,10 +2892,11 @@ bool Manager::triggerAction(ActionId id) {
 					{ u"title"_q, it->title },
 				});
 			finishRecoveryOperation();
+			notifyStateChanged(u"action"_q, it->pluginId, false, false);
 			return true;
 		}
 	} catch (...) {
-		_registeringPluginId.clear();
+		_registeringPluginId = previousPluginId;
 		logEvent(
 			u"action"_q,
 			u"failed"_q,
@@ -2945,9 +2951,9 @@ bool Manager::openPanel(PanelId id) {
 			});
 		return false;
 	}
+	const auto previousPluginId = _registeringPluginId;
 	try {
 		startRecoveryOperation(u"panel"_q, { it->pluginId }, it->descriptor.title);
-		const auto previousPluginId = _registeringPluginId;
 		_registeringPluginId = it->pluginId;
 		logEvent(
 			u"panel"_q,
@@ -2970,9 +2976,10 @@ bool Manager::openPanel(PanelId id) {
 				{ u"title"_q, it->descriptor.title },
 			});
 		finishRecoveryOperation();
+		notifyStateChanged(u"panel"_q, it->pluginId, false, false);
 		return true;
 	} catch (...) {
-		_registeringPluginId.clear();
+		_registeringPluginId = previousPluginId;
 		logEvent(
 			u"panel"_q,
 			u"failed"_q,
@@ -3057,12 +3064,12 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 	const auto snapshot = *target;
 	rememberSettingValue(it->pluginId, snapshot);
 	saveConfig();
+	const auto previousPluginId = _registeringPluginId;
 	try {
 		startRecoveryOperation(
 			u"settings"_q,
 			{ it->pluginId },
 			snapshot.title.isEmpty() ? snapshot.id : snapshot.title);
-		const auto previousPluginId = _registeringPluginId;
 		_registeringPluginId = it->pluginId;
 		logEvent(
 			u"settings"_q,
@@ -3085,12 +3092,13 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 				{ u"settingId"_q, snapshot.id },
 			});
 		finishRecoveryOperation();
+		notifyStateChanged(u"settings"_q, it->pluginId, false, false);
 		return true;
 	} catch (...) {
 		*target = previous;
 		rememberSettingValue(it->pluginId, previous);
 		saveConfig();
-		_registeringPluginId.clear();
+		_registeringPluginId = previousPluginId;
 		logEvent(
 			u"settings"_q,
 			u"failed"_q,
@@ -4372,6 +4380,42 @@ void Manager::logEvent(
 	}
 }
 
+void Manager::notifyStateChanged(
+		QString reason,
+		QString pluginId,
+		bool structural,
+		bool failed) {
+	auto enabledCount = 0;
+	auto loadedCount = 0;
+	auto errorCount = 0;
+	for (const auto &plugin : _plugins) {
+		enabledCount += plugin.state.enabled ? 1 : 0;
+		loadedCount += plugin.state.loaded ? 1 : 0;
+		errorCount += plugin.state.error.trimmed().isEmpty() ? 0 : 1;
+	}
+	auto change = ManagerStateChange();
+	change.sequence = _nextStateChangeSequence++;
+	change.reason = std::move(reason);
+	change.pluginId = pluginId.trimmed();
+	change.structural = structural;
+	change.failed = failed;
+	logEvent(
+		u"ui"_q,
+		u"state-change"_q,
+		QJsonObject{
+			{ u"sequence"_q, QString::number(change.sequence) },
+			{ u"reason"_q, change.reason },
+			{ u"pluginId"_q, change.pluginId },
+			{ u"structural"_q, structural },
+			{ u"failed"_q, failed },
+			{ u"plugins"_q, int(_plugins.size()) },
+			{ u"enabled"_q, enabledCount },
+			{ u"loaded"_q, loadedCount },
+			{ u"errors"_q, errorCount },
+		});
+	_stateChanges.fire_copy(change);
+}
+
 void Manager::logOperationStart(
 		const QString &kind,
 		const QStringList &pluginIds,
@@ -4882,6 +4926,11 @@ void Manager::scanPlugins(bool metadataOnly) {
 			{ u"metadataOnly"_q, metadataOnly },
 			{ u"loadedPlugins"_q, int(_plugins.size()) },
 		});
+	notifyStateChanged(
+		metadataOnly ? u"scan-metadata-only"_q : u"scan"_q,
+		QString(),
+		true,
+		false);
 }
 
 void Manager::loadPluginMetadataOnly(const QString &path) {
@@ -5603,6 +5652,11 @@ void Manager::disablePlugin(
 			{ u"pluginId"_q, pluginId },
 			{ u"stateAfter"_q, pluginStateToJson(record->state) },
 		});
+	notifyStateChanged(
+		disabledByRecovery ? u"plugin-disabled-recovery"_q : u"plugin-disabled"_q,
+		pluginId,
+		true,
+		!clientReason.isEmpty());
 }
 
 void Manager::updateMessageObserverSubscriptions() {

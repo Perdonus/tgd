@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QStringList>
 #include <QtCore/QVector>
 
+#include <rpl/event_stream.h>
 #include <rpl/lifetime.h>
 
 #include <memory>
@@ -107,6 +108,14 @@ struct TraceOperationState {
 	QDateTime startedAt;
 };
 
+struct ManagerStateChange {
+	quint64 sequence = 0;
+	QString reason;
+	QString pluginId;
+	bool structural = false;
+	bool failed = false;
+};
+
 class Manager final : public QObject, public Host {
 public:
 	explicit Manager(QObject *parent = nullptr);
@@ -116,6 +125,7 @@ public:
 	void reload();
 
 	std::vector<PluginState> plugins() const;
+	[[nodiscard]] rpl::producer<ManagerStateChange> stateChanges() const;
 	bool safeModeEnabled() const;
 	bool setSafeModeEnabled(bool enabled);
 	bool runtimeApiEnabled() const;
@@ -312,6 +322,11 @@ private:
 		QString phase,
 		QString event,
 		QJsonObject details = {}) const;
+	void notifyStateChanged(
+		QString reason,
+		QString pluginId = QString(),
+		bool structural = false,
+		bool failed = false);
 	void logLoadFailure(const QString &path, const QString &reason) const;
 	void logOperationStart(
 		const QString &kind,
@@ -432,6 +447,8 @@ private:
 	bool _recoveryNoticeShown = false;
 	QVector<TraceOperationState> _traceOperations;
 	quint64 _nextTraceOperationId = 1;
+	rpl::event_stream<ManagerStateChange> _stateChanges;
+	quint64 _nextStateChangeSequence = 1;
 
 	QHash<QString, CommandId> _commandIdByName;
 	QHash<CommandId, CommandEntry> _commands;

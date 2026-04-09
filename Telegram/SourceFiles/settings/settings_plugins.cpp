@@ -1775,6 +1775,29 @@ public:
 	, _pluginId(std::move(pluginId))
 	, _type(std::move(type))
 	, _content(Ui::CreateChild<Ui::VerticalLayout>(this)) {
+		Core::App().plugins().stateChanges() | rpl::on_next([=](
+				const ::Plugins::ManagerStateChange &change) {
+			const auto normalizedChangePluginId = change.pluginId.trimmed();
+			if (!change.structural && normalizedChangePluginId != _pluginId) {
+				return;
+			}
+			Logs::writeClient(QString::fromLatin1(
+				"[plugins-ui] details refresh requested: plugin=%1 seq=%2 reason=%3 sourcePlugin=%4 structural=%5 failed=%6")
+				.arg(_pluginId)
+				.arg(change.sequence)
+				.arg(change.reason)
+				.arg(normalizedChangePluginId.isEmpty() ? u"-"_q : normalizedChangePluginId)
+				.arg(change.structural ? u"true"_q : u"false"_q)
+				.arg(change.failed ? u"true"_q : u"false"_q));
+			if (_rebuildScheduled) {
+				return;
+			}
+			_rebuildScheduled = true;
+			QTimer::singleShot(0, this, [=] {
+				_rebuildScheduled = false;
+				rebuild();
+			});
+		}, _stateChangesLifetime);
 		rebuild();
 	}
 
@@ -1807,9 +1830,7 @@ private:
 		_title = FormatPluginTitle(*state);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
 		const auto refreshDetails = [=] {
-			QTimer::singleShot(0, _content, [=] {
-				stateChanged();
-			});
+			stateChanged();
 		};
 
 		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
@@ -1856,6 +1877,14 @@ private:
 				_controller,
 				u"./tdata/plugins.log"_q,
 				PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
+		});
+		AddSettingsActionButton(_content, PluginUiText(
+			u"Open plugins.trace.jsonl"_q,
+			u"Открыть plugins.trace.jsonl"_q), [=] {
+			RevealPluginAuxFile(
+				_controller,
+				u"./tdata/plugins.trace.jsonl"_q,
+				PluginUiText(u"plugins.trace.jsonl was not found."_q, u"Файл plugins.trace.jsonl не найден."_q));
 		});
 		if (state->recoverySuspected || state->disabledByRecovery) {
 			AddSettingsActionButton(_content, PluginUiText(
@@ -1960,6 +1989,8 @@ private:
 	const Type _type;
 	not_null<Ui::VerticalLayout*> _content;
 	QString _title;
+	rpl::lifetime _stateChangesLifetime;
+	bool _rebuildScheduled = false;
 };
 
 struct PluginDetailsFactory final
@@ -2006,6 +2037,18 @@ Plugins::Plugins(
 , _controller(controller)
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
 , _list(_content->add(object_ptr<Ui::VerticalLayout>(_content))) {
+	Core::App().plugins().stateChanges() | rpl::on_next([=](
+			const ::Plugins::ManagerStateChange &change) {
+		Logs::writeClient(QString::fromLatin1(
+			"[plugins-ui] manager change observed: seq=%1 reason=%2 plugin=%3 structural=%4 failed=%5")
+			.arg(change.sequence)
+			.arg(change.reason)
+			.arg(change.pluginId.trimmed().isEmpty() ? u"-"_q : change.pluginId.trimmed())
+			.arg(change.structural ? u"true"_q : u"false"_q)
+			.arg(change.failed ? u"true"_q : u"false"_q));
+		_listRefreshPending = true;
+		scheduleRebuildList(0);
+	}, _stateChangesLifetime);
 	setupContent();
 }
 
