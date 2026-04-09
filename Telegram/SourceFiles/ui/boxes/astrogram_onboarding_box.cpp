@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "settings/settings_common.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/effects/ministar_particles.h"
 #include "ui/layers/generic_box.h"
@@ -267,12 +269,14 @@ not_null<Ui::SettingsButton*> AddChoiceButton(
 		const QString &description,
 		const style::icon *icon,
 		std::function<void()> callback) {
+	auto descriptor = Settings::IconDescriptor();
+	descriptor.icon = icon;
 	const auto button = container->add(
-		object_ptr<Ui::SettingsButton>(
+		Settings::CreateButtonWithIcon(
 			container,
 			rpl::single(title),
 			st::settingsButtonLight,
-			IconDescriptor{ icon }),
+			std::move(descriptor)),
 		style::margins(12, 0, 12, 0));
 	button->setClickedCallback(std::move(callback));
 	if (!description.isEmpty()) {
@@ -342,7 +346,7 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 				| Data::PeerUpdate::Flag::Photo
 				| Data::PeerUpdate::Flag::Members
 				| Data::PeerUpdate::Flag::FullInfo
-		) | rpl::start_with_next([=](const Data::PeerUpdate &) {
+		) | rpl::on_next([=](const Data::PeerUpdate &) {
 			refresh();
 		}, row->lifetime());
 		if (const auto channel = peer->asChannel();
@@ -412,7 +416,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			box->closeBox();
 		};
 
-		const auto rebuild = [=]() mutable {
+		const auto rebuild = std::make_shared<Fn<void()>>();
+		*rebuild = [=]() mutable {
 			ClearLayout(container);
 
 			const auto addTitle = [&](const QString &title, const QString &subtitle) {
@@ -447,7 +452,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip);
 				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
 					state->step = Step::Presets;
-					rebuild();
+					(*rebuild)();
 				});
 			} break;
 			case Step::Presets: {
@@ -469,7 +474,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.applyPreset(AstrogramOnboardingPreset::Recommended);
 						}
 						state->step = Step::PluginsInfo;
-						rebuild();
+						(*rebuild)();
 					});
 				AddChoiceButton(
 					container,
@@ -483,7 +488,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.applyPreset(AstrogramOnboardingPreset::Private);
 						}
 						state->step = Step::PluginsInfo;
-						rebuild();
+						(*rebuild)();
 					});
 				AddChoiceButton(
 					container,
@@ -497,12 +502,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.applyPreset(AstrogramOnboardingPreset::Minimal);
 						}
 						state->step = Step::PluginsInfo;
-						rebuild();
+						(*rebuild)();
 					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddLinkAction(container, RuEn("Выбрать позже", "Choose later"), [=] {
 					state->step = Step::PluginsInfo;
-					rebuild();
+					(*rebuild)();
 				});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip);
 			} break;
@@ -522,16 +527,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					&st::menuIconCustomize,
 					[=] {
 						state->step = Step::PluginsInstall;
-						rebuild();
+						(*rebuild)();
 					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
 					state->step = Step::PluginsInstall;
-					rebuild();
+					(*rebuild)();
 				});
 				AddLinkAction(container, RuEn("Позже", "Later"), [=] {
 					state->step = Step::Finish;
-					rebuild();
+					(*rebuild)();
 				});
 			} break;
 				case Step::PluginsInstall: {
@@ -604,7 +609,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
 					state->step = Step::Finish;
-					rebuild();
+					(*rebuild)();
 				});
 				AddLinkAction(container, RuEn("Посмотреть все", "View all"), [=] {
 					if (args.openAllPlugins) {
@@ -667,7 +672,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					}
 					state->pluginsChannelPeer = peer;
 					if (weak.get() && (state->step == Step::PluginsInstall)) {
-						rebuild();
+						(*rebuild)();
 					}
 				});
 			}
@@ -678,12 +683,13 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					}
 					state->officialChannelPeer = peer;
 					if (weak.get() && (state->step == Step::Finish)) {
-						rebuild();
+						(*rebuild)();
 					}
 				});
 			}
-			rebuild();
-		}));
+		};
+		(*rebuild)();
+	}));
 	}
 
 } // namespace Ui

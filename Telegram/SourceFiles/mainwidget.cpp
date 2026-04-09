@@ -247,6 +247,41 @@ void PrimeAstrogramChannel(
 	controller->session().api().requestFullPeer(channel);
 }
 
+void ResolveAstrogramChannelByBareId(
+		not_null<Window::SessionController*> controller,
+		ChannelId bareId,
+		Fn<void(not_null<ChannelData*>)> done) {
+	if (!bareId) {
+		return;
+	}
+	if (const auto loaded = controller->session().data().channelLoaded(bareId)) {
+		done(loaded);
+		return;
+	}
+	const auto weak = base::make_weak(controller);
+	const auto sharedDone = std::make_shared<Fn<void(not_null<ChannelData*>)>>(
+		std::move(done));
+	controller->session().api().request(MTPchannels_GetChannels(
+		MTP_vector<MTPInputChannel>(
+			1,
+			MTP_inputChannel(MTP_long(bareId.bare), MTP_long(0)))
+	)).done([=](const MTPmessages_Chats &result) {
+		const auto controller = weak.get();
+		if (!controller) {
+			return;
+		}
+		result.match([&](const auto &data) {
+			const auto peer = controller->session().data().processChats(
+				data.vchats());
+			if (peer && (peer->id == peerFromChannel(bareId))) {
+				if (const auto channel = peer->asChannel()) {
+					(*sharedDone)(channel);
+				}
+			}
+		});
+	}).send();
+}
+
 void ResolveAstrogramChannel(
 		not_null<Window::SessionController*> controller,
 		int64 channelId,
@@ -265,7 +300,10 @@ void ResolveAstrogramChannel(
 	const auto username = AstrogramChannelUsername(channelId).trimmed();
 	if (username.isEmpty()) {
 		if (bareId) {
-			controller->resolveChannelById(bareId, std::move(done));
+			ResolveAstrogramChannelByBareId(
+				controller,
+				bareId,
+				std::move(done));
 		}
 		return;
 	}
@@ -302,12 +340,18 @@ void ResolveAstrogramChannel(
 		});
 		if (!resolved) {
 			if (bareId) {
-				controller->resolveChannelById(bareId, *sharedDone);
+				ResolveAstrogramChannelByBareId(
+					controller,
+					bareId,
+					*sharedDone);
 			}
 		}
 	}).fail([=](const MTP::Error &) {
 		if (const auto controller = weak.get(); controller && bareId) {
-			controller->resolveChannelById(bareId, *sharedDone);
+			ResolveAstrogramChannelByBareId(
+				controller,
+				bareId,
+				*sharedDone);
 		}
 	}).send();
 }
