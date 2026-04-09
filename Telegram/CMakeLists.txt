@@ -1563,6 +1563,8 @@ PRIVATE
     settings/settings_credits_graphics.h
     settings/settings_experimental.cpp
     settings/settings_experimental.h
+    settings/settings_menu_customization_editor.cpp
+    settings/settings_menu_customization_editor.h
     settings/settings_astrogram.cpp
     settings/settings_astrogram.h
     settings/settings_folders.cpp
