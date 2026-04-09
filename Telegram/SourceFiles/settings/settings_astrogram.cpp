@@ -145,9 +145,13 @@ constexpr auto kSecretChannelClickWindowMs = 1500;
 	if (installed) {
 		return RuEn("Установлена", "Installed");
 	} else if (archiveReady) {
-		return RuEn("Архив готов к установке", "Archive ready to install");
+		return RuEn(
+			"Архив скачан, нажмите для установки",
+			"Archive ready, tap to install");
 	}
-	return RuEn("Не скачана", "Not downloaded");
+	return RuEn(
+		"Нажмите значок загрузки справа",
+		"Tap the download icon on the right");
 }
 
 [[nodiscard]] QString SpeechModelStatusDownloading(float64 progress) {
@@ -561,6 +565,9 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		for (const auto &spec : specs) {
 			addModel(spec);
 		}
+		Logs::writeClient(QString::fromLatin1(
+			"[speech-models] open local speech box: %1 models dir=%2")
+			.arg(QString::number(models.size()), QDir::toNativeSeparators(modelsDir)));
 
 		const auto isInstalled = [modelsDir](const std::shared_ptr<ModelRowState> &state) {
 			const auto dir = QDir(modelsDir).filePath(state->folderName);
@@ -651,7 +658,20 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				p.setFont(st::defaultFlatLabel.style.font->f);
 				p.drawText(QRect(14, 28, rect.width() - 90, 16), Qt::AlignLeft | Qt::AlignVCenter, state->status);
 				if (!state->installed && !state->downloading && !state->extracting && !hasArchive(state)) {
-					st::menuIconDownload.paint(p, rect.width() - 14 - st::menuIconDownload.width(), (rect.height() - st::menuIconDownload.height()) / 2, rect.width(), st::windowSubTextFg->c);
+					const auto actionSize = 28;
+					const auto actionRect = QRect(
+						rect.width() - 14 - actionSize,
+						(rect.height() - actionSize) / 2,
+						actionSize,
+						actionSize);
+					p.setBrush(QColor(0x21, 0xc7, 0x6a, 26));
+					p.drawEllipse(actionRect.adjusted(0, 0, -1, -1));
+					st::menuIconDownload.paint(
+						p,
+						actionRect.x() + (actionSize - st::menuIconDownload.width()) / 2,
+						actionRect.y() + (actionSize - st::menuIconDownload.height()) / 2,
+						rect.width(),
+						QColor(0x21, 0xc7, 0x6a));
 				} else if (state->installed) {
 					p.setPen(QColor(0x21, 0xc7, 0x6a));
 					p.setFont(st::semiboldFont->f);
@@ -725,6 +745,9 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 						"[speech-models] extract finished: %1")
 						.arg(state->folderName));
 					updateRowState(state);
+					controller->showToast(RuEn(
+						"Модель установлена: %1",
+						"Installed model: %1").arg(state->label));
 					return;
 				};
 				if (hasArchive(state)) {
@@ -1267,7 +1290,7 @@ void SetupAstrogramInterface(
 	AddActionButtonWithLabel(
 		speechCard,
 		RuEn("Локальное распознавание речи", "Local speech recognition"),
-		RuEn("Все модели и загрузки", "All models & downloads"),
+		RuEn("Все языки и загрузки", "All languages & downloads"),
 		[=] {
 			ShowSpeechModelDownloadBox(controller);
 		},

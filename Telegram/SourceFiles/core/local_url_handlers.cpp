@@ -130,31 +130,85 @@ using Match = qthelp::RegularExpressionMatch;
 	return result;
 }
 
-[[nodiscard]] QString AstrogramSupportHandle() {
-	return u"@astrogram_support"_q;
+[[nodiscard]] QString AstrogramSupportConfigValue(
+		not_null<Main::Session*> session,
+		const QString &key,
+		const QString &fallback) {
+	const auto value = session->appConfig().get<QString>(key, QString()).trimmed();
+	return value.isEmpty() ? fallback : value;
 }
 
-[[nodiscard]] QString AstrogramSupportPriceLine() {
+[[nodiscard]] QString AstrogramSupportUsername(not_null<Main::Session*> session) {
+	auto username = AstrogramSupportConfigValue(
+		session,
+		u"astrogram_support_username"_q,
+		u"astrogram_support"_q);
+	if (username.startsWith('@')) {
+		username.remove(0, 1);
+	}
+	return username.isEmpty() ? u"astrogram_support"_q : username;
+}
+
+[[nodiscard]] QString AstrogramSupportHandle(not_null<Main::Session*> session) {
+	return u"@"_q + AstrogramSupportUsername(session);
+}
+
+[[nodiscard]] QString AstrogramSupportPriceLine(not_null<Main::Session*> session) {
 	return RuEn(
-		"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN",
-		"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN");
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_line_ru"_q,
+			u"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN"_q),
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_line_en"_q,
+			u"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN"_q));
 }
 
-[[nodiscard]] QString AstrogramSupportSubtitle() {
-	return AstrogramSupportPriceLine()
+[[nodiscard]] QString AstrogramSupportPriceFeatureLine(not_null<Main::Session*> session) {
+	return RuEn(
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_feature_ru"_q,
+			u"50 ₽ • примерно $0.55 • 22 UAH • 265 KZT • 1.80 BYN"_q),
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_feature_en"_q,
+			u"50 RUB • about $0.55 • 22 UAH • 265 KZT • 1.80 BYN"_q));
+}
+
+[[nodiscard]] QString AstrogramSupportPriceNote(not_null<Main::Session*> session) {
+	return RuEn(
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_note_ru"_q,
+			u"Курсы валют ориентировочные и могут меняться."_q),
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_note_en"_q,
+			u"Currency conversions are approximate and may change."_q));
+}
+
+[[nodiscard]] QString AstrogramSupportSubtitle(not_null<Main::Session*> session) {
+	return AstrogramSupportPriceLine(session)
 		+ u"\n"_q
 		+ RuEn(
 			"Поддержите Astrogram и получите <b>серверный значок подписчика</b>, который видят другие пользователи клиента.",
 			"Support Astrogram and receive a <b>server-side subscriber badge</b> visible to other client users.");
 }
 
-[[nodiscard]] QString AstrogramSupportBadgeNote() {
+[[nodiscard]] QString AstrogramSupportBadgeNote(not_null<Main::Session*> session) {
+	const auto handle = AstrogramSupportHandle(session);
 	return RuEn(
-		"<b>Серверный значок</b> выдаётся вручную после доната через <b>@astrogram_support</b>. Это не локальная косметика: значок видят другие пользователи Astrogram.",
-		"The <b>server-side badge</b> is activated manually after your donation via <b>@astrogram_support</b>. This is not a local cosmetic tweak: other Astrogram users can see it.");
+		QString(
+			u"<b>Серверный значок</b> выдаётся вручную после доната через <b>%1</b>. Это не локальная косметика: значок видят другие пользователи Astrogram."_q).arg(handle),
+		QString(
+			u"The <b>server-side badge</b> is activated manually after your donation via <b>%1</b>. This is not a local cosmetic tweak: other Astrogram users can see it."_q).arg(handle));
 }
 
-void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
+void AddAstrogramSupportCover(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Main::Session*> session) {
 	const auto cover = container->add(object_ptr<Ui::RpWidget>(container));
 
 	static const auto gradientEdge = QColor(0x03, 0x10, 0x0a);
@@ -255,7 +309,7 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 
 	const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		colorizeBold(AstrogramSupportSubtitle()),
+		colorizeBold(AstrogramSupportSubtitle(session)),
 		state->subtitleSt);
 	subtitle->setTryMakeSimilarLines(true);
 
@@ -273,7 +327,7 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 
 	const auto contactPill = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		rpl::single(AstrogramSupportHandle()),
+		rpl::single(AstrogramSupportHandle(session)),
 		state->pillSt);
 	contactPill->paintOn([=](QPainter &p) {
 		auto hq = PainterHighQualityEnabler(p);
@@ -286,7 +340,7 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 	const auto noteWrap = Ui::CreateChild<Ui::RpWidget>(cover);
 	const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
 		noteWrap,
-		colorizeBold(AstrogramSupportBadgeNote()),
+		colorizeBold(AstrogramSupportBadgeNote(session)),
 		state->noteSt);
 	noteLabel->setTryMakeSimilarLines(true);
 	noteWrap->paintRequest() | rpl::on_next([=] {
@@ -594,12 +648,15 @@ void SavePersonalChannel(
 void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 	Logs::writeClient(u"[support] open astrogram support box"_q);
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto session = &controller->session();
+		const auto supportHandle = AstrogramSupportHandle(session);
+		const auto supportUsername = AstrogramSupportUsername(session);
 		box->setWidth(st::boxWideWidth);
 		box->setStyle(st::stakeBox);
 		box->setNoContentMargin(true);
 
 		const auto container = box->verticalLayout();
-		AddAstrogramSupportCover(container);
+		AddAstrogramSupportCover(container, session);
 		Ui::AddUniqueCloseButton(box);
 		const auto features = std::vector<Ui::FeatureListEntry>{
 			{
@@ -613,15 +670,17 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 				st::menuIconUsername,
 				RuEn("Кому писать", "Who to contact"),
 				TextWithEntities{ RuEn(
-					"Напишите @astrogram_support, отправьте свой Telegram ID и после подтверждения доната вам вручную активируют значок.",
-					"Message @astrogram_support, send your Telegram ID, and after the donation is confirmed your badge will be activated manually.") },
+					QString(
+						u"Напишите %1, отправьте свой Telegram ID и после подтверждения доната вам вручную активируют значок."_q).arg(supportHandle),
+					QString(
+						u"Message %1, send your Telegram ID, and after the donation is confirmed your badge will be activated manually."_q).arg(supportHandle)) },
 			},
 			{
 				st::menuIconStats,
 				RuEn("Цена", "Price"),
-				TextWithEntities{ RuEn(
-					"50 ₽ • примерно $0.55 • 22 UAH • 265 KZT • 1.80 BYN.",
-					"50 RUB • about $0.55 • 22 UAH • 265 KZT • 1.80 BYN.") },
+				TextWithEntities{ AstrogramSupportPriceFeatureLine(session)
+					+ u"\n"_q
+					+ AstrogramSupportPriceNote(session) },
 			},
 			{
 				st::menuIconInfo,
@@ -654,8 +713,10 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
 			noteWrap,
 			tr::rich(RuEn(
-				"<b>Как это работает:</b> донат оформляется через <b>@astrogram_support</b>, а затем значок подписчика Astrogram выдаётся на сервере вручную.",
-				"<b>How it works:</b> the donation is handled via <b>@astrogram_support</b>, then the Astrogram subscriber badge is issued manually on the server.")),
+				QString(
+					u"<b>Как это работает:</b> донат оформляется через <b>%1</b>, а затем значок подписчика Astrogram выдаётся на сервере вручную."_q).arg(supportHandle),
+				QString(
+					u"<b>How it works:</b> the donation is handled via <b>%1</b>, then the Astrogram subscriber badge is issued manually on the server."_q).arg(supportHandle))),
 			noteSt);
 		noteLabel->setTryMakeSimilarLines(true);
 		noteWrap->paintRequest() | rpl::on_next([=] {
@@ -684,16 +745,20 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		box->addRow(object_ptr<Ui::PlainShadow>(box), st::cocoonJoinSeparatorPadding);
 
 		auto button = box->addButton(rpl::single(QString()), [=] {
-			Logs::writeClient(u"[support] open @astrogram_support from support box"_q);
+			Logs::writeClient(QString::fromLatin1(
+				"[support] open %1 from support box")
+				.arg(supportUsername));
 			controller->showPeerByLink(Window::PeerByLinkInfo{
-				.usernameOrId = QStringLiteral("astrogram_support"),
+				.usernameOrId = supportUsername,
 			});
 			box->closeBox();
 		});
 		button->setText(rpl::single(
 			Ui::Text::IconEmoji(&st::infoStarsUnderstood)
 				.append(' ')
-				.append(RuEn("Открыть чат с @astrogram_support", "Open chat with @astrogram_support"))));
+				.append(RuEn(
+					QString(u"Открыть чат с %1"_q).arg(supportHandle),
+					QString(u"Open chat with %1"_q).arg(supportHandle)))));
 	}));
 }
 
