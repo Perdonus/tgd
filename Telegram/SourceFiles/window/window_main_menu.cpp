@@ -355,7 +355,7 @@ MainMenu::MainMenu(
 	object_ptr<Ui::PlainShadow>(_inner.get()))))
 , _menu(_inner->add(
 	object_ptr<Ui::VerticalLayout>(_inner.get()),
-	{ 0, st::mainMenuSkip, 0, 0 }))
+	{ 0, st::mainMenuSkip / 2, 0, 0 }))
 , _footer(_inner->add(object_ptr<Ui::RpWidget>(_inner.get())))
 , _telegram(
 	Ui::CreateChild<Ui::FlatLabel>(_footer.get(), st::mainMenuTelegramLabel))
@@ -684,13 +684,7 @@ void MainMenu::setupUserpicButton() {
 }
 
 void MainMenu::toggleAccounts() {
-	const auto shown = !_accounts->toggled();
-	_accounts->toggle(shown, anim::type::normal);
-	_toggleAccounts->setToggled(shown);
-	if (Core::App().settings().mainMenuAccountsShown() != shown) {
-		Core::App().settings().setMainMenuAccountsShown(shown);
-		Core::App().saveSettingsDelayed();
-	}
+	syncAccountsVisibility(!_accounts->toggled(), true);
 }
 
 void MainMenu::setupAccounts() {
@@ -706,15 +700,14 @@ void MainMenu::setupAccounts() {
 		closeLayer();
 	}, inner->lifetime());
 
-	_accounts->toggleOn(Core::App().settings().mainMenuAccountsShownValue());
-	_accounts->finishAnimating();
+	Core::App().settings().mainMenuAccountsShownValue(
+	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
+		syncAccountsVisibility(shown, _showFinished.current());
+	}, inner->lifetime());
+
 	_accounts->shownValue(
 	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
 		_toggleAccounts->setToggled(shown);
-		if (Core::App().settings().mainMenuAccountsShown() != shown) {
-			Core::App().settings().setMainMenuAccountsShown(shown);
-			Core::App().saveSettingsDelayed();
-		}
 	}, inner->lifetime());
 
 	_shadow->setDuration(0)->toggleOn(_accounts->shownValue());
@@ -743,15 +736,20 @@ void MainMenu::parentResized() {
 
 void MainMenu::showFinished() {
 	_showFinished = true;
-	if (Core::App().settings().mainMenuAccountsShown()
-		&& !_accounts->toggled()) {
-		_accounts->toggle(true, anim::type::instant);
-		_toggleAccounts->setToggled(true);
-	}
+	syncAccountsVisibility(
+		Core::App().settings().mainMenuAccountsShown(),
+		false);
 	if (!_immersiveGeometryDriven) {
 		_immersiveFallbackShift = std::min(width() / 6, 44);
 		applyImmersiveShift();
 	}
+}
+
+void MainMenu::syncAccountsVisibility(bool shown, bool animated) {
+	_accounts->toggle(
+		shown,
+		animated ? anim::type::normal : anim::type::instant);
+	_toggleAccounts->setToggled(shown);
 }
 
 void MainMenu::setupMenu() {

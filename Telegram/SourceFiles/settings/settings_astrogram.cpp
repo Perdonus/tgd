@@ -793,6 +793,23 @@ void AddSectionGroup(
 	Ui::AddSkip(card, st::settingsCheckboxesSkip / 2);
 }
 
+[[nodiscard]] not_null<Ui::VerticalLayout*> AddSettingsCard(
+		not_null<Ui::VerticalLayout*> container,
+		int topMargin = 8) {
+	auto card = container->add(
+		object_ptr<Ui::VerticalLayout>(container),
+		style::margins(6, topMargin, 6, 0),
+		style::al_top);
+	card->resizeToWidth(container->width());
+	Ui::AddDivider(card);
+	Ui::AddSkip(card, st::settingsCheckboxesSkip / 2);
+	return card;
+}
+
+void FinishSettingsCard(not_null<Ui::VerticalLayout*> card) {
+	Ui::AddSkip(card, st::settingsCheckboxesSkip / 2);
+}
+
 void SetupAstrogramHome(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
@@ -835,16 +852,24 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Основные возможности", "Core features"));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
-	AddSectionGroupTitle(container, RuEn("Аккаунт и Premium", "Account & Premium"));
+	AddSectionGroupTitle(container, RuEn("Аккаунт и возможности", "Account & features"));
+	const auto accountCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		accountCard,
 		settings.localPremiumValue(),
 		RuEn("Локальный премиум", "Local Premium"),
 		[&](bool toggled) { settings.setLocalPremium(toggled); });
 	AddToggle(
-		container,
+		accountCard,
+		settings.disableAdsValue(),
+		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
+		[&](bool toggled) { settings.setDisableAds(toggled); });
+	FinishSettingsCard(accountCard);
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Пересылка и ограничения", "Forwarding & limits"));
+	const auto forwardingCard = AddSettingsCard(container);
+	AddToggle(
+		forwardingCard,
 		settings.unlockForwardSelectionLimitValue(),
 		RuEn(
 			"Снять лимит 100 сообщений при пересылке",
@@ -852,18 +877,16 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 		[&](bool toggled) {
 			settings.setUnlockForwardSelectionLimit(toggled);
 		});
-	AddToggle(
-		container,
-		settings.disableAdsValue(),
-		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
-		[&](bool toggled) { settings.setDisableAds(toggled); });
+	FinishSettingsCard(forwardingCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Боковое меню", "Side menu"));
+	const auto sideMenuCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		sideMenuCard,
 		settings.mainMenuAccountsShownValue(),
 		RuEn("Показывать аккаунты в боковом меню", "Show accounts in side menu"),
 		[&](bool toggled) { settings.setMainMenuAccountsShown(toggled); });
+	FinishSettingsCard(sideMenuCard);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
@@ -873,56 +896,66 @@ void SetupAstrogramPrivacy(
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Приватность и следы", "Privacy & traces"));
+	AddSectionGroupTitle(container, RuEn("Режим призрака", "Ghost mode"));
+	const auto ghostCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		ghostCard,
 		settings.ghostModeValue(),
 		RuEn("Режим призрака", "Ghost mode"),
 		[&](bool toggled) { settings.setGhostMode(toggled); });
 	AddToggle(
-		container,
+		ghostCard,
 		settings.ghostHideReadMessagesValue(),
 		RuEn("Не читать сообщения", "Don't read messages"),
 		[&](bool toggled) { settings.setGhostHideReadMessages(toggled); });
 	AddToggle(
-		container,
+		ghostCard,
 		settings.ghostHideOnlineStatusValue(),
 		RuEn("Не отправлять статус «в сети»", "Don't send online packets"),
 		[&](bool toggled) { settings.setGhostHideOnlineStatus(toggled); });
 	AddToggle(
-		container,
+		ghostCard,
 		settings.ghostHideTypingProgressValue(),
 		RuEn("Не отправлять набор текста и ход загрузки", "Don't send typing/upload progress"),
 		[&](bool toggled) { settings.setGhostHideTypingProgress(toggled); });
+	FinishSettingsCard(ghostCard);
 	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Удаление и правки", "Deleted & edited messages"));
+	AddSectionGroupTitle(container, RuEn("История и защита", "History & protection"));
+	const auto historyCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		historyCard,
 		settings.saveDeletedMessagesValue(),
 		RuEn("Сохранять удалённые сообщения", "Keep deleted messages"),
 		[&](bool toggled) { settings.setSaveDeletedMessages(toggled); });
 	AddToggle(
-		container,
+		historyCard,
 		settings.saveMessagesHistoryValue(),
 		RuEn("Сохранять историю правок", "Keep edit history"),
 		[&](bool toggled) { settings.setSaveMessagesHistory(toggled); });
 	AddToggle(
-		container,
+		historyCard,
 		settings.semiTransparentDeletedMessagesValue(),
 		RuEn("Полупрозрачные удалённые сообщения", "Semi-transparent deleted messages"),
 		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
+	FinishSettingsCard(historyCard);
+	Ui::AddSkip(container);
+	AddSectionGroupTitle(container, RuEn("Отметки изменений и удаления", "Edited & deleted tags"));
+	const auto tagsCard = AddSettingsCard(container);
+	AddSectionGroupTitle(
+		tagsCard,
+		RuEn("Изменённое сообщение", "Edited message"));
 	AddToggle(
-		container,
+		tagsCard,
 		settings.editedMarkShowTextValue(),
 		RuEn("Показывать текст у отметки изменения", "Show text on edited tag"),
 		[&](bool toggled) { settings.setEditedMarkShowText(toggled); });
 	AddToggle(
-		container,
+		tagsCard,
 		settings.editedMarkShowIconValue(),
 		RuEn("Показывать значок у отметки изменения", "Show icon on edited tag"),
 		[&](bool toggled) { settings.setEditedMarkShowIcon(toggled); });
 	AddButtonWithLabel(
-		container,
+		tagsCard,
 		rpl::single(RuEn("Текст отметки изменения", "Edited tag text")),
 		settings.editedMarkTextValue() | rpl::map([](const QString &value) {
 			return value.trimmed().isEmpty()
@@ -943,18 +976,22 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
+	Ui::AddSkip(tagsCard);
+	AddSectionGroupTitle(
+		tagsCard,
+		RuEn("Удалённое сообщение", "Deleted message"));
 	AddToggle(
-		container,
+		tagsCard,
 		settings.deletedMarkShowTextValue(),
 		RuEn("Показывать текст у отметки удаления", "Show text on deleted tag"),
 		[&](bool toggled) { settings.setDeletedMarkShowText(toggled); });
 	AddToggle(
-		container,
+		tagsCard,
 		settings.deletedMarkShowIconValue(),
 		RuEn("Показывать значок у отметки удаления", "Show icon on deleted tag"),
 		[&](bool toggled) { settings.setDeletedMarkShowIcon(toggled); });
 	AddButtonWithLabel(
-		container,
+		tagsCard,
 		rpl::single(RuEn("Текст отметки удаления", "Deleted tag text")),
 		settings.deletedMarkTextValue() | rpl::map([](const QString &value) {
 			return value.trimmed().isEmpty()
@@ -975,6 +1012,7 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
+	FinishSettingsCard(tagsCard);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
@@ -984,48 +1022,49 @@ void SetupAstrogramInterface(
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Интерфейс и поведение", "Interface & behavior"));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 	AddSectionGroupTitle(container, RuEn("Окно и навигация", "Window & navigation"));
+	const auto windowCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		windowCard,
 		settings.adaptiveForWideValue(),
 		RuEn("Адаптивный широкий макет", "Adaptive wide layout"),
 		[&](bool toggled) { settings.setAdaptiveForWide(toggled); });
 	AddToggle(
-		container,
+		windowCard,
 		settings.systemDarkModeEnabledValue(),
 		RuEn("Автоматическая тёмная тема по системе", "Auto dark mode from system"),
 		[&](bool toggled) { settings.setSystemDarkModeEnabled(toggled); });
 	AddToggle(
-		container,
+		windowCard,
 		settings.disableStoriesValue(),
 		RuEn("Скрыть истории", "Hide stories"),
 		[&](bool toggled) { settings.setDisableStories(toggled); });
 	AddToggle(
-		container,
+		windowCard,
 		settings.disableOpenLinkWarningValue(),
 		RuEn("Не спрашивать перед открытием ссылок", "Skip link warning"),
 		[&](bool toggled) { settings.setDisableOpenLinkWarning(toggled); });
 	AddToggle(
-		container,
+		windowCard,
 		settings.showMessageSecondsValue(),
 		RuEn("Показывать секунды во времени", "Show message seconds"),
 		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
+	FinishSettingsCard(windowCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Перевод и речь", "Translation & speech"));
+	const auto speechCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		speechCard,
 		rpl::single(settings.translateButtonEnabled()),
 		RuEn("Показывать кнопку перевода", "Show translate button"),
 		[&](bool toggled) { settings.setTranslateButtonEnabled(toggled); });
 	AddToggle(
-		container,
+		speechCard,
 		settings.translateChatEnabledValue(),
 		RuEn("Переводить чат целиком", "Translate whole chat"),
 		[&](bool toggled) { settings.setTranslateChatEnabled(toggled); });
 	AddButtonWithLabel(
-		container,
+		speechCard,
 		rpl::single(RuEn("Провайдер перевода", "Translation provider")),
 		settings.translateProviderValue() | rpl::map([](Core::TranslateProvider provider) {
 			return TranslateProviderLabel(provider);
@@ -1048,55 +1087,58 @@ void SetupAstrogramInterface(
 		Core::App().saveSettings();
 	});
 	AddActionButtonWithLabel(
-		container,
+		speechCard,
 		RuEn("Локальное распознавание речи", "Local speech recognition"),
-		RuEn("Скачать модель", "Download model"),
+		RuEn("Все модели и загрузки", "All models & downloads"),
 		[=] {
 			ShowSpeechModelDownloadBox(controller);
 		},
 		{ &st::menuIconDownload });
+	FinishSettingsCard(speechCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Текст и ввод", "Text & input"));
+	const auto inputCard = AddSettingsCard(container);
 	AddToggle(
-		container,
+		inputCard,
 		settings.localOnlyDraftsValue(),
 		RuEn("Локальные черновики (без облака)", "Local drafts only (no cloud sync)"),
 		[&](bool toggled) { settings.setLocalOnlyDrafts(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.collapseSimilarChannelsValue(),
 		RuEn("Сворачивать похожие каналы", "Collapse similar channels"),
 		[&](bool toggled) { settings.setCollapseSimilarChannels(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.hideSimilarChannelsValue(),
 		RuEn("Скрыть похожие каналы", "Hide similar channels"),
 		[&](bool toggled) { settings.setHideSimilarChannels(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.largeEmojiValue(),
 		RuEn("Крупные эмодзи", "Large emoji"),
 		[&](bool toggled) { settings.setLargeEmoji(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.replaceEmojiValue(),
 		RuEn("Автозамена эмодзи", "Auto replace emoji"),
 		[&](bool toggled) { settings.setReplaceEmoji(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.cornerReactionValue(),
 		RuEn("Быстрая реакция в углу", "Corner quick reaction"),
 		[&](bool toggled) { settings.setCornerReaction(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.spellcheckerEnabledValue(),
 		RuEn("Проверка орфографии", "Spell checker"),
 		[&](bool toggled) { settings.setSpellcheckerEnabled(toggled); });
 	AddToggle(
-		container,
+		inputCard,
 		settings.autoDownloadDictionariesValue(),
 		RuEn("Автозагрузка словарей", "Auto download dictionaries"),
 		[&](bool toggled) { settings.setAutoDownloadDictionaries(toggled); });
+	FinishSettingsCard(inputCard);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 
@@ -1105,26 +1147,28 @@ void SetupAstrogramAntiRecall(not_null<Ui::VerticalLayout*> container) {
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddSectionGroupTitle(container, RuEn("Журнал защиты от удаления", "Anti-recall log"));
+	const auto card = AddSettingsCard(container);
 	AddToggle(
-		container,
+		card,
 		settings.saveDeletedMessagesValue(),
 		RuEn("Сохранять удалённые сообщения", "Keep deleted messages"),
 		[&](bool toggled) { settings.setSaveDeletedMessages(toggled); });
 	AddToggle(
-		container,
+		card,
 		settings.saveMessagesHistoryValue(),
 		RuEn("Сохранять историю правок", "Keep edit history"),
 		[&](bool toggled) { settings.setSaveMessagesHistory(toggled); });
 	AddToggle(
-		container,
+		card,
 		settings.semiTransparentDeletedMessagesValue(),
 		RuEn("Полупрозрачные удалённые сообщения", "Semi-transparent deleted messages"),
 		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
 	AddActionButton(
-		container,
+		card,
 		RuEn("Показать журнал", "Show local log"),
 		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); },
 		{ &st::menuIconShowInFolder });
+	FinishSettingsCard(card);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
 

@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "history/view/history_view_quick_action.h"
+#include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "export/export_manager.h"
@@ -87,6 +88,24 @@ namespace {
 
 const auto kSchemesList = Window::Theme::EmbeddedThemes();
 constexpr auto kCustomColorButtonParts = 7;
+
+[[nodiscard]] bool IsRussianUi() {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return IsRussianUi()
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+void AddPageGroupDivider(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text) {
+	Ui::AddSkip(container);
+	Ui::AddDividerText(container, rpl::single(text));
+	Ui::AddSkip(container, st::settingsSendTypeSkip / 2);
+}
 
 class ColorsPalette final {
 public:
@@ -2046,10 +2065,17 @@ void Chat::setupContent(not_null<Window::SessionController*> controller) {
 	SetupThemeSettings(controller, content);
 	SetupCloudThemes(controller, content);
 	SetupChatBackground(controller, content);
+
+	AddPageGroupDivider(
+		content,
+		RuEn("Сообщения и поведение", "Messages & behavior"));
+	SetupMessages(controller, content);
 	SetupChatListQuickAction(controller, content);
 	SetupStickersEmoji(controller, content);
-	SetupMessages(controller, content);
-	Ui::AddDivider(content);
+
+	AddPageGroupDivider(
+		content,
+		RuEn("Приватность и инструменты", "Privacy & tools"));
 	SetupSensitiveContent(controller, content, std::move(updateOnTick));
 	SetupArchive(controller, content, showOtherMethod());
 

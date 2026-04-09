@@ -80,6 +80,7 @@ private:
 	void updateInnerControlsGeometry();
 	void initResetScaleButton();
 	void refreshShellModePreferences();
+	void syncAccountsVisibility(bool shown, bool animated);
 	[[nodiscard]] int desiredMenuWidth() const;
 	[[nodiscard]] int visibleMenuWidthForImmersive() const;
 	void applyImmersiveShift();
