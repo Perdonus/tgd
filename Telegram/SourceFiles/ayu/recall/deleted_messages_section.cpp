@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 
 namespace AyuRecall {
@@ -60,6 +61,10 @@ constexpr auto kBubbleMinWidth = 120;
 constexpr auto kBubbleWidthFactor = 0.72;
 constexpr auto kClusterGapSeconds = 15 * 60;
 constexpr auto kIntroCardPadding = QMargins(18, 14, 18, 14);
+constexpr auto kBubbleHeaderSkip = 5;
+constexpr auto kChipHorizontalPadding = 10;
+constexpr auto kChipVerticalPadding = 4;
+constexpr auto kChipSpacing = 6;
 
 struct DeletedMessagesSectionState {
 	int scrollTop = -1;
@@ -124,12 +129,6 @@ struct DeletedMessageVisualGroup {
 	return UiText(
 		"Only the locally saved copy is available.",
 		"Доступна только локально сохранённая копия.");
-}
-
-[[nodiscard]] QString NearestCopyHint() {
-	return UiText(
-		"Opened the nearest available place in chat. The deleted message itself is only saved locally.",
-		"Открыто ближайшее доступное место в чате. Само удалённое сообщение сохранено только локально.");
 }
 
 [[nodiscard]] QString DeletedMessagePlaceholder() {
@@ -200,6 +199,88 @@ struct DeletedMessageVisualGroup {
 		: UiText(
 			"Only locally saved deleted messages from this chat are shown here. Tap a bubble to open its place in the real chat.",
 			"Здесь показаны только локально сохранённые удалённые сообщения из этого чата. Нажмите на пузырь, чтобы открыть это место в реальном чате.");
+}
+
+[[nodiscard]] QString ScopeTypeLabel(not_null<Data::Thread*> thread) {
+	const auto peer = thread->peer();
+	if (thread->asTopic()) {
+		return UiText("Topic", "Тема");
+	} else if (peer->isSelf()) {
+		return UiText("Saved Messages", "Избранное");
+	} else if (peer->isUser()) {
+		return UiText("Private chat", "Личный чат");
+	} else if (peer->isForum()) {
+		return UiText("Forum", "Форум");
+	} else if (peer->isMegagroup() || peer->isChat()) {
+		return UiText("Group", "Группа");
+	} else if (peer->isBroadcast()) {
+		return UiText("Channel", "Канал");
+	}
+	return UiText("Chat", "Чат");
+}
+
+[[nodiscard]] QString ScopePrimaryChip(not_null<Data::Thread*> thread) {
+	return thread->peer()->name();
+}
+
+[[nodiscard]] QString ScopeSecondaryChip(not_null<Data::Thread*> thread) {
+	if (const auto topic = thread->asTopic()) {
+		return UiText("Topic · %1", "Тема · %1").arg(topic->title());
+	}
+	return ScopeTypeLabel(thread);
+}
+
+[[nodiscard]] QString SearchScopeDetails(
+		const QString &query,
+		int visibleCount,
+		int totalCount) {
+	if (query.isEmpty()) {
+		return QString();
+	}
+	const auto shown = (visibleCount == totalCount)
+		? UiText("%1 matches", "%1 совпадений").arg(visibleCount)
+		: UiText("%1 of %2 matches", "%1 из %2 совпадений")
+			.arg(visibleCount)
+			.arg(totalCount);
+	return UiText("Filter: “%1” · %2", "Фильтр: «%1» · %2").arg(query, shown);
+}
+
+[[nodiscard]] bool MatchesSnapshotText(
+		const QString &value,
+		const char *en,
+		const char *ru) {
+	return (value == QString::fromUtf8(en))
+		|| (value == QString::fromUtf8(ru));
+}
+
+[[nodiscard]] bool LooksLikeMediaFallback(const QString &text) {
+	return MatchesSnapshotText(text, "Video message", "Видеосообщение")
+		|| MatchesSnapshotText(text, "Voice message", "Голосовое сообщение")
+		|| MatchesSnapshotText(text, "Music", "Музыка")
+		|| MatchesSnapshotText(text, "GIF", "GIF")
+		|| MatchesSnapshotText(text, "Video", "Видео")
+		|| MatchesSnapshotText(text, "Photo or video", "Фото или видео")
+		|| MatchesSnapshotText(text, "Photo", "Фотография")
+		|| MatchesSnapshotText(text, "File", "Файл")
+		|| MatchesSnapshotText(text, "Link", "Ссылка")
+		|| MatchesSnapshotText(text, "Media message", "Медиасообщение");
+}
+
+[[nodiscard]] bool LooksLikeServiceFallback(const QString &text) {
+	return MatchesSnapshotText(text, "Pinned message", "Закреплённое сообщение")
+		|| MatchesSnapshotText(text, "Service message", "Служебное сообщение");
+}
+
+[[nodiscard]] QString DeletedStateLabel(const AyuMessages::MessageSnapshot &snapshot) {
+	const auto text = snapshot.text.trimmed();
+	if (text.isEmpty() || MatchesSnapshotText(text, "Saved deleted message", "Сохранённое удалённое сообщение")) {
+		return UiText("Local copy only", "Только локальная копия");
+	} else if (LooksLikeServiceFallback(text)) {
+		return UiText("Deleted service event", "Удалённое служебное событие");
+	} else if (LooksLikeMediaFallback(text)) {
+		return UiText("Deleted media", "Удалённое медиа");
+	}
+	return UiText("Deleted message", "Удалённое сообщение");
 }
 
 [[nodiscard]] int TopicIdFor(not_null<Data::Thread*> thread) {
@@ -499,7 +580,8 @@ public:
 		int visibleCount,
 		int totalCount,
 		int oldestTimestamp,
-		int newestTimestamp);
+		int newestTimestamp,
+		QString searchQuery);
 
 	int resizeGetHeight(int newWidth) override;
 
@@ -513,8 +595,13 @@ private:
 	Ui::FlatLabel *_title = nullptr;
 	Ui::FlatLabel *_scope = nullptr;
 	Ui::FlatLabel *_details = nullptr;
+	Ui::FlatLabel *_filter = nullptr;
 	Ui::FlatLabel *_hint = nullptr;
+	QString _primaryChipText;
+	QString _secondaryChipText;
 	QRect _cardRect;
+	QRect _primaryChipRect;
+	QRect _secondaryChipRect;
 };
 
 DeletedMessagesIntroCard::DeletedMessagesIntroCard(
@@ -523,8 +610,11 @@ DeletedMessagesIntroCard::DeletedMessagesIntroCard(
 		int visibleCount,
 		int totalCount,
 		int oldestTimestamp,
-		int newestTimestamp)
-: Ui::RpWidget(parent) {
+		int newestTimestamp,
+		QString searchQuery)
+: Ui::RpWidget(parent)
+, _primaryChipText(ScopePrimaryChip(thread))
+, _secondaryChipText(ScopeSecondaryChip(thread)) {
 	_title = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(ScopeHeadline()),
@@ -541,6 +631,12 @@ DeletedMessagesIntroCard::DeletedMessagesIntroCard(
 			oldestTimestamp,
 			newestTimestamp)),
 		st::sessionDateLabel);
+	if (!searchQuery.isEmpty()) {
+		_filter = Ui::CreateChild<Ui::FlatLabel>(
+			this,
+			rpl::single(SearchScopeDetails(searchQuery, visibleCount, totalCount)),
+			st::sessionDateLabel);
+	}
 	_hint = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(ScopeHint(thread)),
@@ -549,13 +645,22 @@ DeletedMessagesIntroCard::DeletedMessagesIntroCard(
 	_title->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_scope->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_details->setAttribute(Qt::WA_TransparentForMouseEvents);
+	if (_filter) {
+		_filter->setAttribute(Qt::WA_TransparentForMouseEvents);
+	}
 	_hint->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_scope->setTryMakeSimilarLines(true);
 	_details->setTryMakeSimilarLines(true);
+	if (_filter) {
+		_filter->setTryMakeSimilarLines(true);
+	}
 	_hint->setTryMakeSimilarLines(true);
 	_title->setTextColorOverride(st::windowFgActive->c);
 	_scope->setTextColorOverride(st::windowFg->c);
 	_details->setTextColorOverride(st::windowSubTextFg->c);
+	if (_filter) {
+		_filter->setTextColorOverride(st::windowActiveTextFg->c);
+	}
 	_hint->setTextColorOverride(st::windowSubTextFg->c);
 }
 
@@ -583,11 +688,40 @@ void DeletedMessagesIntroCard::paintEvent(QPaintEvent *e) {
 	p.setBrush(Qt::NoBrush);
 	p.setPen(anim::with_alpha(st::windowSubTextFg->c, 0.18));
 	p.drawPath(BubblePath(_cardRect.adjusted(0, 0, -1, -1), st::boxRadius, st::boxRadius, st::boxRadius, st::boxRadius));
+
+	auto drawChip = [&](const QRect &rect, const QString &text, const QColor &fill, const QColor &border, const QColor &color) {
+		if (rect.isNull() || text.isEmpty()) {
+			return;
+		}
+		p.setPen(border);
+		p.setBrush(fill);
+		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
+		p.setPen(color);
+		p.setFont(st::defaultTextStyle.font->f);
+		p.drawText(
+			rect.left() + kChipHorizontalPadding,
+			rect.top() + ((rect.height() - st::defaultTextStyle.font->height) / 2) + st::defaultTextStyle.font->ascent,
+			text);
+	};
+	drawChip(
+		_primaryChipRect,
+		_primaryChipText,
+		anim::with_alpha(st::windowActiveTextFg->c, 0.10),
+		anim::with_alpha(st::windowActiveTextFg->c, 0.22),
+		st::windowActiveTextFg->c);
+	drawChip(
+		_secondaryChipRect,
+		_secondaryChipText,
+		anim::with_alpha(st::windowSubTextFg->c, 0.08),
+		anim::with_alpha(st::windowSubTextFg->c, 0.18),
+		st::windowSubTextFg->c);
 }
 
 void DeletedMessagesIntroCard::layoutChildren(int newWidth) {
 	if (newWidth <= 0) {
 		_cardRect = {};
+		_primaryChipRect = {};
+		_secondaryChipRect = {};
 		return;
 	}
 	const auto outer = QRect(
@@ -597,26 +731,65 @@ void DeletedMessagesIntroCard::layoutChildren(int newWidth) {
 		0);
 	if (outer.width() <= 0) {
 		_cardRect = {};
+		_primaryChipRect = {};
+		_secondaryChipRect = {};
 		return;
 	}
+	const auto innerLeft = outer.left() + kIntroCardPadding.left();
+	const auto innerTop = kIntroCardPadding.top();
 	const auto innerWidth = std::max(
 		1,
 		outer.width() - kIntroCardPadding.left() - kIntroCardPadding.right());
+	const auto innerRight = innerLeft + innerWidth;
+	const auto chipHeight = st::defaultTextStyle.font->height + (kChipVerticalPadding * 2);
+
+	auto chipTop = innerTop;
+	auto chipLeft = innerLeft;
+	auto placeChip = [&](const QString &text, QRect &rect) {
+		if (text.isEmpty()) {
+			rect = {};
+			return;
+		}
+		const auto width = std::min(
+			innerWidth,
+			st::defaultTextStyle.font->width(text) + (kChipHorizontalPadding * 2));
+		if ((chipLeft != innerLeft) && ((chipLeft + width) > innerRight)) {
+			chipLeft = innerLeft;
+			chipTop += chipHeight + kChipSpacing;
+		}
+		rect = QRect(chipLeft, chipTop, width, chipHeight);
+		chipLeft += width + kChipSpacing;
+	};
+	placeChip(_primaryChipText, _primaryChipRect);
+	placeChip(_secondaryChipText, _secondaryChipRect);
+
+	auto top = innerTop;
+	const auto chipsBottom = std::max(_primaryChipRect.bottom(), _secondaryChipRect.bottom());
+	if (chipsBottom >= innerTop) {
+		top = chipsBottom + 10;
+	}
 
 	_title->resizeToWidth(innerWidth);
 	_scope->resizeToWidth(innerWidth);
 	_details->resizeToWidth(innerWidth);
+	if (_filter) {
+		_filter->resizeToWidth(innerWidth);
+	}
 	_hint->resizeToWidth(innerWidth);
 
-	auto top = kIntroCardPadding.top();
-	const auto left = outer.left() + kIntroCardPadding.left();
-	_title->moveToLeft(left, top);
+	_title->moveToLeft(innerLeft, top);
 	top += _title->height() + 6;
-	_scope->moveToLeft(left, top);
+	_scope->moveToLeft(innerLeft, top);
 	top += _scope->height() + 4;
-	_details->moveToLeft(left, top);
-	top += _details->height() + 8;
-	_hint->moveToLeft(left, top);
+	_details->moveToLeft(innerLeft, top);
+	top += _details->height();
+	if (_filter) {
+		top += 4;
+		_filter->moveToLeft(innerLeft, top);
+		top += _filter->height();
+	}
+	top += 8;
+	_hint->moveToLeft(innerLeft, top);
 	top += _hint->height() + kIntroCardPadding.bottom();
 
 	_cardRect = QRect(
@@ -659,13 +832,16 @@ private:
 	const bool _outgoing = false;
 
 	style::owned_color _senderColor;
+	style::owned_color _stateColor;
 	style::owned_color _textColor;
 	style::owned_color _metaColor;
 	style::FlatLabel _senderSt = st::sessionDateLabel;
+	style::FlatLabel _stateSt = st::sessionDateLabel;
 	style::FlatLabel _textSt = st::boxLabel;
 	style::FlatLabel _metaSt = st::sessionDateLabel;
 
 	Ui::FlatLabel *_sender = nullptr;
+	Ui::FlatLabel *_state = nullptr;
 	Ui::FlatLabel *_text = nullptr;
 	Ui::FlatLabel *_meta = nullptr;
 	QRect _bubbleRect;
@@ -688,10 +864,13 @@ DeletedMessageRow::DeletedMessageRow(
 , _group(group)
 , _outgoing(IsOutgoing(_snapshot, _thread))
 , _senderColor(_outgoing ? st::msgOutServiceFg->c : st::msgInServiceFg->c)
+, _stateColor(st::windowSubTextFg->c)
 , _textColor(st::windowFg->c)
 , _metaColor(_outgoing ? st::msgOutDateFg->c : st::msgInDateFg->c) {
 	_senderSt.textFg = _senderColor.color();
 	_senderSt.palette.linkFg = _senderColor.color();
+	_stateSt.textFg = _stateColor.color();
+	_stateSt.palette.linkFg = _stateColor.color();
 	_textSt.textFg = _textColor.color();
 	_textSt.palette.linkFg = _textColor.color();
 	_metaSt.textFg = _metaColor.color();
@@ -704,6 +883,10 @@ DeletedMessageRow::DeletedMessageRow(
 			_senderSt);
 		_sender->setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
+	_state = Ui::CreateChild<Ui::FlatLabel>(
+		this,
+		rpl::single(DeletedStateLabel(_snapshot)),
+		_stateSt);
 	_text = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(_snapshot.text.isEmpty()
@@ -715,6 +898,7 @@ DeletedMessageRow::DeletedMessageRow(
 		rpl::single(MetaText(_snapshot)),
 		_metaSt);
 
+	_state->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_text->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_meta->setAttribute(Qt::WA_TransparentForMouseEvents);
 	setCursor(style::cur_pointer);
@@ -801,15 +985,17 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 	const auto senderWidth = _sender
 		? std::min(_sender->naturalWidth(), maxTextWidth)
 		: 0;
+	const auto stateWidth = std::min(_state->naturalWidth(), maxTextWidth);
 	const auto textNatural = std::min(_text->naturalWidth(), maxTextWidth);
 	const auto metaWidth = std::min(_meta->naturalWidth(), maxTextWidth);
 	const auto contentWidth = std::max(
 		kBubbleMinWidth - kBubblePadding.left() - kBubblePadding.right(),
-		std::max(senderWidth, std::max(textNatural, metaWidth)));
+		std::max(senderWidth, std::max(stateWidth, std::max(textNatural, metaWidth))));
 
 	if (_sender) {
 		_sender->resizeToWidth(contentWidth);
 	}
+	_state->resizeToWidth(contentWidth);
 	_text->resizeToWidth(contentWidth);
 	_meta->resizeToWidth(metaWidth);
 
@@ -827,8 +1013,10 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 
 	if (_sender) {
 		_sender->moveToLeft(left, top);
-		top += _sender->height() + kBubbleInnerSkip;
+		top += _sender->height() + 2;
 	}
+	_state->moveToLeft(left, top);
+	top += _state->height() + kBubbleHeaderSkip;
 	_text->moveToLeft(left, top);
 	top += _text->height() + kBubbleInnerSkip;
 	_meta->moveToLeft(
@@ -845,16 +1033,11 @@ void DeletedMessageRow::openOriginal() {
 		controller->window().showToast(LocalCopyHint());
 		return;
 	}
-	const auto jumpTarget = ResolveJumpTargetMessageId(_thread, _snapshot.messageId);
+	const auto exactLoaded = (ResolveJumpTargetMessageId(_thread, _snapshot.messageId) == _snapshot.messageId);
 	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
-	controller->showThread(
-		_thread,
-		jumpTarget ? jumpTarget : _snapshot.messageId,
-		params);
-	if (jumpTarget == 0) {
+	controller->showThread(_thread, _snapshot.messageId, params);
+	if (!exactLoaded) {
 		controller->window().showToast(OpenAttemptHint(_thread));
-	} else if (jumpTarget != _snapshot.messageId) {
-		controller->window().showToast(NearestCopyHint());
 	}
 }
 
@@ -1250,7 +1433,8 @@ void DeletedMessagesWidget::rebuildContent() {
 			int(_messages.size()),
 			_totalMessages,
 			_oldestTimestamp,
-			_newestTimestamp));
+			_newestTimestamp,
+			_searchQuery));
 	Ui::AddSkip(_content, st::defaultVerticalListSkip);
 
 	if (_messages.empty()) {
@@ -1379,22 +1563,36 @@ bool DeletedMessagesWidget::restoreAnchor(
 		int messageId,
 		int timestamp,
 		int offset) {
-	if (!_scroll || (messageId <= 0)) {
+	if (!_scroll || ((messageId <= 0) && (timestamp <= 0))) {
 		return false;
 	}
+	DeletedMessageRow *nearest = nullptr;
+	auto nearestDistance = std::numeric_limits<int>::max();
 	for (const auto row : _rows) {
 		if (!row) {
 			continue;
 		}
 		const auto &snapshot = row->snapshot();
-		if (snapshot.messageId != messageId) {
-			continue;
+		if ((snapshot.messageId == messageId)
+			&& (!timestamp || (DisplayTimestamp(snapshot) == timestamp))) {
+			const auto target = std::clamp(
+				row->geometry().top() + offset,
+				0,
+				_scroll->scrollTopMax());
+			_scroll->scrollToY(target);
+			return true;
 		}
-		if (timestamp && (DisplayTimestamp(snapshot) != timestamp)) {
-			continue;
+		if (timestamp) {
+			const auto distance = std::abs(DisplayTimestamp(snapshot) - timestamp);
+			if (distance < nearestDistance) {
+				nearestDistance = distance;
+				nearest = row;
+			}
 		}
+	}
+	if (nearest) {
 		const auto target = std::clamp(
-			row->geometry().top() + offset,
+			nearest->geometry().top() + offset,
 			0,
 			_scroll->scrollTopMax());
 		_scroll->scrollToY(target);
