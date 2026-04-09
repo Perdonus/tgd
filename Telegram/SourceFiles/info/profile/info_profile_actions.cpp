@@ -115,7 +115,7 @@ constexpr auto kDay = Data::WorkingInterval::kDay;
 base::options::toggle ShowPeerIdBelowAbout({
 	.id = kOptionShowPeerIdBelowAbout,
 	.name = "Show Peer IDs in Profile",
-	.description = "Show peer IDs from API below their Bio / Description."
+	.description = "Show peer IDs in profile details."
 		" Add contact IDs to exported data.",
 });
 
@@ -205,32 +205,28 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 	return result;
 }
 
+[[nodiscard]] QString PeerIdText(not_null<PeerData*> peer) {
+	if (peer->isUser()) {
+		return QString::number(peerToUser(peer->id).bare);
+	} else if (peer->isChat()) {
+		return QString::number(-qint64(peerToChat(peer->id).bare));
+	} else if (peer->isChannel()) {
+		return u"-100"_q + QString::number(peerToChannel(peer->id).bare);
+	}
+	return QString::number(peer->id.value & PeerId::kChatTypeMask);
+}
+
 [[nodiscard]] rpl::producer<TextWithEntities> AboutWithAdvancedValue(
 		not_null<PeerData*> peer) {
 
 	return AboutValue(
 		peer
 	) | rpl::map([=](TextWithEntities &&value) {
-		if (ShowPeerIdBelowAbout.value()) {
-			using namespace Ui::Text;
-			if (!value.empty()) {
-				value.append("\n\n");
-			}
-			value.append(Italic(u"id: "_q));
-			const auto raw = peer->id.value & PeerId::kChatTypeMask;
-			value.append(Link(
-				Italic(Lang::FormatCountDecimal(raw)),
-				"internal:~peer_id~:copy:" + QString::number(raw)));
-		}
 		if (ShowChannelJoinedBelowAbout.value()) {
 			if (const auto channel = peer->asChannel()) {
 				if (!channel->amCreator() && channel->inviteDate) {
 					if (!value.empty()) {
-						if (ShowPeerIdBelowAbout.value()) {
-							value.append("\n");
-						} else {
-							value.append("\n\n");
-						}
+						value.append("\n\n");
 					}
 					using namespace Ui::Text;
 					value.append((channel->isMegagroup()
@@ -1398,6 +1394,15 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			return false;
 		} else if (SetClickContext<CashtagClickHandler>(handler, context)) {
 			return false;
+		} else if (handler->url().startsWith(u"internal:~peer_id~:"_q)) {
+			const auto id = handler->url().split(
+				u"copy:"_q,
+				Qt::SkipEmptyParts).last();
+			if (!id.isEmpty()) {
+				TextUtilities::SetClipboardText({ id });
+				window->showToast(tr::lng_text_copied(tr::now));
+				return false;
+			}
 		} else if (handler->url().startsWith(u"internal:~join_date~:"_q)) {
 			const auto joinDate = handler->url().split(
 				u"show:"_q,
@@ -1511,6 +1516,15 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		result.text->setDoubleClickSelectsParagraph(true);
 		result.text->setContextCopyText(contextCopyText);
 		return result;
+	};
+	const auto addIdLine = [&] {
+		if (!ShowPeerIdBelowAbout.value()) {
+			return;
+		}
+		addInfoOneLine(
+			u"ID"_q,
+			rpl::single(TextWithEntities{ .text = PeerIdText(_peer) }),
+			u"Copy ID"_q);
 	};
 	const auto fitLabelToButton = [&](
 			not_null<Ui::RpWidget*> button,
@@ -1664,6 +1678,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			Ui::DefaultShowFillPeerQrBoxCallback(show, user);
 			return false;
 		});
+		addIdLine();
 
 		if (!user->isBot()) {
 			tracker.track(result->add(
@@ -1746,6 +1761,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 				return false;
 			});
 		}
+		addIdLine();
 
 		if (const auto channel = _topic ? nullptr : _peer->asChannel()) {
 			auto locationText = LocationValue(

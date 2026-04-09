@@ -293,6 +293,13 @@ bool Poll::showVotes() const {
 	return _voted || (_flags & PollData::Flag::Closed);
 }
 
+bool Poll::canPreviewResults() const {
+	return !_voted
+		&& !(_flags & PollData::Flag::Closed)
+		&& !_poll->quiz()
+		&& _parent->data()->isRegular();
+}
+
 bool Poll::canVote() const {
 	return !showVotes() && _parent->data()->isRegular();
 }
@@ -814,7 +821,7 @@ void Poll::paintInlineFooter(
 		int paintw,
 		const PaintContext &context) const {
 	const auto stm = context.messageStyle();
-	p.setPen(stm->msgDateFg);
+	p.setPen(canPreviewResults() ? stm->msgFileThumbLinkFg : stm->msgDateFg);
 	_totalVotesLabel.drawLeftElided(
 		p,
 		left,
@@ -838,13 +845,15 @@ void Poll::paintBottom(
 		+ st::historyPollBottomButtonTop;
 	const auto stm = context.messageStyle();
 	if (showVotersCount()) {
-		p.setPen(stm->msgDateFg);
+		p.setPen(canPreviewResults() ? stm->msgFileThumbLinkFg : stm->msgDateFg);
 		_totalVotesLabel.draw(p, left, stringtop, paintw, style::al_top);
 	} else {
 		const auto link = showVotes()
 			? _showResultsLink
 			: canSendVotes()
 			? _sendVotesLink
+			: canPreviewResults()
+			? _showResultsLink
 			: nullptr;
 		if (_linkRipple) {
 			const auto linkHeight = bottomButtonHeight();
@@ -862,7 +871,7 @@ void Poll::paintBottom(
 		}
 		p.setFont(st::semiboldFont);
 		p.setPen(link ? stm->msgFileThumbLinkFg : stm->msgDateFg);
-		const auto string = showVotes()
+		const auto string = (showVotes() || canPreviewResults())
 			? tr::lng_polls_view_results(tr::now, tr::upper)
 			: tr::lng_polls_submit_votes(tr::now, tr::upper);
 		const auto stringw = st::semiboldFont->width(string);
@@ -1394,6 +1403,20 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 
 	const auto can = canVote();
 	const auto show = showVotes();
+	const auto preview = canPreviewResults();
+	const auto votesTooltipText = [&](const Answer &answer) {
+		const auto quiz = _poll->quiz();
+		return answer.votes
+			? (quiz
+				? tr::lng_polls_answers_count
+				: tr::lng_polls_votes_count)(
+					tr::now,
+					lt_count_decimal,
+					answer.votes)
+			: (quiz
+				? tr::lng_polls_answers_none
+				: tr::lng_polls_votes_none)(tr::now);
+	};
 	const auto padding = st::msgPadding;
 	auto paintw = width();
 	auto tshift = st::historyPollQuestionTop;
@@ -1422,32 +1445,48 @@ TextState Poll::textState(QPoint point, StateRequest request) const {
 			if (can) {
 				_lastLinkPoint = point;
 				result.link = answer.handler;
+				if (preview) {
+					result.customTooltip = true;
+					using Flag = Ui::Text::StateRequest::Flag;
+					if (request.flags & Flag::LookupCustomTooltip) {
+						result.customTooltipText = votesTooltipText(answer);
+					}
+				}
 			} else if (show) {
 				result.customTooltip = true;
 				using Flag = Ui::Text::StateRequest::Flag;
 				if (request.flags & Flag::LookupCustomTooltip) {
-					const auto quiz = _poll->quiz();
-					result.customTooltipText = answer.votes
-						? (quiz
-							? tr::lng_polls_answers_count
-							: tr::lng_polls_votes_count)(
-								tr::now,
-								lt_count_decimal,
-								answer.votes)
-						: (quiz
-							? tr::lng_polls_answers_none
-							: tr::lng_polls_votes_none)(tr::now);
+					result.customTooltipText = votesTooltipText(answer);
 				}
 			}
 			return result;
 		}
 		tshift += height;
 	}
-	if (!showVotersCount()) {
-		const auto link = showVotes()
+	if (showVotersCount()) {
+		if (preview) {
+			const auto labelTop = inlineFooter()
+				? (tshift + st::msgPadding.bottom())
+				: (tshift
+					+ st::msgPadding.bottom()
+					+ st::historyPollBottomButtonTop);
+			if (QRect(
+				padding.left(),
+				labelTop,
+				paintw,
+				st::msgDateFont->height).contains(point)) {
+				_lastLinkPoint = point;
+				result.link = _showResultsLink;
+				return result;
+			}
+		}
+	} else {
+		const auto link = show
 			? _showResultsLink
 			: canSendVotes()
 			? _sendVotesLink
+			: preview
+			? _showResultsLink
 			: nullptr;
 		if (link) {
 			const auto linkHeight = bottomButtonHeight();
