@@ -362,12 +362,7 @@ MainMenu::MainMenu(
 , _version(AddVersionLabel(_footer)) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	refreshShellModePreferences();
-
-	const auto sideMenuOptions = ::Menu::Customization::LoadSideMenuOptions();
-	_footer->setVisible(sideMenuOptions.showFooterText);
-	setProperty(
-		"astrogram_profile_block_position",
-		sideMenuOptions.profileBlockPosition);
+	refreshSideMenuOptions();
 
 	setupUserpicButton();
 	setupAccountsToggle();
@@ -377,10 +372,16 @@ MainMenu::MainMenu(
 	setupMenu();
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
-	widthValue(
-	) | rpl::on_next([=](int width) {
+	rpl::combine(
+		widthValue(),
+		heightValue()
+	) | rpl::on_next([=] {
 		const auto line = st::lineWidth;
-		shadow->setGeometry(0, st::mainMenuCoverHeight - line, width, line);
+		shadow->setGeometry(
+			0,
+			profileBlockTop() + st::mainMenuCoverHeight - line,
+			width(),
+			line);
 	}, shadow->lifetime());
 
 	_nightThemeSwitch.setCallback([this] {
@@ -507,6 +508,25 @@ void MainMenu::refreshShellModePreferences() {
 	_expandedSidePanel = prefs.expandedSidePanel;
 }
 
+void MainMenu::refreshSideMenuOptions() {
+	const auto options = ::Menu::Customization::LoadSideMenuOptions();
+	_showFooterText = options.showFooterText;
+	_profileBlockPosition = options.profileBlockPosition;
+	_footer->setVisible(_showFooterText);
+}
+
+bool MainMenu::profileBlockAtBottom() const {
+	return _profileBlockPosition
+		== QString::fromLatin1(
+			::Menu::Customization::SideMenuProfileBlockPositionId::Bottom);
+}
+
+int MainMenu::profileBlockTop() const {
+	return profileBlockAtBottom()
+		? std::max(height() - st::mainMenuCoverHeight, 0)
+		: 0;
+}
+
 int MainMenu::desiredMenuWidth() const {
 	const auto parentWidth = parentWidget() ? parentWidget()->width() : 0;
 	if (!_expandedSidePanel || !parentWidth) {
@@ -570,10 +590,11 @@ void MainMenu::moveBadge() {
 		- _badge->widget()->width();
 	const auto left = st::mainMenuCoverNameLeft
 		+ std::min(_name.maxWidth() + st::semiboldFont->spacew, available);
+	const auto top = profileBlockTop() + st::mainMenuCoverNameTop;
 	_badge->move(
 		left,
-		st::mainMenuCoverNameTop,
-		st::mainMenuCoverNameTop + st::semiboldFont->height);
+		top,
+		top + st::semiboldFont->height);
 }
 
 void MainMenu::setupArchive() {
@@ -1096,24 +1117,31 @@ void MainMenu::resizeEvent(QResizeEvent *e) {
 }
 
 void MainMenu::updateControlsGeometry() {
+	const auto profileTop = profileBlockTop();
 	_userpicButton->moveToLeft(
 		st::mainMenuUserpicLeft,
-		st::mainMenuUserpicTop);
+		profileTop + st::mainMenuUserpicTop);
 	if (_resetScaleButton) {
 		_resetScaleButton->moveToRight(0, 0);
 	}
 	_setEmojiStatus->moveToLeft(
 		st::mainMenuCoverStatusLeft,
-		st::mainMenuCoverStatusTop,
+		profileTop + st::mainMenuCoverStatusTop,
 		width());
 	_toggleAccounts->setGeometry(
 		0,
-		st::mainMenuCoverNameTop,
+		profileTop + st::mainMenuCoverNameTop,
 		width(),
 		st::mainMenuCoverHeight - st::mainMenuCoverNameTop);
 	// Allow cover shadow over the scrolled content.
-	const auto top = st::mainMenuCoverHeight - st::lineWidth;
-	_scroll->setGeometry(0, top, width(), height() - top);
+	const auto coverSkip = st::mainMenuCoverHeight - st::lineWidth;
+	const auto scrollTop = profileBlockAtBottom() ? 0 : coverSkip;
+	const auto bottomReserve = profileBlockAtBottom() ? coverSkip : 0;
+	_scroll->setGeometry(
+		0,
+		scrollTop,
+		width(),
+		std::max(height() - scrollTop - bottomReserve, 0));
 	updateInnerControlsGeometry();
 }
 
@@ -1161,7 +1189,11 @@ bool MainMenu::eventHook(QEvent *event) {
 void MainMenu::paintEvent(QPaintEvent *e) {
 	auto p = Painter(this);
 	const auto clip = e->rect();
-	const auto cover = QRect(0, 0, width(), st::mainMenuCoverHeight);
+	const auto cover = QRect(
+		0,
+		profileBlockTop(),
+		width(),
+		st::mainMenuCoverHeight);
 
 	p.fillRect(clip, st::mainMenuBg);
 	if (cover.intersects(clip)) {
@@ -1188,7 +1220,7 @@ void MainMenu::drawName(Painter &p) {
 	_name.drawLeftElided(
 		p,
 		st::mainMenuCoverNameLeft,
-		st::mainMenuCoverNameTop,
+		profileBlockTop() + st::mainMenuCoverNameTop,
 		(widthText
 			- (_badge->widget()
 				? (st::semiboldFont->spacew + _badge->widget()->width())

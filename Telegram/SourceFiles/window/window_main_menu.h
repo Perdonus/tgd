@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/swipe_handler_data.h"
 #include "ui/layers/layer_widget.h"
 
+#include <QtCore/QString>
+
 namespace base {
 enum class EventFilterResult;
 } // namespace base
@@ -80,7 +82,10 @@ private:
 	void updateInnerControlsGeometry();
 	void initResetScaleButton();
 	void refreshShellModePreferences();
+	void refreshSideMenuOptions();
 	void syncAccountsVisibility(bool shown, bool animated);
+	[[nodiscard]] bool profileBlockAtBottom() const;
+	[[nodiscard]] int profileBlockTop() const;
 	[[nodiscard]] int desiredMenuWidth() const;
 	[[nodiscard]] int visibleMenuWidthForImmersive() const;
 	void applyImmersiveShift();
@@ -122,6 +127,8 @@ private:
 
 	rpl::variable<bool> _showFinished = false;
 	bool _insideEventRedirect = false;
+	bool _showFooterText = true;
+	QString _profileBlockPosition;
 	bool _immersiveAnimation = true;
 	bool _expandedSidePanel = false;
 	bool _immersiveGeometryDriven = false;
