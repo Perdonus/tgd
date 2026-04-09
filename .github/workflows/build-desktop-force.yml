@@ -107,7 +107,7 @@ jobs:
       - name: Configure build acceleration
         shell: pwsh
         run: |
-          $buildJobs = 2
+          $buildJobs = 1
           "SCCACHE_GHA_ENABLED=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SCCACHE_CACHE_SIZE=10G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SCCACHE_IGNORE_SERVER_IO_ERROR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -633,7 +633,7 @@ jobs:
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
           set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
-          set "BUILD_JOBS=2"
+          set "BUILD_JOBS=1"
           set "BUILD_JOBS_SAFE=1"
 
           cmake --build ..\out --config Release --parallel %BUILD_JOBS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1

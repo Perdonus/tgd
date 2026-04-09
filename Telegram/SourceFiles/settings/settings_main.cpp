@@ -176,8 +176,8 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			checker.failed(),
 			checker.progress() | rpl::to_empty,
 			checker.releaseInfoChanged()
-		)
-	) | rpl::map(makeVisible);
+		) | rpl::map(makeVisible)
+	);
 }
 
 class Cover final : public Ui::FixedHeightWidget {
