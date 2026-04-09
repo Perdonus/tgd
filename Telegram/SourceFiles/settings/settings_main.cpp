@@ -112,15 +112,14 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			? RuEn("Расширенные • Обновление доступно", "Advanced • Update available")
 			: tr::lng_settings_advanced(tr::now);
 	};
-	return rpl::single(makeLabel()) | rpl::then(
-		rpl::merge(
-			checker.ready(),
-			checker.checking(),
-			checker.isLatest(),
-			checker.failed(),
-			checker.progress() | rpl::to_empty,
-			checker.releaseInfoChanged()
-		)
+	return rpl::merge(
+		rpl::single(rpl::empty_value()),
+		checker.ready(),
+		checker.checking(),
+		checker.isLatest(),
+		checker.failed(),
+		checker.progress() | rpl::to_empty,
+		checker.releaseInfoChanged()
 	) | rpl::map(makeLabel);
 }
 
@@ -143,15 +142,14 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			"Обновление Astrogram",
 			"Astrogram update");
 	};
-	return rpl::single(makeLabel()) | rpl::then(
-		rpl::merge(
-			checker.ready(),
-			checker.checking(),
-			checker.isLatest(),
-			checker.failed(),
-			checker.progress() | rpl::to_empty,
-			checker.releaseInfoChanged()
-		)
+	return rpl::merge(
+		rpl::single(rpl::empty_value()),
+		checker.ready(),
+		checker.checking(),
+		checker.isLatest(),
+		checker.failed(),
+		checker.progress() | rpl::to_empty,
+		checker.releaseInfoChanged()
 	) | rpl::map(makeLabel);
 }
 
