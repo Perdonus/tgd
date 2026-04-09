@@ -60,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkInterface>
 #include <QtNetwork/QTcpServer>
 #include <QtNetwork/QTcpSocket>
+#include <QtWidgets/QApplication>
 
 #include <algorithm>
 #include <exception>
@@ -77,6 +78,7 @@ namespace {
 
 constexpr auto kPluginsFolder = "tdata/plugins";
 constexpr auto kConfigFile = "tdata/plugins.json";
+constexpr auto kClientLogFile = "tdata/client.log";
 constexpr auto kLogFile = "tdata/plugins.log";
 constexpr auto kTraceFile = "tdata/plugins.trace.jsonl";
 constexpr auto kSafeModeFile = "tdata/plugins.safe-mode";
@@ -95,6 +97,152 @@ constexpr auto kMaxPluginLogBackups = 5;
 
 [[nodiscard]] QString PluginUiText(QString en, QString ru) {
 	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
+}
+
+[[nodiscard]] QString CompactClientLogText(QString text, int maxLength = 640) {
+	text.replace(u'\r', u' ');
+	text.replace(u'\n', u' ');
+	while (text.contains(u"  "_q)) {
+		text.replace(u"  "_q, u" "_q);
+	}
+	text = text.trimmed();
+	if (text.size() > maxLength) {
+		text = text.left(std::max(0, maxLength - 1)).trimmed() + u"…"_q;
+	}
+	return text;
+}
+
+[[nodiscard]] bool ShouldMirrorPluginEventToClient(
+		const QString &phase,
+		const QString &event) {
+	if (phase == u"runtime-api"_q
+		|| phase == u"recovery"_q
+		|| phase == u"safe-mode"_q) {
+		return true;
+	}
+	if (phase == u"package"_q
+		&& (event.startsWith(u"install"_q)
+			|| event.startsWith(u"remove"_q)
+			|| event.startsWith(u"rollback"_q))) {
+		return true;
+	}
+	if (phase == u"manager"_q && event == u"reload-requested"_q) {
+		return true;
+	}
+	if (phase == u"ui"_q && event != u"toast"_q) {
+		return true;
+	}
+	return event.contains(u"failed"_q)
+		|| event.contains(u"rejected"_q)
+		|| event.contains(u"missing"_q)
+		|| event.contains(u"disabled"_q)
+		|| event.contains(u"mismatch"_q)
+		|| event.contains(u"listen"_q)
+		|| event.contains(u"stopped"_q)
+		|| event.contains(u"rotated"_q);
+}
+
+[[nodiscard]] int VisibleTopLevelWidgetCount() {
+	auto count = 0;
+	for (auto *widget : QApplication::topLevelWidgets()) {
+		if (!widget
+			|| !widget->isWindow()
+			|| widget->parentWidget()) {
+			continue;
+		}
+		const auto type = widget->windowType();
+		if (type == Qt::Dialog
+			|| type == Qt::Popup
+			|| type == Qt::Tool
+			|| type == Qt::ToolTip
+			|| type == Qt::Sheet
+			|| type == Qt::Drawer
+			|| type == Qt::SplashScreen
+			|| type == Qt::SubWindow) {
+			continue;
+		}
+		if (widget->isVisible() && !widget->isMinimized()) {
+			++count;
+		}
+	}
+	return count;
+}
+
+struct UiRecoveryAttemptResult {
+	int visibleBefore = 0;
+	int visibleAfter = 0;
+	int updatedWindows = 0;
+	bool primaryExists = false;
+	bool primaryWasVisible = false;
+	bool primaryNowVisible = false;
+	bool primaryShown = false;
+};
+
+[[nodiscard]] UiRecoveryAttemptResult AttemptPluginUiRecoveryNow() {
+	auto result = UiRecoveryAttemptResult();
+	result.visibleBefore = VisibleTopLevelWidgetCount();
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+	for (auto *widget : QApplication::topLevelWidgets()) {
+		if (!widget || !widget->isWindow()) {
+			continue;
+		}
+		widget->update();
+		widget->repaint();
+		++result.updatedWindows;
+	}
+	if (const auto primary = Core::App().activePrimaryWindow()) {
+		if (auto *widget = primary->widget()) {
+			result.primaryExists = true;
+			result.primaryWasVisible = widget->isVisible();
+			if (!widget->isVisible()) {
+				widget->showNormal();
+				widget->raise();
+				widget->activateWindow();
+				result.primaryShown = true;
+			}
+			widget->update();
+			widget->repaint();
+			result.primaryNowVisible = widget->isVisible();
+		}
+	}
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+	result.visibleAfter = VisibleTopLevelWidgetCount();
+	return result;
+}
+
+void SchedulePluginUiRecoveryAttempt(QString pluginId, QString reason) {
+	const auto application = QCoreApplication::instance();
+	if (!application) {
+		return;
+	}
+	pluginId = CompactClientLogText(std::move(pluginId), 160);
+	reason = CompactClientLogText(std::move(reason));
+	QTimer::singleShot(0, application, [pluginId = std::move(pluginId), reason = std::move(reason)] {
+		const auto attempt = AttemptPluginUiRecoveryNow();
+		Logs::writeClient(QString::fromLatin1(
+			"[plugins-ui] recovery-attempt plugin=%1 reason=%2 visibleBefore=%3 visibleAfter=%4 primaryExists=%5 primaryWasVisible=%6 primaryNowVisible=%7 primaryShown=%8 updatedWindows=%9 appState=%10")
+			.arg(pluginId)
+			.arg(reason)
+			.arg(attempt.visibleBefore)
+			.arg(attempt.visibleAfter)
+			.arg(attempt.primaryExists ? u"true"_q : u"false"_q)
+			.arg(attempt.primaryWasVisible ? u"true"_q : u"false"_q)
+			.arg(attempt.primaryNowVisible ? u"true"_q : u"false"_q)
+			.arg(attempt.primaryShown ? u"true"_q : u"false"_q)
+			.arg(attempt.updatedWindows)
+			.arg(int(QGuiApplication::applicationState())));
+		if (!Core::App().plugins().safeModeEnabled()
+			&& QGuiApplication::applicationState() == Qt::ApplicationActive
+			&& attempt.primaryExists
+			&& !attempt.primaryNowVisible) {
+			Logs::writeClient(QString::fromLatin1(
+				"[plugins-ui] recovery-escalation plugin=%1 action=enable-safe-mode reason=%2")
+				.arg(pluginId, reason));
+			Core::App().plugins().setSafeModeEnabled(true);
+		}
+	});
 }
 
 [[nodiscard]] QString RecoveryOperationText(const QString &kind) {
@@ -387,6 +535,33 @@ QString SehExceptionText(unsigned int code) {
 		.arg(QString::number(quint64(code), 16)
 			.rightJustified(8, QLatin1Char('0'))
 			.toUpper());
+}
+
+[[nodiscard]] QString RuntimeSocketPeerLabel(const QTcpSocket *socket) {
+	if (!socket) {
+		return QString();
+	}
+	return socket->peerAddress().toString()
+		+ u":"_q
+		+ QString::number(socket->peerPort());
+}
+
+[[nodiscard]] int RuntimeResponseStatusCode(const QByteArray &response) {
+	const auto end = response.indexOf("\r\n");
+	const auto line = response.left(end < 0 ? response.size() : end);
+	const auto parts = line.split(' ');
+	return (parts.size() >= 2) ? parts[1].toInt() : 0;
+}
+
+[[nodiscard]] QString RuntimeBodyPreview(const QByteArray &body) {
+	auto text = QString::fromUtf8(body).trimmed();
+	if (text.isEmpty()) {
+		return QString();
+	}
+	if (text.size() > 400) {
+		text = text.left(399) + u"…"_q;
+	}
+	return CompactClientLogText(std::move(text), 400);
 }
 
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -1576,6 +1751,7 @@ void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
 	QByteArray body;
 	qsizetype consumed = 0;
 	QString error;
+	const auto peer = RuntimeSocketPeerLabel(socket);
 	if (!ParseRuntimeHttpRequest(
 			buffer,
 			method,
@@ -1587,18 +1763,48 @@ void Manager::onRuntimeApiSocketReadyRead(QTcpSocket *socket) {
 		if (error == u"incomplete"_q) {
 			return;
 		}
+		logEvent(
+			u"runtime-api"_q,
+			u"http-parse-failed"_q,
+			QJsonObject{
+				{ u"peer"_q, peer },
+				{ u"bufferBytes"_q, QString::number(buffer.size()) },
+				{ u"error"_q, error },
+			});
 		socket->write(RuntimeErrorResponse(400, error));
 		socket->disconnectFromHost();
 		_runtimeApiBuffers.remove(socket);
 		return;
 	}
 	buffer.remove(0, consumed);
+	logEvent(
+		u"runtime-api"_q,
+		u"http-request"_q,
+		QJsonObject{
+			{ u"peer"_q, peer },
+			{ u"method"_q, method.trimmed().toUpper() },
+			{ u"target"_q, target },
+			{ u"headerCount"_q, headers.size() },
+			{ u"bodyBytes"_q, QString::number(body.size()) },
+			{ u"bodyPreview"_q, RuntimeBodyPreview(body) },
+		});
 	auto disableAfterResponse = false;
 	const auto response = processRuntimeApiRequest(
 		method,
 		target,
 		body,
 		disableAfterResponse);
+	logEvent(
+		u"runtime-api"_q,
+		u"http-response"_q,
+		QJsonObject{
+			{ u"peer"_q, peer },
+			{ u"method"_q, method.trimmed().toUpper() },
+			{ u"target"_q, target },
+			{ u"status"_q, RuntimeResponseStatusCode(response) },
+			{ u"bytes"_q, QString::number(response.size()) },
+			{ u"disableAfterResponse"_q, disableAfterResponse },
+		});
 	socket->write(response);
 	socket->disconnectFromHost();
 	_runtimeApiBuffers.remove(socket);
@@ -1630,7 +1836,8 @@ QByteArray Manager::processRuntimeApiRequest(
 		&& path != u"/v1/health"_q
 		&& path != u"/v1/system"_q
 		&& path != u"/v1/runtime"_q
-		&& path != u"/v1/host"_q) {
+		&& path != u"/v1/host"_q
+		&& path != u"/v1/diagnostics"_q) {
 		return RuntimeErrorResponse(503, u"no active telegram session"_q);
 	}
 
@@ -1651,6 +1858,7 @@ QByteArray Manager::processRuntimeApiRequest(
 				u"GET /v1/health"_q,
 				u"GET /v1/host"_q,
 				u"GET /v1/system"_q,
+				u"GET /v1/diagnostics"_q,
 				u"GET /v1/plugins"_q,
 				u"POST /v1/plugins/reload"_q,
 				u"POST /v1/plugins/<id>/enable"_q,
@@ -1685,6 +1893,45 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"runtimeApiEnabled"_q, host.runtimeApiEnabled },
 			{ u"runtimeApiPort"_q, host.runtimeApiPort },
 			{ u"runtimeApiBaseUrl"_q, host.runtimeApiBaseUrl },
+		});
+	}
+	if (resolvedMethod == u"GET"_q && path == u"/v1/diagnostics"_q) {
+		const auto states = plugins();
+		auto enabledCount = 0;
+		auto loadedCount = 0;
+		auto errorCount = 0;
+		auto recoveryCount = 0;
+		for (const auto &state : states) {
+			enabledCount += state.enabled ? 1 : 0;
+			loadedCount += state.loaded ? 1 : 0;
+			errorCount += !state.error.trimmed().isEmpty() ? 1 : 0;
+			recoveryCount += (state.recoverySuspected || state.disabledByRecovery) ? 1 : 0;
+		}
+		return RuntimeOkResponse(QJsonObject{
+			{ u"safeModeEnabled"_q, safeModeEnabled() },
+			{ u"runtimeApiEnabled"_q, _runtimeApiEnabled },
+			{ u"runtimeApiPort"_q, _runtimeApiPort },
+			{ u"hasActiveSession"_q, session != nullptr },
+			{ u"visibleTopLevelWindows"_q, VisibleTopLevelWidgetCount() },
+			{ u"recoveryPending"_q, _recoveryPending.active },
+			{ u"recoveryNotice"_q, _recoveryNotice.active },
+			{ u"paths"_q, QJsonObject{
+				{ u"workingDir"_q, cWorkingDir() },
+				{ u"pluginsDir"_q, _pluginsPath },
+				{ u"config"_q, _configPath },
+				{ u"clientLog"_q, cWorkingDir() + QString::fromLatin1(kClientLogFile) },
+				{ u"pluginsLog"_q, _logPath },
+				{ u"trace"_q, _tracePath },
+				{ u"safeModeFlag"_q, _safeModePath },
+				{ u"recovery"_q, _recoveryPath },
+			} },
+			{ u"plugins"_q, QJsonObject{
+				{ u"count"_q, int(states.size()) },
+				{ u"enabled"_q, enabledCount },
+				{ u"loaded"_q, loadedCount },
+				{ u"errors"_q, errorCount },
+				{ u"recoveryDisabled"_q, recoveryCount },
+			} },
 		});
 	}
 	if (resolvedMethod == u"GET"_q && path == u"/v1/system"_q) {
@@ -4051,8 +4298,14 @@ void Manager::logEvent(
 		std::move(phase),
 		std::move(event),
 		std::move(details));
-	appendLogLine(formatLogEventText(payload));
+	const auto text = formatLogEventText(payload);
+	appendLogLine(text);
 	appendTraceLine(QJsonDocument(payload).toJson(QJsonDocument::Compact) + '\n');
+	if (ShouldMirrorPluginEventToClient(
+			payload.value(u"phase"_q).toString(),
+			payload.value(u"event"_q).toString())) {
+		Logs::writeClient(u"[plugins] "_q + CompactClientLogText(text, 2000));
+	}
 }
 
 void Manager::logOperationStart(
@@ -5195,6 +5448,21 @@ void Manager::disablePlugin(
 	if (!record) {
 		return;
 	}
+	const auto trimmedReason = reason.trimmed();
+	const auto clientReason = !trimmedReason.isEmpty()
+		? trimmedReason
+		: recoveryReason.trimmed();
+	const auto shouldAttemptUiRecovery = disabledByRecovery
+		|| clientReason.contains(u"failed"_q, Qt::CaseInsensitive)
+		|| clientReason.contains(u"crash"_q, Qt::CaseInsensitive)
+		|| clientReason.contains(u"exception"_q, Qt::CaseInsensitive);
+	Logs::writeClient(QString::fromLatin1(
+		"[plugins] disable plugin=%1 enabled=%2 loaded=%3 recovery=%4 reason=%5")
+		.arg(pluginId)
+		.arg(record->state.enabled ? u"true"_q : u"false"_q)
+		.arg(record->state.loaded ? u"true"_q : u"false"_q)
+		.arg(disabledByRecovery ? u"true"_q : u"false"_q)
+		.arg(CompactClientLogText(clientReason)));
 	appendLogLine(
 		u"[disabled] "_q
 		+ pluginId
@@ -5253,6 +5521,17 @@ void Manager::disablePlugin(
 	}
 	saveConfig();
 	saveRecoveryState();
+	if (shouldAttemptUiRecovery) {
+		logEvent(
+			u"ui"_q,
+			u"recovery-scheduled"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"reason"_q, clientReason },
+				{ u"disabledByRecovery"_q, disabledByRecovery },
+			});
+		SchedulePluginUiRecoveryAttempt(pluginId, clientReason);
+	}
 	logEvent(
 		u"plugin"_q,
 		u"disabled-finished"_q,

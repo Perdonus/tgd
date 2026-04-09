@@ -880,6 +880,7 @@ set_target_properties(my_plugin PROPERTIES SUFFIX ".tgd")
 QString PluginRuntimeText() {
 	const auto host = Core::App().plugins().hostInfo();
 	const auto system = Core::App().plugins().systemInfo();
+	const auto logsRoot = QDir(host.workingPath);
 
 	auto lines = QStringList();
 	lines.push_back(PluginUiText(
@@ -967,6 +968,36 @@ QString PluginRuntimeText() {
 		+ system.userName
 		+ u" @ "_q
 		+ system.hostName);
+
+	lines.push_back(QString());
+	lines.push_back(PluginUiText(
+		u"Diagnostics files"_q,
+		u"Файлы диагностики"_q));
+	lines.push_back(PluginUiText(u"client.log: "_q, u"client.log: "_q)
+		+ QDir::toNativeSeparators(logsRoot.filePath(u"tdata/client.log"_q)));
+	lines.push_back(PluginUiText(u"plugins.log: "_q, u"plugins.log: "_q)
+		+ QDir::toNativeSeparators(logsRoot.filePath(u"tdata/plugins.log"_q)));
+	lines.push_back(PluginUiText(u"plugins.trace.jsonl: "_q, u"plugins.trace.jsonl: "_q)
+		+ QDir::toNativeSeparators(logsRoot.filePath(u"tdata/plugins.trace.jsonl"_q)));
+	lines.push_back(PluginUiText(u"plugins.recovery.json: "_q, u"plugins.recovery.json: "_q)
+		+ QDir::toNativeSeparators(logsRoot.filePath(u"tdata/plugins.recovery.json"_q)));
+
+	lines.push_back(QString());
+	lines.push_back(PluginUiText(
+		u"What to check first"_q,
+		u"Что смотреть в первую очередь"_q));
+	lines.push_back(PluginUiText(
+		u"1. client.log for [plugins] and [plugins-ui] lines."_q,
+		u"1. client.log на строки [plugins] и [plugins-ui]."_q));
+	lines.push_back(PluginUiText(
+		u"2. plugins.log for load-failed / abi-mismatch / action failed / panel failed."_q,
+		u"2. plugins.log на load-failed / abi-mismatch / action failed / panel failed."_q));
+	lines.push_back(PluginUiText(
+		u"3. plugins.trace.jsonl for exact event order and runtime API requests."_q,
+		u"3. plugins.trace.jsonl на точный порядок событий и runtime API запросы."_q));
+	lines.push_back(PluginUiText(
+		u"4. plugins.recovery.json if safe mode or auto-disable was triggered."_q,
+		u"4. plugins.recovery.json, если сработал safe mode или авто-выключение."_q));
 	return lines.join(u"\n"_q);
 }
 
@@ -1199,6 +1230,85 @@ void RevealPluginAuxFile(
 	File::ShowInFolder(path);
 }
 
+QString PluginsDiagnosticsSummaryText() {
+	const auto host = Core::App().plugins().hostInfo();
+	const auto states = Core::App().plugins().plugins();
+	auto enabledCount = 0;
+	auto loadedCount = 0;
+	auto errorCount = 0;
+	auto recoveryCount = 0;
+	for (const auto &state : states) {
+		enabledCount += state.enabled ? 1 : 0;
+		loadedCount += state.loaded ? 1 : 0;
+		errorCount += !state.error.trimmed().isEmpty() ? 1 : 0;
+		recoveryCount += (state.recoverySuspected || state.disabledByRecovery) ? 1 : 0;
+	}
+	auto lines = QStringList();
+	lines.push_back(PluginUiText(
+		u"Always-visible plugin diagnostics. Runtime docs, safe mode and logs stay here even when plugins are broken."_q,
+		u"Постоянно видимая диагностика плагинов. Рантайм, safe mode и логи остаются здесь даже если плагины сломаны."_q));
+	lines.push_back(PluginUiText(
+		u"Plugins: %1 total · %2 enabled · %3 loaded · %4 with errors · %5 in recovery"_q,
+		u"Плагинов: %1 всего · %2 включено · %3 загружено · %4 с ошибками · %5 в recovery"_q)
+		.arg(states.size())
+		.arg(enabledCount)
+		.arg(loadedCount)
+		.arg(errorCount)
+		.arg(recoveryCount));
+	lines.push_back(PluginUiText(
+		u"Safe mode: %1 · Runtime API: %2"_q,
+		u"Безопасный режим: %1 · Runtime API: %2"_q)
+		.arg(PluginUiText(host.safeModeEnabled ? u"enabled"_q : u"disabled"_q, host.safeModeEnabled ? u"включён"_q : u"выключен"_q))
+		.arg(host.runtimeApiEnabled
+			? PluginUiText(u"enabled on port %1"_q, u"включён на порту %1"_q).arg(host.runtimeApiPort)
+			: PluginUiText(u"disabled"_q, u"выключен"_q)));
+	return lines.join(u"\n"_q);
+}
+
+QString PluginDiagnosticsText(const ::Plugins::PluginState &state) {
+	auto lines = QStringList();
+	lines.push_back(PluginUiText(u"Plugin ID: "_q, u"ID плагина: "_q) + state.info.id);
+	if (!state.path.trimmed().isEmpty()) {
+		lines.push_back(PluginUiText(u"Package: "_q, u"Пакет: "_q) + QDir::toNativeSeparators(state.path));
+	}
+	lines.push_back(PluginUiText(
+		u"State: %1 / %2"_q,
+		u"Состояние: %1 / %2"_q)
+		.arg(state.enabled
+			? PluginUiText(u"enabled"_q, u"включён"_q)
+			: PluginUiText(u"disabled"_q, u"выключен"_q))
+		.arg(state.loaded
+			? PluginUiText(u"loaded"_q, u"загружен"_q)
+			: PluginUiText(u"not loaded"_q, u"не загружен"_q)));
+	if (!state.error.trimmed().isEmpty()) {
+		lines.push_back(PluginUiText(u"Last error: "_q, u"Последняя ошибка: "_q) + state.error.trimmed());
+	}
+	if (state.recoverySuspected || state.disabledByRecovery) {
+		lines.push_back(PluginUiText(
+			u"Recovery: this plugin was auto-disabled after a risky callback."_q,
+			u"Recovery: этот плагин был автоматически выключен после рискованного callback."_q));
+		if (!state.recoveryReason.trimmed().isEmpty()) {
+			lines.push_back(PluginUiText(u"Recovery reason: "_q, u"Причина recovery: "_q) + state.recoveryReason.trimmed());
+		}
+	}
+	return lines.join(u"\n"_q);
+}
+
+void AddSettingsActionButton(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text,
+		Fn<void()> callback) {
+	const auto button = container->add(object_ptr<Ui::SettingsButton>(
+		container,
+		rpl::single(text),
+		st::settingsButtonNoIcon));
+	button->setClickedCallback([callback = std::move(callback)] {
+		if (callback) {
+			callback();
+		}
+	});
+}
+
 std::optional<::Plugins::PluginState> LookupPluginState(
 		const QString &pluginId) {
 	for (const auto &state : Core::App().plugins().plugins()) {
@@ -1300,6 +1410,76 @@ void RequestSafeModeChange(
 			? PluginUiText(u"Enable"_q, u"Включить"_q)
 			: PluginUiText(u"Disable"_q, u"Выключить"_q),
 	}));
+}
+
+void AddPluginsDiagnosticsSection(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> context,
+		Fn<void()> onStateChanged) {
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(PluginUiText(
+			u"Runtime & Diagnostics"_q,
+			u"Рантайм и диагностика"_q)));
+	Ui::AddDividerText(container, rpl::single(PluginsDiagnosticsSummaryText()));
+	AddSettingsActionButton(container, PluginUiText(
+		u"Open runtime overview"_q,
+		u"Открыть обзор рантайма"_q), [=] {
+		ShowPluginRuntimeBox(controller);
+	});
+	AddSettingsActionButton(container, PluginUiText(
+		u"Open local plugin docs"_q,
+		u"Открыть локальную документацию плагинов"_q), [=] {
+		ShowPluginDocsBox(controller);
+	});
+	AddSettingsActionButton(container, PluginUiText(
+		u"Reload plugins now"_q,
+		u"Перезагрузить плагины сейчас"_q), [=] {
+		Core::App().plugins().reload();
+		if (onStateChanged) {
+			onStateChanged();
+		}
+	});
+	AddSettingsActionButton(container, PluginUiText(
+		u"Open client.log"_q,
+		u"Открыть client.log"_q), [=] {
+		RevealPluginAuxFile(
+			controller,
+			u"./tdata/client.log"_q,
+			PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
+	});
+	AddSettingsActionButton(container, PluginUiText(
+		u"Open plugins.log"_q,
+		u"Открыть plugins.log"_q), [=] {
+		RevealPluginAuxFile(
+			controller,
+			u"./tdata/plugins.log"_q,
+			PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
+	});
+	AddSettingsActionButton(container, PluginUiText(
+		u"Open plugins.trace.jsonl"_q,
+		u"Открыть plugins.trace.jsonl"_q), [=] {
+		RevealPluginAuxFile(
+			controller,
+			u"./tdata/plugins.trace.jsonl"_q,
+			PluginUiText(u"plugins.trace.jsonl was not found."_q, u"Файл plugins.trace.jsonl не найден."_q));
+	});
+	AddSettingsActionButton(container, PluginUiText(
+		u"Open recovery state"_q,
+		u"Открыть recovery-state"_q), [=] {
+		RevealPluginAuxFile(
+			controller,
+			u"./tdata/plugins.recovery.json"_q,
+			PluginUiText(u"plugins.recovery.json was not found."_q, u"Файл plugins.recovery.json не найден."_q));
+	});
+	const auto safeModeEnabled = Core::App().plugins().safeModeEnabled();
+	AddSettingsActionButton(container, safeModeEnabled
+		? PluginUiText(u"Disable Safe Mode"_q, u"Выключить безопасный режим"_q)
+		: PluginUiText(u"Enable Safe Mode"_q, u"Включить безопасный режим"_q), [=] {
+		RequestSafeModeChange(controller, context, !safeModeEnabled, onStateChanged);
+	});
+	Ui::AddSkip(container);
 }
 
 void AddPluginSettingsContent(
@@ -1544,6 +1724,34 @@ private:
 
 		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
 		Ui::AddSkip(_content);
+		Ui::AddSubsectionTitle(
+			_content,
+			rpl::single(PluginUiText(u"Diagnostics"_q, u"Диагностика"_q)));
+		Ui::AddDividerText(_content, rpl::single(PluginDiagnosticsText(*state)));
+		if (!state->path.trimmed().isEmpty()) {
+			AddSettingsActionButton(_content, PluginUiText(
+				u"Reveal plugin package"_q,
+				u"Показать пакет плагина"_q), [=] {
+				RevealPluginAuxFile(
+					_controller,
+					state->path,
+					PluginUiText(u"Plugin package file was not found."_q, u"Файл пакета плагина не найден."_q));
+			});
+		}
+		AddSettingsActionButton(_content, PluginUiText(
+			u"Copy plugin ID"_q,
+			u"Скопировать ID плагина"_q), [=] {
+			if (const auto clipboard = QGuiApplication::clipboard()) {
+				clipboard->setText(state->info.id);
+			}
+			_controller->window().showToast(PluginUiText(u"Plugin ID copied."_q, u"ID плагина скопирован."_q));
+		});
+		AddSettingsActionButton(_content, PluginUiText(
+			u"Open runtime & diagnostics"_q,
+			u"Открыть рантайм и диагностику"_q), [=] {
+			ShowPluginRuntimeBox(_controller);
+		});
+		Ui::AddSkip(_content);
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto panels = Core::App().plugins().panelsFor(state->info.id);
@@ -1692,9 +1900,7 @@ rpl::producer<QString> Plugins::title() {
 void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 	addAction(Ui::Menu::MenuCallback::Args{
 		.text = PluginUiText(u"Documentation"_q, u"Документация"_q),
-		.handler = [=] {
-			QDesktopServices::openUrl(QUrl(u"https://docs.astrogram.su"_q));
-		},
+		.handler = [=] { ShowPluginDocsBox(_controller); },
 		.icon = &st::menuIconFaq,
 	});
 	addAction(Ui::Menu::MenuCallback::Args{
@@ -1705,9 +1911,27 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		.icon = &st::menuIconIpAddress,
 	});
 	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Reload Plugins"_q, u"Перезагрузить плагины"_q),
+		.handler = [=] {
+			Core::App().plugins().reload();
+			scheduleRebuildList(0);
+		},
+		.icon = &st::menuIconSettings,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
 		.text = PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
 		.handler = [=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
 		.icon = &st::menuIconShowInFolder,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Open client.log"_q, u"Открыть client.log"_q),
+		.handler = [=] {
+			RevealPluginAuxFile(
+				_controller,
+				u"./tdata/client.log"_q,
+				PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
+		},
+		.icon = &st::menuIconSettings,
 	});
 	addAction(Ui::Menu::MenuCallback::Args{
 		.text = PluginUiText(u"Open plugins.log"_q, u"Открыть plugins.log"_q),
@@ -1715,9 +1939,27 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 			RevealPluginAuxFile(
 				_controller,
 				u"./tdata/plugins.log"_q,
-				PluginUiText(
-					u"plugins.log was not found."_q,
-					u"Файл plugins.log не найден."_q));
+				PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
+		},
+		.icon = &st::menuIconSettings,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Open plugins.trace.jsonl"_q, u"Открыть plugins.trace.jsonl"_q),
+		.handler = [=] {
+			RevealPluginAuxFile(
+				_controller,
+				u"./tdata/plugins.trace.jsonl"_q,
+				PluginUiText(u"plugins.trace.jsonl was not found."_q, u"Файл plugins.trace.jsonl не найден."_q));
+		},
+		.icon = &st::menuIconSettings,
+	});
+	addAction(Ui::Menu::MenuCallback::Args{
+		.text = PluginUiText(u"Open recovery state"_q, u"Открыть recovery-state"_q),
+		.handler = [=] {
+			RevealPluginAuxFile(
+				_controller,
+				u"./tdata/plugins.recovery.json"_q,
+				PluginUiText(u"plugins.recovery.json was not found."_q, u"Файл plugins.recovery.json не найден."_q));
 		},
 		.icon = &st::menuIconSettings,
 	});
@@ -1777,6 +2019,7 @@ void Plugins::rebuildList() {
 		_listRefreshPending = true;
 		scheduleRebuildList(0);
 	});
+	AddPluginsDiagnosticsSection(_list, _controller, this, scheduleRefresh);
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
 			_list,
