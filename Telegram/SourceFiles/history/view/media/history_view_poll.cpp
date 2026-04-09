@@ -294,7 +294,11 @@ bool Poll::showVotes() const {
 }
 
 bool Poll::canPreviewResults() const {
+	const auto previewEnabled = _poll->session()
+		.settings()
+		.showPollResultsBeforeVoting();
 	return !_voted
+		&& previewEnabled
 		&& !(_flags & PollData::Flag::Closed)
 		&& !_poll->quiz()
 		&& _parent->data()->isRegular();

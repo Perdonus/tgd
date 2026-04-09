@@ -304,7 +304,7 @@ if not defined ASTRO_COMMAND_DIR set "ASTRO_COMMAND_DIR=%~dp0"
 
 if "%~1"=="" goto help
 if /I "%~1"=="help" goto help
-if /I "%~1"=="api" goto api_root
+if /I "%~1"=="api" goto api
 if /I "%~1"=="status" goto status
 if /I "%~1"=="health" goto health
 if /I "%~1"=="host" goto host
@@ -323,11 +323,43 @@ echo Unknown command: %~1
 echo.
 goto help
 
+:api
+shift
+if "%~1"=="" goto api_root
+set "ASTRO_METHOD=%~1"
+if /I "%ASTRO_METHOD%"=="GET" goto api_method
+if /I "%ASTRO_METHOD%"=="POST" goto api_method
+if /I "%ASTRO_METHOD%"=="PUT" goto api_method
+if /I "%ASTRO_METHOD%"=="PATCH" goto api_method
+if /I "%ASTRO_METHOD%"=="DELETE" goto api_method
+set "ASTRO_METHOD=GET"
+set "ASTRO_PATH=%~1"
+set "ASTRO_RAW_BODY="
+goto api_passthrough
+
+:api_method
+shift
+if "%~1"=="" goto help_api
+set "ASTRO_PATH=%~1"
+shift
+set "ASTRO_RAW_BODY=%*"
+goto api_passthrough
+
 :api_root
 set "ASTRO_METHOD=GET"
 set "ASTRO_PATH=/v1"
-set "ASTRO_BODY_KIND="
-call :api_request
+set "ASTRO_RAW_BODY="
+goto api_passthrough
+
+:api_passthrough
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$base = if ($env:ASTRO_BASE_URL) { $env:ASTRO_BASE_URL } else { 'http://127.0.0.1:37080' };" ^
+  "$path = if ($env:ASTRO_PATH) { $env:ASTRO_PATH } else { '/v1' };" ^
+  "if (-not $path.StartsWith('/')) { $path = '/' + $path.TrimStart('/') }" ^
+  "$uri = $base + $path;" ^
+  "$bodyText = if ($env:ASTRO_RAW_BODY) { $env:ASTRO_RAW_BODY.Trim() } else { '' };" ^
+  "try { if ($bodyText) { $null = $bodyText | ConvertFrom-Json; $response = Invoke-RestMethod -Method $env:ASTRO_METHOD -Uri $uri -ContentType 'application/json; charset=utf-8' -Body $bodyText } else { $response = Invoke-RestMethod -Method $env:ASTRO_METHOD -Uri $uri }; $response | ConvertTo-Json -Depth 16 } catch { $payload = ''; if ($_.Exception.Response) { try { $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd() } catch {} } if ($payload) { Write-Host $payload } else { if ($bodyText) { Write-Host 'If you pass a body to astro api, it must be valid JSON.' }; Write-Host ('Astrogram Runtime API is unavailable at ' + $base + '.'); Write-Host 'Enable Runtime API in Astrogram settings or use astro runtime on for the next launch.'; Write-Host $_.Exception.Message } exit 1 }"
 exit /b %errorlevel%
 
 :status
@@ -414,6 +446,14 @@ if "%~1"=="" (
   set "ASTRO_BODY_KIND="
   call :api_request
   exit /b %errorlevel%
+)
+if /I "%~1"=="info" (
+  shift
+  if "%~1"=="" goto help_plugins
+  set "ASTRO_METHOD=GET"
+  set "ASTRO_PATH=/v1/plugins/%~1"
+  set "ASTRO_RAW_BODY="
+  goto api_passthrough
 )
 if /I "%~1"=="reload" (
   set "ASTRO_METHOD=POST"
@@ -596,6 +636,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "try { if ($null -ne $body) { $json = $body | ConvertTo-Json -Compress -Depth 16; $response = Invoke-RestMethod -Method $env:ASTRO_METHOD -Uri $uri -ContentType 'application/json; charset=utf-8' -Body $json } else { $response = Invoke-RestMethod -Method $env:ASTRO_METHOD -Uri $uri }; $response | ConvertTo-Json -Depth 16 } catch { $payload = ''; if ($_.Exception.Response) { try { $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd() } catch {} } if ($payload) { Write-Host $payload } else { Write-Host ('Astrogram Runtime API is unavailable at ' + $base + '.'); Write-Host 'Enable Runtime API in Astrogram settings or use astro runtime on for the next launch.'; Write-Host $_.Exception.Message } exit 1 }"
 exit /b %errorlevel%
 
+:help_api
+echo Usage: astro api
+echo        astro api ^<path^>
+echo        astro api ^<METHOD^> ^<path^> [json-body]
+exit /b 1
+
 :help_runtime
 echo Usage: astro runtime on [port]
 echo        astro runtime off
@@ -603,6 +649,7 @@ exit /b 1
 
 :help_plugins
 echo Usage: astro plugins
+echo        astro plugins info ^<id^>
 echo        astro plugins reload
 echo        astro plugins enable ^<id^>
 echo        astro plugins disable ^<id^>
@@ -626,6 +673,8 @@ exit /b 1
 echo Astrogram Runtime API CLI
 echo.
 echo   astro api
+echo   astro api ^<path^>
+echo   astro api ^<METHOD^> ^<path^> [json-body]
 echo   astro status
 echo   astro health
 echo   astro host
@@ -634,6 +683,7 @@ echo   astro diagnostics
 echo   astro runtime on [port]
 echo   astro runtime off
 echo   astro plugins
+echo   astro plugins info ^<id^>
 echo   astro plugins reload
 echo   astro plugins enable ^<id^>
 echo   astro plugins disable ^<id^>

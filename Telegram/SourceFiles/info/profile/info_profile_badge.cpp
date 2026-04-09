@@ -53,7 +53,11 @@ namespace {
 		return (lowered == u"1"_q
 			|| lowered == u"true"_q
 			|| lowered == u"yes"_q
-			|| lowered == u"on"_q);
+			|| lowered == u"on"_q
+			|| lowered == u"enabled"_q
+			|| lowered == u"active"_q
+			|| lowered == u"premium"_q
+			|| lowered == u"subscriber"_q);
 	}
 	return false;
 }
@@ -144,6 +148,12 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		u"emojiStatusId"_q,
 		u"emoji_status_document_id"_q,
 		u"emojiStatusDocumentId"_q,
+		u"status_emoji_id"_q,
+		u"statusEmojiId"_q,
+		u"status_document_id"_q,
+		u"statusDocumentId"_q,
+		u"premium_emoji_status_id"_q,
+		u"premiumEmojiStatusId"_q,
 		u"document_id"_q,
 		u"documentId"_q,
 		u"custom_emoji_id"_q,
@@ -161,6 +171,10 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 	for (const auto &key : {
 		u"emoji_status"_q,
 		u"emojiStatus"_q,
+		u"premium_emoji_status"_q,
+		u"premiumEmojiStatus"_q,
+		u"custom_emoji"_q,
+		u"customEmoji"_q,
 		u"badge"_q,
 		u"subscriber_badge"_q,
 		u"subscriberBadge"_q,
@@ -181,8 +195,19 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		u"subscriber_badge"_q,
 		u"subscriberBadge"_q,
 		u"subscriber"_q,
+		u"enabled"_q,
+		u"active"_q,
+		u"is_subscriber"_q,
+		u"isSubscriber"_q,
+		u"has_badge"_q,
+		u"hasBadge"_q,
+		u"premium"_q,
 		u"emoji_status"_q,
 		u"emojiStatus"_q,
+		u"premium_emoji_status"_q,
+		u"premiumEmojiStatus"_q,
+		u"custom_emoji"_q,
+		u"customEmoji"_q,
 	}) {
 		const auto value = object.value(key);
 		if (value.isObject()) {
@@ -195,11 +220,23 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		|| object.contains(u"subscriber"_q)
 		|| object.contains(u"subscriber_badge"_q)
 		|| object.contains(u"subscriberBadge"_q)
-		|| object.contains(u"enabled"_q);
+		|| object.contains(u"enabled"_q)
+		|| object.contains(u"active"_q)
+		|| object.contains(u"is_subscriber"_q)
+		|| object.contains(u"isSubscriber"_q)
+		|| object.contains(u"has_badge"_q)
+		|| object.contains(u"hasBadge"_q)
+		|| object.contains(u"premium"_q);
 	const auto hasStatusIdField = object.contains(u"emoji_status_id"_q)
 		|| object.contains(u"emojiStatusId"_q)
 		|| object.contains(u"emoji_status_document_id"_q)
 		|| object.contains(u"emojiStatusDocumentId"_q)
+		|| object.contains(u"status_emoji_id"_q)
+		|| object.contains(u"statusEmojiId"_q)
+		|| object.contains(u"status_document_id"_q)
+		|| object.contains(u"statusDocumentId"_q)
+		|| object.contains(u"premium_emoji_status_id"_q)
+		|| object.contains(u"premiumEmojiStatusId"_q)
 		|| object.contains(u"document_id"_q)
 		|| object.contains(u"documentId"_q)
 		|| object.contains(u"custom_emoji_id"_q)
@@ -207,7 +244,11 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		|| object.contains(u"emoji_id"_q)
 		|| object.contains(u"emojiId"_q)
 		|| object.contains(u"emoji_status"_q)
-		|| object.contains(u"emojiStatus"_q);
+		|| object.contains(u"emojiStatus"_q)
+		|| object.contains(u"premium_emoji_status"_q)
+		|| object.contains(u"premiumEmojiStatus"_q)
+		|| object.contains(u"custom_emoji"_q)
+		|| object.contains(u"customEmoji"_q);
 	if (!hasEnabledField && !hasStatusIdField) {
 		return std::nullopt;
 	}
@@ -218,6 +259,12 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 			|| JsonTruthy(object.value(u"subscriber_badge"_q))
 			|| JsonTruthy(object.value(u"subscriberBadge"_q))
 			|| JsonTruthy(object.value(u"enabled"_q))
+			|| JsonTruthy(object.value(u"active"_q))
+			|| JsonTruthy(object.value(u"is_subscriber"_q))
+			|| JsonTruthy(object.value(u"isSubscriber"_q))
+			|| JsonTruthy(object.value(u"has_badge"_q))
+			|| JsonTruthy(object.value(u"hasBadge"_q))
+			|| JsonTruthy(object.value(u"premium"_q))
 			|| (statusId != 0))
 		: (statusId != 0);
 	if (!enabled) {
@@ -377,6 +424,8 @@ private:
 			QNetworkRequest::RedirectPolicyAttribute,
 			QNetworkRequest::NoLessSafeRedirectPolicy);
 		request.setRawHeader("Accept", "application/json");
+		request.setRawHeader("User-Agent", "AstrogramDesktop");
+		request.setRawHeader("Cache-Control", "no-cache");
 		auto *reply = _manager.get(request);
 		QObject::connect(
 			reply,

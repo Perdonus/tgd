@@ -1055,7 +1055,21 @@ bool ParseRuntimeHttpRequest(
 	return true;
 }
 
+QString RuntimeSourceBadgeKind(const PluginState &state) {
+	return state.sourceVerified ? u"confirmed"_q : u"unconfirmed"_q;
+}
+
 QJsonObject RuntimePluginJson(const PluginState &state) {
+	const auto source = QJsonObject{
+		{ u"verified"_q, state.sourceVerified },
+		{ u"badge"_q, state.sourceTrustText },
+		{ u"badgeKind"_q, RuntimeSourceBadgeKind(state) },
+		{ u"details"_q, state.sourceTrustDetails },
+		{ u"reason"_q, state.sourceTrustReason },
+		{ u"channelId"_q, QString::number(state.sourceChannelId) },
+		{ u"messageId"_q, QString::number(state.sourceMessageId) },
+		{ u"sha256"_q, state.sha256 },
+	};
 	return QJsonObject{
 		{ u"id"_q, state.info.id },
 		{ u"name"_q, state.info.name },
@@ -1063,12 +1077,21 @@ QJsonObject RuntimePluginJson(const PluginState &state) {
 		{ u"author"_q, state.info.author },
 		{ u"description"_q, state.info.description },
 		{ u"path"_q, state.path },
+		{ u"sha256"_q, state.sha256 },
 		{ u"enabled"_q, state.enabled },
 		{ u"loaded"_q, state.loaded },
 		{ u"error"_q, state.error },
 		{ u"disabledByRecovery"_q, state.disabledByRecovery },
 		{ u"recoverySuspected"_q, state.recoverySuspected },
 		{ u"recoveryReason"_q, state.recoveryReason },
+		{ u"sourceVerified"_q, state.sourceVerified },
+		{ u"sourceBadgeKind"_q, RuntimeSourceBadgeKind(state) },
+		{ u"sourceTrustText"_q, state.sourceTrustText },
+		{ u"sourceTrustDetails"_q, state.sourceTrustDetails },
+		{ u"sourceTrustReason"_q, state.sourceTrustReason },
+		{ u"sourceChannelId"_q, QString::number(state.sourceChannelId) },
+		{ u"sourceMessageId"_q, QString::number(state.sourceMessageId) },
+		{ u"source"_q, source },
 	};
 }
 
@@ -1865,6 +1888,7 @@ QByteArray Manager::processRuntimeApiRequest(
 				u"GET /v1/system"_q,
 				u"GET /v1/diagnostics"_q,
 				u"GET /v1/plugins"_q,
+				u"GET /v1/plugins/<id>"_q,
 				u"POST /v1/plugins/reload"_q,
 				u"POST /v1/plugins/<id>/enable"_q,
 				u"POST /v1/plugins/<id>/disable"_q,
@@ -1906,11 +1930,25 @@ QByteArray Manager::processRuntimeApiRequest(
 		auto loadedCount = 0;
 		auto errorCount = 0;
 		auto recoveryCount = 0;
+		auto verifiedSourceCount = 0;
+		auto unverifiedSourceCount = 0;
 		for (const auto &state : states) {
 			enabledCount += state.enabled ? 1 : 0;
 			loadedCount += state.loaded ? 1 : 0;
 			errorCount += !state.error.trimmed().isEmpty() ? 1 : 0;
 			recoveryCount += (state.recoverySuspected || state.disabledByRecovery) ? 1 : 0;
+			verifiedSourceCount += state.sourceVerified ? 1 : 0;
+			unverifiedSourceCount += state.sourceVerified ? 0 : 1;
+		}
+		const auto trustedChannelIds = session
+			? session->appConfig().astrogramTrustedPluginChannelIds()
+			: std::vector<int64>();
+		const auto trustedRecords = session
+			? session->appConfig().astrogramTrustedPluginRecords()
+			: std::vector<QString>();
+		auto trustedChannelsJson = QJsonArray();
+		for (const auto channelId : trustedChannelIds) {
+			trustedChannelsJson.push_back(QString::number(channelId));
 		}
 		return RuntimeOkResponse(QJsonObject{
 			{ u"safeModeEnabled"_q, safeModeEnabled() },
@@ -1936,6 +1974,12 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"loaded"_q, loadedCount },
 				{ u"errors"_q, errorCount },
 				{ u"recoveryDisabled"_q, recoveryCount },
+				{ u"verifiedSources"_q, verifiedSourceCount },
+				{ u"unverifiedSources"_q, unverifiedSourceCount },
+			} },
+			{ u"trustedSources"_q, QJsonObject{
+				{ u"channels"_q, trustedChannelsJson },
+				{ u"recordsCount"_q, int(trustedRecords.size()) },
 			} },
 		});
 	}
@@ -2106,6 +2150,54 @@ QByteArray Manager::processRuntimeApiRequest(
 	const auto prefix = u"/v1/plugins/"_q;
 	if (path.startsWith(prefix)) {
 		auto rest = path.mid(prefix.size());
+		if (resolvedMethod == u"GET"_q
+			&& !rest.isEmpty()
+			&& !rest.contains(u'/'_q)) {
+			const auto id = QUrl::fromPercentEncoding(rest.toUtf8());
+			if (id.isEmpty()) {
+				return RuntimeErrorResponse(400, u"plugin id is required"_q);
+			}
+			const auto record = findRecord(id);
+			if (!record) {
+				return RuntimeErrorResponse(404, u"plugin not found"_q);
+			}
+			auto commands = QJsonArray();
+			for (const auto &command : commandsFor(id)) {
+				commands.push_back(commandDescriptorToJson(command));
+			}
+			auto actions = QJsonArray();
+			for (const auto &action : actionsFor(id)) {
+				actions.push_back(QJsonObject{
+					{ u"id"_q, QString::number(action.id) },
+					{ u"title"_q, action.title },
+					{ u"description"_q, action.description },
+				});
+			}
+			auto panels = QJsonArray();
+			for (const auto &panel : panelsFor(id)) {
+				panels.push_back(QJsonObject{
+					{ u"id"_q, QString::number(panel.id) },
+					{ u"title"_q, panel.title },
+					{ u"description"_q, panel.description },
+				});
+			}
+			auto settingsPages = QJsonArray();
+			for (const auto &page : settingsPagesFor(id)) {
+				settingsPages.push_back(QJsonObject{
+					{ u"id"_q, QString::number(page.id) },
+					{ u"title"_q, page.title },
+					{ u"description"_q, page.description },
+					{ u"sectionsCount"_q, page.sections.size() },
+				});
+			}
+			return RuntimeOkResponse(QJsonObject{
+				{ u"plugin"_q, RuntimePluginJson(record->state) },
+				{ u"commands"_q, commands },
+				{ u"actions"_q, actions },
+				{ u"panels"_q, panels },
+				{ u"settingsPages"_q, settingsPages },
+			});
+		}
 		if (rest.endsWith(u"/enable"_q) || rest.endsWith(u"/disable"_q)) {
 			if (resolvedMethod != u"POST"_q) {
 				return RuntimeErrorResponse(405, u"method not allowed"_q);
@@ -4489,6 +4581,7 @@ QJsonObject Manager::pluginStateToJson(const PluginState &state) const {
 	result.insert(u"recoverySuspected"_q, state.recoverySuspected);
 	result.insert(u"recoveryReason"_q, state.recoveryReason);
 	result.insert(u"sourceVerified"_q, state.sourceVerified);
+	result.insert(u"sourceBadgeKind"_q, RuntimeSourceBadgeKind(state));
 	result.insert(u"sourceTrustText"_q, state.sourceTrustText);
 	result.insert(u"sourceTrustDetails"_q, state.sourceTrustDetails);
 	result.insert(u"sourceTrustReason"_q, state.sourceTrustReason);
@@ -4701,10 +4794,62 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		int64 messageId = 0;
 		QString label;
 	};
+	const auto parseRecordObject = [&](const QJsonObject &object) -> ParsedRecord {
+		auto result = ParsedRecord();
+		for (const auto &key : { u"sha256"_q, u"hash"_q, u"digest"_q }) {
+			const auto value = object.value(key).toString().trimmed();
+			if (!value.isEmpty()) {
+				result.sha256 = normalizeHash(value);
+				if (!result.sha256.isEmpty()) {
+					break;
+				}
+			}
+		}
+		for (const auto &key : {
+			u"channel_id"_q,
+			u"channelId"_q,
+			u"source_channel_id"_q,
+			u"sourceChannelId"_q,
+		}) {
+			const auto value = object.value(key).toVariant().toLongLong();
+			if (value != 0) {
+				result.channelId = value;
+				break;
+			}
+		}
+		for (const auto &key : {
+			u"message_id"_q,
+			u"messageId"_q,
+			u"post_id"_q,
+			u"postId"_q,
+			u"source_message_id"_q,
+			u"sourceMessageId"_q,
+		}) {
+			const auto value = object.value(key).toVariant().toLongLong();
+			if (value != 0) {
+				result.messageId = value;
+				break;
+			}
+		}
+		for (const auto &key : { u"label"_q, u"title"_q, u"name"_q }) {
+			const auto value = object.value(key).toString().trimmed();
+			if (!value.isEmpty()) {
+				result.label = value;
+				break;
+			}
+		}
+		return result;
+	};
 	const auto parseRecord = [&](QString raw) -> ParsedRecord {
 		raw = raw.trimmed();
 		if (raw.isEmpty()) {
 			return {};
+		}
+		if (raw.startsWith(u'{'_q)) {
+			const auto document = QJsonDocument::fromJson(raw.toUtf8());
+			if (document.isObject()) {
+				return parseRecordObject(document.object());
+			}
 		}
 		auto delimiter = u'|';
 		auto parts = raw.split(delimiter, Qt::KeepEmptyParts);
@@ -4763,16 +4908,18 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 			matchedHashWithoutOrigin = true;
 			continue;
 		}
-		if (record.channelId
-			&& !trustedChannels.empty()
-			&& (std::find(
-				trustedChannels.begin(),
-				trustedChannels.end(),
-				record.channelId) == trustedChannels.end())) {
-			matchedHashInUntrustedChannel = true;
-			matchedChannelId = record.channelId;
-			matchedMessageId = record.messageId;
-			continue;
+		if (record.channelId) {
+			const auto trusted = !trustedChannels.empty()
+				&& (std::find(
+					trustedChannels.begin(),
+					trustedChannels.end(),
+					record.channelId) != trustedChannels.end());
+			if (!trusted) {
+				matchedHashInUntrustedChannel = true;
+				matchedChannelId = record.channelId;
+				matchedMessageId = record.messageId;
+				continue;
+			}
 		}
 		state.sourceVerified = true;
 		state.sourceTrustText = u"verified"_q;

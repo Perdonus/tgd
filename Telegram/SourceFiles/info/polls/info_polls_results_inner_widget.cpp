@@ -693,7 +693,11 @@ void InnerWidget::setupContent() {
 			st::boxDividerLabel),
 		st::boxRowPadding);
 	Ui::AddSkip(_content, st::boxLittleSkip);
-	const auto showVoters = _poll->publicVotes() && _poll->voted();
+	const auto showVoters = _poll->publicVotes()
+		&& (_poll->voted()
+			|| _poll->session()
+				.settings()
+				.showPollResultsBeforeVoting());
 	for (const auto &answer : _poll->answers) {
 		const auto session = &_controller->session();
 		if (!showVoters) {

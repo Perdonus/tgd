@@ -483,8 +483,14 @@ std::optional<GitHubReleaseData> FindGitHubRelease(
 	if (chosen.isEmpty()) {
 		return std::nullopt;
 	}
+	const auto releaseTitle = [&] {
+		const auto name = chosen.value(u"name"_q).toString().trimmed();
+		return !name.isEmpty()
+			? name
+			: chosen.value(u"tag_name"_q).toString().trimmed();
+	}();
 	return GitHubReleaseData{
-		.title = chosen.value(u"name"_q).toString().trimmed(),
+		.title = releaseTitle,
 		.url = chosen.value(u"html_url"_q).toString().trimmed(),
 		.changelog = NormalizeReleaseMarkdown(
 			chosen.value(u"body"_q).toString()),

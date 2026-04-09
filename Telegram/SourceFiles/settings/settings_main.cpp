@@ -104,12 +104,22 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 		const auto ready = !Core::UpdaterDisabled()
 			&& (checker.state() == Core::UpdateChecker::State::Ready);
 		const auto info = checker.releaseInfo();
+		const auto versionText = !info.versionText.isEmpty()
+			? info.versionText
+			: (info.version > 0)
+			? Core::FormatVersionWithBuild(info.version)
+			: QString();
+		const auto appendVersion = [&](QString label) {
+			return versionText.isEmpty()
+				? label
+				: (label + u" · "_q + versionText);
+		};
 		return (ready
 			|| info.available
 			|| info.changelogLoading
 			|| !info.changelog.isEmpty()
 			|| info.changelogFailed)
-			? RuEn("Расширенные • Обновление доступно", "Advanced • Update available")
+			? appendVersion(RuEn("Расширенные • Обновление доступно", "Advanced • Update available"))
 			: tr::lng_settings_advanced(tr::now);
 	};
 	return rpl::merge(
@@ -129,14 +139,24 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 		const auto ready = !Core::UpdaterDisabled()
 			&& (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready);
 		const auto info = Core::UpdateChecker().releaseInfo();
+		const auto versionText = !info.versionText.isEmpty()
+			? info.versionText
+			: (info.version > 0)
+			? Core::FormatVersionWithBuild(info.version)
+			: QString();
+		const auto withVersion = [&](QString label) {
+			return versionText.isEmpty()
+				? label
+				: (label + u" · "_q + versionText);
+		};
 		if (ready) {
-			return RuEn(
+			return withVersion(RuEn(
 				"Установить обновление Astrogram",
-				"Install Astrogram update");
+				"Install Astrogram update"));
 		} else if (info.available) {
-			return RuEn(
+			return withVersion(RuEn(
 				"Посмотреть обновление Astrogram",
-				"View Astrogram update");
+				"View Astrogram update"));
 		}
 		return RuEn(
 			"Обновление Astrogram",
