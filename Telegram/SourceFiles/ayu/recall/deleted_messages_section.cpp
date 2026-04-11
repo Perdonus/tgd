@@ -2099,8 +2099,9 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 	) | rpl::on_next([=] {
 		refreshScopeBar();
 	}, lifetime());
+	handleStorageChange();
 	AyuMessages::deletedMessagesChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		handleStorageChange();
 	}, lifetime());
 }

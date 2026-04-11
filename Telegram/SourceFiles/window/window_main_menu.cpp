@@ -818,13 +818,17 @@ void MainMenu::setupAccounts() {
 		closeLayer();
 	}, inner->lifetime());
 
+	syncAccountsVisibility(
+		Core::App().settings().mainMenuAccountsShown(),
+		_showFinished.current());
 	Core::App().settings().mainMenuAccountsShownValue(
-	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
+	) | rpl::distinct_until_changed() | rpl::on_next([=](bool shown) {
 		syncAccountsVisibility(shown, _showFinished.current());
 	}, inner->lifetime());
 
+	_toggleAccounts->setToggled(_accounts->toggled());
 	_accounts->shownValue(
-	) | rpl::distinct_until_changed() | rpl::start_with_next([=](bool shown) {
+	) | rpl::distinct_until_changed() | rpl::on_next([=](bool shown) {
 		_toggleAccounts->setToggled(shown);
 	}, inner->lifetime());
 

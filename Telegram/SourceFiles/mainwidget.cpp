@@ -694,11 +694,12 @@ void MaybeShowAstrogramOnboarding(
 				}
 			};
 			controller->session().appConfig().refreshed(
-			) | rpl::take(1) | rpl::start_with_next([emit] {
+			) | rpl::take(1) | rpl::on_next([emit]() mutable {
 				emit();
 			}, *lifetime);
+			emit();
 			controller->session().appConfig().refresh(true);
-			QTimer::singleShot(1800, controller->content(), [emit] {
+			QTimer::singleShot(1800, controller->content(), [emit]() mutable {
 				emit();
 			});
 		};

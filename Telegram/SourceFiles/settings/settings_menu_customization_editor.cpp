@@ -774,7 +774,8 @@ public:
 		std::shared_ptr<SideMenuEditorState> state)
 	: RpWidget(parent)
 	, _state(std::move(state)) {
-		_state->changes() | rpl::start_with_next([=] {
+		update();
+		_state->changes() | rpl::on_next([=] {
 			update();
 		}, lifetime());
 	}
@@ -1175,7 +1176,8 @@ public:
 		std::shared_ptr<SideMenuEditorState> state)
 	: RpWidget(parent)
 	, _state(std::move(state)) {
-		_state->changes() | rpl::start_with_next([=] {
+		update();
+		_state->changes() | rpl::on_next([=] {
 			update();
 		}, lifetime());
 	}
@@ -1334,7 +1336,7 @@ public:
 	: RpWidget(parent)
 	, _state(std::move(state)) {
 		setMouseTracking(true);
-		_state->changes() | rpl::start_with_next([=] {
+		const auto refreshFromState = [=] {
 			const auto selected = _state->selectedEntryIndex();
 			if ((selected >= 0)
 				&& (selected < int(_state->entries().size()))
@@ -1344,8 +1346,11 @@ public:
 			clampSelection();
 			update();
 			updateGeometry();
+		};
+		refreshFromState();
+		_state->changes() | rpl::on_next([=] {
+			refreshFromState();
 		}, lifetime());
-		clampSelection();
 	}
 
 	[[nodiscard]] int selectedIndex() const {
@@ -2490,11 +2495,13 @@ public:
 	: RpWidget(parent)
 	, _state(std::move(state))
 	, _contextState(std::move(contextState)) {
-		_state->changes() | rpl::start_with_next([=] {
+		update();
+		updateGeometry();
+		_state->changes() | rpl::on_next([=] {
 			update();
 			updateGeometry();
 		}, lifetime());
-		_contextState->changes() | rpl::start_with_next([=] {
+		_contextState->changes() | rpl::on_next([=] {
 			update();
 			updateGeometry();
 		}, lifetime());
@@ -2656,7 +2663,8 @@ public:
 		std::shared_ptr<ContextMenuEditorState> state)
 	: RpWidget(parent)
 	, _state(std::move(state)) {
-		_state->changes() | rpl::start_with_next([=] {
+		update();
+		_state->changes() | rpl::on_next([=] {
 			update();
 		}, lifetime());
 	}
@@ -2847,15 +2855,18 @@ public:
 	, _surface(surface)
 	, _lane(lane) {
 		setMouseTracking(true);
-		_state->changes() | rpl::start_with_next([=] {
+		const auto refreshSurface = [=] {
 			clampSelection();
 			_hoveredRow = -1;
 			_hoveredKind = ActionKind::None;
 			_hoveredOnHandle = false;
 			update();
 			updateGeometry();
+		};
+		refreshSurface();
+		_state->changes() | rpl::on_next([=] {
+			refreshSurface();
 		}, lifetime());
-		clampSelection();
 	}
 
 protected:
