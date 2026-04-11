@@ -549,7 +549,7 @@ void AddHeroCover(
 
 	const auto subtitleLabel = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		tr::rich(subtitle),
+		rpl::single(tr::rich(subtitle)),
 		state->subtitleSt);
 	subtitleLabel->setTryMakeSimilarLines(true);
 
@@ -890,7 +890,7 @@ not_null<Ui::LinkButton*> AddLinkAction(
 	const auto button = container->add(
 		object_ptr<Ui::LinkButton>(
 			container,
-			rpl::single(text),
+			text,
 			st::defaultLinkButton),
 		style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
 	button->setClickedCallback(std::move(callback));

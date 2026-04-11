@@ -99,7 +99,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 
 [[nodiscard]] rpl::producer<QString> AdvancedLabelWithUpdateBadge() {
 	auto checker = Core::UpdateChecker();
-	const auto makeLabel = [] {
+	const auto makeLabel = []() -> QString {
 		const auto checker = Core::UpdateChecker();
 		const auto ready = !Core::UpdaterDisabled()
 			&& (checker.state() == Core::UpdateChecker::State::Ready);
@@ -135,7 +135,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 
 [[nodiscard]] rpl::producer<QString> UpdateSectionLabel() {
 	auto checker = Core::UpdateChecker();
-	const auto makeLabel = [] {
+	const auto makeLabel = []() -> QString {
 		const auto ready = !Core::UpdaterDisabled()
 			&& (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready);
 		const auto info = Core::UpdateChecker().releaseInfo();

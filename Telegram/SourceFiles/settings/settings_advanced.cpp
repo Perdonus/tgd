@@ -206,7 +206,7 @@ void SetupUpdate(
 	openRelease->hide();
 	const auto releaseUrl = std::make_shared<QString>();
 	const auto refreshReleaseInfo = [=](
-			const Core::UpdateReleaseInfo &info) mutable {
+			const Core::UpdateReleaseInfo &info) {
 		const auto visible = info.available
 			|| info.changelogLoading
 			|| !info.changelog.isEmpty()
@@ -286,7 +286,7 @@ void SetupUpdate(
 	toggle->toggledValue(
 	) | rpl::filter([](bool toggled) {
 		return (toggled != cAutoUpdate());
-	}) | rpl::on_next([=](bool toggled) {
+	}) | rpl::on_next([=](bool toggled) mutable {
 		cSetAutoUpdate(toggled);
 
 		Local::writeSettings();
@@ -347,7 +347,7 @@ void SetupUpdate(
 	setDefaultStatus(checker);
 	refreshReleaseInfo(initialReleaseInfo);
 
-	check->addClickHandler([=] {
+	check->addClickHandler([=] mutable {
 		cSetLastUpdateCheck(0);
 		checker.start();
 	});

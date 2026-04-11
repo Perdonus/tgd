@@ -11,12 +11,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "core/application.h"
 #include "core/launcher.h"
+#include "core/update_checker.h"
 #include "data/data_changes.h"
 #include "data/data_history_messages.h"
 #include "history/history_item.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
+#include "main/main_app_config.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
@@ -68,6 +70,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -643,15 +646,20 @@ QString DescribeBinaryInfoMismatch(const Plugins::BinaryInfo &info) {
 }
 
 QString DescribeBinaryInfo(const Plugins::BinaryInfo &info) {
-	return QString::fromLatin1(
-		"api=%1 ptr=%2 qt=%3.%4 compiler=%5/%6 platform=%7")
+	const auto compiler = QString::fromLatin1(
+		info.compiler ? info.compiler : "unknown");
+	const auto platform = QString::fromLatin1(
+		info.platform ? info.platform : "unknown");
+	auto result = QString::fromLatin1(
+		"api=%1 ptr=%2 qt=%3.%4 compiler=%5/%6 platform=%7");
+	return result
 		.arg(info.apiVersion)
 		.arg(info.pointerSize)
 		.arg(info.qtMajor)
 		.arg(info.qtMinor)
-		.arg(QString::fromLatin1(info.compiler ? info.compiler : "unknown"))
+		.arg(compiler)
 		.arg(info.compilerVersion)
-			.arg(QString::fromLatin1(info.platform ? info.platform : "unknown"));
+		.arg(platform);
 }
 
 QString DescribeBinaryInfoMismatchField(const Plugins::BinaryInfo &info) {
@@ -1184,6 +1192,84 @@ QJsonObject RuntimeMessageJson(
 		result.insert(u"fromPeerId"_q, QString::number(from->id.value));
 	}
 	return result;
+}
+
+QString RuntimeUpdateStateText(Core::UpdateChecker::State state) {
+	switch (state) {
+	case Core::UpdateChecker::State::Download:
+		return u"download"_q;
+	case Core::UpdateChecker::State::Ready:
+		return u"ready"_q;
+	case Core::UpdateChecker::State::None:
+	default:
+		return u"idle"_q;
+	}
+}
+
+QString RuntimeUpdateChannelText(Core::UpdateChannel channel) {
+	switch (channel) {
+	case Core::UpdateChannel::DevBeta:
+		return u"beta"_q;
+	case Core::UpdateChannel::Alpha:
+		return u"alpha"_q;
+	case Core::UpdateChannel::Stable:
+	default:
+		return u"stable"_q;
+	}
+}
+
+QJsonObject RuntimeReleaseInfoJson(const Core::UpdateReleaseInfo &info) {
+	return QJsonObject{
+		{ u"available"_q, info.available },
+		{ u"channel"_q, RuntimeUpdateChannelText(info.channel) },
+		{ u"version"_q, info.version },
+		{ u"versionText"_q, info.versionText },
+		{ u"title"_q, info.title },
+		{ u"url"_q, info.url },
+		{ u"changelog"_q, info.changelog },
+		{ u"changelogLoading"_q, info.changelogLoading },
+		{ u"changelogFailed"_q, info.changelogFailed },
+	};
+}
+
+QJsonObject RuntimeUpdatesJson() {
+	const auto checker = Core::UpdateChecker();
+	const auto state = checker.state();
+	return QJsonObject{
+		{ u"autoUpdateEnabled"_q, cAutoUpdate() },
+		{ u"updaterDisabled"_q, Core::UpdaterDisabled() },
+		{ u"state"_q, RuntimeUpdateStateText(state) },
+		{ u"ready"_q, state == Core::UpdateChecker::State::Ready },
+		{ u"downloadedBytes"_q, checker.already() },
+		{ u"totalBytes"_q, checker.size() },
+		{ u"currentVersion"_q, AppVersion },
+		{ u"currentVersionText"_q, Core::FormatVersionWithBuild(AppVersion) },
+		{ u"preferredChannel"_q, cInstallBetaVersion() ? u"beta"_q : u"stable"_q },
+		{ u"installBetaVersion"_q, cInstallBetaVersion() },
+		{ u"alphaVersion"_q, QString::number(cAlphaVersion()) },
+		{ u"devHooksConfigPath"_q, QDir::toNativeSeparators(Core::DevUpdateHooksConfigPath()) },
+		{ u"devHooksSummary"_q, Core::ActiveDevUpdateHooksSummary() },
+		{ u"devHooksState"_q, Core::DescribeDevUpdateHooksState() },
+		{ u"releasesPageUrl"_q, Core::CurrentUpdateFeedPageUrl() },
+		{ u"release"_q, RuntimeReleaseInfoJson(checker.releaseInfo()) },
+	};
+}
+
+bool RuntimeResolveInstallBetaChannel(const QString &channel, bool &enabled) {
+	const auto normalized = channel.trimmed().toLower();
+	if (normalized == u"stable"_q
+		|| normalized == u"release"_q
+		|| normalized == u"off"_q) {
+		enabled = false;
+		return true;
+	}
+	if (normalized == u"beta"_q
+		|| normalized == u"dev"_q
+		|| normalized == u"devbeta"_q) {
+		enabled = true;
+		return true;
+	}
+	return false;
 }
 
 } // namespace
@@ -1865,7 +1951,10 @@ QByteArray Manager::processRuntimeApiRequest(
 		&& path != u"/v1/system"_q
 		&& path != u"/v1/runtime"_q
 		&& path != u"/v1/host"_q
-		&& path != u"/v1/diagnostics"_q) {
+		&& path != u"/v1/diagnostics"_q
+		&& path != u"/v1/updates"_q
+		&& path != u"/v1/updates/check"_q
+		&& path != u"/v1/updates/channel"_q) {
 		return RuntimeErrorResponse(503, u"no active telegram session"_q);
 	}
 
@@ -1887,6 +1976,9 @@ QByteArray Manager::processRuntimeApiRequest(
 				u"GET /v1/host"_q,
 				u"GET /v1/system"_q,
 				u"GET /v1/diagnostics"_q,
+				u"GET /v1/updates"_q,
+				u"POST /v1/updates/check"_q,
+				u"POST /v1/updates/channel"_q,
 				u"GET /v1/plugins"_q,
 				u"GET /v1/plugins/<id>"_q,
 				u"POST /v1/plugins/reload"_q,
@@ -1915,6 +2007,7 @@ QByteArray Manager::processRuntimeApiRequest(
 		return RuntimeOkResponse(QJsonObject{
 			{ u"compiler"_q, host.compiler },
 			{ u"platform"_q, host.platform },
+			{ u"appVersion"_q, host.appVersion },
 			{ u"workingPath"_q, host.workingPath },
 			{ u"pluginsPath"_q, host.pluginsPath },
 			{ u"appUiLanguage"_q, host.appUiLanguage },
@@ -1940,12 +2033,13 @@ QByteArray Manager::processRuntimeApiRequest(
 			verifiedSourceCount += state.sourceVerified ? 1 : 0;
 			unverifiedSourceCount += state.sourceVerified ? 0 : 1;
 		}
-		const auto trustedChannelIds = session
-			? session->appConfig().astrogramTrustedPluginChannelIds()
-			: std::vector<int64>();
-		const auto trustedRecords = session
-			? session->appConfig().astrogramTrustedPluginRecords()
-			: std::vector<QString>();
+		auto trustedChannelIds = std::vector<int64>();
+		auto trustedRecords = std::vector<QString>();
+		if (session) {
+			const auto &appConfig = session->appConfig();
+			trustedChannelIds = appConfig.astrogramTrustedPluginChannelIds();
+			trustedRecords = appConfig.astrogramTrustedPluginRecords();
+		}
 		auto trustedChannelsJson = QJsonArray();
 		for (const auto channelId : trustedChannelIds) {
 			trustedChannelsJson.push_back(QString::number(channelId));
@@ -2001,6 +2095,43 @@ QByteArray Manager::processRuntimeApiRequest(
 			{ u"locale"_q, system.locale },
 			{ u"uiLanguage"_q, system.uiLanguage },
 			{ u"timeZone"_q, system.timeZone },
+		});
+	}
+	if (resolvedMethod == u"GET"_q && path == u"/v1/updates"_q) {
+		return RuntimeOkResponse(QJsonObject{
+			{ u"updates"_q, RuntimeUpdatesJson() },
+		});
+	}
+	if (resolvedMethod == u"POST"_q && path == u"/v1/updates/check"_q) {
+		if (Core::UpdaterDisabled()) {
+			return RuntimeErrorResponse(409, u"updater is disabled"_q);
+		}
+		if (!cAutoUpdate()) {
+			return RuntimeErrorResponse(409, u"auto update is disabled"_q);
+		}
+		Core::UpdateChecker().test();
+		return RuntimeOkResponse(QJsonObject{
+			{ u"message"_q, u"update check started"_q },
+			{ u"updates"_q, RuntimeUpdatesJson() },
+		});
+	}
+	if (resolvedMethod == u"POST"_q && path == u"/v1/updates/channel"_q) {
+		if (cAlphaVersion() != 0) {
+			return RuntimeErrorResponse(409, u"channel override is unavailable on alpha builds"_q);
+		}
+		const auto object = parseBodyObject();
+		const auto channel = object.value(u"channel"_q).toString();
+		auto installBeta = false;
+		if (!RuntimeResolveInstallBetaChannel(channel, installBeta)) {
+			return RuntimeErrorResponse(400, u"body.channel must be stable or beta"_q);
+		}
+		cSetInstallBetaVersion(installBeta);
+		Core::Launcher::Instance().writeInstallBetaVersionsSetting();
+		return RuntimeOkResponse(QJsonObject{
+			{ u"preferredChannel"_q, installBeta ? u"beta"_q : u"stable"_q },
+			{ u"installBetaVersion"_q, installBeta },
+			{ u"message"_q, u"update channel preference saved"_q },
+			{ u"updates"_q, RuntimeUpdatesJson() },
 		});
 	}
 	if (resolvedMethod == u"GET"_q && path == u"/v1/plugins"_q) {
@@ -4189,6 +4320,7 @@ HostInfo Manager::hostInfo() const {
 	auto info = HostInfo();
 	info.compiler = QString::fromLatin1(kCompilerId);
 	info.platform = QString::fromLatin1(kPlatformId);
+	info.appVersion = Core::FormatVersionWithBuild(AppVersion);
 	info.workingPath = cWorkingDir();
 	info.pluginsPath = _pluginsPath;
 	info.appUiLanguage = Lang::LanguageIdOrDefault(Lang::Id());
@@ -4889,8 +5021,11 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		state.sourceTrustDetails = u"no-active-session"_q;
 		return;
 	}
-	const auto trustedChannels = session->appConfig().astrogramTrustedPluginChannelIds();
-	const auto trustedRecords = session->appConfig().astrogramTrustedPluginRecords();
+	const auto &appConfig = session->appConfig();
+	const std::vector<int64> trustedChannels
+		= appConfig.astrogramTrustedPluginChannelIds();
+	const std::vector<QString> trustedRecords
+		= appConfig.astrogramTrustedPluginRecords();
 	auto matchedHashInUntrustedChannel = false;
 	auto matchedHashWithoutOrigin = false;
 	auto hasValidTrustedRecord = false;

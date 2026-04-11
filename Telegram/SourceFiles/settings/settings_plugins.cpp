@@ -1433,7 +1433,7 @@ void RequestPluginRemoval(
 		}
 		box->addButton(rpl::single(PluginUiText(u"Delete"_q, u"Удалить"_q)), [=] {
 			box->closeBox();
-			QTimer::singleShot(0, context, [=] {
+			QTimer::singleShot(0, context.get(), [=] {
 				QString error;
 				if (!Core::App().plugins().removePlugin(state.info.id, &error)) {
 					controller->window().showToast(
@@ -1456,7 +1456,7 @@ void RequestPluginRemoval(
 				}
 			});
 		});
-		box->addButton(rpl::single(tr::lng_cancel()), [=] {
+		box->addButton(tr::lng_cancel(), [=] {
 			box->closeBox();
 		});
 	}));
@@ -1480,7 +1480,7 @@ void RequestSafeModeChange(
 	controller->show(Ui::MakeConfirmBox({
 		.text = title + u"\n\n"_q + text,
 		.confirmed = crl::guard(context, [=] {
-			QTimer::singleShot(0, context, [=] {
+			QTimer::singleShot(0, context.get(), [=] {
 				if (!Core::App().plugins().setSafeModeEnabled(enabled)) {
 					controller->window().showToast(PluginUiText(
 						u"Could not change safe mode."_q,

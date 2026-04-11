@@ -446,8 +446,8 @@ void ShowAstrogramUpdateChannelBox(
 				"Скрытый канал обновлений Astrogram",
 				"Hidden Astrogram update channel")),
 			.options = {
-				rpl::single(RuEn("Stable", "Stable")),
-				rpl::single(RuEn("Dev (beta)", "Dev (beta)")),
+				RuEn("Stable", "Stable"),
+				RuEn("Dev (beta)", "Dev (beta)"),
 			},
 			.initialSelection = cInstallBetaVersion() ? 1 : 0,
 			.callback = [=](int index) {
@@ -534,7 +534,7 @@ void AddAstrogramHeader(
 				Qt::AlignHCenter | Qt::TextSingleLine,
 				AstrogramVersionText());
 		}, raw->lifetime());
-	raw->events() | rpl::start_with_next([=](not_null<QEvent*> event) {
+	raw->events() | rpl::on_next([=](not_null<QEvent*> event) {
 		if (event->type() != QEvent::MouseButtonRelease) {
 			return;
 		}
@@ -937,7 +937,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				}
 			}, row->lifetime());
 			updateRowState(state);
-			row->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
+			row->events() | rpl::on_next([=](not_null<QEvent*> e) {
 				if (e->type() != QEvent::MouseButtonRelease) {
 					return;
 				}
@@ -1315,14 +1315,15 @@ void AddAstrogramUpdateSection(
 			checker->state() == Core::UpdateChecker::State::Ready);
 	};
 
-	checker->checking() | rpl::start_with_next(refresh, card->lifetime());
-	checker->progress() | rpl::start_with_next([=](auto) {
+	refresh();
+	checker->checking() | rpl::on_next(refresh, card->lifetime());
+	checker->progress() | rpl::on_next([=](auto) {
 		refresh();
 	}, card->lifetime());
-	checker->isLatest() | rpl::start_with_next(refresh, card->lifetime());
-	checker->failed() | rpl::start_with_next(refresh, card->lifetime());
-	checker->ready() | rpl::start_with_next(refresh, card->lifetime());
-	checker->releaseInfoChanged() | rpl::start_with_next(refresh, card->lifetime());
+	checker->isLatest() | rpl::on_next(refresh, card->lifetime());
+	checker->failed() | rpl::on_next(refresh, card->lifetime());
+	checker->ready() | rpl::on_next(refresh, card->lifetime());
+	checker->releaseInfoChanged() | rpl::on_next(refresh, card->lifetime());
 }
 
 void SetupAstrogramHome(

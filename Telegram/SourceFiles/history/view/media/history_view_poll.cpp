@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_poll.h"
 
+#include "core/core_settings.h"
 #include "core/ui_integration.h" // TextContext
 #include "lang/lang_keys.h"
 #include "history/history.h"
