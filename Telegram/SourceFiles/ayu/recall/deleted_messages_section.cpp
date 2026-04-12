@@ -8,11 +8,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/recall/deleted_messages_section.h"
 
 #include "ayu/data/messages_storage.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
 #include "data/data_forum_topic.h"
+#include "data/data_msg_id.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_thread.h"
+#include "data/data_user.h"
 #include "dialogs/dialogs_key.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -23,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_window.h"
+#include "ui/chat/chat_style.h"
 #include "ui/effects/animations.h"
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
@@ -34,10 +39,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_memento.h"
 #include "window/section_widget.h"
 #include "window/window_adaptive.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
 #include <QDate>
 #include <QDateTime>
+#include <QEnterEvent>
 #include <QLocale>
 #include <QMouseEvent>
 #include <QPainterPath>
@@ -121,7 +128,7 @@ struct DeletedJumpTarget {
 	DeletedJumpState state = DeletedJumpState::LocalOnly;
 	HistoryItem *item = nullptr;
 	int requestedMessageId = 0;
-	int openedMessageId = 0;
+	MsgId openedMessageId = 0;
 };
 
 struct DeletedMessagePresentation {
@@ -1119,17 +1126,17 @@ DeletedMessagesIntroCard::DeletedMessagesIntroCard(
 			totalCount,
 			oldestTimestamp,
 			newestTimestamp)),
-		st::sessionDateLabel);
+		st::boxLabel);
 	if (!searchQuery.isEmpty()) {
 		_filter = Ui::CreateChild<Ui::FlatLabel>(
 			this,
 			rpl::single(SearchScopeDetails(searchQuery, visibleCount, totalCount)),
-			st::sessionDateLabel);
+			st::boxLabel);
 	}
 	_hint = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(ScopeHint(thread)),
-		st::sessionDateLabel);
+		st::boxLabel);
 
 	_title->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_scope->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -1283,7 +1290,7 @@ DeletedMessagesDayBadge::DeletedMessagesDayBadge(
 	_details = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(DaySummaryDetails(summary, searchMode)),
-		st::sessionDateLabel);
+		st::boxLabel);
 	_title->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_details->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_title->setTextColorOverride(st::windowFgActive->c);
@@ -1399,11 +1406,11 @@ DeletedMessagesScopeBar::DeletedMessagesScopeBar(
 	_details = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(QString()),
-		st::sessionDateLabel);
+		st::boxLabel);
 	_status = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(QString()),
-		st::sessionDateLabel);
+		st::boxLabel);
 	for (const auto label : { _title, _scope, _details, _status }) {
 		label->setAttribute(Qt::WA_TransparentForMouseEvents);
 		label->setTryMakeSimilarLines(true);
@@ -1542,11 +1549,11 @@ DeletedMessagesFooterBar::DeletedMessagesFooterBar(
 	_details = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(QString()),
-		st::sessionDateLabel);
+		st::boxLabel);
 	_status = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(QString()),
-		st::sessionDateLabel);
+		st::boxLabel);
 	for (const auto label : { _title, _details, _status }) {
 		label->setAttribute(Qt::WA_TransparentForMouseEvents);
 		label->setTryMakeSimilarLines(true);
@@ -1649,7 +1656,8 @@ public:
 	}
 
 protected:
-	bool event(QEvent *e) override;
+	void enterEventHook(QEnterEvent *e) override;
+	void leaveEventHook(QEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
@@ -1671,10 +1679,10 @@ private:
 	style::owned_color _stateColor;
 	style::owned_color _textColor;
 	style::owned_color _metaColor;
-	style::FlatLabel _senderSt = st::sessionDateLabel;
-	style::FlatLabel _stateSt = st::sessionDateLabel;
+	style::FlatLabel _senderSt = st::boxLabel;
+	style::FlatLabel _stateSt = st::boxLabel;
 	style::FlatLabel _textSt = st::boxLabel;
-	style::FlatLabel _metaSt = st::sessionDateLabel;
+	style::FlatLabel _metaSt = st::boxLabel;
 
 	Ui::FlatLabel *_sender = nullptr;
 	Ui::FlatLabel *_state = nullptr;
@@ -1750,24 +1758,20 @@ int DeletedMessageRow::resizeGetHeight(int newWidth) {
 			+ 1);
 }
 
-bool DeletedMessageRow::event(QEvent *e) {
-	switch (e->type()) {
-	case QEvent::Enter:
-		if (_interactive && !_hovered) {
-			_hovered = true;
-			update();
-		}
-		break;
-	case QEvent::Leave:
-		if (_hovered) {
-			_hovered = false;
-			update();
-		}
-		break;
-	default:
-		break;
+void DeletedMessageRow::enterEventHook(QEnterEvent *e) {
+	if (_interactive && !_hovered) {
+		_hovered = true;
+		update();
 	}
-	return Ui::RpWidget::event(e);
+	Ui::RpWidget::enterEventHook(e);
+}
+
+void DeletedMessageRow::leaveEventHook(QEvent *e) {
+	if (_hovered) {
+		_hovered = false;
+		update();
+	}
+	Ui::RpWidget::leaveEventHook(e);
 }
 
 void DeletedMessageRow::resizeEvent(QResizeEvent *e) {
@@ -1873,7 +1877,7 @@ void DeletedMessageRow::openOriginal() {
 	const auto params = Window::SectionShow(Window::SectionShow::Way::Forward);
 	if (jump.item) {
 		controller->showMessage(jump.item, params);
-	} else if (jump.openedMessageId > 0) {
+	} else if (jump.openedMessageId) {
 		controller->showThread(_thread, jump.openedMessageId, params);
 	} else {
 		controller->window().showToast(LocalCopyHint());

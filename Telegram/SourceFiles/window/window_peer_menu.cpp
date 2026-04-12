@@ -3273,10 +3273,14 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 				auto menu = base::make_unique_q<Ui::PopupMenu>(
 					parent,
 					st::popupMenuWithIcons);
-				menu->addAction(tr::lng_bot_choose_chat(tr::now), [=] {
-					delegate()->peerListSetRowChecked(row, true);
-					_selectionChanges.fire({});
-				}, &st::menuIconSelect);
+				Ui::Menu::CreateAddActionCallback(menu.get())({
+					.text = tr::lng_bot_choose_chat(tr::now),
+					.handler = [=] {
+						delegate()->peerListSetRowChecked(row, true);
+						_selectionChanges.fire({});
+					},
+					.icon = &st::menuIconSelect,
+				});
 				return menu;
 			}
 			return nullptr;
@@ -3579,10 +3583,14 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 				auto menu = base::make_unique_q<Ui::PopupMenu>(
 					parent,
 					st::popupMenuWithIcons);
-				menu->addAction(tr::lng_bot_choose_chat(tr::now), [=] {
-					delegate()->peerListSetRowChecked(row, true);
-					_selectionChanges.fire({});
-				}, &st::menuIconSelect);
+				Ui::Menu::CreateAddActionCallback(menu.get())({
+					.text = tr::lng_bot_choose_chat(tr::now),
+					.handler = [=] {
+						delegate()->peerListSetRowChecked(row, true);
+						_selectionChanges.fire({});
+					},
+					.icon = &st::menuIconSelect,
+				});
 				return menu;
 			}
 			return nullptr;
@@ -3698,7 +3706,7 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		});
 		show->showBox(std::move(box));
 		if (forwardWithoutAuthor) {
-			boxRaw->setTitle(ForwardWithoutAuthorLabelText());
+			boxRaw->setTitle(rpl::single(ForwardWithoutAuthorLabelText()));
 		}
 		auto state = State{ boxRaw, controllerRaw };
 		return boxRaw->lifetime().make_state<State>(std::move(state));
@@ -4459,11 +4467,10 @@ void MenuAddMarkAsReadAllChatsAction(
 			}),
 			Ui::LayerOption::CloseOther);
 	};
-	auto markReadAllArgs = PeerMenuCallback::Args{};
-	markReadAllArgs.text = tr::lng_context_mark_read_all(tr::now);
-	markReadAllArgs.handler = std::move(callback);
-	markReadAllArgs.icon = &st::menuIconMarkRead;
-	addAction(std::move(markReadAllArgs));
+	addAction(
+		tr::lng_context_mark_read_all(tr::now),
+		std::move(callback),
+		&st::menuIconMarkRead);
 }
 
 void MenuAddMarkAsReadChatListAction(
@@ -4495,11 +4502,10 @@ void MenuAddMarkAsReadChatListAction(
 			MarkAsReadChatList(list());
 		}
 	};
-	auto markReadArgs = PeerMenuCallback::Args{};
-	markReadArgs.text = tr::lng_context_mark_read(tr::now);
-	markReadArgs.handler = std::move(callback);
-	markReadArgs.icon = &st::menuIconMarkRead;
-	addAction(std::move(markReadArgs));
+	addAction(
+		tr::lng_context_mark_read(tr::now),
+		std::move(callback),
+		&st::menuIconMarkRead);
 }
 
 void ToggleHistoryArchived(
@@ -4582,35 +4588,31 @@ bool FillVideoChatMenu(
 	const auto has = (peer->groupCall() != nullptr);
 	const auto manager = peer->canManageGroupCall();
 	if (has) {
-		auto joinCallArgs = PeerMenuCallback::Args{};
-		joinCallArgs.text = tr::lng_menu_start_group_call_join(tr::now);
-		joinCallArgs.handler = [=] { callback({}); };
-		joinCallArgs.icon = &st::menuIconVideoChat;
-		addAction(std::move(joinCallArgs));
+		addAction(
+			tr::lng_menu_start_group_call_join(tr::now),
+			[=] { callback({}); },
+			&st::menuIconVideoChat);
 	} else if (manager) {
-		auto startCallArgs = PeerMenuCallback::Args{};
-		startCallArgs.text = (livestream
-			? tr::lng_menu_start_group_call_channel
-			: tr::lng_menu_start_group_call)(tr::now);
-		startCallArgs.handler = [=] { callback({}); };
-		startCallArgs.icon = &st::menuIconStartStream;
-		addAction(std::move(startCallArgs));
+		addAction(
+			(livestream
+				? tr::lng_menu_start_group_call_channel
+				: tr::lng_menu_start_group_call)(tr::now),
+			[=] { callback({}); },
+			&st::menuIconStartStream);
 	}
 	if (!has && manager) {
-		auto scheduleCallArgs = PeerMenuCallback::Args{};
-		scheduleCallArgs.text = (livestream
-			? tr::lng_menu_start_group_call_scheduled_channel
-			: tr::lng_menu_start_group_call_scheduled)(tr::now);
-		scheduleCallArgs.handler = [=] { callback({ .scheduleNeeded = true }); };
-		scheduleCallArgs.icon = &st::menuIconReschedule;
-		addAction(std::move(scheduleCallArgs));
-		auto rtmpCallArgs = PeerMenuCallback::Args{};
-		rtmpCallArgs.text = (livestream
-			? tr::lng_menu_start_group_call_with_channel
-			: tr::lng_menu_start_group_call_with)(tr::now);
-		rtmpCallArgs.handler = rtmpCallback;
-		rtmpCallArgs.icon = &st::menuIconStartStreamWith;
-		addAction(std::move(rtmpCallArgs));
+		addAction(
+			(livestream
+				? tr::lng_menu_start_group_call_scheduled_channel
+				: tr::lng_menu_start_group_call_scheduled)(tr::now),
+			[=] { callback({ .scheduleNeeded = true }); },
+			&st::menuIconReschedule);
+		addAction(
+			(livestream
+				? tr::lng_menu_start_group_call_with_channel
+				: tr::lng_menu_start_group_call_with)(tr::now),
+			rtmpCallback,
+			&st::menuIconStartStreamWith);
 	}
 	return has || manager;
 }
@@ -4628,68 +4630,59 @@ void FillSenderUserpicMenu(
 		: channel
 		? tr::lng_context_view_channel(tr::now)
 		: tr::lng_context_view_profile(tr::now);
-	auto viewProfileArgs = PeerMenuCallback::Args{};
-	viewProfileArgs.text = viewProfileText;
-	viewProfileArgs.handler = [=] {
-		controller->showPeerInfo(peer, Window::SectionShow::Way::Forward);
-	};
-	viewProfileArgs.icon = channel
-		? static_cast<const style::icon*>(&st::menuIconInfo)
-		: static_cast<const style::icon*>(&st::menuIconProfile);
-	addAction(std::move(viewProfileArgs));
+	addAction(
+		viewProfileText,
+		[=] {
+			controller->showPeerInfo(peer, Window::SectionShow::Way::Forward);
+		},
+		(channel ? &st::menuIconInfo : &st::menuIconProfile));
 
 	const auto showHistoryText = group
 		? tr::lng_context_open_group(tr::now)
 		: channel
 		? tr::lng_context_open_channel(tr::now)
 		: tr::lng_profile_send_message(tr::now);
-	auto showHistoryArgs = PeerMenuCallback::Args{};
-	showHistoryArgs.text = showHistoryText;
-	showHistoryArgs.handler = [=] {
-		controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
-	};
-	showHistoryArgs.icon = channel
-		? static_cast<const style::icon*>(&st::menuIconChannel)
-		: static_cast<const style::icon*>(&st::menuIconChatBubble);
-	addAction(std::move(showHistoryArgs));
+	addAction(
+		showHistoryText,
+		[=] {
+			controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
+		},
+		(channel ? &st::menuIconChannel : &st::menuIconChatBubble));
 
 	const auto username = peer->username();
 	const auto mention = !username.isEmpty() || peer->isUser();
 	const auto hasTrailingActions = mention || searchInEntry;
 
 	addAction(PeerMenuCallback::Args{ .isSeparator = true });
-	auto copyIdArgs = PeerMenuCallback::Args{};
-	copyIdArgs.text = AstrogramUiText("Copy ID", "Скопировать ID");
-	copyIdArgs.handler = [=] { CopyPeerIdToClipboard(controller, peer); };
-	copyIdArgs.icon = &st::menuIconCopy;
-	addAction(std::move(copyIdArgs));
+	addAction(
+		AstrogramUiText("Copy ID", "Скопировать ID"),
+		[=] { CopyPeerIdToClipboard(controller, peer); },
+		&st::menuIconCopy);
 	if (hasTrailingActions) {
 		addAction(PeerMenuCallback::Args{ .isSeparator = true });
 	}
 	if (const auto guard = mention ? fieldForMention : nullptr) {
-		auto mentionArgs = PeerMenuCallback::Args{};
-		mentionArgs.text = tr::lng_context_mention(tr::now);
-		mentionArgs.handler = crl::guard(guard, [=] {
-			if (!username.isEmpty()) {
-				fieldForMention->insertTag('@' + username);
-			} else {
-				fieldForMention->insertTag(
-					peer->shortName(),
-					PrepareMentionTag(peer->asUser()));
-			}
-		});
-		mentionArgs.icon = &st::menuIconUsername;
-		addAction(std::move(mentionArgs));
+		addAction(
+			tr::lng_context_mention(tr::now),
+			crl::guard(guard, [=] {
+				if (!username.isEmpty()) {
+					fieldForMention->insertTag('@' + username);
+				} else {
+					fieldForMention->insertTag(
+						peer->shortName(),
+						PrepareMentionTag(peer->asUser()));
+				}
+			}),
+			&st::menuIconUsername);
 	}
 
 	if (searchInEntry) {
-		auto searchArgs = PeerMenuCallback::Args{};
-		searchArgs.text = tr::lng_context_search_from(tr::now);
-		searchArgs.handler = [=] {
-			controller->searchInChat(searchInEntry, peer);
-		};
-		searchArgs.icon = &st::menuIconSearch;
-		addAction(std::move(searchArgs));
+		addAction(
+			tr::lng_context_search_from(tr::now),
+			[=] {
+				controller->searchInChat(searchInEntry, peer);
+			},
+			&st::menuIconSearch);
 	}
 }
 
