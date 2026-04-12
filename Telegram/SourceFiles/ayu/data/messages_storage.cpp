@@ -330,24 +330,19 @@ template <typename Int>
 [[nodiscard]] bool MatchesDialog(
 		not_null<PeerData*> peer,
 		const MessageSnapshot &snapshot) {
-	const auto matchesCandidate = [&](not_null<const PeerData*> candidate) {
+	const auto matchesCandidate = [&](const PeerData *candidate) {
+		if (!candidate) {
+			return false;
+		}
 		const auto dialogSerialized = SerializePeerId(candidate->id);
 		const auto dialogId = candidate->id.value & PeerId::kChatTypeMask;
 		return snapshot.dialogSerialized
 			? (snapshot.dialogSerialized == dialogSerialized)
 			: (snapshot.dialogId == dialogId);
 	};
-	if (matchesCandidate(peer)) {
-		return true;
-	}
-	if (const auto previous = peer->migrateFrom(); previous
-		&& matchesCandidate(previous)) {
-		return true;
-	}
-	if (const auto next = peer->migrateTo(); next && matchesCandidate(next)) {
-		return true;
-	}
-	return false;
+	return matchesCandidate(peer)
+		|| matchesCandidate(peer->migrateFrom())
+		|| matchesCandidate(peer->migrateTo());
 }
 
 [[nodiscard]] bool MatchesPeer(
