@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/unique_qptr.h"
 #include "history/view/history_view_element.h"
+#include "ui/style/style_core.h"
 
 #include <QtCore/QJsonObject>
 #include <QtCore/QString>
@@ -20,9 +21,6 @@ namespace Data {
 struct ReactionId;
 } // namespace Data
 
-namespace style {
-struct icon;
-} // namespace style
 
 namespace Main {
 class Session;
