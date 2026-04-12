@@ -101,6 +101,15 @@ jobs:
           "ready=$($ready.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "[toolchain] cache-hit=${{ steps.desktop_toolchain_cache.outputs.cache-hit }} ready=$ready"
 
+      - name: Download prebuilt Windows deps bundle
+        id: prebuilt_deps
+        if: ${{ steps.toolchain_state.outputs.ready != 'true' || steps.desktop_sources_cache.outputs.cache-hit != 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./.github/scripts/download-prebuilt-win-deps.ps1 -PrepareRoot '${{ steps.prepare_paths.outputs.prepare_root }}'
+
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
@@ -115,7 +124,7 @@ jobs:
 
       - name: Prepare dependencies (Windows)
         id: prepare
-        if: ${{ steps.toolchain_state.outputs.ready != 'true' }}
+        if: ${{ steps.prebuilt_deps.outputs.ready != 'true' && steps.toolchain_state.outputs.ready != 'true' }}
         shell: cmd
         run: |
           @echo on
