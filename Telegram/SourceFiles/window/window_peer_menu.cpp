@@ -4622,47 +4622,64 @@ void FillSenderUserpicMenu(
 		: channel
 		? tr::lng_context_view_channel(tr::now)
 		: tr::lng_context_view_profile(tr::now);
-	addAction(viewProfileText, [=] {
-		controller->showPeerInfo(peer, Window::SectionShow::Way::Forward);
-	}, channel ? &st::menuIconInfo : &st::menuIconProfile);
+	addAction(PeerMenuCallback::Args{
+		.text = viewProfileText,
+		.handler = [=] {
+			controller->showPeerInfo(peer, Window::SectionShow::Way::Forward);
+		},
+		.icon = channel ? &st::menuIconInfo : &st::menuIconProfile,
+	});
 
 	const auto showHistoryText = group
 		? tr::lng_context_open_group(tr::now)
 		: channel
 		? tr::lng_context_open_channel(tr::now)
 		: tr::lng_profile_send_message(tr::now);
-	addAction(showHistoryText, [=] {
-		controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
-	}, channel ? &st::menuIconChannel : &st::menuIconChatBubble);
+	addAction(PeerMenuCallback::Args{
+		.text = showHistoryText,
+		.handler = [=] {
+			controller->showPeerHistory(peer, Window::SectionShow::Way::Forward);
+		},
+		.icon = channel ? &st::menuIconChannel : &st::menuIconChatBubble,
+	});
 
 	const auto username = peer->username();
 	const auto mention = !username.isEmpty() || peer->isUser();
 	const auto hasTrailingActions = mention || searchInEntry;
 
 	addAction(PeerMenuCallback::Args{ .isSeparator = true });
-	addAction(
-		AstrogramUiText("Copy ID", "Скопировать ID"),
-		[=] { CopyPeerIdToClipboard(controller, peer); },
-		&st::menuIconCopy);
+	addAction(PeerMenuCallback::Args{
+		.text = AstrogramUiText("Copy ID", "Скопировать ID"),
+		.handler = [=] { CopyPeerIdToClipboard(controller, peer); },
+		.icon = &st::menuIconCopy,
+	});
 	if (hasTrailingActions) {
 		addAction(PeerMenuCallback::Args{ .isSeparator = true });
 	}
 	if (const auto guard = mention ? fieldForMention : nullptr) {
-		addAction(tr::lng_context_mention(tr::now), crl::guard(guard, [=] {
-			if (!username.isEmpty()) {
-				fieldForMention->insertTag('@' + username);
-			} else {
-				fieldForMention->insertTag(
-					peer->shortName(),
-					PrepareMentionTag(peer->asUser()));
-			}
-		}), &st::menuIconUsername);
+		addAction(PeerMenuCallback::Args{
+			.text = tr::lng_context_mention(tr::now),
+			.handler = crl::guard(guard, [=] {
+				if (!username.isEmpty()) {
+					fieldForMention->insertTag('@' + username);
+				} else {
+					fieldForMention->insertTag(
+						peer->shortName(),
+						PrepareMentionTag(peer->asUser()));
+				}
+			}),
+			.icon = &st::menuIconUsername,
+		});
 	}
 
 	if (searchInEntry) {
-		addAction(tr::lng_context_search_from(tr::now), [=] {
-			controller->searchInChat(searchInEntry, peer);
-		}, &st::menuIconSearch);
+		addAction(PeerMenuCallback::Args{
+			.text = tr::lng_context_search_from(tr::now),
+			.handler = [=] {
+				controller->searchInChat(searchInEntry, peer);
+			},
+			.icon = &st::menuIconSearch,
+		});
 	}
 }
 

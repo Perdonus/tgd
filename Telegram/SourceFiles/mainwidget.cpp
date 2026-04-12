@@ -225,6 +225,11 @@ void ClearBotStartToken(PeerData *peer) {
 		: fallbackTitle;
 }
 
+void InstallAstrogramOnboardingPlugin(
+		not_null<Window::SessionController*> controller,
+		int64 channelId,
+		int64 postId);
+
 [[nodiscard]] std::vector<Ui::AstrogramOnboardingPlugin> BuildAstrogramOnboardingPlugins(
 		not_null<Window::SessionController*> controller,
 		ChannelData *pluginsChannel,
@@ -250,36 +255,37 @@ void ClearBotStartToken(PeerData *peer) {
 		const auto media = item ? item->media() : nullptr;
 		const auto document = media ? media->document() : nullptr;
 		const auto hasPackage = document && IsAstrogramPluginPackage(document);
+		const auto titleOverride = (i < titleOverrides.size())
+			? titleOverrides[i].trimmed()
+			: QString();
+		const auto descriptionOverride = (i < descriptionOverrides.size())
+			? descriptionOverrides[i].trimmed()
+			: QString();
 		auto plugin = Ui::AstrogramOnboardingPlugin();
 		plugin.postId = postId;
 		plugin.pendingServerData = (item == nullptr);
 		plugin.invalidServerData = (item != nullptr) && !hasPackage;
-		plugin.title = hasPackage
-			? AstrogramPluginTitle(
-				document,
-				(i < titleOverrides.size()) ? titleOverrides[i] : QString())
-			: (((i < titleOverrides.size())
-					&& !titleOverrides[i].trimmed().isEmpty())
-				? titleOverrides[i].trimmed()
-				: RuEn("Плагин #%1", "Plugin #%1").arg(postId)));
+		if (hasPackage) {
+			plugin.title = AstrogramPluginTitle(document, titleOverride);
+		} else if (!titleOverride.isEmpty()) {
+			plugin.title = titleOverride;
+		} else {
+			plugin.title = RuEn("Плагин #%1", "Plugin #%1").arg(postId);
+		}
 		if (hasPackage) {
 			plugin.description = AstrogramPluginDescription(
 				item,
-				(i < descriptionOverrides.size())
-					? descriptionOverrides[i]
-					: QString(),
+				descriptionOverride,
 				postId);
 		} else if (plugin.pendingServerData) {
-			plugin.description = ((i < descriptionOverrides.size())
-					&& !descriptionOverrides[i].trimmed().isEmpty())
-				? descriptionOverrides[i].trimmed()
+			plugin.description = !descriptionOverride.isEmpty()
+				? descriptionOverride
 				: RuEn(
 					"Сервер передал пост #%1. Подтягиваем карточку и пакет .tgd.",
 					"The server provided post #%1. Fetching the card and the .tgd package.").arg(postId);
 		} else {
-			plugin.description = ((i < descriptionOverrides.size())
-					&& !descriptionOverrides[i].trimmed().isEmpty())
-				? descriptionOverrides[i].trimmed()
+			plugin.description = !descriptionOverride.isEmpty()
+				? descriptionOverride
 				: RuEn(
 					"Сервер рекомендовал этот пост, но в нём пока не найден пакет .tgd. Попробуй обновить список.",
 					"The server recommended this post, but no .tgd package was found yet. Try refreshing the list.");
@@ -658,7 +664,8 @@ void MaybeShowAstrogramOnboarding(
 			}
 			const auto lifetime = std::make_shared<rpl::lifetime>();
 			const auto finished = std::make_shared<bool>(false);
-			const auto emit = [weak, fallbackTitle, lifetime, finished, done = std::move(done)]() mutable {
+			const auto emit = std::make_shared<Fn<void()>>();
+			*emit = [weak, fallbackTitle, lifetime, finished, done = std::move(done)]() mutable {
 				if (*finished) {
 					return;
 				}
@@ -694,13 +701,13 @@ void MaybeShowAstrogramOnboarding(
 				}
 			};
 			controller->session().appConfig().refreshed(
-			) | rpl::take(1) | rpl::on_next([emit]() mutable {
-				emit();
+			) | rpl::take(1) | rpl::on_next([emit] {
+				(*emit)();
 			}, *lifetime);
-			emit();
+			(*emit)();
 			controller->session().appConfig().refresh(true);
-			QTimer::singleShot(1800, controller->content(), [emit]() mutable {
-				emit();
+			QTimer::singleShot(1800, controller->content(), [emit] {
+				(*emit)();
 			});
 		};
 		args.applyShellPreset = [](Ui::AstrogramOnboardingShellPreset preset) {
