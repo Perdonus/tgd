@@ -159,7 +159,7 @@ enum class PeerMenuSection {
 };
 
 [[nodiscard]] PeerMenuSection PeerMenuSectionFor(const QString &id) {
-	using Id = ::Menu::Customization::PeerMenuItemId;
+	namespace Id = ::Menu::Customization::PeerMenuItemId;
 	return (id == QString::fromLatin1(Id::DeletedMessages))
 		? PeerMenuSection::Astrogram
 		: PeerMenuSection::Default;

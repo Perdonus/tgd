@@ -126,7 +126,7 @@ enum class SideMenuSection {
 };
 
 [[nodiscard]] SideMenuSection SideMenuSectionFor(const QString &id) {
-	using Id = ::Menu::Customization::SideMenuItemId;
+	namespace Id = ::Menu::Customization::SideMenuItemId;
 	return (id == QString::fromLatin1(Id::Plugins))
 		|| (id == QString::fromLatin1(Id::ShowLogs))
 		|| (id == QString::fromLatin1(Id::GhostMode))

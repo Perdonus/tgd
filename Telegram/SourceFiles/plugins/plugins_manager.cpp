@@ -2283,7 +2283,7 @@ QByteArray Manager::processRuntimeApiRequest(
 		auto rest = path.mid(prefix.size());
 		if (resolvedMethod == u"GET"_q
 			&& !rest.isEmpty()
-			&& !rest.contains(u'/'_q)) {
+			&& !rest.contains(u'/')) {
 			const auto id = QUrl::fromPercentEncoding(rest.toUtf8());
 			if (id.isEmpty()) {
 				return RuntimeErrorResponse(400, u"plugin id is required"_q);
@@ -4977,7 +4977,7 @@ void Manager::syncSourceTrustState(PluginState &state) const {
 		if (raw.isEmpty()) {
 			return {};
 		}
-		if (raw.startsWith(u'{'_q)) {
+		if (raw.startsWith(u'{')) {
 			const auto document = QJsonDocument::fromJson(raw.toUtf8());
 			if (document.isObject()) {
 				return parseRecordObject(document.object());

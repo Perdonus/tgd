@@ -122,6 +122,10 @@ using Match = qthelp::RegularExpressionMatch;
 		: QString::fromUtf8(en);
 }
 
+[[nodiscard]] QString RuEn(QString ru, QString en) {
+	return AstrogramRussianUi() ? ru : en;
+}
+
 [[nodiscard]] QImage AstrogramSupportLogo() {
 	auto result = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
 	if (result.isNull()) {
@@ -364,7 +368,7 @@ void AddAstrogramSupportCover(
 	const auto noteWrap = Ui::CreateChild<Ui::RpWidget>(cover);
 	const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
 		noteWrap,
-		colorizeBold(AstrogramSupportBadgeNote(session)),
+		rpl::single(colorizeBold(AstrogramSupportBadgeNote(session))),
 		state->noteSt);
 	noteLabel->setTryMakeSimilarLines(true);
 	noteWrap->paintRequest() | rpl::on_next([=] {

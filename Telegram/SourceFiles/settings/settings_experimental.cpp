@@ -241,7 +241,7 @@ void AddShellModeToggle(
 		Getter getter,
 		Setter setter) {
 	const auto toggles = container->lifetime().make_state<rpl::event_stream<bool>>();
-	const auto current = getter(state->prefs);
+	auto current = getter(state->prefs);
 	const auto button = container->add(object_ptr<Button>(
 		container,
 		rpl::single(title),

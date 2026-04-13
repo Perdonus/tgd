@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_plugins.h"
 #include "settings.h"
 #include "storage/localstorage.h"
+#include "main/main_session.h"
 #include "styles/style_boxes.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"

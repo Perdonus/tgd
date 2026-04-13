@@ -313,7 +313,7 @@ QString DevUpdateHooksConfigPathValue() {
 }
 
 QString TrimTrailingSlashes(QString value) {
-	while (value.endsWith(u'/'_q)) {
+	while (value.endsWith(u'/')) {
 		value.chop(1);
 	}
 	return value;
