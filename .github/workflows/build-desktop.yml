@@ -650,7 +650,6 @@ jobs:
           set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
           if defined ASTROGRAM_BUILD_JOBS (set "BUILD_JOBS=%ASTROGRAM_BUILD_JOBS%") else set "BUILD_JOBS=4"
           if defined ASTROGRAM_BUILD_JOBS_SAFE (set "BUILD_JOBS_SAFE=%ASTROGRAM_BUILD_JOBS_SAFE%") else set "BUILD_JOBS_SAFE=1"
-          if defined CL (set "CL=/Zm300 !CL!") else set "CL=/Zm300"
 
           cmake --build ..\out --config Release --parallel %BUILD_JOBS% --target Telegram > "%BUILD_LOG_TARGET%" 2>&1
           if not errorlevel 1 goto build_ok

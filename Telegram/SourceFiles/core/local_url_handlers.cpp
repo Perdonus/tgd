@@ -325,7 +325,7 @@ void AddAstrogramSupportCover(
 
 	const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		colorizeBold(AstrogramSupportSubtitle(session)),
+		rpl::single(colorizeBold(AstrogramSupportSubtitle(session))),
 		state->subtitleSt);
 	subtitle->setTryMakeSimilarLines(true);
 
