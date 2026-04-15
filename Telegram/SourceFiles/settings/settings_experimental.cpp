@@ -239,14 +239,13 @@ void AddShellModeToggle(
 		QString title,
 		QString description,
 		Getter getter,
-		Setter setter) {
+	Setter setter) {
 	const auto toggles = container->lifetime().make_state<rpl::event_stream<bool>>();
-	auto current = getter(state->prefs);
 	const auto button = container->add(object_ptr<Button>(
 		container,
 		rpl::single(title),
 		st::settingsButtonNoIcon))->toggleOn(
-		toggles->events_starting_with(current));
+		toggles->events_starting_with(getter(state->prefs)));
 	state->syncs.push_back([=](const ShellModePreferences &prefs) {
 		toggles->fire_copy(getter(prefs));
 	});
