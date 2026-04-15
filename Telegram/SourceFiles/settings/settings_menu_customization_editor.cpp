@@ -3374,8 +3374,8 @@ void AddPreviewToggle(
 	const auto button = container->add(object_ptr<Button>(
 		container,
 		rpl::single(title),
-		st::settingsButtonNoIcon));
-	button->toggleOn(stream->events_starting_with(initial));
+		st::settingsButtonNoIcon))->toggleOn(
+			stream->events_starting_with(initial));
 	button->toggledChanges() | rpl::on_next([=](bool toggled) {
 		if (!apply(toggled)) {
 			stream->fire_copy(!toggled);
