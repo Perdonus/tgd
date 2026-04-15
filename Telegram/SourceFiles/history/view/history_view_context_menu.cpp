@@ -216,7 +216,7 @@ enum class ContextActionSection {
 };
 
 [[nodiscard]] ContextActionSection ContextActionSectionFor(const QString &id) {
-	using Id = Menu::Customization::ContextMenuItemId;
+	namespace Id = Menu::Customization::ContextMenuItemId;
 	if ((id == QString::fromLatin1(Id::SelectionCopy))
 		|| (id == QString::fromLatin1(Id::SelectionTranslate))
 		|| (id == QString::fromLatin1(Id::SelectionSearch))

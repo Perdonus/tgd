@@ -2952,11 +2952,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}, &st::menuIconForward);
 			}
 			if (allowSelectionForwardWithoutAuthor) {
-				if (const auto ids = getSelectedItems(); !ids.empty()) {
+				const auto ids = getSelectedItems();
+				if (!ids.empty()) {
 					const auto items = session().data().idsToItems(ids);
 					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-							ShowForwardWithoutAuthorValidated(_controller, getSelectedItems(), [=] {
+							ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
 								_widget->clearSelected();
 							});
 						}, &st::menuIconForward);
@@ -2984,8 +2985,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					}, &st::menuIconForward);
 				}
 				if (allowMessageForwardWithoutAuthor) {
-					if (const auto ids = session().data().itemOrItsGroup(item);
-						!ids.empty()) {
+					const auto ids = session().data().itemOrItsGroup(item);
+					if (!ids.empty()) {
 						const auto items = session().data().idsToItems(ids);
 						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
@@ -3243,11 +3244,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}, &st::menuIconForward);
 			}
 			if (allowSelectionForwardWithoutAuthor) {
-				if (const auto ids = getSelectedItems(); !ids.empty()) {
+				const auto ids = getSelectedItems();
+				if (!ids.empty()) {
 					const auto items = session().data().idsToItems(ids);
 					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-							ShowForwardWithoutAuthorValidated(_controller, getSelectedItems(), [=] {
+							ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
 								_widget->clearSelected();
 							});
 						}, &st::menuIconForward);
@@ -3273,7 +3275,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					}, &st::menuIconForward);
 				}
 				if (allowMessageForwardWithoutAuthor) {
-					if (const auto ids = session().data().itemOrItsGroup(item); !ids.empty()) {
+					const auto ids = session().data().itemOrItsGroup(item);
+					if (!ids.empty()) {
 						const auto items = session().data().idsToItems(ids);
 						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {

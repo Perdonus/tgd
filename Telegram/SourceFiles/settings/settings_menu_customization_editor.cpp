@@ -169,7 +169,7 @@ struct ContextLayoutStats {
 }
 
 [[nodiscard]] bool IsForwardWithoutAuthorAction(const QString &id) {
-	using Id = Menu::Customization::ContextMenuItemId;
+	namespace Id = Menu::Customization::ContextMenuItemId;
 	return (id == QString::fromLatin1(Id::SelectionForwardWithoutAuthor))
 		|| (id == QString::fromLatin1(Id::MessageForwardWithoutAuthor));
 }
@@ -244,7 +244,7 @@ struct ContextLayoutStats {
 [[nodiscard]] EntryDescriptor DescribeEntry(
 		const Menu::Customization::SideMenuEntry &entry,
 		bool supportMode) {
-	using Id = Menu::Customization::SideMenuItemId;
+	namespace Id = Menu::Customization::SideMenuItemId;
 	if (entry.separator) {
 		if (entry.id == QString::fromLatin1(Id::SeparatorPrimary)) {
 			return {
@@ -2120,7 +2120,7 @@ struct ContextActionDescriptor {
 }
 
 [[nodiscard]] ContextActionDescriptor DescribeContextAction(const QString &id) {
-	using Id = Menu::Customization::ContextMenuItemId;
+	namespace Id = Menu::Customization::ContextMenuItemId;
 	const auto make = [&](const char *ruTitle,
 			const char *enTitle,
 			const char *ruSubtitle,

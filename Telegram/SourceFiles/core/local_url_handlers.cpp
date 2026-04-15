@@ -767,11 +767,11 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 				0));
 		const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
 			noteWrap,
-			tr::rich(RuEn(
+			rpl::single(tr::rich(RuEn(
 				QString(
 					u"<b>Как это работает:</b> донат оформляется через <b>%1</b>, а затем значок подписчика Astrogram выдаётся на сервере вручную."_q).arg(supportHandle),
 				QString(
-					u"<b>How it works:</b> the donation is handled via <b>%1</b>, then the Astrogram subscriber badge is issued manually on the server."_q).arg(supportHandle))),
+					u"<b>How it works:</b> the donation is handled via <b>%1</b>, then the Astrogram subscriber badge is issued manually on the server."_q).arg(supportHandle)))),
 			noteSt);
 		noteLabel->setTryMakeSimilarLines(true);
 		noteWrap->paintRequest() | rpl::on_next([=] {
