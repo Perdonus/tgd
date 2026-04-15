@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/vertical_list.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -3373,8 +3374,8 @@ void AddPreviewToggle(
 	const auto button = container->add(object_ptr<Button>(
 		container,
 		rpl::single(title),
-		st::settingsButtonNoIcon))->toggleOn(
-			stream->events_starting_with(initial));
+		st::settingsButtonNoIcon));
+	button->toggleOn(stream->events_starting_with(initial));
 	button->toggledChanges() | rpl::on_next([=](bool toggled) {
 		if (!apply(toggled)) {
 			stream->fire_copy(!toggled);
@@ -3529,7 +3530,7 @@ void AddMenuCustomizationEditor(
 			"Вернуть все скрытые пункты бокового меню",
 			"Restore all hidden side menu items")),
 		st::settingsButton,
-		{ &st::menuIconShow }
+		{ &st::menuIconRestore }
 	)->addClickHandler([=] {
 		if (!state->restoreAllHidden()) {
 			controller->window().showToast(RuEn(

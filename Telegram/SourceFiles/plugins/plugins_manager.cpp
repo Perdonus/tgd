@@ -195,7 +195,7 @@ struct UiRecoveryAttemptResult {
 		++result.updatedWindows;
 	}
 	if (const auto primary = Core::App().activePrimaryWindow()) {
-		if (auto *widget = primary->widget()) {
+		if (const auto widget = primary->widget()) {
 			result.primaryExists = true;
 			result.primaryWasVisible = widget->isVisible();
 			if (!widget->isVisible()) {

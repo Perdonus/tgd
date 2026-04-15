@@ -106,7 +106,7 @@ void MaybeShowPremiumToast(
 	if (overrideValue <= 0) {
 		return false;
 	}
-	const auto limits = Data::PremiumLimits(&session());
+	const auto limits = Data::PremiumLimits(session);
 	const auto base = session->premium()
 		? limits.gifsPremium()
 		: limits.gifsDefault();
@@ -1143,7 +1143,7 @@ void Stickers::specialSetReceived(
 			if (setId == CloudRecentSetId) {
 				while (!recent.isEmpty()
 					&& (set->stickers.size() + recent.size()
-						> limits.stickersRecentCurrent())) {
+						> localLimit)) {
 					recent.pop_back();
 					writeRecent = true;
 				}
