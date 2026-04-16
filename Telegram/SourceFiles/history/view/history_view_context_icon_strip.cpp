@@ -70,7 +70,7 @@ public:
 
 protected:
 	void paintEvent(QPaintEvent *e) override {
-		auto p = Ui::Painter(this);
+		auto p = QPainter(this);
 		p.fillRect(e->rect(), st::windowBg);
 		p.fillRect(
 			QRect(0, 0, width(), kStripSeparatorHeight),
