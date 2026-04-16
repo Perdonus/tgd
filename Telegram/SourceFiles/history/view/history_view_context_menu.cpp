@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/data/messages_storage.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
+#include "core/application.h"
 #include "core/core_settings.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_cursor_state.h"

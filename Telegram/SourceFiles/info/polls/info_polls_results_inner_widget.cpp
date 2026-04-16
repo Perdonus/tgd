@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/polls/info_polls_results_inner_widget.h"
 
 #include "info/polls/info_polls_results_widget.h"
+#include "core/application.h"
 #include "core/core_settings.h"
 #include "core/ui_integration.h"
 #include "data/data_peer.h"

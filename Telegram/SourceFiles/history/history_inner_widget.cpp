@@ -2954,7 +2954,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			if (allowSelectionForwardWithoutAuthor) {
 				const auto ids = getSelectedItems();
 				if (!ids.empty()) {
-					const auto items = session().data().idsToItems(ids);
+					const auto items = session->data().idsToItems(ids);
 					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
 							ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
@@ -2985,9 +2985,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					}, &st::menuIconForward);
 				}
 				if (allowMessageForwardWithoutAuthor) {
-					const auto ids = session().data().itemOrItsGroup(item);
+					const auto ids = session->data().itemOrItsGroup(item);
 					if (!ids.empty()) {
-						const auto items = session().data().idsToItems(ids);
+						const auto items = session->data().idsToItems(ids);
 						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
 								ShowForwardWithoutAuthorValidated(_controller, ids);
@@ -3246,7 +3246,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			if (allowSelectionForwardWithoutAuthor) {
 				const auto ids = getSelectedItems();
 				if (!ids.empty()) {
-					const auto items = session().data().idsToItems(ids);
+					const auto items = session->data().idsToItems(ids);
 					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
 							ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
@@ -3275,9 +3275,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					}, &st::menuIconForward);
 				}
 				if (allowMessageForwardWithoutAuthor) {
-					const auto ids = session().data().itemOrItsGroup(item);
+					const auto ids = session->data().itemOrItsGroup(item);
 					if (!ids.empty()) {
-						const auto items = session().data().idsToItems(ids);
+						const auto items = session->data().idsToItems(ids);
 						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
 							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
 								forwardAsGroupWithoutAuthor(itemId);
