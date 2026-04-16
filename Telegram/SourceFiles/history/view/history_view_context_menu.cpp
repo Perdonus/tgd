@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/data/messages_storage.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
+#include "core/core_settings.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/history.h"
@@ -2364,12 +2365,11 @@ void AddPollActions(
 		&& (context != Context::ScheduledTopic)) {
 		return;
 	}
-	const auto itemId = item->fullId();
-	const auto canPreviewResults = item->history()
-		->session()
-		.settings()
-		.showPollResultsBeforeVoting()
-		&& !poll->quiz()
+		const auto itemId = item->fullId();
+		const auto canPreviewResults = Core::App()
+			.settings()
+			.showPollResultsBeforeVoting()
+			&& !poll->quiz()
 		&& !poll->closed()
 		&& !poll->voted()
 		&& item->isRegular();

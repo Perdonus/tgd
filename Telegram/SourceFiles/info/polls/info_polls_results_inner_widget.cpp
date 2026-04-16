@@ -8,11 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/polls/info_polls_results_inner_widget.h"
 
 #include "info/polls/info_polls_results_widget.h"
-#include "lang/lang_keys.h"
+#include "core/core_settings.h"
 #include "core/ui_integration.h"
 #include "data/data_peer.h"
 #include "data/data_poll.h"
 #include "data/data_session.h"
+#include "lang/lang_keys.h"
 #include "ui/controls/peer_list_dummy.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
@@ -695,7 +696,7 @@ void InnerWidget::setupContent() {
 	Ui::AddSkip(_content, st::boxLittleSkip);
 	const auto showVoters = _poll->publicVotes()
 		&& (_poll->voted()
-			|| _poll->session()
+			|| Core::App()
 				.settings()
 				.showPollResultsBeforeVoting());
 	for (const auto &answer : _poll->answers) {
