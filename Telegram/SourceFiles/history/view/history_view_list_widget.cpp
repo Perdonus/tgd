@@ -2943,8 +2943,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		_menu = nullptr;
 		return;
 	}
-	// TODO(astrogram): swap the default DTO below for persisted editor data.
-	const auto customizationLayout = DefaultContextMenuCustomizationLayout();
+	const auto customizationLayout = LoadContextMenuCustomizationLayout();
 	const auto stripAttached = AttachContextIconStripToMenu(
 		_menu.get(),
 		desiredPosition,

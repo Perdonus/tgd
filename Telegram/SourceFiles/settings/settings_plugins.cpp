@@ -342,6 +342,9 @@ QString PluginSourceBadgeDetailText(
 		return result;
 	}
 	const auto reason = PluginSourceReasonCode(state);
+	if (mode == PluginSourceBadgeMode::Card) {
+		return QString();
+	}
 	if (reason == u"sha256-unavailable"_q) {
 		return PluginUiText(
 			u"Could not compute the plugin SHA-256 hash."_q,
@@ -410,6 +413,9 @@ void AddPluginSourceBadge(
 		not_null<Ui::VerticalLayout*> container,
 		const ::Plugins::PluginState &state,
 		PluginSourceBadgeMode mode = PluginSourceBadgeMode::Card) {
+	if ((mode == PluginSourceBadgeMode::Card) && !state.sourceVerified) {
+		return;
+	}
 	const auto badge = container->add(
 		object_ptr<Ui::RpWidget>(container),
 		style::margins(
@@ -457,9 +463,10 @@ void AddPluginSourceBadge(
 			text);
 	}, badge->lifetime());
 
-	AddPluginDescriptionText(
-		container,
-		PluginSourceBadgeDetailText(state, mode));
+	if (const auto details = PluginSourceBadgeDetailText(state, mode);
+			!details.trimmed().isEmpty()) {
+		AddPluginDescriptionText(container, details);
+	}
 	if (mode == PluginSourceBadgeMode::Details) {
 		AddPluginMetaText(container, PluginSourceHashText(state));
 	}

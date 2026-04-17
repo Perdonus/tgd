@@ -94,6 +94,7 @@ private:
 	[[nodiscard]] int visibleMenuWidthForImmersive() const;
 	[[nodiscard]] int desiredImmersiveShift(int menuWidth) const;
 	void animateImmersiveShiftTo(int target);
+	void startImmersiveReset(bool animated);
 	void applyImmersiveShift();
 	void resetImmersiveShift();
 	void toggleAccounts();

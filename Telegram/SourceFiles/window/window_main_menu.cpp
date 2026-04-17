@@ -660,6 +660,24 @@ void MainMenu::animateImmersiveShiftTo(int target) {
 	}, _immersiveFallbackShift, target, st::slideWrapDuration);
 }
 
+void MainMenu::startImmersiveReset(bool animated) {
+	_showFinished = false;
+	if (!_appliedImmersiveShift) {
+		_immersiveShiftAnimation.stop();
+		_immersiveFallbackShift = 0;
+		_immersiveGeometryDriven = false;
+		return;
+	}
+	if (!animated || !_immersiveAnimation) {
+		resetImmersiveShift();
+		return;
+	}
+	_immersiveShiftAnimation.stop();
+	_immersiveFallbackShift = _appliedImmersiveShift;
+	_immersiveGeometryDriven = false;
+	animateImmersiveShiftTo(0);
+}
+
 void MainMenu::applyImmersiveShift() {
 	const auto main = _controller->widget()->sessionContent();
 	if (!main) {
@@ -1306,6 +1324,9 @@ void MainMenu::chooseEmojiStatus() {
 
 bool MainMenu::eventHook(QEvent *event) {
 	const auto type = event->type();
+	if (type == QEvent::Hide || type == QEvent::Close) {
+		startImmersiveReset(true);
+	}
 	if (type == QEvent::TouchBegin
 		|| type == QEvent::TouchUpdate
 		|| type == QEvent::TouchEnd
