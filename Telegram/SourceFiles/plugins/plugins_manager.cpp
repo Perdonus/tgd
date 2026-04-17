@@ -81,7 +81,7 @@ namespace {
 
 constexpr auto kPluginsFolder = "tdata/plugins";
 constexpr auto kConfigFile = "tdata/plugins.json";
-constexpr auto kClientLogFile = "tdata/client.log";
+constexpr auto kClientLogFile = "client.log";
 constexpr auto kLogFile = "tdata/plugins.log";
 constexpr auto kTraceFile = "tdata/plugins.trace.jsonl";
 constexpr auto kSafeModeFile = "tdata/plugins.safe-mode";

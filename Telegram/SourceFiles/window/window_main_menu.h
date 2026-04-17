@@ -91,7 +91,6 @@ private:
 	[[nodiscard]] bool profileBlockAtBottom() const;
 	[[nodiscard]] int profileBlockTop() const;
 	[[nodiscard]] int desiredMenuWidth() const;
-	[[nodiscard]] int visibleMenuWidthForImmersive() const;
 	[[nodiscard]] int desiredImmersiveShift(int menuWidth) const;
 	void animateImmersiveShiftTo(int target);
 	void startImmersiveReset(bool animated);
@@ -141,7 +140,6 @@ private:
 	QString _profileBlockPosition;
 	bool _immersiveAnimation = true;
 	bool _expandedSidePanel = false;
-	bool _immersiveGeometryDriven = false;
 	int _immersiveFallbackShift = 0;
 	int _appliedImmersiveShift = 0;
 

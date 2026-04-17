@@ -53,6 +53,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Settings {
 namespace {
 
+constexpr auto kPluginUiRebuildDebounceMs = 120;
+
 [[nodiscard]] bool UseRussianPluginUi() {
 	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
 }
@@ -356,13 +358,7 @@ QString PluginSourceBadgeDetailText(
 			u"Доверенные записи источников станут доступны после полной загрузки активной сессии."_q);
 	}
 	if (reason == u"no-trusted-records"_q) {
-		return (mode == PluginSourceBadgeMode::Card)
-			? PluginUiText(
-				u"The trusted source record list is still empty."_q,
-				u"Список доверенных записей источников пока пуст."_q)
-			: PluginUiText(
-				u"No trusted Astrogram source records have been published yet, so this plugin cannot be verified."_q,
-				u"Доверенные записи источников Astrogram ещё не опубликованы, поэтому этот плагин пока нельзя подтвердить."_q);
+		return QString();
 	}
 	if (reason == u"no-valid-trusted-records"_q) {
 		return (mode == PluginSourceBadgeMode::Card)
@@ -1023,7 +1019,7 @@ QString PluginRuntimeText() {
 		u"Diagnostics files"_q,
 		u"Файлы диагностики"_q));
 	lines.push_back(PluginUiText(u"client.log: "_q, u"client.log: "_q)
-		+ QDir::toNativeSeparators(logsRoot.filePath(u"tdata/client.log"_q)));
+		+ QDir::toNativeSeparators(logsRoot.filePath(u"client.log"_q)));
 	lines.push_back(PluginUiText(u"plugins.log: "_q, u"plugins.log: "_q)
 		+ QDir::toNativeSeparators(logsRoot.filePath(u"tdata/plugins.log"_q)));
 	lines.push_back(PluginUiText(u"plugins.trace.jsonl: "_q, u"plugins.trace.jsonl: "_q)
@@ -1539,11 +1535,11 @@ void AddPluginsDiagnosticsSection(
 		}
 	});
 	AddSettingsActionButton(container, PluginUiText(
-		u"Open client.log"_q,
-		u"Открыть client.log"_q), [=] {
-			RevealPluginAuxFile(
+			u"Open client.log"_q,
+			u"Открыть client.log"_q), [=] {
+		RevealPluginAuxFile(
 			controller,
-			u"./tdata/client.log"_q,
+			u"./client.log"_q,
 			PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
 	});
 	AddSettingsActionButton(container, PluginUiText(
@@ -1800,7 +1796,7 @@ public:
 				return;
 			}
 			_rebuildScheduled = true;
-			QTimer::singleShot(0, this, [=] {
+			QTimer::singleShot(kPluginUiRebuildDebounceMs, this, [=] {
 				_rebuildScheduled = false;
 				rebuild();
 			});
@@ -2034,7 +2030,7 @@ Plugins::Plugins(
 			.arg(change.structural ? u"true"_q : u"false"_q)
 			.arg(change.failed ? u"true"_q : u"false"_q));
 		_listRefreshPending = true;
-		scheduleRebuildList(0);
+		scheduleRebuildList(kPluginUiRebuildDebounceMs);
 	}, _stateChangesLifetime);
 	setupContent();
 }
@@ -2060,7 +2056,7 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		.text = PluginUiText(u"Reload Plugins"_q, u"Перезагрузить плагины"_q),
 		.handler = [=] {
 			Core::App().plugins().reload();
-			scheduleRebuildList(0);
+			scheduleRebuildList(kPluginUiRebuildDebounceMs);
 		},
 		.icon = &st::menuIconSettings,
 	});
@@ -2104,7 +2100,7 @@ void Plugins::rebuildList() {
 	const auto scheduleRefresh = crl::guard(this, [=] {
 		Logs::writeClient(u"[plugins-ui] scheduled list refresh"_q);
 		_listRefreshPending = true;
-		scheduleRebuildList(0);
+		scheduleRebuildList(kPluginUiRebuildDebounceMs);
 	});
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
@@ -2134,8 +2130,8 @@ void Plugins::rebuildList() {
 		Ui::AddDividerText(
 			_list,
 			rpl::single(PluginUiText(
-				u"No plugins found in tdata/plugins. Use the top bar menu for the plugins folder and diagnostics."_q,
-				u"В tdata/plugins плагины не найдены. Для папки плагинов и диагностики используйте меню в верхней панели."_q)));
+				u"No plugins found in tdata/plugins."_q,
+				u"В tdata/plugins плагины не найдены."_q)));
 		Ui::AddSkip(_list);
 		Ui::ResizeFitChild(this, _content);
 		return;

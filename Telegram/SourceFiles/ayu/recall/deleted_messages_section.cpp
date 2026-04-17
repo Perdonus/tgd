@@ -58,15 +58,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace AyuRecall {
 namespace {
 
-constexpr auto kRowOuterLeft = 16;
-constexpr auto kRowOuterRight = 16;
+constexpr auto kRowOuterLeft = 10;
+constexpr auto kRowOuterRight = 10;
 constexpr auto kRowOuterTop = 6;
 constexpr auto kRowOuterBottom = 6;
 constexpr auto kGroupedOuterSkip = 1;
 constexpr auto kBubblePadding = QMargins(14, 10, 14, 10);
 constexpr auto kBubbleInnerSkip = 4;
 constexpr auto kBubbleMinWidth = 120;
-constexpr auto kBubbleWidthFactor = 0.72;
+constexpr auto kBubbleWidthFactor = 0.82;
 constexpr auto kClusterGapSeconds = 15 * 60;
 constexpr auto kIntroCardPadding = QMargins(18, 14, 18, 14);
 constexpr auto kBubbleHeaderSkip = 5;
@@ -2104,6 +2104,8 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 		applySearchQuery(query.trimmed());
 	}, lifetime());
 
+	_scopeBar->hide();
+	_footerBar->hide();
 	_content = _scroll->setOwnedWidget(object_ptr<Ui::VerticalLayout>(this));
 	_scroll->show();
 	_scroll->scrolls(
@@ -2408,7 +2410,6 @@ void DeletedMessagesWidget::rebuildContent() {
 	_daySummaries = BuildDaySummaries(_messages);
 	_topBar->setCustomTitle(TitleText(int(_messages.size()), _totalMessages));
 	_content->clear();
-	Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 
 	if (_messages.empty()) {
 		const auto empty = _content->add(

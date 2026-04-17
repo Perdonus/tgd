@@ -539,13 +539,21 @@ call :api_request
 exit /b %errorlevel%
 
 :send
-set "ASTRO_SEND_ARGS=%*"
-set "ASTRO_ARG1="
+shift
+if "%~1"=="" goto help_send
+set "ASTRO_ARG1=%~1"
 set "ASTRO_ARG2="
-for /f "tokens=1,2,*" %%A in ("%ASTRO_SEND_ARGS%") do (
-  set "ASTRO_ARG1=%%B"
-  set "ASTRO_ARG2=%%C"
+shift
+:send_collect
+if "%~1"=="" goto send_ready
+if defined ASTRO_ARG2 (
+  set "ASTRO_ARG2=%ASTRO_ARG2% %~1"
+) else (
+  set "ASTRO_ARG2=%~1"
 )
+shift
+goto send_collect
+:send_ready
 if not defined ASTRO_ARG1 goto help_send
 if not defined ASTRO_ARG2 goto help_send
 set "ASTRO_METHOD=POST"

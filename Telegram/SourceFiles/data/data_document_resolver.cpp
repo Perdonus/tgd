@@ -217,6 +217,9 @@ QString PluginSourceBadgeDetails(const Plugins::PackagePreviewState &preview) {
 			u"Could not calculate the plugin SHA-256 for verification."_q,
 			u"Не удалось вычислить SHA-256 плагина для проверки."_q);
 	}
+	if (preview.sourceTrustReason == u"no-trusted-records"_q) {
+		return QString();
+	}
 	return PluginUiText(
 		u"This exact plugin binary was not found in the trusted source records."_q,
 		u"Точный бинарник этого плагина не найден в доверенных записях источников."_q);

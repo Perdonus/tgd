@@ -3396,11 +3396,9 @@ void AddPreviewToggle(
 void AddMenuCustomizationEditor(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	const auto hasLogsAction = !Core::App().plugins().actionsFor(
-		QStringLiteral("astro.show_logs")).empty();
 	const auto state = std::make_shared<SideMenuEditorState>(
 		controller->session().supportMode(),
-		hasLogsAction);
+		false);
 	const auto contextState = std::make_shared<ContextMenuEditorState>();
 
 	Ui::AddDivider(container);
@@ -3409,31 +3407,15 @@ void AddMenuCustomizationEditor(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Visual editor меню",
-				"Menu visual editor")),
+				"Ручная настройка меню",
+				"Manual menu tuning")),
 			st::boxLabel),
 		st::defaultBoxDividerLabelPadding);
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Экспериментальный editor уже редактирует боковое меню напрямую через `menu_layout.json`: видимые пункты живут в основном списке, скрытые уходят в restore-tray ниже, а fake Telegram preview теперь подчёркивает выбранный пункт и shell-режимы сразу после изменения.",
-			"This experimental editor already works directly with `menu_layout.json`: visible items stay in the main list, hidden ones move into the restore tray below, and the fake Telegram preview now highlights the selected action plus active shell modes right after each change.")));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	container->add(
-		object_ptr<CustomizationStatusDeck>(container, state, contextState),
-		style::margins(6, 0, 6, 0),
-		style::al_top);
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Status deck выше теперь живой: он собирается из текущего `menu_layout.json`, shell preview prefs и `context_menu_layout.json`, так что сразу показывает, какие runtime-хуки уже реально активны, а не просто нарисованы в preview.",
-			"The status deck above is now live: it reads the current `menu_layout.json`, shell preview prefs and `context_menu_layout.json`, so it immediately shows which runtime hooks are truly active instead of merely being drawn in the preview.")));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-
-	container->add(
-		object_ptr<SideMenuPreview>(container, state),
-		style::margins(6, 0, 6, 0),
-		style::al_top);
+			"Здесь только живой runtime-редактор. Видимые пункты можно переставлять руками, скрытые сразу уходят вниз таблетками, а рисованные preview и старый visual editor отсюда убраны.",
+			"This section keeps only the live runtime editor. Visible items can be reordered manually, hidden items move into pill trays below, and the fake previews plus the old visual editor are gone from here.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 
 	Ui::AddSubsectionTitle(
@@ -3492,16 +3474,16 @@ void AddMenuCustomizationEditor(
 	AddButtonWithIcon(
 		container,
 		rpl::single(RuEn(
-			"Перечитать layout и preview-настройки с диска",
-			"Reload layout and preview settings from disk")),
+			"Перечитать layout с диска",
+			"Reload the layout from disk")),
 		st::settingsButton,
 		{ &st::menuIconRestore }
 	)->addClickHandler([=] {
 		state->reloadFromDisk();
 		list->setSelectedIndex(list->selectedIndex());
 		controller->window().showToast(RuEn(
-			"Editor перечитал файл с диска.",
-			"Editor reloaded the file from disk."));
+			"Раскладка перечитана с диска.",
+			"Layout reloaded from disk."));
 	});
 
 	AddButtonWithIcon(
@@ -3552,8 +3534,8 @@ void AddMenuCustomizationEditor(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Эти переключатели уже применяются к живому боковому меню. Если панель открыта, footer и положение профиля меняются без ручного переоткрытия.",
-			"These switches already apply to the live side menu. If it is open, the footer and profile position update without a manual reopen.")));
+			"Эти переключатели применяются к настоящему боковому меню. Если панель открыта, footer и положение профиля меняются без ручного переоткрытия.",
+			"These switches apply to the real side menu. If it is open, the footer and profile position update without a manual reopen.")));
 
 	AddPreviewToggle(
 		controller,
@@ -3562,8 +3544,8 @@ void AddMenuCustomizationEditor(
 			"Показывать нижний footer-текст",
 			"Show the footer text"),
 		RuEn(
-			"Применяется и в preview, и в реальном боковом меню: можно убрать нижний текстовый хвост, чтобы меню выглядело чище.",
-			"Applies to both the preview and the real side menu: the bottom text footer can now be hidden for a cleaner shell."),
+			"Можно убрать нижний текстовый хвост, чтобы настоящее меню выглядело чище.",
+			"The bottom text footer can be hidden for a cleaner real menu."),
 		state->showFooterText(),
 		[=](bool value) {
 			return state->setShowFooterText(value);
@@ -3613,8 +3595,8 @@ void AddMenuCustomizationEditor(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Ниже уже не просто demo-флажки: widened settings, left-edge, expanded side panel и immersive animation записываются в runtime prefs и сразу отражаются в shell и preview.",
-			"These are no longer demo-only flags: widened settings, left-edge, expanded side panel and immersive animation are written into runtime prefs and immediately reflected by both the shell and the preview.")));
+			"Ниже только реальные runtime-переключатели оболочки: widened settings, left-edge, expanded side panel и immersive animation. Они пишутся в runtime prefs и сразу отражаются в клиенте.",
+			"Below stay only the real runtime shell switches: widened settings, left-edge, expanded side panel and immersive animation. They are written into runtime prefs and immediately reflected by the client.")));
 
 	AddPreviewToggle(
 		controller,
@@ -3623,8 +3605,8 @@ void AddMenuCustomizationEditor(
 			"Расширенная боковая панель",
 			"Expanded side panel"),
 		RuEn(
-			"Runtime-хук уже подключён: реальное боковое меню становится шире. Preview тоже сразу повторяет это состояние.",
-			"The runtime hook is now live: the real side menu becomes wider, and the preview mirrors that state immediately."),
+			"Runtime-хук уже подключён: реальное боковое меню становится шире.",
+			"The runtime hook is already live: the real side menu becomes wider."),
 		state->expandedSidePanel(),
 		[=](bool value) {
 			return state->setExpandedSidePanel(value);
@@ -3651,8 +3633,8 @@ void AddMenuCustomizationEditor(
 			"Иммерсивная анимация бокового меню",
 			"Immersive side menu animation"),
 		RuEn(
-			"Runtime-хук уже есть: основная секция клиента уезжает вправо вместе с открытием бокового меню. Полный drawer-level рефактор анимаций всего окна здесь пока не делается.",
-			"The runtime hook is live: the main client section now shifts right together with the side menu opening. A full drawer-level refactor of the entire window animation is still out of scope here."),
+			"При открытии бокового меню основной интерфейс двигается вместе с ним. Если эффект мешает, его можно отключить здесь.",
+			"When the side menu opens, the main interface moves together with it. If the effect feels distracting, it can be disabled here."),
 		state->immersiveAnimation(),
 		[=](bool value) {
 			return state->setImmersiveAnimation(value);
@@ -3672,38 +3654,6 @@ void AddMenuCustomizationEditor(
 			return state->setWideSettingsPane(value);
 		});
 
-	AddButtonWithLabel(
-		container,
-		rpl::single(RuEn(
-			"Файл preview-настроек editor-а",
-			"Editor preview settings file")),
-		rpl::single(QDir::toNativeSeparators(state->previewPrefsPath())),
-		st::settingsButton,
-		{ &st::menuIconEdit }
-	)->addClickHandler([=] {
-		QGuiApplication::clipboard()->setText(
-			QDir::toNativeSeparators(state->previewPrefsPath()));
-		controller->window().showToast(RuEn(
-			"Путь к preview-настройкам скопирован.",
-			"Preview settings path copied."));
-	});
-
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn(
-			"Следующие поверхности editor-а",
-			"Next editor surfaces")));
-	container->add(
-		object_ptr<FutureSurfacesPreview>(container, state),
-		style::margins(6, 0, 6, 0),
-		style::al_top);
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Peer и 3-dot здесь пока остаются preview-only. Зато ниже уже живой runtime-editor контекстного меню: он пишет в `context_menu_layout.json`, разделяет обычное состояние и состояние выделения и отдельно управляет нижней полоской до 4 иконок.",
-			"Peer and 3-dot remain preview-only here. But the section below is now a live runtime editor for the context menu: it writes into `context_menu_layout.json`, separates message and selection states and manages the bottom strip with up to 4 icons.")));
-
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	Ui::AddSubsectionTitle(
 		container,
@@ -3713,13 +3663,9 @@ void AddMenuCustomizationEditor(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Эта часть уже реально влияет на клиент: сохранённая раскладка применяется к runtime context menu и к нижней полоске иконок при каждом открытии меню.",
-			"This section already affects the real client: the saved layout is applied to the runtime context menu and the bottom icon strip every time the menu opens.")));
-	container->add(
-		object_ptr<ContextMenuPreview>(container, contextState),
-		style::margins(6, 0, 6, 0),
-		style::al_top);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+			"Сохранённая раскладка применяется к настоящему context menu и к нижней полоске до 4 иконок при каждом открытии меню.",
+			"The saved layout is applied to the real context menu and to the bottom strip with up to 4 icons every time the menu opens.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 
 	const auto addContextEditor = [&](HistoryView::ContextMenuSurface surface,
 			ContextEditorLane lane) {
@@ -3740,11 +3686,11 @@ void AddMenuCustomizationEditor(
 			rpl::single(
 				(lane == ContextEditorLane::Strip)
 					? RuEn(
-						"Hide/Show управляет попаданием в нижнюю полоску. Runtime жёстко держит лимит в 4 видимых иконки, а строка уже оформлена в том же ритме, что и side editor, чтобы потом спокойно принять drag-style сортировку.",
-						"Hide/Show controls whether the action appears in the bottom strip. Runtime strictly keeps the limit at 4 visible icons, and the row already follows the same rhythm as the side editor so it can accept drag-style sorting later.")
+						"Hide/Show управляет попаданием в нижнюю полоску. Runtime жёстко держит лимит в 4 видимые иконки.",
+						"Hide/Show controls whether the action appears in the bottom strip. Runtime strictly keeps the limit at 4 visible icons.")
 					: RuEn(
-						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности. Drag-handle слева теперь реально переставляет строки, так что runtime и preview смотрят на один и тот же порядок.",
-						"Hide/Show and ordering here directly change the popup action list for this surface. The left drag handle now really reorders rows, so runtime and preview read the exact same order.")));
+						"Hide/Show и порядок здесь напрямую меняют обычный popup-список действий для этой поверхности. Drag-handle слева реально переставляет строки.",
+						"Hide/Show and ordering here directly change the popup action list for this surface. The left drag handle really reorders rows.")));
 		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	};
 

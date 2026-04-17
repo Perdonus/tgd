@@ -388,8 +388,9 @@ void SetupExperimental(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Пресеты оболочки перенесены во вступительный гайд. Здесь остались только прямые переключатели без визуального редактора и предпросмотров.",
-			"Shell presets have been moved to onboarding. This page now keeps only direct switches without the visual editor or previews.")));
+			"Пресеты оболочки перенесены во вступительный гайд. Ниже остаётся только нативная ручная настройка настоящих меню клиента: без fake-preview и без старого visual editor.",
+			"Shell presets have been moved to onboarding. Below stays only the native manual editor for the real client menus: no fake preview and no old visual editor.")));
+	AddMenuCustomizationEditor(controller, container);
 }
 
 } // namespace

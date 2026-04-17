@@ -128,7 +128,6 @@ enum class SideMenuSection {
 [[nodiscard]] SideMenuSection SideMenuSectionFor(const QString &id) {
 	namespace Id = ::Menu::Customization::SideMenuItemId;
 	return (id == QString::fromLatin1(Id::Plugins))
-		|| (id == QString::fromLatin1(Id::ShowLogs))
 		|| (id == QString::fromLatin1(Id::GhostMode))
 		? SideMenuSection::Astrogram
 		: SideMenuSection::Default;
@@ -570,15 +569,13 @@ void MainMenu::reloadCustomizationFromDisk() {
 	if (!_immersiveAnimation) {
 		resetImmersiveShift();
 	} else {
-		if (!_immersiveGeometryDriven) {
-			const auto target = _showFinished.current()
-				? desiredImmersiveShift(width())
-				: 0;
-			if (_showFinished.current()) {
-				animateImmersiveShiftTo(target);
-			} else {
-				_immersiveFallbackShift = target;
-			}
+		const auto target = _showFinished.current()
+			? desiredImmersiveShift(width())
+			: 0;
+		if (_showFinished.current()) {
+			animateImmersiveShiftTo(target);
+		} else {
+			_immersiveFallbackShift = target;
 		}
 		applyImmersiveShift();
 	}
@@ -629,17 +626,6 @@ int MainMenu::desiredMenuWidth() const {
 	return std::clamp(parentWidth * 48 / 100, st::mainMenuWidth, 360);
 }
 
-int MainMenu::visibleMenuWidthForImmersive() const {
-	if (!_immersiveAnimation || !width()) {
-		return 0;
-	}
-	const auto left = x();
-	if (left >= 0) {
-		return width();
-	}
-	return std::clamp(width() + left, 0, width());
-}
-
 int MainMenu::desiredImmersiveShift(int menuWidth) const {
 	if (!_immersiveAnimation || (menuWidth <= 0)) {
 		return 0;
@@ -651,9 +637,6 @@ int MainMenu::desiredImmersiveShift(int menuWidth) const {
 void MainMenu::animateImmersiveShiftTo(int target) {
 	target = std::max(target, 0);
 	_immersiveShiftAnimation.start([=] {
-		if (_immersiveGeometryDriven) {
-			return;
-		}
 		const auto progress = _immersiveShiftAnimation.value(1.);
 		_immersiveFallbackShift = int((target * progress) + 0.5);
 		applyImmersiveShift();
@@ -665,7 +648,6 @@ void MainMenu::startImmersiveReset(bool animated) {
 	if (!_appliedImmersiveShift) {
 		_immersiveShiftAnimation.stop();
 		_immersiveFallbackShift = 0;
-		_immersiveGeometryDriven = false;
 		return;
 	}
 	if (!animated || !_immersiveAnimation) {
@@ -674,7 +656,6 @@ void MainMenu::startImmersiveReset(bool animated) {
 	}
 	_immersiveShiftAnimation.stop();
 	_immersiveFallbackShift = _appliedImmersiveShift;
-	_immersiveGeometryDriven = false;
 	animateImmersiveShiftTo(0);
 }
 
@@ -685,9 +666,7 @@ void MainMenu::applyImmersiveShift() {
 	}
 	auto shift = 0;
 	if (_immersiveAnimation) {
-		shift = _immersiveGeometryDriven
-			? desiredImmersiveShift(visibleMenuWidthForImmersive())
-			: _immersiveFallbackShift;
+		shift = _immersiveFallbackShift;
 	}
 	auto geometry = main->geometry();
 	geometry.moveLeft(geometry.x() - _appliedImmersiveShift + shift);
@@ -700,7 +679,6 @@ void MainMenu::applyImmersiveShift() {
 void MainMenu::resetImmersiveShift() {
 	_immersiveShiftAnimation.stop();
 	_immersiveFallbackShift = 0;
-	_immersiveGeometryDriven = false;
 	if (!_appliedImmersiveShift) {
 		return;
 	}
@@ -888,6 +866,9 @@ void MainMenu::setupSetEmojiStatus() {
 
 void MainMenu::parentResized() {
 	resize(desiredMenuWidth(), parentWidget()->height());
+	if (_showFinished.current() && _immersiveAnimation) {
+		animateImmersiveShiftTo(desiredImmersiveShift(width()));
+	}
 	applyImmersiveShift();
 }
 
@@ -896,9 +877,7 @@ void MainMenu::showFinished() {
 	syncAccountsVisibility(
 		Core::App().settings().mainMenuAccountsShown(),
 		false);
-	if (!_immersiveGeometryDriven) {
-		animateImmersiveShiftTo(desiredImmersiveShift(width()));
-	}
+	animateImmersiveShiftTo(desiredImmersiveShift(width()));
 }
 
 void MainMenu::syncAccountsVisibility(bool shown, bool animated) {
@@ -928,9 +907,7 @@ void MainMenu::setupMenu() {
 	using Render = std::function<void()>;
 
 	const auto supportMode = _controller->session().supportMode();
-	const auto logActions = Core::App().plugins().actionsFor(
-		QStringLiteral("astro.show_logs"));
-	const auto hasLogsAction = !logActions.empty();
+	const auto hasLogsAction = false;
 	const auto addSeparator = [&] {
 		menu->add(
 			object_ptr<Ui::PlainShadow>(menu),
@@ -1138,25 +1115,6 @@ void MainMenu::setupMenu() {
 				controller->showSettings(::Settings::Plugins::Id());
 			});
 		});
-	if (hasLogsAction) {
-		const auto action = logActions.front();
-		registerRenderer(
-			::Menu::Customization::SideMenuItemId::ShowLogs,
-			[=] {
-				addAction(
-					rpl::single(action.title.isEmpty()
-						? RuEn("Показать логи", "Show Logs")
-						: action.title),
-					{ &st::menuIconIpAddress }
-				)->setClickedCallback([=] {
-					if (!Core::App().plugins().triggerAction(action.id)) {
-						controller->window().showToast(RuEn(
-							"Не удалось открыть окно логов.",
-							"Could not open the logs overlay."));
-					}
-				});
-			});
-	}
 	registerRenderer(
 		::Menu::Customization::SideMenuItemId::GhostMode,
 		[=] {
@@ -1249,11 +1207,6 @@ void MainMenu::setupMenu() {
 
 void MainMenu::moveEvent(QMoveEvent *e) {
 	Ui::LayerWidget::moveEvent(e);
-	if (_immersiveAnimation && (e->oldPos().x() != e->pos().x())) {
-		_immersiveGeometryDriven = true;
-		_immersiveShiftAnimation.stop();
-		_immersiveFallbackShift = 0;
-	}
 	applyImmersiveShift();
 }
 

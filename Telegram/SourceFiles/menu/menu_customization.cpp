@@ -174,6 +174,9 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 		if (entry.id.isEmpty()) {
 			changed = true;
 			continue;
+		} else if (entry.id == QString::fromLatin1(SideMenuItemId::ShowLogs)) {
+			changed = true;
+			continue;
 		} else if (entry.separator) {
 			result.push_back(entry);
 			continue;
@@ -234,9 +237,6 @@ std::vector<SideMenuEntry> DefaultSideMenuLayout(
 	result.push_back(MakeSeparator(SideMenuItemId::SeparatorSystem));
 	result.push_back(MakeItem(SideMenuItemId::Settings));
 	result.push_back(MakeItem(SideMenuItemId::Plugins));
-	if (includeShowLogs) {
-		result.push_back(MakeItem(SideMenuItemId::ShowLogs));
-	}
 	result.push_back(MakeItem(SideMenuItemId::GhostMode));
 	result.push_back(MakeItem(SideMenuItemId::NightMode));
 	return result;
