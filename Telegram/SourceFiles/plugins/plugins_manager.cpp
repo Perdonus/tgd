@@ -2487,6 +2487,18 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 	}
 	result.compatible = loadability.compatible;
 	result.error = loadability.error;
+	{
+		auto trustProbe = PluginState();
+		trustProbe.path = path;
+		syncSourceTrustState(trustProbe);
+		result.sha256 = trustProbe.sha256;
+		result.sourceVerified = trustProbe.sourceVerified;
+		result.sourceTrustText = trustProbe.sourceTrustText;
+		result.sourceTrustDetails = trustProbe.sourceTrustDetails;
+		result.sourceTrustReason = trustProbe.sourceTrustReason;
+		result.sourceChannelId = trustProbe.sourceChannelId;
+		result.sourceMessageId = trustProbe.sourceMessageId;
+	}
 
 	if (result.info.id.isEmpty()) {
 		result.info.id = PluginBaseName(path);
@@ -2512,6 +2524,10 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 			{ u"compatible"_q, result.compatible },
 			{ u"installed"_q, result.installed },
 			{ u"update"_q, result.update },
+			{ u"sourceVerified"_q, result.sourceVerified },
+			{ u"sourceTrustReason"_q, result.sourceTrustReason },
+			{ u"sourceChannelId"_q, QString::number(result.sourceChannelId) },
+			{ u"sourceMessageId"_q, QString::number(result.sourceMessageId) },
 			{ u"installedVersion"_q, result.installedVersion },
 			{ u"installedPath"_q, result.installedPath },
 			{ u"icon"_q, result.icon },

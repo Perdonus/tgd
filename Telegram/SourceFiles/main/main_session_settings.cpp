@@ -227,7 +227,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	base::flat_set<uint64> ratedTranscriptions;
 	std::vector<Data::UnreviewedAuth> unreviewed;
 	qint32 setupEmailState = 0;
-	qint32 astrogramOnboardingShown = 1;
+	qint32 astrogramOnboardingShown = 0;
 	std::vector<PeerId> moderateCommonGroups;
 
 	stream >> versionTag;

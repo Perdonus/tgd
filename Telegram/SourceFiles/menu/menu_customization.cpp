@@ -57,6 +57,15 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 	return result;
 }
 
+[[nodiscard]] bool IsKnownSeparatorId(const QString &id) {
+	return (id == QString::fromLatin1(SideMenuItemId::SeparatorPrimary))
+		|| (id == QString::fromLatin1(SideMenuItemId::SeparatorSystem))
+		|| (id == QString::fromLatin1(PeerMenuItemId::SeparatorPrimary))
+		|| (id == QString::fromLatin1(PeerMenuItemId::SeparatorSecondary))
+		|| (id == QString::fromLatin1(PeerMenuItemId::SeparatorDanger))
+		|| id.startsWith(u"custom_separator_"_q);
+}
+
 [[nodiscard]] std::vector<SideMenuEntry> ParseEntries(const QJsonArray &array) {
 	auto result = std::vector<SideMenuEntry>();
 	result.reserve(array.size());
@@ -70,8 +79,9 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 			continue;
 		}
 		const auto separator = object.value(QStringLiteral("separator")).toBool(
-			object.value(QStringLiteral("type")).toString()
-				== QStringLiteral("separator"));
+			(object.value(QStringLiteral("type")).toString()
+				== QStringLiteral("separator"))
+			|| IsKnownSeparatorId(id));
 		result.push_back({
 			.id = id,
 			.visible = object.value(QStringLiteral("visible")).toBool(true),

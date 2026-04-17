@@ -1833,12 +1833,17 @@ private:
 			stateChanged();
 		};
 
-		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
-		Ui::AddSkip(_content);
-		Ui::AddSubsectionTitle(
-			_content,
-			rpl::single(PluginUiText(u"Diagnostics"_q, u"Диагностика"_q)));
-		Ui::AddDividerText(_content, rpl::single(PluginDiagnosticsText(*state)));
+		const auto meta = PluginCardMetaText(*state);
+		const auto summary = FormatPluginCardSummary(*state);
+		if (!meta.text.isEmpty()) {
+			AddPluginMetaText(_content, meta);
+		}
+		if (!summary.isEmpty()) {
+			AddPluginDescriptionText(_content, summary);
+		}
+		if (!meta.text.isEmpty() || !summary.isEmpty()) {
+			Ui::AddSkip(_content);
+		}
 		if (!state->path.trimmed().isEmpty()) {
 			AddSettingsActionButton(_content, PluginUiText(
 				u"Reveal plugin package"_q,
@@ -1857,45 +1862,6 @@ private:
 			}
 			_controller->window().showToast(PluginUiText(u"Plugin ID copied."_q, u"ID плагина скопирован."_q));
 		});
-		AddSettingsActionButton(_content, PluginUiText(
-			u"Open runtime & diagnostics"_q,
-			u"Открыть рантайм и диагностику"_q), [=] {
-			ShowPluginRuntimeBox(_controller);
-		});
-		AddSettingsActionButton(_content, PluginUiText(
-			u"Open client.log"_q,
-			u"Открыть client.log"_q), [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/client.log"_q,
-				PluginUiText(u"client.log was not found."_q, u"Файл client.log не найден."_q));
-		});
-		AddSettingsActionButton(_content, PluginUiText(
-			u"Open plugins.log"_q,
-			u"Открыть plugins.log"_q), [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/plugins.log"_q,
-				PluginUiText(u"plugins.log was not found."_q, u"Файл plugins.log не найден."_q));
-		});
-		AddSettingsActionButton(_content, PluginUiText(
-			u"Open plugins.trace.jsonl"_q,
-			u"Открыть plugins.trace.jsonl"_q), [=] {
-			RevealPluginAuxFile(
-				_controller,
-				u"./tdata/plugins.trace.jsonl"_q,
-				PluginUiText(u"plugins.trace.jsonl was not found."_q, u"Файл plugins.trace.jsonl не найден."_q));
-		});
-		if (state->recoverySuspected || state->disabledByRecovery) {
-			AddSettingsActionButton(_content, PluginUiText(
-				u"Open recovery state"_q,
-				u"Открыть recovery-state"_q), [=] {
-				RevealPluginAuxFile(
-					_controller,
-					u"./tdata/plugins.recovery.json"_q,
-					PluginUiText(u"plugins.recovery.json was not found."_q, u"Файл plugins.recovery.json не найден."_q));
-			});
-		}
 		Ui::AddSkip(_content);
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
@@ -2120,7 +2086,6 @@ void Plugins::rebuildList() {
 		_listRefreshPending = true;
 		scheduleRebuildList(0);
 	});
-	AddPluginsDiagnosticsSection(_list, _controller, this, scheduleRefresh);
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
 			_list,
@@ -2184,7 +2149,6 @@ void Plugins::rebuildList() {
 			}
 			scheduleRefresh();
 		}, header->lifetime());
-		AddPluginSourceBadge(card, state, PluginSourceBadgeMode::Card);
 		if (!meta.text.isEmpty()) {
 			AddPluginMetaText(card, meta);
 		}

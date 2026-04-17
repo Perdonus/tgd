@@ -84,12 +84,19 @@ struct PackagePreviewState {
 	QString sourcePath;
 	QString icon;
 	QString error;
+	QString sha256;
 	QString installedVersion;
 	QString installedPath;
+	QString sourceTrustText;
+	QString sourceTrustDetails;
+	QString sourceTrustReason;
+	int64 sourceChannelId = 0;
+	int64 sourceMessageId = 0;
 	bool compatible = false;
 	bool previewAvailable = false;
 	bool installed = false;
 	bool update = false;
+	bool sourceVerified = false;
 };
 
 struct RecoveryOperationState {

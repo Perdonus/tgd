@@ -284,75 +284,16 @@ void SetupExperimental(
 		not_null<Ui::VerticalLayout*> container) {
 	const auto window = &controller->window();
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-
-	container->add(
-		object_ptr<Ui::FlatLabel>(
-			container,
-			tr::lng_settings_experimental_about(),
-			st::boxLabel),
-		st::defaultBoxDividerLabelPadding);
-
-	auto reset = (Button*)nullptr;
-	if (base::options::changed()) {
-		const auto wrap = container->add(
-			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-				container,
-				object_ptr<Ui::VerticalLayout>(container)));
-		const auto inner = wrap->entity();
-		Ui::AddDivider(inner);
-		Ui::AddSkip(inner, st::settingsCheckboxesSkip);
-		reset = inner->add(object_ptr<Button>(
-			inner,
-			tr::lng_settings_experimental_restore(),
-			st::settingsButtonNoIcon));
-		reset->addClickHandler([=] {
-			base::options::reset();
-			wrap->hide(anim::type::normal);
-		});
-		Ui::AddSkip(inner, st::settingsCheckboxesSkip);
-	}
-
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-
-	const auto addToggle = [&](const char name[]) {
-		AddOption(
-			window,
-			container,
-			base::options::lookup<bool>(name),
-			(reset
-				? (reset->clicks() | rpl::to_empty)
-				: rpl::producer<>()));
-	};
-
-	addToggle(ChatHelpers::kOptionTabbedPanelShowOnClick);
-	addToggle(Dialogs::kOptionForumHideChatsList);
-	addToggle(Core::kOptionFractionalScalingEnabled);
-	addToggle(Core::kOptionHighDpiDownscale);
-	addToggle(Window::kOptionViewProfileInChatsListContextMenu);
-	addToggle(Info::Profile::kOptionShowPeerIdBelowAbout);
-	addToggle(Info::Profile::kOptionShowChannelJoinedBelowAbout);
-	addToggle(Ui::kOptionUseSmallMsgBubbleRadius);
-	addToggle(Media::Player::kOptionDisableAutoplayNext);
-	addToggle(kOptionSendLargePhotos);
-	addToggle(Webview::kOptionWebviewDebugEnabled);
-	addToggle(Webview::kOptionWebviewLegacyEdge);
-	addToggle(kOptionAutoScrollInactiveChat);
-	addToggle(Window::Notifications::kOptionHideReplyButton);
-	addToggle(Window::Notifications::kOptionCustomNotification);
-	addToggle(Window::Notifications::kOptionGNotification);
-	addToggle(Core::kOptionFreeType);
-	addToggle(Core::kOptionSkipUrlSchemeRegister);
-	addToggle(Core::kOptionDeadlockDetector);
-	addToggle(Data::kOptionExternalVideoPlayer);
-	addToggle(Window::kOptionNewWindowsSizeAsFirst);
-	addToggle(MTP::details::kOptionPreferIPv6);
-	if (base::options::lookup<bool>(kOptionFastButtonsMode).value()) {
-		addToggle(kOptionFastButtonsMode);
-	}
-	addToggle(Window::kOptionDisableTouchbar);
-	addToggle(Info::kAlternativeScrollProcessing);
-	addToggle(kModerateCommonGroups);
+	Ui::AddSubsectionTitle(
+		container,
+		rpl::single(RuEn(
+			"Экспериментальные настройки Astrogram",
+			"Astrogram experimental settings")));
+	Ui::AddDividerText(
+		container,
+		rpl::single(RuEn(
+			"Здесь оставлены только переключатели оболочки Astrogram. Пресеты и стартовая настройка вынесены во вступительный гайд, а визуальный редактор из этого раздела убран.",
+			"Only Astrogram shell switches stay here now. Presets and first-run setup have been moved into onboarding, and the visual editor has been removed from this section.")));
 
 	const auto shellState = container->lifetime().make_state<ShellModeUiState>();
 	shellState->prefs = LoadShellModePreferences();
@@ -366,19 +307,19 @@ void SetupExperimental(
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Вступительный гайд теперь не только ведёт сюда напрямую, но и отдельно объясняет кастомизацию меню перед shell-шагом. Здесь вынесены быстрые runtime-переключатели для боковой панели и анимации, а ниже остаётся живой editor с preview и более глубокой раскладкой меню.",
-			"The onboarding flow now not only lands here directly, but also explains menu customization before the shell step. This top area surfaces quick runtime switches for the side panel and animation, while the live editor with the preview and deeper menu layout stays below.")));
+			"Ниже только реальные runtime-переключатели клиента: ширина боковой панели, левый торец для окон, иммерсивная анимация и ширина настроек.",
+			"Only the real client runtime switches stay below: side panel width, left-edge surfaces, immersive animation, and wider settings.")));
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	Ui::AddSubsectionTitle(
 		container,
 		rpl::single(RuEn(
-			"Быстрые shell-переключатели",
-			"Quick shell switches")));
+			"Переключатели оболочки",
+			"Shell switches")));
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Это те же runtime-hooks wide / left-edge / immersive, которые использует onboarding и слушают side menu, shell и settings/info layers. Здесь ими можно управлять напрямую, не заходя сразу в deeper editor surface.",
-			"These are the same wide / left-edge / immersive runtime hooks used by onboarding and observed by the side menu, the shell and the settings/info layers. You can control them directly here without jumping into the deeper editor surface right away.")));
+			"Эти параметры применяются сразу и влияют на настоящее боковое меню, окна настроек и анимацию открытия.",
+			"These preferences apply immediately and affect the real side menu, settings surfaces, and opening animation.")));
 	AddShellModeToggle(
 		window,
 		container,
@@ -387,8 +328,8 @@ void SetupExperimental(
 			"Расширенная боковая панель",
 			"Expanded side panel"),
 		RuEn(
-			"Шире делает реальное боковое меню и одновременно перестраивает preview-панель ниже.",
-			"Makes the real side menu wider and immediately reshapes the preview panel below."),
+			"Делает настоящее боковое меню шире и даёт больше места для пунктов и разделителей.",
+			"Makes the real side menu wider and gives more room for items and separators."),
 		[](const ShellModePreferences &prefs) {
 			return prefs.expandedSidePanel;
 		},
@@ -403,8 +344,8 @@ void SetupExperimental(
 			"Левоторцевые settings/info surfaces",
 			"Left-edge settings/info surfaces"),
 		RuEn(
-			"Переставляет settings и info ближе к левому краю, чтобы оболочка ощущалась продолжением боковой панели, а не отдельным центрированным слоем.",
-			"Moves settings and info closer to the left edge so the shell feels like a continuation of the side menu instead of a separate centered layer."),
+			"Сдвигает окна настроек и информации к левому краю, чтобы они ощущались частью оболочки клиента.",
+			"Moves settings and info surfaces closer to the left edge so they feel like part of the client shell."),
 		[](const ShellModePreferences &prefs) {
 			return prefs.leftEdgeSettings;
 		},
@@ -419,8 +360,8 @@ void SetupExperimental(
 			"Иммерсивная анимация бокового меню",
 			"Immersive side menu animation"),
 		RuEn(
-			"Основная часть клиента уезжает вправо вместе с открытием бокового меню. Это тот же runtime-переключатель, который теперь показывается и в onboarding shell-шаге.",
-			"The main part of the client shifts right together with the side menu opening. This is the same runtime switch now referenced by the onboarding shell step."),
+			"При открытии бокового меню основной интерфейс двигается вместе с ним. Если анимация мешает или выглядит нестабильно, отключай её здесь.",
+			"When the side menu opens, the main interface moves together with it. If the animation feels distracting or unstable, disable it here."),
 		[](const ShellModePreferences &prefs) {
 			return prefs.immersiveAnimation;
 		},
@@ -435,8 +376,8 @@ void SetupExperimental(
 			"Более широкая панель настроек",
 			"Wider settings pane"),
 		RuEn(
-			"Даёт settings/info более широкий контейнер, чтобы длинные строки и новые shell-поверхности не упирались в узкую колонку.",
-			"Gives settings/info a wider container so longer rows and the newer shell surfaces do not collapse into a narrow column."),
+			"Делает окно настроек шире, чтобы длинные строки и дополнительные элементы не ломались в узкой колонке.",
+			"Makes settings surfaces wider so longer rows and extra controls do not collapse into a narrow column."),
 		[](const ShellModePreferences &prefs) {
 			return prefs.wideSettingsPane;
 		},
@@ -444,26 +385,11 @@ void SetupExperimental(
 			prefs.wideSettingsPane = value;
 		});
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn(
-			"Shell presets и runtime-hooks",
-			"Shell presets and runtime hooks")));
 	Ui::AddDividerText(
 		container,
 		rpl::single(RuEn(
-			"Если не хочется собирать режим по одному флагу, ниже лежат те же связки одним нажатием. Они обновляют этот верхний блок сразу, а дальше тот же state подхватывает live editor ниже.",
-			"If you do not want to build a mode flag by flag, the same stacks are available below in one tap. They update this top block immediately, and the live editor below picks up the same state next.")));
-	AddShellPresetButton(window, container, shellState, AstrogramShellPreset::Balanced);
-	AddShellPresetButton(window, container, shellState, AstrogramShellPreset::Focused);
-	AddShellPresetButton(window, container, shellState, AstrogramShellPreset::Wide);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Ниже остаётся расширенный editor: side menu layout, restore-tray, footer/profile presentation и тот же preview/runtime bridge для оболочки Astrogram.",
-			"The extended editor stays below: side menu layout, restore tray, footer/profile presentation and the same preview/runtime bridge for the Astrogram shell.")));
-	AddMenuCustomizationEditor(controller, container);
+			"Пресеты оболочки перенесены во вступительный гайд. Здесь остались только прямые переключатели без визуального редактора и предпросмотров.",
+			"Shell presets have been moved to onboarding. This page now keeps only direct switches without the visual editor or previews.")));
 }
 
 } // namespace

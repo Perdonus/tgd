@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 
-if exist "%~dp0astro.env" call "%~dp0astro.env"
+if exist "%~dp0astro-vars.bat" call "%~dp0astro-vars.bat"
 
 if not defined ASTRO_RUNTIME_HOST set "ASTRO_RUNTIME_HOST=127.0.0.1"
 if not defined ASTRO_RUNTIME_PORT set "ASTRO_RUNTIME_PORT=37080"
@@ -191,12 +191,15 @@ call :api_request
 exit /b %errorlevel%
 
 :send
-shift
-if "%~1"=="" goto help_send
-set "ASTRO_ARG1=%~1"
-shift
-if "%~1"=="" goto help_send
-set "ASTRO_ARG2=%*"
+set "ASTRO_SEND_ARGS=%*"
+set "ASTRO_ARG1="
+set "ASTRO_ARG2="
+for /f "tokens=1,2,*" %%A in ("%ASTRO_SEND_ARGS%") do (
+  set "ASTRO_ARG1=%%B"
+  set "ASTRO_ARG2=%%C"
+)
+if not defined ASTRO_ARG1 goto help_send
+if not defined ASTRO_ARG2 goto help_send
 set "ASTRO_METHOD=POST"
 set "ASTRO_PATH=/v1/messages/send"
 set "ASTRO_BODY_KIND=send"

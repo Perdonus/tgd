@@ -104,6 +104,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMimeData>
 #include <QtCore/QSet>
@@ -542,10 +543,14 @@ void ApplyAstrogramOnboardingPreset(Ui::AstrogramOnboardingPreset preset) {
 void MaybeShowAstrogramOnboarding(
 		not_null<Window::SessionController*> controller) {
 	static auto shown = QSet<quint64>();
+	const auto onboardingMarkerPath = cWorkingDir()
+		+ u"tdata/astrogram_onboarding_v2"_q;
+	const auto onboardingMigrated = QFileInfo::exists(onboardingMarkerPath);
 
 	const auto sessionKey = quint64(controller->session().uniqueId());
 	if (shown.contains(sessionKey)
-			|| controller->session().settings().astrogramOnboardingShown()) {
+			|| (controller->session().settings().astrogramOnboardingShown()
+				&& onboardingMigrated)) {
 		return;
 	}
 	if (controller->isLayerShown()) {
@@ -651,6 +656,11 @@ void MaybeShowAstrogramOnboarding(
 			if (const auto controller = weak.get()) {
 				controller->session().settings().setAstrogramOnboardingShown(true);
 				controller->session().saveSettingsDelayed();
+				auto marker = QFile(cWorkingDir() + u"tdata/astrogram_onboarding_v2"_q);
+				if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+					marker.write("1");
+					marker.close();
+				}
 			}
 		};
 		args.reloadPlugins = [weak, fallbackTitle = args.pluginsChannelTitle](
