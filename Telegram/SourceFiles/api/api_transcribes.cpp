@@ -704,11 +704,17 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 		raw,
 		&QProcess::errorOccurred,
 		raw,
-		[this, id](QProcess::ProcessError error) {
+		[this, id, wavPath, scriptPath](QProcess::ProcessError error) {
 			const auto i = _localProcesses.find(id);
 			if (i == _localProcesses.end()) {
+				QFile::remove(wavPath);
+				QFile::remove(scriptPath);
 				return;
 			}
+			auto process = std::move(i->second);
+			_localProcesses.erase(i);
+			QFile::remove(wavPath);
+			QFile::remove(scriptPath);
 			auto &entry = _map[id];
 			entry.requestId = 0;
 			entry.pending = false;
