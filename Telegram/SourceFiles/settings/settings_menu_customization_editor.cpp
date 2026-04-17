@@ -1465,7 +1465,7 @@ protected:
 	}
 
 	void mouseMoveEvent(QMouseEvent *e) override {
-		const auto point = e->position().toPoint();
+			const auto point = e->pos();
 		if (_draggingRow >= 0) {
 			_dragCurrentY = point.y();
 			updateDragTarget(point.y());
@@ -1491,7 +1491,7 @@ protected:
 		if (e->button() != Qt::LeftButton) {
 			return;
 		}
-		const auto point = e->position().toPoint();
+		const auto point = e->pos();
 		_pressedRow = -1;
 		_pressedOnButton = false;
 		_pressedOnHandle = false;
@@ -1550,7 +1550,7 @@ protected:
 		_pressedRow = -1;
 		_pressedOnButton = false;
 		_pressedOnHandle = false;
-		updateHover(e->position().toPoint());
+			updateHover(e->pos());
 	}
 
 	void leaveEventHook(QEvent *e) override {
@@ -2915,7 +2915,7 @@ protected:
 	}
 
 	void mouseMoveEvent(QMouseEvent *e) override {
-		const auto point = e->position().toPoint();
+		const auto point = e->pos();
 		if (_draggingIndex >= 0) {
 			_dragCurrentY = point.y();
 			updateDragTarget(point.y());
@@ -2939,7 +2939,7 @@ protected:
 		if (e->button() != Qt::LeftButton) {
 			return;
 		}
-		const auto point = e->position().toPoint();
+		const auto point = e->pos();
 		_pressedRow = -1;
 		_pressedOnButton = false;
 		_pressedOnHandle = false;
@@ -2980,7 +2980,7 @@ protected:
 		_pressedRow = -1;
 		_pressedOnButton = false;
 		_pressedOnHandle = false;
-		updateHover(e->position().toPoint());
+		updateHover(e->pos());
 	}
 
 	void leaveEventHook(QEvent *e) override {

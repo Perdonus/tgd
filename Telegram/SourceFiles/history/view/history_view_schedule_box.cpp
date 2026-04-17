@@ -161,14 +161,14 @@ void ScheduleBox(
 						"Local scheduled edits work while Astrogram stays open.");
 			})
 		: rpl::producer<QString>();
-	auto descriptor = Ui::ChooseDateTimeBox(box, {
-		.title = std::move(title),
-		.submit = std::move(submitText),
-		.description = std::move(description),
-		.done = [=](TimeId result) { submit(with(result)); },
-		.time = time,
-		.style = style.chooseDateTimeArgs,
-	});
+		auto descriptor = Ui::ChooseDateTimeBox(box, {
+			.title = std::move(title),
+			.submit = std::move(submitText),
+			.done = [=](TimeId result) { submit(with(result)); },
+			.time = time,
+			.description = std::move(description),
+			.style = style.chooseDateTimeArgs,
+		});
 
 	if (repeat) {
 		const auto boxShow = box->uiShow();
