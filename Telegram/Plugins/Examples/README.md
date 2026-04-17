@@ -8,7 +8,7 @@ Requirements
 - UI plugins should also link QtWidgets.
 
 Examples
-- ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to `sosiskibot.ru`.
+- ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to a user-configured endpoint.
 - font_tuner.cpp: tunes Astrogram fonts, loads a local font file and applies changes live.
 - show_logs.cpp: opens a translucent log overlay with filtering, copy and clear actions.
 - transparent_telegram.cpp: adds a transparency slider for Telegram windows.

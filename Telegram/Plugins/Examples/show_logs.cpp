@@ -35,7 +35,7 @@ TGD_PLUGIN_PREVIEW(
 	"1.4",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
-	"https://sosiskibot.ru",
+	"",
 	"GusTheDuck/24")
 
 namespace {
@@ -569,7 +569,7 @@ private:
 			_host,
 			"Opens a semi-transparent overlay with client.log, plugins.log and plugins.trace.jsonl, plus quick filters for errors/runtime/recovery.",
 			u8"Открывает полупрозрачное overlay-окно с client.log, plugins.log и plugins.trace.jsonl, плюс быстрые фильтры по ошибкам/runtime/recovery.");
-		_info.website = QStringLiteral("https://sosiskibot.ru");
+		_info.website.clear();
 	}
 
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {

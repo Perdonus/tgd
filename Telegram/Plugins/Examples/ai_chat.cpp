@@ -481,6 +481,19 @@ private:
 					u8"Готово, но перехват исходящих /ai в этой сборке недоступен. Модель: %1. Для отправки используй Ctrl+Enter.").arg(Latin1(kModelName)));
 	}
 
+	QString missingConfigurationText() const {
+		return tr(
+			QStringLiteral("Configure the API endpoint and key in Settings > Plugins > AI Chat first."),
+			u8"Сначала укажи API-эндпоинт и ключ: Настройки > Плагины > ИИ-чат.");
+	}
+
+	bool configurationReady() const {
+		if (_baseUrl.isEmpty() || _apiKey.isEmpty()) {
+			return false;
+		}
+		return QUrl(BuildCompletionsEndpoint(_baseUrl)).isValid();
+	}
+
 	void handleSettingChanged(const Plugins::SettingDescriptor &setting) {
 		if (setting.id == Latin1(kBaseUrlSettingId)) {
 			_baseUrl = NormalizeEndpoint(setting.textValue);
@@ -495,6 +508,10 @@ private:
 		if (setting.id == Latin1(kOpenChatSettingId)) {
 			QTimer::singleShot(120, this, [this] {
 				if (!_isUnloading) {
+					if (!configurationReady()) {
+						_host->showToast(missingConfigurationText());
+						return;
+					}
 					scheduleOpenChat(QString(), nullptr, false);
 				}
 			});
@@ -632,6 +649,10 @@ private:
 			const QString &prefill,
 			QWidget *preferredWindow = nullptr,
 			bool autoSend = false) {
+		if (!configurationReady()) {
+			_host->showToast(missingConfigurationText());
+			return;
+		}
 		const auto normalizedPrefill = NormalizeText(prefill);
 		const auto preferredGuard = QPointer<QWidget>(preferredWindow);
 		QTimer::singleShot(kOpenDelayMs, this, [this, preferredGuard, normalizedPrefill, autoSend] {

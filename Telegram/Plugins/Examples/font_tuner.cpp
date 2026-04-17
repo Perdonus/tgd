@@ -30,7 +30,7 @@ TGD_PLUGIN_PREVIEW(
 	"1.8",
 	"@etopizdesblin",
 	"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
-	"https://sosiskibot.ru",
+	"",
 	"GusTheDuck/11")
 
 namespace {
@@ -116,7 +116,7 @@ public:
 			_host,
 			"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
 			u8"Настраивает шрифты Astrogram, загружает пользовательский шрифт из файла и применяет изменения сразу.");
-		_info.website = QStringLiteral("https://sosiskibot.ru");
+		_info.website.clear();
 		_baseFont = QApplication::font();
 		_scalePercent = readScalePercent();
 		const auto storageRoot = StorageRoot(_host);

@@ -28,7 +28,7 @@ TGD_PLUGIN_PREVIEW(
 	"3.1",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
-	"https://sosiskibot.ru",
+	"",
 	"GusTheDuck/4")
 
 namespace {
@@ -415,7 +415,7 @@ public:
 			_host,
 			"Adds separate interface, message, and text transparency controls for Astrogram.",
 			u8"Добавляет отдельные настройки прозрачности интерфейса, сообщений и текста в Astrogram.");
-		_info.website = QStringLiteral("https://sosiskibot.ru");
+		_info.website.clear();
 		_windowOpacityPercent = readWindowOpacityPercent();
 		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();

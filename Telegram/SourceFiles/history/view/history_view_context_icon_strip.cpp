@@ -211,6 +211,28 @@ private:
 			break;
 		}
 	}
+	if (!result.empty()) {
+		return result;
+	}
+	for (const auto &action : resolved.actions) {
+		if (action.id.isEmpty()
+			|| !action.icon
+			|| !action.stripEligible
+			|| !action.trigger
+			|| seen.contains(action.id)) {
+			continue;
+		}
+		seen.emplace(action.id);
+		result.push_back({
+			.id = action.id,
+			.text = action.text,
+			.icon = action.icon,
+			.trigger = action.trigger,
+		});
+		if (int(result.size()) >= kStripMaxButtons) {
+			break;
+		}
+	}
 	return result;
 }
 

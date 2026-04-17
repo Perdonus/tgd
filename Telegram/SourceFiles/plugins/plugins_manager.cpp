@@ -1676,7 +1676,7 @@ void Manager::reload() {
 	}
 }
 
-std::vector<PluginState> Manager::plugins() const {
+std::vector<PluginState> Manager::visiblePluginStatesFromRecords() const {
 	auto result = std::vector<PluginState>();
 	result.reserve(_plugins.size());
 	for (const auto &plugin : _plugins) {
@@ -1686,6 +1686,25 @@ std::vector<PluginState> Manager::plugins() const {
 		result.push_back(std::move(state));
 	}
 	return result;
+}
+
+void Manager::beginUiTransientPluginSnapshot() {
+	_uiTransientPlugins = visiblePluginStatesFromRecords();
+	_uiTransientPluginsActive = !_uiTransientPlugins.empty();
+}
+
+void Manager::finishUiTransientPluginSnapshot() {
+	_uiTransientPlugins = visiblePluginStatesFromRecords();
+	_uiTransientPluginsActive = false;
+}
+
+std::vector<PluginState> Manager::plugins() const {
+	if (_uiTransientPluginsActive
+		&& _plugins.empty()
+		&& !_uiTransientPlugins.empty()) {
+		return _uiTransientPlugins;
+	}
+	return visiblePluginStatesFromRecords();
 }
 
 rpl::producer<ManagerStateChange> Manager::stateChanges() const {
@@ -5224,6 +5243,7 @@ void Manager::scanPlugins(bool metadataOnly) {
 			{ u"metadataOnly"_q, metadataOnly },
 			{ u"loadedPlugins"_q, int(_plugins.size()) },
 		});
+	finishUiTransientPluginSnapshot();
 	notifyStateChanged(
 		metadataOnly ? u"scan-metadata-only"_q : u"scan"_q,
 		QString(),
@@ -5639,6 +5659,7 @@ void Manager::loadPlugin(const QString &path) {
 }
 
 void Manager::unloadAll() {
+	beginUiTransientPluginSnapshot();
 	logEvent(
 		u"unload"_q,
 		u"begin"_q,
