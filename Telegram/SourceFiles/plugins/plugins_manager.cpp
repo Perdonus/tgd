@@ -236,14 +236,12 @@ void SchedulePluginUiRecoveryAttempt(QString pluginId, QString reason) {
 			.arg(attempt.primaryShown ? u"true"_q : u"false"_q)
 			.arg(attempt.updatedWindows)
 			.arg(int(QGuiApplication::applicationState())));
-		if (!Core::App().plugins().safeModeEnabled()
-			&& QGuiApplication::applicationState() == Qt::ApplicationActive
+		if (QGuiApplication::applicationState() == Qt::ApplicationActive
 			&& attempt.primaryExists
 			&& !attempt.primaryNowVisible) {
 			Logs::writeClient(QString::fromLatin1(
-				"[plugins-ui] recovery-escalation plugin=%1 action=enable-safe-mode reason=%2")
+				"[plugins-ui] recovery-escalation-suppressed plugin=%1 reason=%2")
 				.arg(pluginId, reason));
-			Core::App().plugins().setSafeModeEnabled(true);
 		}
 	});
 }
@@ -1646,6 +1644,15 @@ void Manager::start() {
 }
 
 void Manager::reload() {
+	const auto transientSnapshotStarted = !_uiTransientPluginsActive;
+	if (transientSnapshotStarted) {
+		beginUiTransientPluginSnapshot();
+	}
+	const auto finishTransientSnapshot = gsl::finally([&] {
+		if (transientSnapshotStarted) {
+			finishUiTransientPluginSnapshot();
+		}
+	});
 	Logs::writeClient(QString::fromLatin1("[plugins] reload requested: safeMode=%1 knownPlugins=%2")
 		.arg(safeModeEnabled() ? u"true"_q : u"false"_q)
 		.arg(_plugins.size()));
@@ -1700,7 +1707,6 @@ void Manager::finishUiTransientPluginSnapshot() {
 
 std::vector<PluginState> Manager::plugins() const {
 	if (_uiTransientPluginsActive
-		&& _plugins.empty()
 		&& !_uiTransientPlugins.empty()) {
 		return _uiTransientPlugins;
 	}
@@ -2567,6 +2573,15 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 }
 
 bool Manager::installPackage(const QString &sourcePath, QString *error) {
+	const auto transientSnapshotStarted = !_uiTransientPluginsActive;
+	if (transientSnapshotStarted) {
+		beginUiTransientPluginSnapshot();
+	}
+	const auto finishTransientSnapshot = gsl::finally([&] {
+		if (transientSnapshotStarted) {
+			finishUiTransientPluginSnapshot();
+		}
+	});
 	const auto preview = inspectPackage(sourcePath);
 	if (!preview.compatible) {
 		if (error) {
@@ -2820,6 +2835,15 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	Logs::writeClient(QString::fromLatin1("[plugins] remove requested: %1").arg(pluginId));
 	const auto normalizedId = pluginId.trimmed();
+	const auto transientSnapshotStarted = !_uiTransientPluginsActive;
+	if (transientSnapshotStarted) {
+		beginUiTransientPluginSnapshot();
+	}
+	const auto finishTransientSnapshot = gsl::finally([&] {
+		if (transientSnapshotStarted) {
+			finishUiTransientPluginSnapshot();
+		}
+	});
 	const auto *record = findRecord(normalizedId);
 	if (!record) {
 		if (error) {
@@ -5876,6 +5900,15 @@ void Manager::removePluginRecords(const QString &pluginId) {
 
 bool Manager::enablePluginRecord(const QString &pluginId, QString *error) {
 	const auto normalizedId = pluginId.trimmed();
+	const auto transientSnapshotStarted = !_uiTransientPluginsActive;
+	if (transientSnapshotStarted) {
+		beginUiTransientPluginSnapshot();
+	}
+	const auto finishTransientSnapshot = gsl::finally([&] {
+		if (transientSnapshotStarted) {
+			finishUiTransientPluginSnapshot();
+		}
+	});
 	auto index = findRecordIndex(normalizedId);
 	if (index < 0) {
 		if (error) {
@@ -6064,6 +6097,15 @@ void Manager::disablePlugin(
 		const QString &reason,
 		bool disabledByRecovery,
 		const QString &recoveryReason) {
+	const auto transientSnapshotStarted = !_uiTransientPluginsActive;
+	if (transientSnapshotStarted) {
+		beginUiTransientPluginSnapshot();
+	}
+	const auto finishTransientSnapshot = gsl::finally([&] {
+		if (transientSnapshotStarted) {
+			finishUiTransientPluginSnapshot();
+		}
+	});
 	auto *record = findRecord(pluginId);
 	if (!record) {
 		return;

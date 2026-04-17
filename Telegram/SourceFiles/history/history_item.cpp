@@ -3412,10 +3412,16 @@ void HistoryItem::setDeleted() {
 
 	if (isService()) {
 		setAyuHint(tr::lng_deleted_message(tr::now));
-	} else {
 		history()->owner().requestItemViewRefresh(this);
+		history()->owner().requestItemTextRefresh(this);
+		history()->owner().requestItemResize(this);
+	} else {
+		setAyuHint(tr::lng_deleted_message(tr::now));
+		history()->owner().requestItemViewRefresh(this);
+		history()->owner().requestItemTextRefresh(this);
 		history()->owner().requestItemResize(this);
 	}
+	history()->owner().requestItemShowHighlight(this);
 }
 
 bool HistoryItem::isDeleted() const {

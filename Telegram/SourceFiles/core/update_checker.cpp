@@ -68,6 +68,8 @@ constexpr auto kGitHubReleasesApi
 	= "https://api.github.com/repos/Perdonus/tgd/releases?per_page=20";
 constexpr auto kGitHubReleasesPage
 	= "https://github.com/Perdonus/tgd/releases";
+constexpr auto kGitHubBetaAutoupdatePrefix
+	= "https://raw.githubusercontent.com/Perdonus/tgd/updates-beta";
 constexpr auto kGitHubUserAgent = "AstrogramDesktop";
 
 #ifdef TDESKTOP_DISABLE_AUTOUPDATE
@@ -443,6 +445,8 @@ QString CurrentAutoupdatePrefix() {
 	const auto hooks = ReadDevUpdateHooks();
 	return !hooks.autoupdatePrefix.isEmpty()
 		? hooks.autoupdatePrefix
+		: cInstallBetaVersion()
+		? QString::fromLatin1(kGitHubBetaAutoupdatePrefix)
 		: TrimTrailingSlashes(Local::readAutoupdatePrefix());
 }
 

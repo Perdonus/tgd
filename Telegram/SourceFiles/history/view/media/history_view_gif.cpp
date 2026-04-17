@@ -2196,11 +2196,13 @@ bool Gif::needCornerStatusDisplay() const {
 }
 
 void Gif::ensureTranscribeButton() const {
+	const auto localSpeech = Core::App().settings().localSpeechRecognition();
 	if (_data->isVideoMessage()
 		&& !_parent->data()->media()->ttlSeconds()
 		&& !_parent->data()->isScheduled()
 		&& !_parent->data()->isAdminLogEntry()
-		&& (_data->session().premium()
+		&& (localSpeech
+			|| _data->session().premium()
 			|| _data->session().api().transcribes().trialsSupport())) {
 		if (!_transcribe) {
 			_transcribe = std::make_unique<TranscribeButton>(

@@ -113,6 +113,76 @@ constexpr auto kContextStripPreviewLimit = 4;
 		: QString::fromUtf8(en);
 }
 
+[[nodiscard]] QColor ThemedRowFill(
+		bool hovered,
+		bool selected,
+		bool floating) {
+	if (floating) {
+		return anim::with_alpha(st::windowBgActive->c, 0.18);
+	} else if (selected) {
+		return anim::with_alpha(st::windowBgActive->c, 0.12);
+	} else if (hovered) {
+		return anim::with_alpha(st::windowSubTextFg->c, 0.08);
+	}
+	return anim::with_alpha(st::windowSubTextFg->c, 0.04);
+}
+
+[[nodiscard]] QColor ThemedRowBorder(bool hovered, bool selected) {
+	return anim::with_alpha(
+		selected ? st::windowBgActive->c : st::windowSubTextFg->c,
+		selected ? 0.28 : (hovered ? 0.16 : 0.10));
+}
+
+[[nodiscard]] QColor ThemedButtonFill(bool hovered, bool enabled) {
+	if (!enabled) {
+		return anim::with_alpha(st::windowSubTextFg->c, 0.08);
+	}
+	return anim::with_alpha(st::windowBgActive->c, hovered ? 0.20 : 0.12);
+}
+
+[[nodiscard]] QColor ThemedButtonText(bool enabled) {
+	return enabled
+		? st::windowFgActive->c
+		: anim::with_alpha(st::windowSubTextFg->c, 0.65);
+}
+
+[[nodiscard]] QColor ThemedDestructiveButtonFill(bool hovered, bool enabled) {
+	if (!enabled) {
+		return anim::with_alpha(st::windowSubTextFg->c, 0.08);
+	}
+	return anim::with_alpha(st::boxTextFgError->c, hovered ? 0.20 : 0.12);
+}
+
+[[nodiscard]] QColor ThemedDestructiveButtonText(bool enabled) {
+	return enabled
+		? st::boxTextFgError->c
+		: anim::with_alpha(st::windowSubTextFg->c, 0.65);
+}
+
+[[nodiscard]] QColor BlendThemeColor(
+		const QColor &left,
+		const QColor &right,
+		float64 ratio) {
+	ratio = std::clamp(ratio, 0., 1.);
+	const auto mix = [=](int a, int b) {
+		return int(a + ((b - a) * ratio));
+	};
+	return QColor(
+		mix(left.red(), right.red()),
+		mix(left.green(), right.green()),
+		mix(left.blue(), right.blue()),
+		mix(left.alpha(), right.alpha()));
+}
+
+[[nodiscard]] QColor ThemedDescriptorAccent(
+		const QColor &seed,
+		bool emphasized = false) {
+	const auto anchored = BlendThemeColor(st::windowBgActive->c, seed, 0.22);
+	return emphasized
+		? BlendThemeColor(anchored, st::windowFgActive->c, 0.12)
+		: BlendThemeColor(anchored, st::windowSubTextFg->c, 0.08);
+}
+
 [[nodiscard]] bool IsCustomSeparatorId(const QString &id) {
 	return id.startsWith(u"custom_separator_"_q);
 }
@@ -1379,10 +1449,10 @@ protected:
 		const auto visible = visibleEntryIndexes();
 		if (visible.empty()) {
 			const auto emptyRect = QRect(0, 8, width(), kRowHeight + 8);
-			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(0xF7, 0xFB, 0xFD));
+			p.setPen(QPen(ThemedRowBorder(false, false)));
+			p.setBrush(st::boxBg);
 			p.drawRoundedRect(emptyRect, kRowRadius, kRowRadius);
-			p.setPen(QColor(0x23, 0x2F, 0x3C));
+			p.setPen(st::windowFg);
 			p.setFont(st::semiboldTextStyle.font->f);
 			p.drawText(
 				emptyRect.adjusted(18, 12, -18, -18),
@@ -1390,7 +1460,7 @@ protected:
 				RuEn(
 					"Все пункты сейчас скрыты из меню",
 					"All actions are currently hidden"));
-			p.setPen(QColor(0x67, 0x75, 0x84));
+			p.setPen(st::windowSubTextFg);
 			p.setFont(st::defaultTextStyle.font->f);
 			p.drawText(
 				emptyRect.adjusted(18, 34, -18, -12),
@@ -1415,7 +1485,7 @@ protected:
 		}
 
 		if (_draggingRow >= 0) {
-			p.setPen(QPen(QColor(0x35, 0xC3, 0x8F), 3));
+			p.setPen(QPen(st::windowBgActive->c, 3));
 			const auto y = insertionLineY();
 			p.drawLine(QPoint(8, y), QPoint(width() - 8, y));
 			paintRow(
@@ -1433,7 +1503,7 @@ protected:
 				_state->entries().begin(),
 				_state->entries().end(),
 				[](const auto &entry) { return !entry.visible; });
-			p.setPen(QColor(0x5B, 0x6A, 0x79));
+			p.setPen(st::windowSubTextFg);
 			p.setFont(st::defaultTextStyle.font->f);
 			p.drawText(
 				QRect(0, hiddenSectionTop(), width(), 18),
@@ -1445,16 +1515,17 @@ protected:
 				const auto hovered = chip.restoreAll
 					? _hoveredRestoreAll
 					: (chip.index == _hoveredHiddenEntry);
+				const auto fillColor = chip.restoreAll
+					? ThemedButtonFill(hovered, true)
+					: anim::with_alpha(
+						ThemedDescriptorAccent(chip.color, hovered),
+						hovered ? 0.22 : 0.12);
 				p.setPen(Qt::NoPen);
-				p.setBrush(chip.restoreAll
-					? (hovered ? QColor(0xD8, 0xF1, 0xE5) : QColor(0xEB, 0xF7, 0xF1))
-					: (hovered
-						? QColor(chip.color.red(), chip.color.green(), chip.color.blue(), 48)
-						: QColor(0xEC, 0xF5, 0xEF)));
+				p.setBrush(fillColor);
 				p.drawRoundedRect(chip.rect, 14, 14);
 				p.setPen(chip.restoreAll
-					? QColor(0x1C, 0x8B, 0x62)
-					: (hovered ? QColor(0x1C, 0x8B, 0x62) : QColor(0x2A, 0x4B, 0x57)));
+					? ThemedButtonText(true)
+					: (hovered ? st::windowFgActive->c : st::windowFg->c));
 				p.setFont(st::normalFont->f);
 				p.drawText(
 					chip.rect.adjusted(12, 0, -12, 0),
@@ -1571,8 +1642,6 @@ private:
 	enum class ActionKind {
 		None,
 		ToggleVisible,
-		MoveUp,
-		MoveDown,
 		DeleteCustomSeparator,
 	};
 
@@ -1694,7 +1763,7 @@ private:
 		pushChip(
 			-1,
 			RuEn("Вернуть всё", "Restore all"),
-			QColor(0x35, 0xC3, 0x8F),
+			st::windowBgActive->c,
 			true);
 		for (const auto index : hiddenIndexes) {
 			const auto meta = DescribeEntry(_state->entries()[index], _state->supportMode());
@@ -1726,9 +1795,6 @@ private:
 		const auto height = 28;
 		auto right = row.right() - kRowPadding;
 		auto result = std::vector<ActionButton>();
-		const auto visibleRow = visibleRowForEntry(index);
-		const auto visibleCount = int(visibleEntryIndexes().size());
-
 		const auto push = [&](QString label, ActionKind kind, bool enabled) {
 			const auto buttonWidth = std::max(44, fm.horizontalAdvance(label) + 22);
 			right -= buttonWidth;
@@ -1744,8 +1810,6 @@ private:
 		if (entry.separator && IsCustomSeparatorId(entry.id)) {
 			push(RuEn("Удалить", "Delete"), ActionKind::DeleteCustomSeparator, true);
 		}
-		push(RuEn("Ниже", "Down"), ActionKind::MoveDown, (visibleRow + 1) < visibleCount);
-		push(RuEn("Выше", "Up"), ActionKind::MoveUp, visibleRow > 0);
 		push(RuEn("Скрыть", "Hide"), ActionKind::ToggleVisible, true);
 		std::reverse(result.begin(), result.end());
 		return result;
@@ -1758,17 +1822,13 @@ private:
 		const auto active = button.enabled;
 		const auto destructive = (button.kind == ActionKind::DeleteCustomSeparator);
 		p.setPen(Qt::NoPen);
-		p.setBrush(!active
-			? QColor(0xE8, 0xEE, 0xF3)
-			: destructive
-				? (hovered ? QColor(0xF8, 0xD9, 0xD9) : QColor(0xFE, 0xEC, 0xEC))
-				: (hovered ? QColor(0xD8, 0xF1, 0xE5) : QColor(0xEB, 0xF7, 0xF1)));
+		p.setBrush(destructive
+			? ThemedDestructiveButtonFill(hovered, active)
+			: ThemedButtonFill(hovered, active));
 		p.drawRoundedRect(button.rect, 14, 14);
-		p.setPen(!active
-			? QColor(0xA0, 0xAD, 0xB8)
-			: destructive
-				? QColor(0xC2, 0x4C, 0x4C)
-				: QColor(0x1C, 0x8B, 0x62));
+		p.setPen(destructive
+			? ThemedDestructiveButtonText(active)
+			: ThemedButtonText(active));
 		p.setFont(st::normalFont->f);
 		p.drawText(button.rect, Qt::AlignCenter, button.label);
 	}
@@ -1776,7 +1836,9 @@ private:
 	void paintDragHandle(Painter &p, const QRect &row, bool active) const {
 		const auto handle = dragHandleRect(row);
 		p.setPen(Qt::NoPen);
-		p.setBrush(active ? QColor(0x35, 0xC3, 0x8F) : QColor(0xA7, 0xB3, 0xBE));
+		p.setBrush(active
+			? st::windowBgActive->c
+			: anim::with_alpha(st::windowSubTextFg->c, 0.65));
 		for (auto column = 0; column != 2; ++column) {
 			for (auto line = 0; line != 3; ++line) {
 				p.drawEllipse(
@@ -1798,18 +1860,15 @@ private:
 			bool floating) const {
 		const auto &entry = _state->entries()[index];
 		const auto meta = DescribeEntry(entry, _state->supportMode());
-		p.setPen(Qt::NoPen);
-		p.setBrush(floating
-			? QColor(0xD9, 0xF4, 0xE8)
-			: selected
-				? QColor(0xE7, 0xF8, 0xEF)
-				: hovered
-					? QColor(0xF5, 0xF9, 0xFC)
-					: QColor(0xFA, 0xFC, 0xFE));
+		const auto accent = ThemedDescriptorAccent(
+			meta.color,
+			hovered || selected || floating);
+		p.setPen(QPen(ThemedRowBorder(hovered, selected)));
+		p.setBrush(ThemedRowFill(hovered, selected, floating));
 		p.drawRoundedRect(row, kRowRadius, kRowRadius);
 
 		paintDragHandle(p, row, hovered || selected || floating);
-		p.setBrush(meta.color);
+		p.setBrush(accent);
 		p.drawEllipse(QRect(row.left() + 36, row.top() + 14, 36, 36));
 		p.setPen(Qt::white);
 		p.setFont(st::semiboldFont->f);
@@ -1818,14 +1877,14 @@ private:
 			Qt::AlignCenter,
 			meta.glyph.left(1));
 
-		p.setPen(QColor(0x23, 0x2F, 0x3C));
+		p.setPen(st::windowFg);
 		p.setFont(st::semiboldTextStyle.font->f);
 		p.drawText(
 			QRect(row.left() + 84, row.top() + 12, row.width() - 242, 20),
 			Qt::AlignLeft | Qt::AlignVCenter,
 			meta.title);
 
-		p.setPen(QColor(0x67, 0x75, 0x84));
+		p.setPen(st::windowSubTextFg);
 		p.setFont(st::defaultTextStyle.font->f);
 		const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
 			meta.subtitle,
@@ -1994,17 +2053,6 @@ private:
 		case ActionKind::ToggleVisible:
 			changed = _state->toggleVisible(index);
 			break;
-		case ActionKind::MoveUp: {
-			const auto visibleRow = visibleRowForEntry(index);
-			changed = (visibleRow > 0) && _state->moveVisibleEntry(visibleRow, visibleRow - 1);
-			break;
-		}
-		case ActionKind::MoveDown: {
-			const auto visibleRow = visibleRowForEntry(index);
-			changed = (visibleRow >= 0)
-				&& _state->moveVisibleEntry(visibleRow, visibleRow + 1);
-			break;
-		}
 		case ActionKind::DeleteCustomSeparator:
 			changed = _state->removeCustomSeparator(index);
 			break;
@@ -2901,7 +2949,7 @@ protected:
 		}
 
 		if (_draggingIndex >= 0) {
-			p.setPen(QPen(QColor(0x35, 0xC3, 0x8F), 3));
+			p.setPen(QPen(st::windowBgActive->c, 3));
 			const auto y = insertionLineY();
 			p.drawLine(QPoint(8, y), QPoint(width() - 8, y));
 			paintRow(
@@ -2999,8 +3047,6 @@ private:
 	enum class ActionKind {
 		None,
 		ToggleVisible,
-		MoveUp,
-		MoveDown,
 	};
 
 	struct ActionButton {
@@ -3070,8 +3116,6 @@ private:
 			right -= 8;
 		};
 
-		push(RuEn("Ниже", "Down"), ActionKind::MoveDown, index + 1 < int(entries.size()));
-		push(RuEn("Выше", "Up"), ActionKind::MoveUp, index > 0);
 		push(
 			entries[index].visible
 				? RuEn("Скрыть", "Hide")
@@ -3085,7 +3129,9 @@ private:
 	void paintDragHandle(Painter &p, const QRect &row, bool active) const {
 		const auto handle = dragHandleRect(row);
 		p.setPen(Qt::NoPen);
-		p.setBrush(active ? QColor(0x35, 0xC3, 0x8F) : QColor(0xA7, 0xB3, 0xBE));
+		p.setBrush(active
+			? st::windowBgActive->c
+			: anim::with_alpha(st::windowSubTextFg->c, 0.65));
 		for (auto column = 0; column != 2; ++column) {
 			for (auto line = 0; line != 3; ++line) {
 				p.drawEllipse(
@@ -3107,19 +3153,16 @@ private:
 			bool floating) const {
 		const auto &entry = _state->entries(_surface, _lane)[index];
 		const auto meta = DescribeContextAction(entry.id);
+		const auto accent = ThemedDescriptorAccent(
+			meta.color,
+			hovered || selected || floating);
 
-		p.setPen(Qt::NoPen);
-		p.setBrush(floating
-			? QColor(0xD9, 0xF4, 0xE8)
-			: selected
-				? QColor(0xE7, 0xF8, 0xEF)
-				: hovered
-					? QColor(0xF5, 0xF9, 0xFC)
-					: QColor(0xFA, 0xFC, 0xFE));
+		p.setPen(QPen(ThemedRowBorder(hovered, selected)));
+		p.setBrush(ThemedRowFill(hovered, selected, floating));
 		p.drawRoundedRect(row, kRowRadius, kRowRadius);
 
 		paintDragHandle(p, row, hovered || selected || floating);
-		p.setBrush(meta.color);
+		p.setBrush(accent);
 		p.drawEllipse(QRect(row.left() + 36, row.top() + 14, 36, 36));
 		p.setPen(Qt::white);
 		p.setFont(st::semiboldFont->f);
@@ -3128,7 +3171,7 @@ private:
 			Qt::AlignCenter,
 			meta.glyph.left(1));
 
-		p.setPen(QColor(0x23, 0x2F, 0x3C));
+		p.setPen(st::windowFg);
 		p.setFont(st::semiboldTextStyle.font->f);
 		p.drawText(
 			QRect(row.left() + 84, row.top() + 12, row.width() - 242, 20),
@@ -3146,7 +3189,7 @@ private:
 			stateText + u" · "_q + meta.subtitle,
 			Qt::ElideRight,
 			row.width() - 242);
-		p.setPen(QColor(0x67, 0x75, 0x84));
+		p.setPen(st::windowSubTextFg);
 		p.setFont(st::defaultTextStyle.font->f);
 		p.drawText(
 			QRect(row.left() + 84, row.top() + 34, row.width() - 242, 18),
@@ -3165,13 +3208,9 @@ private:
 			&& (button.kind == _hoveredKind)
 			&& button.rect.intersects(rowRect(_hoveredRow));
 		p.setPen(Qt::NoPen);
-		p.setBrush(!button.enabled
-			? QColor(0xE8, 0xEE, 0xF3)
-			: (hovered ? QColor(0xD8, 0xF1, 0xE5) : QColor(0xEB, 0xF7, 0xF1)));
+		p.setBrush(ThemedButtonFill(hovered, button.enabled));
 		p.drawRoundedRect(button.rect, 14, 14);
-		p.setPen(!button.enabled
-			? QColor(0xA0, 0xAD, 0xB8)
-			: QColor(0x1C, 0x8B, 0x62));
+		p.setPen(ThemedButtonText(button.enabled));
 		p.setFont(st::normalFont->f);
 		p.drawText(button.rect, Qt::AlignCenter, button.label);
 	}
@@ -3306,20 +3345,6 @@ private:
 		switch (kind) {
 		case ActionKind::ToggleVisible:
 			changed = _state->toggleVisible(_surface, _lane, index);
-			break;
-		case ActionKind::MoveUp:
-			changed = _state->moveUp(_surface, _lane, index);
-			if (changed) {
-				_selected = std::max(0, index - 1);
-			}
-			break;
-		case ActionKind::MoveDown:
-			changed = _state->moveDown(_surface, _lane, index);
-			if (changed) {
-				_selected = std::min(
-					index + 1,
-					int(_state->entries(_surface, _lane).size()) - 1);
-			}
 			break;
 		case ActionKind::None:
 			break;

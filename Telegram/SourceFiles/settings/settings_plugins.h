@@ -7,9 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "plugins/plugins_manager.h"
 #include "settings/settings_common_session.h"
 
 #include <rpl/lifetime.h>
+#include <vector>
 
 namespace Window {
 class SessionController;
@@ -42,6 +44,7 @@ private:
 	bool _rebuildScheduled = false;
 	bool _listRefreshPending = true;
 	int _lastRenderedPluginCount = 0;
+	std::vector<::Plugins::PluginState> _lastStablePlugins;
 	rpl::lifetime _stateChangesLifetime;
 };
 

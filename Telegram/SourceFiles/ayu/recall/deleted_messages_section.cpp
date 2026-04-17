@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ayu/recall/deleted_messages_section.h"
 
+#include "base/unique_qptr.h"
 #include "ayu/data/messages_storage.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -33,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/shadow.h"
 #include "ui/wrap/vertical_layout.h"
@@ -42,9 +44,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
+#include <QClipboard>
+#include <QContextMenuEvent>
 #include <QDate>
 #include <QDateTime>
 #include <QEnterEvent>
+#include <QGuiApplication>
 #include <QLocale>
 #include <QMouseEvent>
 #include <QPainterPath>
@@ -58,15 +63,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace AyuRecall {
 namespace {
 
-constexpr auto kRowOuterLeft = 10;
-constexpr auto kRowOuterRight = 10;
-constexpr auto kRowOuterTop = 6;
-constexpr auto kRowOuterBottom = 6;
+constexpr auto kRowOuterLeft = 4;
+constexpr auto kRowOuterRight = 4;
+constexpr auto kRowOuterTop = 4;
+constexpr auto kRowOuterBottom = 4;
 constexpr auto kGroupedOuterSkip = 1;
-constexpr auto kBubblePadding = QMargins(14, 10, 14, 10);
-constexpr auto kBubbleInnerSkip = 4;
+constexpr auto kBubblePadding = QMargins(12, 8, 12, 8);
+constexpr auto kBubbleInnerSkip = 2;
 constexpr auto kBubbleMinWidth = 120;
-constexpr auto kBubbleWidthFactor = 0.82;
+constexpr auto kBubbleWidthFactor = 0.96;
 constexpr auto kClusterGapSeconds = 15 * 60;
 constexpr auto kIntroCardPadding = QMargins(18, 14, 18, 14);
 constexpr auto kBubbleHeaderSkip = 5;
@@ -923,6 +928,30 @@ void SaveRememberedState(
 	return thread->peer()->name();
 }
 
+[[nodiscard]] PeerData *ResolveSenderPeer(
+		const AyuMessages::MessageSnapshot &snapshot,
+		not_null<Data::Thread*> thread) {
+	auto &data = thread->session().data();
+	if (snapshot.senderSerialized) {
+		if (const auto peer = data.peerLoaded(
+				DeserializePeerId(snapshot.senderSerialized))) {
+			return peer;
+		}
+	}
+	if (snapshot.fromId > 0) {
+		if (const auto user = data.userLoaded(UserId(snapshot.fromId))) {
+			return user;
+		}
+		if (const auto chat = data.chatLoaded(ChatId(snapshot.fromId))) {
+			return chat;
+		}
+		if (const auto channel = data.channelLoaded(ChannelId(snapshot.fromId))) {
+			return channel;
+		}
+	}
+	return nullptr;
+}
+
 [[nodiscard]] style::color ChipTextColor(ScopeChipTone tone) {
 	switch (tone) {
 	case ScopeChipTone::Accent:
@@ -1661,11 +1690,13 @@ protected:
 	void leaveEventHook(QEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 
 private:
 	void layoutChildren(int newWidth);
 	void openOriginal();
+	void showContextMenu(const QPoint &globalPosition);
 
 	const not_null<Window::SessionController*> _controller;
 	const not_null<Data::Thread*> _thread;
@@ -1691,6 +1722,7 @@ private:
 	Ui::FlatLabel *_meta = nullptr;
 	QRect _bubbleRect;
 	bool _hovered = false;
+	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
 };
 
@@ -1787,6 +1819,11 @@ void DeletedMessageRow::mouseReleaseEvent(QMouseEvent *e) {
 	if (e->button() == Qt::LeftButton && rect().contains(e->pos())) {
 		openOriginal();
 	}
+}
+
+void DeletedMessageRow::contextMenuEvent(QContextMenuEvent *e) {
+	e->accept();
+	showContextMenu(e->globalPos());
 }
 
 void DeletedMessageRow::paintEvent(QPaintEvent *e) {
@@ -1896,6 +1933,62 @@ void DeletedMessageRow::openOriginal() {
 	if (!toast.isEmpty()) {
 		controller->window().showToast(toast);
 	}
+}
+
+void DeletedMessageRow::showContextMenu(const QPoint &globalPosition) {
+	_contextMenu = base::make_unique_q<Ui::PopupMenu>(
+		this,
+		st::popupMenuWithIcons);
+	const auto senderPeer = ResolveSenderPeer(_snapshot, _thread);
+
+	const auto copyText = [=](QString value) {
+		if (const auto clipboard = QGuiApplication::clipboard()) {
+			clipboard->setText(std::move(value));
+		}
+	};
+	const auto combinedText = [=] {
+		auto parts = QStringList();
+		if (!_senderLabel.trimmed().isEmpty()) {
+			parts.push_back(_senderLabel.trimmed());
+		}
+		if (!_presentation.text.trimmed().isEmpty()) {
+			parts.push_back(_presentation.text.trimmed());
+		}
+		if (!_presentation.meta.trimmed().isEmpty()) {
+			parts.push_back(_presentation.meta.trimmed());
+		}
+		return parts.join(u"\n"_q);
+	};
+
+	if (_interactive) {
+		_contextMenu->addAction(
+			UiText("Open in live chat", "Открыть в живом чате"),
+			[=] { openOriginal(); });
+	}
+	if (senderPeer && !_outgoing) {
+		_contextMenu->addAction(
+			UiText("Open sender profile", "Открыть профиль автора"),
+			[=] { _controller->showPeerInfo(senderPeer); });
+	}
+	if (!_presentation.text.trimmed().isEmpty()) {
+		_contextMenu->addAction(
+			UiText("Copy text", "Копировать текст"),
+			[=] { copyText(_presentation.text.trimmed()); });
+	}
+	if (!_presentation.meta.trimmed().isEmpty()) {
+		_contextMenu->addAction(
+			UiText("Copy time", "Копировать время"),
+			[=] { copyText(_presentation.meta.trimmed()); });
+	}
+	_contextMenu->addAction(
+		UiText("Copy saved message", "Копировать сохранённое сообщение"),
+		[=] { copyText(combinedText()); });
+	if (!_senderLabel.trimmed().isEmpty()) {
+		_contextMenu->addAction(
+			UiText("Copy sender", "Копировать автора"),
+			[=] { copyText(_senderLabel.trimmed()); });
+	}
+	_contextMenu->popup(globalPosition);
 }
 
 class DeletedMessagesMemento;

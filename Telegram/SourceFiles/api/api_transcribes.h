@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/sender.h"
 #include "spellcheck/spellcheck_types.h"
+#include <rpl/lifetime.h>
 
 #include <memory>
 
@@ -71,6 +72,7 @@ private:
 	[[nodiscard]] bool localModeEnabled() const;
 	void load(not_null<HistoryItem*> item);
 	void loadLocal(not_null<HistoryItem*> item);
+	void maybeRetryPendingLocal(not_null<HistoryItem*> item);
 	void summarize(not_null<HistoryItem*> item);
 
 	const not_null<Main::Session*> _session;
@@ -85,6 +87,7 @@ private:
 	base::flat_map<FullMsgId, std::unique_ptr<QProcess>> _localProcesses;
 
 	base::flat_map<FullMsgId, SummaryEntry> _summaries;
+	rpl::lifetime _lifetime;
 
 };
 

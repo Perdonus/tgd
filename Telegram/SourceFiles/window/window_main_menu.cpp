@@ -511,9 +511,6 @@ MainMenu::MainMenu(
 	}
 
 	setupSwipe();
-	if (_immersiveAnimation) {
-		animateImmersiveShiftTo(desiredImmersiveShift(desiredMenuWidth()));
-	}
 }
 
 MainMenu::~MainMenu() {
@@ -630,17 +627,17 @@ int MainMenu::desiredImmersiveShift(int menuWidth) const {
 	if (!_immersiveAnimation || (menuWidth <= 0)) {
 		return 0;
 	}
-	const auto proportional = std::max(menuWidth / 4, menuWidth * 28 / 100);
-	return std::clamp(proportional, 0, 120);
+	return std::max(menuWidth, 0);
 }
 
 void MainMenu::animateImmersiveShiftTo(int target) {
 	target = std::max(target, 0);
+	const auto duration = std::max(st::slideDuration * 2, 250);
 	_immersiveShiftAnimation.start([=] {
 		const auto progress = _immersiveShiftAnimation.value(1.);
 		_immersiveFallbackShift = int((target * progress) + 0.5);
 		applyImmersiveShift();
-	}, _immersiveFallbackShift, target, st::slideWrapDuration);
+	}, _immersiveFallbackShift, target, duration, anim::sineInOut);
 }
 
 void MainMenu::startImmersiveReset(bool animated) {
@@ -877,7 +874,10 @@ void MainMenu::showFinished() {
 	syncAccountsVisibility(
 		Core::App().settings().mainMenuAccountsShown(),
 		false);
-	animateImmersiveShiftTo(desiredImmersiveShift(width()));
+	if (_immersiveAnimation
+		&& (_immersiveFallbackShift != desiredImmersiveShift(width()))) {
+		animateImmersiveShiftTo(desiredImmersiveShift(width()));
+	}
 }
 
 void MainMenu::syncAccountsVisibility(bool shown, bool animated) {
@@ -1277,7 +1277,14 @@ void MainMenu::chooseEmojiStatus() {
 
 bool MainMenu::eventHook(QEvent *event) {
 	const auto type = event->type();
-	if (type == QEvent::Hide || type == QEvent::Close) {
+	if (type == QEvent::Show || type == QEvent::ShowToParent) {
+		_immersiveShiftAnimation.stop();
+		_immersiveFallbackShift = 0;
+		applyImmersiveShift();
+	}
+	if (type == QEvent::Hide
+		|| type == QEvent::HideToParent
+		|| type == QEvent::Close) {
 		startImmersiveReset(true);
 	}
 	if (type == QEvent::TouchBegin

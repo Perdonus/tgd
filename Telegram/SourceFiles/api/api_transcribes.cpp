@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "history/history.h"
@@ -43,6 +44,16 @@ namespace {
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] QString LocalSpeechPreparingText(bool roundVideo) {
+	return roundVideo
+		? RuEn(
+			"Подготавливаю кружочек для локального распознавания. Кнопку можно нажать ещё раз, как только медиа догрузится.",
+			"Preparing the video note for local transcription. Tap the button again once the media finishes downloading.")
+		: RuEn(
+			"Подготавливаю аудио для локального распознавания. Кнопку можно нажать ещё раз, как только файл догрузится.",
+			"Preparing audio for local transcription. Tap the button again once the file finishes downloading.");
 }
 
 constexpr auto kLocalSpeechTargetRate = 16000;
@@ -169,11 +180,12 @@ void AppendWaveLE32(not_null<QByteArray*> buffer, int value) {
 }
 
 [[nodiscard]] QByteArray DecodeWaveForLocalSpeech(
-		const QString &path,
+		const Core::FileLocation &file,
+		const QByteArray &data,
 		QString *error) {
 	auto loader = Media::FFMpegLoader(
-		Core::FileLocation(path),
-		QByteArray(),
+		file,
+		data,
 		bytes::vector());
 	if (!loader.open(0)) {
 		if (error) {
@@ -361,6 +373,10 @@ namespace Api {
 Transcribes::Transcribes(not_null<ApiWrap*> api)
 : _session(&api->session())
 , _api(&api->instance()) {
+	_session->data().itemDataChanges(
+	) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		maybeRetryPendingLocal(item);
+	}, _lifetime);
 }
 
 Transcribes::~Transcribes() = default;
@@ -450,6 +466,15 @@ void Transcribes::toggle(not_null<HistoryItem*> item) {
 	if (i == _map.end()) {
 		load(item);
 		_session->data().requestItemResize(item);
+		if (localModeEnabled()) {
+			_session->data().requestItemViewRefresh(item);
+		}
+	} else if (localModeEnabled()
+		&& !i->second.requestId
+		&& (i->second.pending || i->second.failed)) {
+		loadLocal(item);
+		_session->data().requestItemResize(item);
+		_session->data().requestItemViewRefresh(item);
 	} else if (!i->second.requestId) {
 		i->second.shown = !i->second.shown;
 		if (i->second.roundview) {
@@ -591,7 +616,7 @@ void Transcribes::load(not_null<HistoryItem*> item) {
 void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 	const auto id = item->fullId();
 	auto &entry = _map.emplace(id).first->second;
-	if (entry.requestId || entry.pending) {
+	if (entry.requestId) {
 		return;
 	}
 	entry.shown = true;
@@ -612,28 +637,42 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 #else // Q_OS_WIN
 	const auto media = item->media();
 	const auto document = media ? media->document() : nullptr;
-	if (InstalledSpeechModelFolders().isEmpty()) {
+	const auto mediaView = document ? document->activeMediaView() : nullptr;
+	auto path = document ? document->filepath(true) : QString();
+	auto bytes = mediaView ? mediaView->bytes() : QByteArray();
+	if (path.isEmpty() && document && !bytes.isEmpty()) {
+		document->saveFromDataSilent();
+		path = document->filepath(true);
+	}
+	if (document && document->isVideoMessage()) {
+		entry.roundview = true;
+		_session->data().requestItemViewRefresh(item);
+	}
+	if (path.isEmpty() && bytes.isEmpty()) {
+		if (document) {
+			if (document->isVideoMessage()) {
+				document->forceToCache(true);
+			}
+			document->save(item->fullId(), QString(), LoadFromCloudOrLocal, true);
+		} else if (mediaView) {
+			mediaView->automaticLoad(item->fullId(), item);
+		}
 		entry.requestId = 0;
-		entry.failed = true;
-		entry.result = RuEn(
-			"Для локального распознавания сначала скачайте хотя бы одну модель в настройках Astrogram.",
-			"Download at least one speech model in Astrogram settings before using local transcription.");
+		entry.pending = true;
+		entry.failed = false;
+		entry.result = LocalSpeechPreparingText(
+			document && document->isVideoMessage());
 		_session->data().requestItemResize(item);
+		_session->data().requestItemViewRefresh(item);
 		return;
 	}
-	const auto path = document ? document->filepath(true) : QString();
-	if (path.isEmpty()) {
-		entry.requestId = 0;
-		entry.failed = true;
-		entry.result = RuEn(
-			"Сначала дождитесь полной загрузки голосового/видео-сообщения на диск.",
-			"Wait until the voice/video message is fully downloaded to disk first.");
-		_session->data().requestItemResize(item);
-		return;
-	}
+	entry.pending = false;
 
 	auto decodeError = QString();
-	const auto wave = DecodeWaveForLocalSpeech(path, &decodeError);
+	const auto wave = DecodeWaveForLocalSpeech(
+		path.isEmpty() ? Core::FileLocation() : Core::FileLocation(path),
+		bytes,
+		&decodeError);
 	if (wave.isEmpty()) {
 		entry.requestId = 0;
 		entry.failed = true;
@@ -643,6 +682,7 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 				"Could not prepare audio for local transcription.")
 			: decodeError;
 		_session->data().requestItemResize(item);
+		_session->data().requestItemViewRefresh(item);
 		return;
 	}
 
@@ -657,6 +697,7 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 			"Не удалось записать временный WAV для локального распознавания.",
 			"Could not write a temporary WAV file for local transcription.");
 		_session->data().requestItemResize(item);
+		_session->data().requestItemViewRefresh(item);
 		return;
 	}
 	const auto wavPath = wavFile.fileName();
@@ -676,6 +717,7 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 			"Не удалось записать PowerShell-скрипт локального распознавания.",
 			"Could not write the local transcription PowerShell script.");
 		_session->data().requestItemResize(item);
+		_session->data().requestItemViewRefresh(item);
 		return;
 	}
 	const auto scriptPath = scriptFile.fileName();
@@ -787,7 +829,40 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 	_localProcesses.emplace(id, std::move(process));
 	raw->start();
 	_session->data().requestItemResize(item);
+	_session->data().requestItemViewRefresh(item);
 #endif // Q_OS_WIN
+}
+
+void Transcribes::maybeRetryPendingLocal(not_null<HistoryItem*> item) {
+	if (!localModeEnabled() || !item->isHistoryEntry() || item->isLocal()) {
+		return;
+	}
+	const auto i = _map.find(item->fullId());
+	if (i == _map.end()) {
+		return;
+	}
+	const auto &entry = i->second;
+	if (!entry.pending || entry.requestId) {
+		return;
+	}
+	const auto media = item->media();
+	const auto document = media ? media->document() : nullptr;
+	if (!document) {
+		return;
+	}
+	const auto mediaView = document->activeMediaView();
+	auto path = document->filepath(true);
+	auto bytes = mediaView ? mediaView->bytes() : QByteArray();
+	if (path.isEmpty() && !bytes.isEmpty()) {
+		document->saveFromDataSilent();
+		path = document->filepath(true);
+	}
+	if (path.isEmpty() && bytes.isEmpty()) {
+		return;
+	}
+	loadLocal(item);
+	_session->data().requestItemResize(item);
+	_session->data().requestItemViewRefresh(item);
 }
 
 void Transcribes::summarize(not_null<HistoryItem*> item) {

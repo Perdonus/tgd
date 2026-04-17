@@ -15,10 +15,11 @@ on:
       - 'lib/**'
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  BETA_FEED_BRANCH: updates-beta
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -740,6 +741,193 @@ jobs:
           Copy-Item -LiteralPath $picked.FullName -Destination "$PWD/dist/Astrogram.exe" -Force
           Write-Host "Picked binary: $($picked.FullName)"
 
+      - name: Build updater tools (Release)
+        if: ${{ always() && steps.locate_exe.outcome == 'success' && github.ref != 'refs/heads/main' }}
+        shell: cmd
+        run: |
+          @echo on
+          setlocal EnableExtensions EnableDelayedExpansion
+          cd /d "%GITHUB_WORKSPACE%\\Telegram"
+          cmake --build ..\out --config Release --parallel 1 --target Updater Packer
+
+      - name: Pack beta update bundle
+        if: ${{ always() && steps.locate_exe.outcome == 'success' && github.ref != 'refs/heads/main' }}
+        id: pack_beta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Find-SingleExe([string] $Name, [string[]] $Roots) {
+            foreach ($root in $Roots) {
+              if (-not (Test-Path -LiteralPath $root)) {
+                continue
+              }
+              $match = Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ieq $Name } |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+              if ($match) {
+                return $match.FullName
+              }
+            }
+            return $null
+          }
+
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path
+          $roots = @(
+            (Join-Path $workspace "out"),
+            (Join-Path $workspace "Telegram\\out"),
+            (Join-Path $workspace "out\\Release"),
+            (Join-Path $workspace "Telegram\\out\\Release")
+          )
+          $astroExe = Find-SingleExe "Astrogram.exe" $roots
+          $updaterExe = Find-SingleExe "Updater.exe" $roots
+          $packerExe = Find-SingleExe "Packer.exe" $roots
+          if (-not $astroExe) {
+            throw "Astrogram.exe was not found for beta pack."
+          }
+          if (-not $updaterExe) {
+            throw "Updater.exe was not found for beta pack."
+          }
+          if (-not $packerExe) {
+            throw "Packer.exe was not found for beta pack."
+          }
+
+          $versionMap = @{}
+          foreach ($line in Get-Content -LiteralPath (Join-Path $workspace "Telegram\\build\\version")) {
+            if ($line -match '^\s*([A-Za-z0-9_]+)\s+(.+?)\s*$') {
+              $versionMap[$matches[1]] = $matches[2].Trim()
+            }
+          }
+          $appVersion = $versionMap["AppVersion"]
+          if ([string]::IsNullOrWhiteSpace($appVersion)) {
+            throw "AppVersion was not found in Telegram/build/version."
+          }
+
+          $packRoot = Join-Path $workspace "dist\\update-feed"
+          if (Test-Path -LiteralPath $packRoot) {
+            Remove-Item -LiteralPath $packRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $packRoot -Force | Out-Null
+
+          Copy-Item -LiteralPath $astroExe -Destination (Join-Path $packRoot "Astrogram.exe") -Force
+          Copy-Item -LiteralPath $updaterExe -Destination (Join-Path $packRoot "Updater.exe") -Force
+
+          $d3dSource = Join-Path (Split-Path -Parent $astroExe) "modules\\win64\\d3d\\d3dcompiler_47.dll"
+          if (Test-Path -LiteralPath $d3dSource) {
+            $d3dTargetDir = Join-Path $packRoot "modules\\win64\\d3d"
+            New-Item -ItemType Directory -Path $d3dTargetDir -Force | Out-Null
+            Copy-Item -LiteralPath $d3dSource -Destination (Join-Path $d3dTargetDir "d3dcompiler_47.dll") -Force
+          }
+
+          Push-Location $packRoot
+          try {
+            $arguments = @(
+              "-version", $appVersion,
+              "-path", "Astrogram.exe",
+              "-path", "Updater.exe"
+            )
+            if (Test-Path -LiteralPath (Join-Path $packRoot "modules\\win64\\d3d\\d3dcompiler_47.dll")) {
+              $arguments += @("-path", "modules\\win64\\d3d\\d3dcompiler_47.dll")
+            }
+            $arguments += @("-target", "win64", "-beta")
+            & $packerExe @arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "Packer.exe failed with exit code $LASTEXITCODE."
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $updateFile = Join-Path $packRoot ("tx64upd" + $appVersion)
+          if (-not (Test-Path -LiteralPath $updateFile)) {
+            throw "Packed beta update file was not produced: $updateFile"
+          }
+
+          $current = [ordered]@{
+            win64 = [ordered]@{
+              beta = [ordered]@{
+                released = [int64]$appVersion
+                testing = [int64]$appVersion
+                link = "/" + [IO.Path]::GetFileName($updateFile)
+              }
+            }
+          }
+          $currentPath = Join-Path $packRoot "current"
+          [System.IO.File]::WriteAllText(
+            $currentPath,
+            ($current | ConvertTo-Json -Depth 6),
+            [System.Text.UTF8Encoding]::new($false))
+
+          "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "update_file=$updateFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "current_file=$currentPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish beta update feed branch
+        if: ${{ always() && steps.pack_beta.outputs.ready == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path
+          $source = Join-Path $workspace "dist\\update-feed"
+          $branch = $env:BETA_FEED_BRANCH
+          $repo = "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
+          $publishRoot = Join-Path $env:RUNNER_TEMP "astrogram-beta-feed"
+          if (Test-Path -LiteralPath $publishRoot) {
+            Remove-Item -LiteralPath $publishRoot -Recurse -Force
+          }
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git ls-remote --exit-code --heads $repo $branch *> $null
+          if ($LASTEXITCODE -eq 0) {
+            git clone --depth 1 --branch $branch $repo $publishRoot
+          } else {
+            git clone --depth 1 $repo $publishRoot
+            Push-Location $publishRoot
+            try {
+              git checkout --orphan $branch
+              Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
+            } finally {
+              Pop-Location
+            }
+          }
+
+          Copy-Item -LiteralPath (Join-Path $source "*") -Destination $publishRoot -Recurse -Force
+          Push-Location $publishRoot
+          try {
+            git add current tx64upd*
+            git status --short
+            git diff --cached --quiet
+            if ($LASTEXITCODE -ne 0) {
+              git commit -m "beta update feed for ${{ github.sha }}"
+              git push origin HEAD:$branch --force
+            } else {
+              Write-Host "[beta-feed] no changes to publish"
+            }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Publish beta prerelease
+        if: ${{ always() && steps.pack_beta.outputs.ready == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-${{ github.run_id }}
+          name: Astrogram Dev Beta ${{ steps.pack_beta.outputs.app_version }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          files: |
+            dist/Astrogram.exe
+            dist/update-feed/current
+            dist/update-feed/tx64upd*
+
       - name: Upload Windows artifact
         if: ${{ always() && steps.locate_exe.outcome == 'success' }}
         uses: actions/upload-artifact@v4
@@ -747,6 +935,8 @@ jobs:
           name: astrogram-windows-release
           path: |
             dist/Astrogram.exe
+            dist/update-feed/current
+            dist/update-feed/tx64upd*
           if-no-files-found: error
 
   linux_deb:

@@ -63,6 +63,18 @@ constexpr auto kPluginUiRebuildDebounceMs = 120;
 	return UseRussianPluginUi() ? std::move(ru) : std::move(en);
 }
 
+[[nodiscard]] bool ShouldHidePluginFromPrimaryUi(
+		const ::Plugins::PluginState &state) {
+	return state.info.id.trimmed() == u"astro.show_logs"_q;
+}
+
+[[nodiscard]] bool IsStablePluginCardState(
+		const ::Plugins::PluginState &state) {
+	return !state.info.id.trimmed().isEmpty()
+		&& (!state.info.name.trimmed().isEmpty()
+			|| !state.path.trimmed().isEmpty());
+}
+
 constexpr auto kPluginCardRadius = 20.;
 constexpr auto kPluginCardVerticalMargin = 12;
 constexpr auto kPluginCardContentInsetLeft = 18;
@@ -2102,6 +2114,40 @@ void Plugins::rebuildList() {
 		_listRefreshPending = true;
 		scheduleRebuildList(kPluginUiRebuildDebounceMs);
 	});
+	const auto allPlugins = Core::App().plugins().plugins();
+	auto plugins = std::vector<::Plugins::PluginState>();
+	plugins.reserve(allPlugins.size());
+	for (const auto &state : allPlugins) {
+		if (!ShouldHidePluginFromPrimaryUi(state)) {
+			plugins.push_back(state);
+		}
+	}
+	const auto stableNow = !plugins.empty()
+		&& std::all_of(
+			plugins.begin(),
+			plugins.end(),
+			&IsStablePluginCardState);
+	if (stableNow) {
+		_lastStablePlugins = plugins;
+	}
+	const auto &renderPlugins = (stableNow || _lastStablePlugins.empty())
+		? plugins
+		: _lastStablePlugins;
+	Logs::writeClient(QString::fromLatin1(
+		"[plugins-ui] rebuild list: safeMode=%1 pluginCount=%2 visibleCount=%3 stable=%4 snapshot=%5")
+		.arg(Core::App().plugins().safeModeEnabled() ? u"true"_q : u"false"_q)
+		.arg(allPlugins.size())
+		.arg(plugins.size())
+		.arg(stableNow ? u"true"_q : u"false"_q)
+		.arg(_lastStablePlugins.empty() ? u"false"_q : u"true"_q));
+	if (renderPlugins.empty() && (_lastRenderedPluginCount > 0)) {
+		Logs::writeClient(
+			u"[plugins-ui] transient empty plugin list observed, keeping previous cards"_q);
+		_listRefreshPending = true;
+		scheduleRebuildList(150);
+		return;
+	}
+	_list->clear();
 	if (Core::App().plugins().safeModeEnabled()) {
 		Ui::AddDividerText(
 			_list,
@@ -2111,21 +2157,7 @@ void Plugins::rebuildList() {
 					u"Безопасный режим включён. Плагины показаны без загрузки. Откройте меню в верхней панели, чтобы выключить его."_q)));
 		Ui::AddSkip(_list);
 	}
-
-	const auto plugins = Core::App().plugins().plugins();
-	Logs::writeClient(QString::fromLatin1(
-		"[plugins-ui] rebuild list: safeMode=%1 pluginCount=%2")
-		.arg(Core::App().plugins().safeModeEnabled() ? u"true"_q : u"false"_q)
-		.arg(plugins.size()));
-	if (plugins.empty() && (_lastRenderedPluginCount > 0)) {
-		Logs::writeClient(
-			u"[plugins-ui] transient empty plugin list observed, keeping previous cards"_q);
-		_listRefreshPending = true;
-		scheduleRebuildList(150);
-		return;
-	}
-	_list->clear();
-	if (plugins.empty()) {
+	if (renderPlugins.empty()) {
 		_lastRenderedPluginCount = 0;
 		Ui::AddDividerText(
 			_list,
@@ -2137,7 +2169,7 @@ void Plugins::rebuildList() {
 		return;
 	}
 	auto first = true;
-	for (const auto &state : plugins) {
+	for (const auto &state : renderPlugins) {
 		if (!first) {
 			Ui::AddSkip(_list, kPluginCardVerticalMargin);
 		}
@@ -2186,7 +2218,7 @@ void Plugins::rebuildList() {
 			state,
 			scheduleRefresh);
 	}
-	_lastRenderedPluginCount = int(plugins.size());
+	_lastRenderedPluginCount = int(renderPlugins.size());
 
 	Ui::ResizeFitChild(this, _content);
 }
