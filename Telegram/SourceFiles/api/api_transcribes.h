@@ -10,7 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "spellcheck/spellcheck_types.h"
 
+#include <memory>
+
 class ApiWrap;
+class QProcess;
 
 namespace Main {
 class Session;
@@ -31,6 +34,7 @@ struct SummaryEntry {
 class Transcribes final {
 public:
 	explicit Transcribes(not_null<ApiWrap*> api);
+	~Transcribes();
 
 	struct Entry {
 		QString result;
@@ -64,7 +68,9 @@ public:
 	[[nodiscard]] crl::time trialsMaxLengthMs() const;
 
 private:
+	[[nodiscard]] bool localModeEnabled() const;
 	void load(not_null<HistoryItem*> item);
+	void loadLocal(not_null<HistoryItem*> item);
 	void summarize(not_null<HistoryItem*> item);
 
 	const not_null<Main::Session*> _session;
@@ -76,6 +82,7 @@ private:
 
 	base::flat_map<FullMsgId, Entry> _map;
 	base::flat_map<uint64, FullMsgId> _ids;
+	base::flat_map<FullMsgId, std::unique_ptr<QProcess>> _localProcesses;
 
 	base::flat_map<FullMsgId, SummaryEntry> _summaries;
 

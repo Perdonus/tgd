@@ -423,13 +423,16 @@ QSize Document::countOptimalSize() {
 		const auto history = _realParent->history();
 		const auto session = &history->session();
 		const auto transcribes = &session->api().transcribes();
+		const auto localSpeech = Core::App().settings().localSpeechRecognition();
 		if (_parent->data()->media()->ttlSeconds()
 			|| _realParent->isScheduled()
 			|| _realParent->isAdminLogEntry()
-			|| (!session->premium()
+			|| (!localSpeech
+				&& !session->premium()
 				&& !transcribes->freeFor(_realParent)
 				&& !transcribes->trialsSupport())
-			|| (!session->premium()
+			|| (!localSpeech
+				&& !session->premium()
 				&& _data->duration() > transcribes->trialsMaxLengthMs())) {
 			voice->transcribe = nullptr;
 			voice->transcribeText = {};
@@ -458,7 +461,9 @@ QSize Document::countOptimalSize() {
 				: entry.toolong
 				? tr::italic(tr::lng_audio_transcribe_long(tr::now))
 				: entry.failed
-				? tr::italic(tr::lng_attach_failed(tr::now))
+				? (!entry.result.isEmpty()
+					? TextWithEntities{ entry.result }
+					: tr::italic(tr::lng_attach_failed(tr::now)))
 				: TextWithEntities{ entry.result }.append(
 					pending
 						? Ui::Text::LottieEmoji(descriptor)

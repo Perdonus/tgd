@@ -429,6 +429,7 @@ QByteArray Settings::serialize() const {
 			<< qint32(_collapseSimilarChannels.current() ? 1 : 0)
 			<< qint32(_hideSimilarChannels.current() ? 1 : 0)
 			<< qint32(_localOnlyDrafts.current() ? 1 : 0)
+			<< qint32(_localSpeechRecognition.current() ? 1 : 0)
 			<< qint32(_translateProviderRaw.current())
 			<< qint32(_editedMarkShowText.current() ? 1 : 0)
 			<< qint32(_editedMarkShowIcon.current() ? 1 : 0)
@@ -592,6 +593,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 collapseSimilarChannels = _collapseSimilarChannels.current() ? 1 : 0;
 	qint32 hideSimilarChannels = _hideSimilarChannels.current() ? 1 : 0;
 	qint32 localOnlyDrafts = _localOnlyDrafts.current() ? 1 : 0;
+	qint32 localSpeechRecognition = _localSpeechRecognition.current() ? 1 : 0;
 	qint32 translateProvider = _translateProviderRaw.current();
 	qint32 editedMarkShowText = _editedMarkShowText.current() ? 1 : 0;
 	qint32 editedMarkShowIcon = _editedMarkShowIcon.current() ? 1 : 0;
@@ -998,6 +1000,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		stream >> localOnlyDrafts;
 	}
 	if (!stream.atEnd()) {
+		stream >> localSpeechRecognition;
+	}
+	if (!stream.atEnd()) {
 		stream >> translateProvider;
 	}
 	if (!stream.atEnd()) {
@@ -1279,6 +1284,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_collapseSimilarChannels = (collapseSimilarChannels == 1);
 	_hideSimilarChannels = (hideSimilarChannels == 1);
 	_localOnlyDrafts = (localOnlyDrafts == 1);
+	_localSpeechRecognition = (localSpeechRecognition == 1);
 	_translateProviderRaw = std::clamp(translateProvider, 0, 2);
 	_editedMarkShowText = (editedMarkShowText == 1);
 	_editedMarkShowIcon = (editedMarkShowIcon == 1);
@@ -1691,6 +1697,7 @@ void Settings::resetOnLastLogout() {
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction::Disabled;
 	_notificationsVolume = 100;
 	_localOnlyDrafts = false;
+	_localSpeechRecognition = false;
 	_translateProviderRaw = 0;
 
 	_recentEmojiPreload.clear();

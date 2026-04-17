@@ -93,6 +93,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "main/main_app_config.h"
 #include "settings/settings_advanced.h"
+#include "settings/settings_astrogram.h"
 #include "settings/settings_plugins.h"
 #include "settings/settings_premium.h"
 #include "settings/settings_experimental.h"
@@ -837,7 +838,7 @@ void ShowAstrogramUpdateNotice(
 				Core::checkReadyUpdate();
 				Core::Restart();
 			} else {
-				controller->showSettings(Settings::Advanced::Id());
+				controller->showSettings(Settings::Astrogram::Id());
 			}
 		});
 		if (!info.url.isEmpty()) {

@@ -1800,6 +1800,15 @@ void SetupAstrogramInterface(
 		settings.setTranslateProvider(next);
 		Core::App().saveSettings();
 	});
+	AddToggle(
+		speechCard,
+		settings.localSpeechRecognitionValue(),
+		RuEn(
+			"Использовать локальное распознавание речи",
+			"Use local speech recognition"),
+		[&](bool toggled) {
+			settings.setLocalSpeechRecognition(toggled);
+		});
 	AddButtonWithLabel(
 		speechCard,
 		rpl::single(RuEn("Локальное распознавание речи", "Local speech recognition")),
@@ -1814,8 +1823,8 @@ void SetupAstrogramInterface(
 		object_ptr<Ui::FlatLabel>(
 			speechCard,
 			rpl::single(RuEn(
-				"Открывается отдельное окно со всеми языками сразу: у не скачанных моделей справа есть значок загрузки, прогресс идёт тонкой полосой снизу, после установки повторная загрузка скрывается.",
-				"A separate box shows all languages at once: not-downloaded models keep a download icon on the right, progress is shown as a thin bar at the bottom, and re-download is hidden after install.")),
+				"Если переключатель выше включён, кнопка transcribe будет идти в локальный путь. Отдельное окно показывает все языки сразу: у не скачанных моделей справа есть значок загрузки, прогресс идёт тонкой полосой снизу, после установки повторная загрузка скрывается.",
+				"If the toggle above is enabled, the transcribe button switches to the local path. The separate box shows all languages at once: not-downloaded models keep a download icon on the right, progress is shown as a thin bar at the bottom, and re-download is hidden after install.")),
 			st::defaultFlatLabel),
 		style::margins(14, 0, 14, 0),
 		style::al_top);

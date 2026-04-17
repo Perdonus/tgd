@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "core/click_handler_types.h" // ClickHandlerContext
 #include "history/history.h"
 #include "history/history_item.h"
@@ -278,6 +280,9 @@ void TranscribeButton::paint(
 
 bool TranscribeButton::hasLock() const {
 	const auto session = &_item->history()->session();
+	if (!_summarize && Core::App().settings().localSpeechRecognition()) {
+		return false;
+	}
 	if (session->premium()) {
 		return false;
 	}
@@ -323,6 +328,10 @@ ClickHandlerPtr TranscribeButton::link() {
 	_link = std::make_shared<LambdaClickHandler>([=](ClickContext context) {
 		const auto item = session->data().message(id);
 		if (!item) {
+			return;
+		}
+		if (!summarize && Core::App().settings().localSpeechRecognition()) {
+			session->api().transcribes().toggle(item);
 			return;
 		}
 		if (session->premium()) {

@@ -447,6 +447,19 @@ public:
 		_localOnlyDrafts = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool localSpeechRecognition() const {
+		return _localSpeechRecognition.current();
+	}
+	[[nodiscard]] rpl::producer<bool> localSpeechRecognitionValue() const {
+		return _localSpeechRecognition.value();
+	}
+	void setLocalSpeechRecognition(bool value) {
+		if (_localSpeechRecognition.current() == value) {
+			return;
+		}
+		_localSpeechRecognition = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool collapseSimilarChannels() const {
 		return _collapseSimilarChannels.current();
 	}
@@ -1414,6 +1427,7 @@ private:
 	rpl::variable<bool> _showMessageSeconds = false;
 	rpl::variable<bool> _showPollResultsBeforeVoting = false;
 	rpl::variable<bool> _localOnlyDrafts = false;
+	rpl::variable<bool> _localSpeechRecognition = false;
 	rpl::variable<bool> _collapseSimilarChannels = true;
 	rpl::variable<bool> _hideSimilarChannels = false;
 	rpl::variable<bool> _ghostHideReadMessages = true;

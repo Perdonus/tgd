@@ -379,7 +379,10 @@ private:
 	void scanPlugins(bool metadataOnly = false);
 	void loadPluginMetadataOnly(const QString &path);
 	void loadPlugin(const QString &path);
+	bool enablePluginRecord(const QString &pluginId, QString *error = nullptr);
 	void unloadAll();
+	void unloadPluginRecord(PluginRecord &record);
+	void removePluginRecords(const QString &pluginId);
 	PluginRecord *findRecord(const QString &pluginId);
 	const PluginRecord *findRecord(const QString &pluginId) const;
 	void unregisterPluginCommands(const QString &pluginId);

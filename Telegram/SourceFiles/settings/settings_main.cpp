@@ -791,7 +791,7 @@ void SetupSections(
 			Core::Restart();
 			return;
 		}
-		showOther(Advanced::Id());
+		showOther(Astrogram::Id());
 	});
 
 	const auto preload = [=] {

@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "api/api_text_entities.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
 #include "data/data_peer.h"
@@ -17,16 +19,354 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_instance.h"
+#include "logs.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "media/audio/media_audio_ffmpeg_loader.h"
 #include "spellcheck/spellcheck_types.h"
+#include "storage/localstorage.h"
+
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QProcess>
+#include <QtCore/QTemporaryFile>
+
+#include <cmath>
+
+namespace {
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+constexpr auto kLocalSpeechTargetRate = 16000;
+
+[[nodiscard]] QString SpeechModelsRootPath() {
+	return QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
+}
+
+[[nodiscard]] QStringList InstalledSpeechModelFolders() {
+	return QDir(SpeechModelsRootPath()).entryList(
+		QDir::Dirs | QDir::NoDotAndDotDot,
+		QDir::Name | QDir::IgnoreCase);
+}
+
+[[nodiscard]] int ChannelsFromOpenAlFormat(int format) {
+	switch (format) {
+	case AL_FORMAT_STEREO8:
+	case AL_FORMAT_STEREO16:
+		return 2;
+	case AL_FORMAT_MONO8:
+	case AL_FORMAT_MONO16:
+	default:
+		return 1;
+	}
+}
+
+[[nodiscard]] int BitsFromOpenAlFormat(int format) {
+	switch (format) {
+	case AL_FORMAT_MONO8:
+	case AL_FORMAT_STEREO8:
+		return 8;
+	case AL_FORMAT_MONO16:
+	case AL_FORMAT_STEREO16:
+	default:
+		return 16;
+	}
+}
+
+void AppendWaveLE16(not_null<QByteArray*> buffer, int value) {
+	buffer->push_back(char(value & 0xFF));
+	buffer->push_back(char((value >> 8) & 0xFF));
+}
+
+void AppendWaveLE32(not_null<QByteArray*> buffer, int value) {
+	buffer->push_back(char(value & 0xFF));
+	buffer->push_back(char((value >> 8) & 0xFF));
+	buffer->push_back(char((value >> 16) & 0xFF));
+	buffer->push_back(char((value >> 24) & 0xFF));
+}
+
+[[nodiscard]] std::vector<int16> DecodeMonoSamples(
+		const QByteArray &raw,
+		int format) {
+	const auto channels = std::max(ChannelsFromOpenAlFormat(format), 1);
+	const auto bits = BitsFromOpenAlFormat(format);
+	const auto bytesPerSample = std::max(bits / 8, 1);
+	const auto frameSize = std::max(bytesPerSample * channels, 1);
+	const auto frames = raw.size() / frameSize;
+	auto result = std::vector<int16>(frames);
+	const auto data = reinterpret_cast<const uchar*>(raw.constData());
+	for (auto frame = 0; frame != frames; ++frame) {
+		auto mixed = 0;
+		for (auto channel = 0; channel != channels; ++channel) {
+			const auto offset = (frame * frameSize) + (channel * bytesPerSample);
+			if (bits == 8) {
+				mixed += (int(data[offset]) - 128) << 8;
+			} else {
+				const auto lo = quint16(data[offset]);
+				const auto hi = quint16(data[offset + 1]) << 8;
+				mixed += qint16(lo | hi);
+			}
+		}
+		result[frame] = qBound(-32768, mixed / channels, 32767);
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<int16> ResampleMonoTo16k(
+		const std::vector<int16> &input,
+		int sourceRate) {
+	if (input.empty() || (sourceRate <= 0) || (sourceRate == kLocalSpeechTargetRate)) {
+		return input;
+	}
+	const auto targetFrames = std::max(
+		1,
+		int(std::llround(
+			(double(input.size()) * kLocalSpeechTargetRate) / sourceRate)));
+	auto result = std::vector<int16>(targetFrames);
+	const auto ratio = double(sourceRate) / kLocalSpeechTargetRate;
+	for (auto i = 0; i != targetFrames; ++i) {
+		const auto src = i * ratio;
+		const auto left = std::clamp(int(std::floor(src)), 0, int(input.size()) - 1);
+		const auto right = std::clamp(left + 1, 0, int(input.size()) - 1);
+		const auto mix = src - left;
+		const auto value = int(std::lround(
+			(input[left] * (1. - mix)) + (input[right] * mix)));
+		result[i] = qBound(-32768, value, 32767);
+	}
+	return result;
+}
+
+[[nodiscard]] QByteArray BuildMonoWavePcm16(
+		const std::vector<int16> &samples,
+		int sampleRate) {
+	auto result = QByteArray();
+	const auto dataSize = int(samples.size() * sizeof(int16));
+	result.reserve(44 + dataSize);
+	result += "RIFF";
+	AppendWaveLE32(&result, 36 + dataSize);
+	result += "WAVEfmt ";
+	AppendWaveLE32(&result, 16);
+	AppendWaveLE16(&result, 1);
+	AppendWaveLE16(&result, 1);
+	AppendWaveLE32(&result, sampleRate);
+	AppendWaveLE32(&result, sampleRate * int(sizeof(int16)));
+	AppendWaveLE16(&result, sizeof(int16));
+	AppendWaveLE16(&result, 16);
+	result += "data";
+	AppendWaveLE32(&result, dataSize);
+	result.append(
+		reinterpret_cast<const char*>(samples.data()),
+		dataSize);
+	return result;
+}
+
+[[nodiscard]] QByteArray DecodeWaveForLocalSpeech(
+		const QString &path,
+		QString *error) {
+	auto loader = Media::FFMpegLoader(
+		Core::FileLocation(path),
+		QByteArray(),
+		bytes::vector());
+	if (!loader.open(0)) {
+		if (error) {
+			*error = RuEn(
+				"Не удалось открыть аудиофайл для локального распознавания.",
+				"Could not open the audio file for local transcription.");
+		}
+		return {};
+	}
+	auto decoded = QByteArray();
+	for (;;) {
+		const auto chunk = loader.readMore();
+		if (const auto readError = std::get_if<Media::AudioPlayerLoader::ReadError>(&chunk)) {
+			switch (*readError) {
+			case Media::AudioPlayerLoader::ReadError::Retry:
+			case Media::AudioPlayerLoader::ReadError::RetryNotQueued:
+			case Media::AudioPlayerLoader::ReadError::Wait:
+				continue;
+			case Media::AudioPlayerLoader::ReadError::EndOfFile:
+				break;
+			case Media::AudioPlayerLoader::ReadError::Other:
+				if (error) {
+					*error = RuEn(
+						"Не удалось декодировать аудиофайл для локального распознавания.",
+						"Could not decode the audio file for local transcription.");
+				}
+				return {};
+			}
+			break;
+		}
+		const auto span = std::get<bytes::const_span>(chunk);
+		decoded.append(
+			reinterpret_cast<const char*>(span.data()),
+			int(span.size()));
+	}
+	if (decoded.isEmpty()) {
+		if (error) {
+			*error = RuEn(
+				"Локально распознать нечего: аудиоданные пустые.",
+				"There is nothing to transcribe locally: audio data is empty.");
+		}
+		return {};
+	}
+	const auto mono = DecodeMonoSamples(decoded, loader.format());
+	const auto resampled = ResampleMonoTo16k(mono, loader.samplesFrequency());
+	if (resampled.empty()) {
+		if (error) {
+			*error = RuEn(
+				"Не удалось подготовить PCM для локального распознавания.",
+				"Could not prepare PCM data for local transcription.");
+		}
+		return {};
+	}
+	return BuildMonoWavePcm16(resampled, kLocalSpeechTargetRate);
+}
+
+[[nodiscard]] QByteArray LocalSpeechPowerShellScript() {
+	return QByteArray(R"PS(
+param(
+  [Parameter(Mandatory=$true)][string]$AudioPath,
+  [string]$Culture
+)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+  Add-Type -AssemblyName System.Speech | Out-Null
+  $engine = $null
+  if ($Culture) {
+    try {
+      $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine([System.Globalization.CultureInfo]::GetCultureInfo($Culture))
+    } catch {
+      $engine = $null
+    }
+  }
+  if ($null -eq $engine) {
+    $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+  }
+  $engine.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+  $engine.SetInputToWaveFile($AudioPath)
+  $parts = New-Object System.Collections.Generic.List[string]
+  while ($true) {
+    $result = $engine.Recognize()
+    if ($null -eq $result) {
+      break
+    }
+    if (-not [string]::IsNullOrWhiteSpace($result.Text)) {
+      $parts.Add($result.Text.Trim())
+    }
+  }
+  @{
+    ok = $true
+    text = ($parts -join ' ')
+    culture = $engine.RecognizerInfo.Culture.Name
+  } | ConvertTo-Json -Compress
+} catch {
+  @{
+    ok = $false
+    error = $_.Exception.Message
+  } | ConvertTo-Json -Compress
+  exit 1
+}
+)PS");
+}
+
+[[nodiscard]] QString BestInstalledSpeechCulture() {
+	const auto installed = InstalledSpeechModelFolders();
+	const auto cultureFromFolder = [](const QString &folder) -> QString {
+		const auto value = folder.toLower();
+		if (value.contains(u"-ru-") || value.contains(u"-ru")) {
+			return u"ru-RU"_q;
+		} else if (value.contains(u"-uk-") || value.contains(u"-uk")) {
+			return u"uk-UA"_q;
+		} else if (value.contains(u"-de-") || value.contains(u"-de")) {
+			return u"de-DE"_q;
+		} else if (value.contains(u"-fr-") || value.contains(u"-fr")) {
+			return u"fr-FR"_q;
+		} else if (value.contains(u"-es-") || value.contains(u"-es")) {
+			return u"es-ES"_q;
+		} else if (value.contains(u"-pt-") || value.contains(u"-pt")) {
+			return u"pt-PT"_q;
+		} else if (value.contains(u"-it-") || value.contains(u"-it")) {
+			return u"it-IT"_q;
+		} else if (value.contains(u"-nl-") || value.contains(u"-nl")) {
+			return u"nl-NL"_q;
+		} else if (value.contains(u"-pl-") || value.contains(u"-pl")) {
+			return u"pl-PL"_q;
+		} else if (value.contains(u"-tr-") || value.contains(u"-tr")) {
+			return u"tr-TR"_q;
+		} else if (value.contains(u"-sv-") || value.contains(u"-sv")) {
+			return u"sv-SE"_q;
+		} else if (value.contains(u"-cs-") || value.contains(u"-cs")) {
+			return u"cs-CZ"_q;
+		} else if (value.contains(u"-ja-") || value.contains(u"-ja")) {
+			return u"ja-JP"_q;
+		} else if (value.contains(u"-ko-") || value.contains(u"-ko")) {
+			return u"ko-KR"_q;
+		} else if (value.contains(u"-cn-") || value.contains(u"-zh")) {
+			return u"zh-CN"_q;
+		} else if (value.contains(u"-hi-") || value.contains(u"-hi")) {
+			return u"hi-IN"_q;
+		} else if (value.contains(u"-fa-") || value.contains(u"-fa")) {
+			return u"fa-IR"_q;
+		} else if (value.contains(u"-vn-") || value.contains(u"-vi")) {
+			return u"vi-VN"_q;
+		} else if (value.contains(u"-en-") || value.contains(u"-en")) {
+			return u"en-US"_q;
+		}
+		return QString();
+	};
+	for (const auto &folder : installed) {
+		if (const auto culture = cultureFromFolder(folder); !culture.isEmpty()) {
+			return culture;
+		}
+	}
+	const auto ui = Lang::LanguageIdOrDefault(Lang::Id()).toLower();
+	if (ui.startsWith(u"ru")) {
+		return u"ru-RU"_q;
+	} else if (ui.startsWith(u"uk")) {
+		return u"uk-UA"_q;
+	} else if (ui.startsWith(u"de")) {
+		return u"de-DE"_q;
+	} else if (ui.startsWith(u"fr")) {
+		return u"fr-FR"_q;
+	} else if (ui.startsWith(u"es")) {
+		return u"es-ES"_q;
+	} else if (ui.startsWith(u"pt")) {
+		return u"pt-PT"_q;
+	} else if (ui.startsWith(u"it")) {
+		return u"it-IT"_q;
+	} else if (ui.startsWith(u"pl")) {
+		return u"pl-PL"_q;
+	} else if (ui.startsWith(u"ja")) {
+		return u"ja-JP"_q;
+	} else if (ui.startsWith(u"ko")) {
+		return u"ko-KR"_q;
+	} else if (ui.startsWith(u"zh")) {
+		return u"zh-CN"_q;
+	}
+	return u"en-US"_q;
+}
+
+} // namespace
 
 namespace Api {
 
 Transcribes::Transcribes(not_null<ApiWrap*> api)
 : _session(&api->session())
 , _api(&api->instance()) {
+}
+
+Transcribes::~Transcribes() = default;
+
+bool Transcribes::localModeEnabled() const {
+	return Core::App().settings().localSpeechRecognition();
 }
 
 bool Transcribes::isRated(not_null<HistoryItem*> item) const {
@@ -56,6 +396,9 @@ void Transcribes::rate(not_null<HistoryItem*> item, bool isGood) {
 }
 
 bool Transcribes::freeFor(not_null<HistoryItem*> item) const {
+	if (localModeEnabled()) {
+		return true;
+	}
 	if (const auto channel = item->history()->peer->asMegagroup()) {
 		const auto owner = &channel->owner();
 		return channel->levelHint() >= owner->groupFreeTranscribeLevel();
@@ -176,6 +519,10 @@ void Transcribes::apply(const MTPDupdateTranscribedAudio &update) {
 }
 
 void Transcribes::load(not_null<HistoryItem*> item) {
+	if (localModeEnabled()) {
+		loadLocal(item);
+		return;
+	}
 	if (!item->isHistoryEntry() || item->isLocal()) {
 		return;
 	}
@@ -239,6 +586,202 @@ void Transcribes::load(not_null<HistoryItem*> item) {
 	entry.shown = true;
 	entry.failed = false;
 	entry.pending = false;
+}
+
+void Transcribes::loadLocal(not_null<HistoryItem*> item) {
+	const auto id = item->fullId();
+	auto &entry = _map.emplace(id).first->second;
+	if (entry.requestId || entry.pending) {
+		return;
+	}
+	entry.shown = true;
+	entry.failed = false;
+	entry.pending = false;
+	entry.toolong = false;
+	entry.result.clear();
+	entry.requestId = 1;
+
+#ifndef Q_OS_WIN
+	entry.requestId = 0;
+	entry.failed = true;
+	entry.result = RuEn(
+		"Локальное распознавание речи сейчас доступно только в Windows-сборке Astrogram.",
+		"Local speech recognition is currently available only in the Windows build of Astrogram.");
+	_session->data().requestItemResize(item);
+	return;
+#else // Q_OS_WIN
+	const auto media = item->media();
+	const auto document = media ? media->document() : nullptr;
+	if (InstalledSpeechModelFolders().isEmpty()) {
+		entry.requestId = 0;
+		entry.failed = true;
+		entry.result = RuEn(
+			"Для локального распознавания сначала скачайте хотя бы одну модель в настройках Astrogram.",
+			"Download at least one speech model in Astrogram settings before using local transcription.");
+		_session->data().requestItemResize(item);
+		return;
+	}
+	const auto path = document ? document->filepath(true) : QString();
+	if (path.isEmpty()) {
+		entry.requestId = 0;
+		entry.failed = true;
+		entry.result = RuEn(
+			"Сначала дождитесь полной загрузки голосового/видео-сообщения на диск.",
+			"Wait until the voice/video message is fully downloaded to disk first.");
+		_session->data().requestItemResize(item);
+		return;
+	}
+
+	auto decodeError = QString();
+	const auto wave = DecodeWaveForLocalSpeech(path, &decodeError);
+	if (wave.isEmpty()) {
+		entry.requestId = 0;
+		entry.failed = true;
+		entry.result = decodeError.isEmpty()
+			? RuEn(
+				"Не удалось подготовить аудио для локального распознавания.",
+				"Could not prepare audio for local transcription.")
+			: decodeError;
+		_session->data().requestItemResize(item);
+		return;
+	}
+
+	auto wavFile = QTemporaryFile();
+	wavFile.setAutoRemove(false);
+	wavFile.setFileTemplate(
+		QDir(QDir::tempPath()).filePath(u"astrogram-local-transcribe-XXXXXX.wav"_q));
+	if (!wavFile.open() || (wavFile.write(wave) != wave.size())) {
+		entry.requestId = 0;
+		entry.failed = true;
+		entry.result = RuEn(
+			"Не удалось записать временный WAV для локального распознавания.",
+			"Could not write a temporary WAV file for local transcription.");
+		_session->data().requestItemResize(item);
+		return;
+	}
+	const auto wavPath = wavFile.fileName();
+	wavFile.close();
+
+	auto scriptFile = QTemporaryFile();
+	scriptFile.setAutoRemove(false);
+	scriptFile.setFileTemplate(
+		QDir(QDir::tempPath()).filePath(u"astrogram-local-transcribe-XXXXXX.ps1"_q));
+	if (!scriptFile.open()
+		|| (scriptFile.write(LocalSpeechPowerShellScript())
+			!= LocalSpeechPowerShellScript().size())) {
+		QFile::remove(wavPath);
+		entry.requestId = 0;
+		entry.failed = true;
+		entry.result = RuEn(
+			"Не удалось записать PowerShell-скрипт локального распознавания.",
+			"Could not write the local transcription PowerShell script.");
+		_session->data().requestItemResize(item);
+		return;
+	}
+	const auto scriptPath = scriptFile.fileName();
+	scriptFile.close();
+
+	auto process = std::make_unique<QProcess>();
+	process->setProgram(u"powershell"_q);
+	auto arguments = QStringList{
+		u"-NoProfile"_q,
+		u"-NonInteractive"_q,
+		u"-ExecutionPolicy"_q,
+		u"Bypass"_q,
+		u"-File"_q,
+		scriptPath,
+		u"-AudioPath"_q,
+		wavPath,
+	};
+	if (const auto culture = BestInstalledSpeechCulture(); !culture.isEmpty()) {
+		arguments.push_back(u"-Culture"_q);
+		arguments.push_back(culture);
+	}
+	process->setArguments(arguments);
+	process->setProcessChannelMode(QProcess::SeparateChannels);
+	auto *raw = process.get();
+	QObject::connect(
+		raw,
+		&QProcess::errorOccurred,
+		raw,
+		[this, id](QProcess::ProcessError error) {
+			const auto i = _localProcesses.find(id);
+			if (i == _localProcesses.end()) {
+				return;
+			}
+			auto &entry = _map[id];
+			entry.requestId = 0;
+			entry.pending = false;
+			entry.failed = true;
+			entry.result = RuEn(
+				"Не удалось запустить локальный speech runner (%1).",
+				"Could not start the local speech runner (%1).")
+					.arg(QString::number(int(error)));
+			if (const auto updated = _session->data().message(id)) {
+				_session->data().requestItemResize(updated);
+				_session->data().requestItemViewRefresh(updated);
+			}
+		});
+	QObject::connect(
+		raw,
+		qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+		raw,
+		[this, id, wavPath, scriptPath](int exitCode, QProcess::ExitStatus exitStatus) {
+			const auto it = _localProcesses.find(id);
+			if (it == _localProcesses.end()) {
+				QFile::remove(wavPath);
+				QFile::remove(scriptPath);
+				return;
+			}
+			auto process = std::move(it->second);
+			_localProcesses.erase(it);
+			const auto output = QString::fromUtf8(
+				process->readAllStandardOutput()).trimmed();
+			const auto errorOutput = QString::fromUtf8(
+				process->readAllStandardError()).trimmed();
+			QFile::remove(wavPath);
+			QFile::remove(scriptPath);
+
+			auto text = QString();
+			auto failed = (exitStatus != QProcess::NormalExit) || (exitCode != 0);
+			if (!output.isEmpty()) {
+				const auto json = QJsonDocument::fromJson(output.toUtf8());
+				if (json.isObject()) {
+					const auto object = json.object();
+					failed = !object.value(u"ok"_q).toBool(false);
+					text = failed
+						? object.value(u"error"_q).toString().trimmed()
+						: object.value(u"text"_q).toString().trimmed();
+				} else {
+					text = output;
+				}
+			}
+			if (text.isEmpty()) {
+				text = failed
+					? (!errorOutput.isEmpty()
+						? errorOutput
+						: RuEn(
+							"Локальное распознавание завершилось ошибкой.",
+							"Local transcription failed."))
+					: RuEn(
+						"Локальное распознавание завершилось без текста.",
+						"Local transcription finished without any text.");
+			}
+
+			auto &entry = _map[id];
+			entry.requestId = 0;
+			entry.pending = false;
+			entry.failed = failed;
+			entry.result = text;
+			if (const auto updated = _session->data().message(id)) {
+				_session->data().requestItemResize(updated);
+				_session->data().requestItemViewRefresh(updated);
+			}
+		});
+	_localProcesses.emplace(id, std::move(process));
+	raw->start();
+	_session->data().requestItemResize(item);
+#endif // Q_OS_WIN
 }
 
 void Transcribes::summarize(not_null<HistoryItem*> item) {

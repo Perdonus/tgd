@@ -2619,10 +2619,12 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 			{ u"update"_q, preview.update },
 			{ u"installedPath"_q, preview.installedPath },
 		});
-
-	unloadAll();
-	loadConfig();
-	loadRecoveryState();
+	if (!preview.info.id.isEmpty()) {
+		if (const auto existing = findRecordIndex(preview.info.id); existing >= 0) {
+			unloadPluginRecord(_plugins[existing]);
+			removePluginRecords(preview.info.id);
+		}
+	}
 
 	QFile::remove(tempPath);
 	QFile::remove(rollbackBackupPath);
@@ -2680,10 +2682,7 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 				{ u"restorePath"_q, rollbackRestorePath },
 				{ u"reason"_q, reason },
 			});
-		unloadAll();
 		restoreRollbackBackup(reason);
-		loadConfig();
-		loadRecoveryState();
 		rescanNow();
 	};
 
@@ -2776,8 +2775,11 @@ bool Manager::installPackage(const QString &sourcePath, QString *error) {
 				{ u"targetPath"_q, targetPath },
 				{ u"plugin"_q, pluginInfoToJson(preview.info) },
 			});
+		loadPluginMetadataOnly(targetPath);
+		notifyStateChanged(u"plugin-installed-safe-mode"_q, preview.info.id, true, false);
 	} else {
-		scanPlugins();
+		loadPlugin(targetPath);
+		notifyStateChanged(u"plugin-installed"_q, preview.info.id, true, false);
 		if (!preview.info.id.isEmpty()) {
 			if (const auto record = findRecord(preview.info.id);
 				record && !record->state.error.trimmed().isEmpty()) {
@@ -2885,9 +2887,9 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 			{ u"plugin"_q, pluginInfoToJson(pluginInfo) },
 		});
 
-	unloadAll();
-	loadConfig();
-	loadRecoveryState();
+	if (record->state.loaded || record->instance || record->library) {
+		disablePlugin(normalizedId, QString());
+	}
 
 	if (packagePaths.isEmpty()) {
 		logEvent(
@@ -2973,7 +2975,8 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 	_storedSettings.remove(normalizedId);
 	saveConfig();
 	saveRecoveryState();
-	rescanNow();
+	removePluginRecords(normalizedId);
+	notifyStateChanged(u"plugin-removed"_q, normalizedId, true, false);
 	Logs::writeClient(QString::fromLatin1(
 		"[plugins] remove finished: %1 removed=%2 missing=%3")
 		.arg(normalizedId)
@@ -3405,15 +3408,27 @@ bool Manager::setEnabled(const QString &pluginId, bool enabled) {
 			{ u"pluginId"_q, pluginId },
 			{ u"enabled"_q, enabled },
 		});
-	startRecoveryOperation(
-		enabled ? u"enable"_q : u"disable"_q,
-		{ pluginId });
-	reload();
-	finishRecoveryOperation();
+	auto toggleError = QString();
+	const auto success = enabled
+		? enablePluginRecord(pluginId, &toggleError)
+		: ([&] {
+			disablePlugin(pluginId, QString());
+			return true;
+		})();
+	if (!success) {
+		logEvent(
+			u"plugin"_q,
+			u"toggle-failed"_q,
+			QJsonObject{
+				{ u"pluginId"_q, pluginId },
+				{ u"enabled"_q, enabled },
+				{ u"reason"_q, toggleError },
+			});
+	}
 	Logs::writeClient(QString::fromLatin1("[plugins] toggle applied: %1 -> %2")
 		.arg(pluginId)
 		.arg(enabled ? u"enabled"_q : u"disabled"_q));
-	return true;
+	return success;
 }
 
 CommandResult Manager::interceptOutgoingText(
@@ -5749,6 +5764,179 @@ void Manager::unloadAll() {
 	_plugins.clear();
 	_pluginIndexById.clear();
 	logEvent(u"unload"_q, u"finish"_q);
+}
+
+void Manager::rebuildPluginIndex() {
+	_pluginIndexById.clear();
+	for (auto i = 0; i != int(_plugins.size()); ++i) {
+		const auto id = _plugins[i].state.info.id.trimmed();
+		if (id.isEmpty() || _pluginIndexById.contains(id)) {
+			continue;
+		}
+		_pluginIndexById.insert(id, i);
+	}
+}
+
+void Manager::moveLastPluginRecordToIndex(int index) {
+	if (_plugins.empty()) {
+		_pluginIndexById.clear();
+		return;
+	}
+	const auto last = int(_plugins.size()) - 1;
+	if (index < 0 || index >= last) {
+		rebuildPluginIndex();
+		return;
+	}
+	auto moved = std::move(_plugins.back());
+	_plugins.pop_back();
+	_plugins.insert(_plugins.begin() + index, std::move(moved));
+	rebuildPluginIndex();
+}
+
+void Manager::unloadPluginRecord(PluginRecord &plugin) {
+	if (plugin.state.loaded && plugin.instance) {
+		startRecoveryOperation(
+			u"unload"_q,
+			{ plugin.state.info.id },
+			plugin.state.path);
+		unregisterPluginCommands(plugin.state.info.id);
+		unregisterPluginActions(plugin.state.info.id);
+		unregisterPluginPanels(plugin.state.info.id);
+		unregisterPluginSettingsPages(plugin.state.info.id);
+		unregisterPluginOutgoingInterceptors(plugin.state.info.id);
+		unregisterPluginMessageObservers(plugin.state.info.id);
+		unregisterPluginWindowHandlers(plugin.state.info.id);
+		unregisterPluginWindowWidgetHandlers(plugin.state.info.id);
+		unregisterPluginSessionHandlers(plugin.state.info.id);
+		_registeringPluginId = plugin.state.info.id;
+		try {
+			logEvent(
+				u"unload"_q,
+				u"onunload-call"_q,
+				QJsonObject{
+					{ u"pluginId"_q, plugin.state.info.id },
+					{ u"path"_q, plugin.state.path },
+					{ u"registrations"_q, registrationSummaryToJson(plugin) },
+				});
+			InvokePluginCallbackOrThrow([&] {
+				plugin.instance->onUnload();
+			});
+		} catch (...) {
+			plugin.state.error = u"onUnload failed: "_q + CurrentExceptionText();
+			logEvent(
+				u"unload"_q,
+				u"onunload-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, plugin.state.info.id },
+					{ u"reason"_q, plugin.state.error },
+				});
+		}
+		_registeringPluginId.clear();
+		finishRecoveryOperation();
+	} else {
+		unregisterPluginCommands(plugin.state.info.id);
+		unregisterPluginActions(plugin.state.info.id);
+		unregisterPluginPanels(plugin.state.info.id);
+		unregisterPluginSettingsPages(plugin.state.info.id);
+		unregisterPluginOutgoingInterceptors(plugin.state.info.id);
+		unregisterPluginMessageObservers(plugin.state.info.id);
+		unregisterPluginWindowHandlers(plugin.state.info.id);
+		unregisterPluginWindowWidgetHandlers(plugin.state.info.id);
+		unregisterPluginSessionHandlers(plugin.state.info.id);
+	}
+	plugin.commandIds.clear();
+	plugin.actionIds.clear();
+	plugin.panelIds.clear();
+	plugin.settingsPageIds.clear();
+	plugin.outgoingInterceptorIds.clear();
+	plugin.messageObserverIds.clear();
+	plugin.state.loaded = false;
+	plugin.instance.reset();
+	if (plugin.library) {
+		plugin.library->unload();
+		plugin.library.reset();
+	}
+}
+
+void Manager::removePluginRecords(const QString &pluginId) {
+	const auto normalized = pluginId.trimmed();
+	if (normalized.isEmpty()) {
+		return;
+	}
+	_plugins.erase(
+		std::remove_if(
+			_plugins.begin(),
+			_plugins.end(),
+			[&](const PluginRecord &record) {
+				return record.state.info.id.trimmed() == normalized;
+			}),
+		_plugins.end());
+	rebuildPluginIndex();
+}
+
+bool Manager::enablePluginRecord(const QString &pluginId, QString *error) {
+	const auto normalizedId = pluginId.trimmed();
+	auto index = findRecordIndex(normalizedId);
+	if (index < 0) {
+		if (error) {
+			*error = u"Plugin was not found."_q;
+		}
+		return false;
+	}
+	auto path = _plugins[index].state.path.trimmed();
+	if (path.isEmpty()) {
+		if (error) {
+			*error = u"Plugin package path is unavailable."_q;
+		}
+		return false;
+	}
+	_disabled.remove(normalizedId);
+	clearRecoveryDisabled(normalizedId);
+	saveConfig();
+	saveRecoveryState();
+
+	if (safeModeEnabled()) {
+		auto &record = _plugins[index];
+		record.state.enabled = true;
+		record.state.loaded = false;
+		record.state.error.clear();
+		syncRecoveryFlags(record.state);
+		notifyStateChanged(u"plugin-enabled-safe-mode"_q, normalizedId, true, false);
+		if (error) {
+			error->clear();
+		}
+		return true;
+	}
+
+	unloadPluginRecord(_plugins[index]);
+	_plugins.erase(_plugins.begin() + index);
+	rebuildPluginIndex();
+
+	loadPlugin(path);
+	const auto reloadedIndex = findRecordIndex(normalizedId);
+	if (reloadedIndex >= 0) {
+		moveLastPluginRecordToIndex(index);
+	}
+	const auto *record = findRecord(normalizedId);
+	const auto success = record
+		&& record->state.enabled
+		&& record->state.error.trimmed().isEmpty()
+		&& record->state.loaded;
+	if (error) {
+		if (success) {
+			error->clear();
+		} else if (record && !record->state.error.trimmed().isEmpty()) {
+			*error = record->state.error.trimmed();
+		} else {
+			*error = u"Could not load the plugin."_q;
+		}
+	}
+	notifyStateChanged(
+		success ? u"plugin-enabled"_q : u"plugin-enable-failed"_q,
+		normalizedId,
+		true,
+		!success);
+	return success;
 }
 
 int Manager::findRecordIndex(const QString &pluginId) const {

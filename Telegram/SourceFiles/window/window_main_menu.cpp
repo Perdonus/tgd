@@ -1080,7 +1080,7 @@ void MainMenu::setupMenu() {
 					Core::Restart();
 					return;
 				}
-				controller->showSettings(Settings::Advanced::Id());
+				controller->showSettings(Settings::Astrogram::Id());
 			});
 			const auto syncUpdateButton = [=] {
 				updateButton->setVisible(updateButtonVisible());
