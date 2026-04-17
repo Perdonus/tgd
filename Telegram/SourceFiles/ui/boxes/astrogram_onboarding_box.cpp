@@ -1583,20 +1583,20 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				addTitle(
 					RuEn("Кастомизируй меню Astrogram", "Customize Astrogram menus"),
 					RuEn(
-						"Это отдельный понятный шаг перед shell-режимами: сначала поймём, где живёт кастомизация меню, а потом уже выберем стартовую оболочку.",
-						"This is a separate clear step before shell modes: first you see where menu customization lives, and only then choose the starter shell mode."));
+						"Сначала разложим меню и боковую панель, а уже потом выберем стартовый shell-режим.",
+						"First lay out the menus and side panel, then choose the starter shell mode."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
 					InfoCardDescriptor{
-						.eyebrow = RuEn("Experimental -> Редактор бокового меню", "Experimental -> Side menu editor"),
+						.eyebrow = RuEn("Experimental -> Боковая панель", "Experimental -> Side panel"),
 						.title = RuEn(
-							"Живой editor боковой панели уже в клиенте",
-							"The live side panel editor is already inside the client"),
+							"Ручная раскладка боковой панели уже в клиенте",
+							"Manual side panel layout is already inside the client"),
 						.description = RuEn(
-							"Внутри Experimental можно не просто включать флажки: там уже есть живая настройка пунктов бокового меню, restore-tray, footer-текста, положения профильного блока и preview реального shell.",
-							"Inside Experimental you can do more than flip flags: it already exposes live side menu items, the restore tray, footer text, profile block placement and a preview of the real shell."),
-						.footer = RuEn("Кастомизация живёт в реальной поверхности клиента", "Customization lives in a real client surface"),
+							"Внутри Experimental можно менять порядок пунктов боковой панели руками, скрывать их и сразу видеть скрытые элементы отдельными таблетками внизу.",
+							"Inside Experimental you can reorder side panel items by hand, hide them, and immediately see hidden items as separate pills at the bottom."),
+						.footer = RuEn("Порядок, скрытие и возврат пунктов без лишнего визуального редактора", "Order, hide and restore items without an extra visual editor"),
 						.icon = &st::menuIconEdit,
 						.tone = OnboardingBadgeTone::Official,
 					});
@@ -1604,14 +1604,14 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddInfoCard(
 					container,
 					InfoCardDescriptor{
-						.eyebrow = RuEn("Visual editor меню / Preview shell", "Menu visual editor / Preview shell"),
+						.eyebrow = RuEn("Experimental -> Настройки оболочки", "Experimental -> Shell settings"),
 						.title = RuEn(
-							"Редакторы меню и preview связаны между собой",
-							"Menu editors and the preview are wired together"),
+							"Иммерсивная анимация и широкая оболочка настраиваются отдельно",
+							"Immersive animation and the wider shell are configured separately"),
 						.description = RuEn(
-							"Гайд не прячет дальше важные поверхности: из Experimental можно дойти до visual editor меню и глубже раскладывать layout уже после стартового пресета.",
-							"The guide does not hide the important surfaces further away: from Experimental you can reach the menu visual editor and keep refining the layout after the starter preset."),
-						.footer = RuEn("Сначала понятный старт, потом глубже manual-кастомизация", "Clear onboarding first, deeper manual customization next"),
+							"В том же разделе лежат expanded side panel, left-edge, widened settings и переключатель иммерсивной анимации, чтобы после гайда быстро дотюнить оболочку под себя.",
+							"In the same section you will find expanded side panel, left-edge, widened settings and the immersive animation switch, so after onboarding you can fine-tune the shell quickly."),
+						.footer = RuEn("Только реальные runtime-настройки без лишних preview-поверхностей", "Only real runtime settings without extra preview surfaces"),
 						.icon = &st::menuIconCustomize,
 						.tone = OnboardingBadgeTone::Trusted,
 					});
@@ -1621,12 +1621,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					InfoCardDescriptor{
 						.eyebrow = RuEn("Experimental shell features", "Experimental shell features"),
 						.title = RuEn(
-							"Wide, left-edge и immersive живут рядом с редактором",
-							"Wide, left-edge and immersive live next to the editor"),
+							"Пресеты живут в гайде, ручная доводка остаётся в настройках",
+							"Presets live in onboarding, manual tuning stays in settings"),
 						.description = RuEn(
-							"На следующем шаге ты выберешь shell-пресет, а в самом Experimental те же runtime-опции лежат рядом с редактором меню, чтобы всё дотюнивалось в одном месте.",
-							"On the next step you will choose a shell preset, and inside Experimental the same runtime options sit next to the menu editor so everything can be fine-tuned in one place."),
-						.footer = RuEn("Один раздел для layout, preview и оболочки", "One section for layout, preview and shell"),
+							"На следующем шаге ты выберешь стартовый shell-пресет прямо здесь, а внутри Experimental останутся только обычные нативные настройки без пресетов и без visual editor.",
+							"On the next step you will choose the starter shell preset right here, while Experimental keeps only regular native settings without presets and without a visual editor."),
+						.footer = RuEn("Гайд даёт старт, Experimental оставляет только нативную ручную настройку", "Onboarding gives the start, Experimental keeps only native manual tuning"),
 						.icon = &st::menuIconExperimental,
 						.tone = OnboardingBadgeTone::Pending,
 					});
@@ -1634,15 +1634,15 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddBadgePill(
 					container,
 					RuEn(
-						"side menu editor · preview shell · immersive animation",
-						"side menu editor · preview shell · immersive animation"),
+						"ручная раскладка меню · скрытые элементы снизу · иммерсивная анимация",
+						"manual menu layout · hidden pills below · immersive animation"),
 					OnboardingBadgeTone::Trusted,
 					style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
 				AddSecondaryNote(
 					container,
 					RuEn(
-						"Сейчас гайд только готовит тебе хороший старт. Точная ручная доводка меню остаётся в Experimental без скрытых жестов и без потери live-preview.",
-						"The guide only prepares a solid start right now. Precise manual menu tuning stays in Experimental without hidden gestures and without losing the live preview."),
+						"Сейчас гайд только даёт хороший старт. Точная ручная доводка меню и оболочки остаётся в Experimental без скрытых жестов и без отдельного visual editor.",
+						"The guide only gives you a solid start. Precise manual menu and shell tuning stays in Experimental without hidden gestures and without a separate visual editor."),
 					style::margins(st::boxRowPadding.left(), -2, st::boxRowPadding.right(), 4));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить к shell-режимам", "Continue to shell modes"), [=] {
@@ -1656,20 +1656,20 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				addTitle(
 					RuEn("Выбери shell-режим", "Choose a shell mode"),
 					RuEn(
-						"После шага про кастомизацию меню здесь выбирается стартовый shell-пресет, а точная ручная доводка остаётся в Experimental рядом с живым editor-ом.",
-						"After the menu customization step, this is where you choose the starter shell preset, while precise manual tuning remains in Experimental next to the live editor."));
+						"После шага про меню здесь выбирается стартовый shell-пресет, а точная ручная доводка остаётся в Experimental обычными нативными переключателями.",
+						"After the menu step, choose the starter shell preset here, while precise manual tuning stays in Experimental through regular native switches."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
 					InfoCardDescriptor{
 						.eyebrow = RuEn("Experimental", "Experimental"),
 						.title = RuEn(
-							"Редактор бокового меню и Visual editor меню",
-							"Side menu editor and Menu visual editor"),
+							"Ручная настройка боковой панели",
+							"Manual side panel tuning"),
 						.description = RuEn(
-							"Внутри Experimental уже лежат реальные Редактор бокового меню, Visual editor меню и Preview shell. Гайд не редактирует их за тебя, а просто доводит до хорошего старта перед ручной настройкой.",
-							"Experimental already contains the real Side menu editor, Menu visual editor and Preview shell. The guide does not edit them for you, it simply gets you to a good starting point before manual tuning."),
-						.footer = RuEn("Experimental -> Редактор бокового меню", "Experimental -> Side menu editor"),
+							"Внутри Experimental останутся только нативные настройки боковой панели: порядок, скрытие, разделители, профильный блок и нижние таблетки для скрытых пунктов.",
+							"Inside Experimental only the native side panel settings remain: ordering, hiding, separators, profile block placement and bottom pills for hidden items."),
+						.footer = RuEn("Experimental -> Боковая панель", "Experimental -> Side panel"),
 						.icon = &st::menuIconEdit,
 						.tone = OnboardingBadgeTone::Official,
 					});
@@ -1682,8 +1682,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Expanded side panel, widened settings, left-edge и immersive animation",
 							"Expanded side panel, widened settings, left-edge and immersive animation"),
 						.description = RuEn(
-							"Пресеты ниже заранее включают те же runtime-переключатели, которые теперь вынесены в верхний блок Experimental и дальше дотюниваются уже по живому shell и preview.",
-							"The presets below pre-apply the same runtime switches that are now surfaced in the top Experimental block and can then be fine-tuned against the live shell and preview."),
+							"Пресеты ниже заранее включают те же runtime-переключатели, которые потом можно дотюнить вручную в Experimental, если захочется больше или спокойнее.",
+							"The presets below pre-apply the same runtime switches that you can later fine-tune by hand in Experimental if you want a stronger or calmer shell."),
 						.footer = RuEn("Экспериментальные режимы оболочки / Experimental shell modes", "Experimental shell modes"),
 						.icon = &st::menuIconExperimental,
 						.tone = OnboardingBadgeTone::Pending,
@@ -1761,14 +1761,14 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddInfoCard(
 					container,
 					InfoCardDescriptor{
-						.eyebrow = RuEn("Visual editor меню / Preview shell", "Menu visual editor / Preview shell"),
+						.eyebrow = RuEn("После гайда / Manual tuning", "After onboarding / Manual tuning"),
 						.title = RuEn(
-							"Сначала shell, потом deeper editor surfaces",
-							"Shell first, then deeper editor surfaces"),
+							"После гайда остаётся только нативная ручная настройка",
+							"After onboarding only native manual tuning remains"),
 						.description = RuEn(
-							"Этот гайд специально доводит сначала до бокового меню. Дальше внутри Experimental уже ждут Visual editor меню, Preview shell и Next editor surfaces.",
-							"This guide intentionally gets you to the side menu first. After that, Experimental already exposes Menu visual editor, Preview shell and Next editor surfaces."),
-						.footer = RuEn("Visual editor меню / Preview shell", "Menu visual editor / Preview shell"),
+							"Этот гайд специально убирает лишнюю сложность на старте: после него в Experimental остаются обычные нативные настройки оболочки и боковой панели без отдельного visual editor.",
+							"This guide intentionally removes extra complexity at the start: after it, Experimental keeps only regular native shell and side panel settings without a separate visual editor."),
+						.footer = RuEn("Нативные настройки без visual editor", "Native settings without a visual editor"),
 						.icon = &st::menuIconCustomize,
 						.tone = OnboardingBadgeTone::Trusted,
 					});

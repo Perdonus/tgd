@@ -92,6 +92,8 @@ private:
 	[[nodiscard]] int profileBlockTop() const;
 	[[nodiscard]] int desiredMenuWidth() const;
 	[[nodiscard]] int visibleMenuWidthForImmersive() const;
+	[[nodiscard]] int desiredImmersiveShift(int menuWidth) const;
+	void animateImmersiveShiftTo(int target);
 	void applyImmersiveShift();
 	void resetImmersiveShift();
 	void toggleAccounts();

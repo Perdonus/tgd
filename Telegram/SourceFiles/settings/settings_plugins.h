@@ -41,6 +41,7 @@ private:
 	not_null<Ui::VerticalLayout*> _list;
 	bool _rebuildScheduled = false;
 	bool _listRefreshPending = true;
+	int _lastRenderedPluginCount = 0;
 	rpl::lifetime _stateChangesLifetime;
 };
 

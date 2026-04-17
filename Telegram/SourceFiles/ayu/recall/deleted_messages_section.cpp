@@ -391,9 +391,9 @@ struct DeletedMessagePresentation {
 	case DeletedSnapshotKind::Service:
 		return UiText("Deleted service event", "Удалённое служебное событие");
 	case DeletedSnapshotKind::Media:
-		return UiText("Deleted media", "Удалённое медиа");
+		return QString();
 	case DeletedSnapshotKind::Text:
-		return UiText("Deleted message", "Удалённое сообщение");
+		return QString();
 	}
 	Unexpected("Snapshot kind.");
 }
@@ -809,6 +809,7 @@ void SaveRememberedState(
 [[nodiscard]] QString MetaText(
 		const AyuMessages::MessageSnapshot &snapshot,
 		DeletedJumpState jumpState) {
+	Q_UNUSED(jumpState);
 	const auto original = TimeLabel(DisplayTimestamp(snapshot));
 	auto result = original;
 	if (snapshot.editDate > 0
@@ -817,7 +818,7 @@ void SaveRememberedState(
 			original,
 			TimeLabel(snapshot.editDate));
 	}
-	return result + u" · "_q + JumpStateText(jumpState);
+	return result;
 }
 
 [[nodiscard]] QString JumpTooltipText(
@@ -1729,10 +1730,13 @@ DeletedMessageRow::DeletedMessageRow(
 			_senderSt);
 		_sender->setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
-	_state = Ui::CreateChild<Ui::FlatLabel>(
-		this,
-		rpl::single(_presentation.state),
-		_stateSt);
+	if (!_presentation.state.isEmpty()) {
+		_state = Ui::CreateChild<Ui::FlatLabel>(
+			this,
+			rpl::single(_presentation.state),
+			_stateSt);
+		_state->setAttribute(Qt::WA_TransparentForMouseEvents);
+	}
 	_text = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		rpl::single(_presentation.text),
@@ -1742,7 +1746,6 @@ DeletedMessageRow::DeletedMessageRow(
 		rpl::single(_presentation.meta),
 		_metaSt);
 
-	_state->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_text->setAttribute(Qt::WA_TransparentForMouseEvents);
 	_meta->setAttribute(Qt::WA_TransparentForMouseEvents);
 	setCursor(_interactive ? style::cur_pointer : style::cur_default);
@@ -1825,7 +1828,9 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 	const auto senderWidth = _sender
 		? std::min(_sender->naturalWidth(), maxTextWidth)
 		: 0;
-	const auto stateWidth = std::min(_state->naturalWidth(), maxTextWidth);
+	const auto stateWidth = _state
+		? std::min(_state->naturalWidth(), maxTextWidth)
+		: 0;
 	const auto textNatural = std::min(_text->naturalWidth(), maxTextWidth);
 	const auto metaWidth = std::min(_meta->naturalWidth(), maxTextWidth);
 	const auto contentWidth = std::max(
@@ -1835,7 +1840,9 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 	if (_sender) {
 		_sender->resizeToWidth(contentWidth);
 	}
-	_state->resizeToWidth(contentWidth);
+	if (_state) {
+		_state->resizeToWidth(contentWidth);
+	}
 	_text->resizeToWidth(contentWidth);
 	_meta->resizeToWidth(metaWidth);
 
@@ -1855,8 +1862,10 @@ void DeletedMessageRow::layoutChildren(int newWidth) {
 		_sender->moveToLeft(left, top);
 		top += _sender->height() + 2;
 	}
-	_state->moveToLeft(left, top);
-	top += _state->height() + kBubbleHeaderSkip;
+	if (_state) {
+		_state->moveToLeft(left, top);
+		top += _state->height() + kBubbleHeaderSkip;
+	}
 	_text->moveToLeft(left, top);
 	top += _text->height() + kBubbleInnerSkip;
 	_meta->moveToLeft(
@@ -2077,8 +2086,6 @@ DeletedMessagesWidget::DeletedMessagesWidget(
 		nullptr);
 	_topBar->move(0, 0);
 	_topBar->show();
-	_scopeBar->show();
-	_footerBar->show();
 
 	_topBarShadow->raise();
 	controller->adaptive().value(
@@ -2194,7 +2201,7 @@ void DeletedMessagesWidget::paintEvent(QPaintEvent *e) {
 		return;
 	}
 	const auto aboveHeight = _topBar->height()
-		+ (_scopeBar ? _scopeBar->height() : 0);
+		+ ((_scopeBar && _scopeBar->isVisible()) ? _scopeBar->height() : 0);
 	const auto bg = e->rect().intersected(
 		QRect(0, aboveHeight, width(), height() - aboveHeight));
 	SectionWidget::PaintBackground(controller(), _theme.get(), this, bg);
@@ -2219,7 +2226,8 @@ void DeletedMessagesWidget::doSetInnerFocus() {
 void DeletedMessagesWidget::updateAdaptiveLayout() {
 	_topBarShadow->moveToLeft(
 		controller()->adaptive().isOneColumn() ? 0 : st::lineWidth,
-		_topBar->height() + (_scopeBar ? _scopeBar->height() : 0));
+		_topBar->height()
+			+ ((_scopeBar && _scopeBar->isVisible()) ? _scopeBar->height() : 0));
 }
 
 void DeletedMessagesWidget::recountChatWidth() {
@@ -2236,17 +2244,17 @@ void DeletedMessagesWidget::updateControlsGeometry() {
 		: base::make_optional(_scroll->scrollTop() + topDelta());
 
 	_topBar->resizeToWidth(contentWidth);
-	const auto scopeHeight = _scopeBar
+	const auto scopeHeight = (_scopeBar && _scopeBar->isVisible())
 		? _scopeBar->resizeGetHeight(contentWidth)
 		: 0;
-	if (_scopeBar) {
+	if (_scopeBar && _scopeBar->isVisible()) {
 		_scopeBar->resize(contentWidth, scopeHeight);
 		_scopeBar->move(0, _topBar->height());
 	}
-	const auto footerHeight = _footerBar
+	const auto footerHeight = (_footerBar && _footerBar->isVisible())
 		? _footerBar->resizeGetHeight(contentWidth)
 		: 0;
-	if (_footerBar) {
+	if (_footerBar && _footerBar->isVisible()) {
 		_footerBar->resize(contentWidth, footerHeight);
 		_footerBar->move(0, std::max(_topBar->height() + scopeHeight, height() - footerHeight));
 	}
@@ -2283,7 +2291,7 @@ void DeletedMessagesWidget::updateControlsGeometry() {
 }
 
 void DeletedMessagesWidget::refreshScopeBar() {
-	if (_scopeBar == nullptr) {
+	if ((_scopeBar == nullptr) || !_scopeBar->isVisible()) {
 		refreshFooterBar();
 		return;
 	}
@@ -2315,7 +2323,7 @@ void DeletedMessagesWidget::refreshScopeBar() {
 }
 
 void DeletedMessagesWidget::refreshFooterBar() {
-	if (_footerBar == nullptr) {
+	if ((_footerBar == nullptr) || !_footerBar->isVisible()) {
 		return;
 	}
 	_footerBar->setContent(
@@ -2400,18 +2408,7 @@ void DeletedMessagesWidget::rebuildContent() {
 	_daySummaries = BuildDaySummaries(_messages);
 	_topBar->setCustomTitle(TitleText(int(_messages.size()), _totalMessages));
 	_content->clear();
-	Ui::AddSkip(_content, st::defaultVerticalListSkip);
-
-	_content->add(
-		object_ptr<DeletedMessagesIntroCard>(
-			_content,
-			_thread,
-			int(_messages.size()),
-			_totalMessages,
-			_oldestTimestamp,
-			_newestTimestamp,
-			_searchQuery));
-	Ui::AddSkip(_content, st::defaultVerticalListSkip);
+	Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 
 	if (_messages.empty()) {
 		const auto empty = _content->add(
@@ -2441,18 +2438,9 @@ void DeletedMessagesWidget::rebuildContent() {
 		const auto day = QDateTime::fromSecsSinceEpoch(stamp).toLocalTime().date();
 		if (day != currentDay) {
 			currentDay = day;
-			Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
-			auto summary = DeletedMessagesDaySummary();
-			if (const auto i = _daySummaries.find(DayKey(stamp)); i != _daySummaries.end()) {
-				summary = i->second;
+			if (!_rows.empty()) {
+				Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 			}
-			_content->add(
-				object_ptr<DeletedMessagesDayBadge>(
-					_content,
-					stamp,
-					summary,
-					!_searchQuery.isEmpty()));
-			Ui::AddSkip(_content, st::defaultVerticalListSkip / 2);
 		}
 		const auto sender = ResolveSenderName(message, _thread);
 		const auto outgoing = IsOutgoing(message, _thread);

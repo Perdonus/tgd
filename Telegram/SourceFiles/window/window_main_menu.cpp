@@ -513,15 +513,7 @@ MainMenu::MainMenu(
 
 	setupSwipe();
 	if (_immersiveAnimation) {
-		_immersiveShiftAnimation.start([=] {
-			if (_immersiveGeometryDriven) {
-				return;
-			}
-			const auto target = std::min(desiredMenuWidth() / 6, 44);
-			const auto progress = _immersiveShiftAnimation.value(1.);
-			_immersiveFallbackShift = int((target * progress) + 0.5);
-			applyImmersiveShift();
-		}, 0., 1., st::slideWrapDuration);
+		animateImmersiveShiftTo(desiredImmersiveShift(desiredMenuWidth()));
 	}
 }
 
@@ -579,9 +571,14 @@ void MainMenu::reloadCustomizationFromDisk() {
 		resetImmersiveShift();
 	} else {
 		if (!_immersiveGeometryDriven) {
-			_immersiveFallbackShift = _showFinished.current()
-				? std::min(width() / 6, 44)
+			const auto target = _showFinished.current()
+				? desiredImmersiveShift(width())
 				: 0;
+			if (_showFinished.current()) {
+				animateImmersiveShiftTo(target);
+			} else {
+				_immersiveFallbackShift = target;
+			}
 		}
 		applyImmersiveShift();
 	}
@@ -643,6 +640,26 @@ int MainMenu::visibleMenuWidthForImmersive() const {
 	return std::clamp(width() + left, 0, width());
 }
 
+int MainMenu::desiredImmersiveShift(int menuWidth) const {
+	if (!_immersiveAnimation || (menuWidth <= 0)) {
+		return 0;
+	}
+	const auto proportional = std::max(menuWidth / 4, menuWidth * 28 / 100);
+	return std::clamp(proportional, 0, 120);
+}
+
+void MainMenu::animateImmersiveShiftTo(int target) {
+	target = std::max(target, 0);
+	_immersiveShiftAnimation.start([=] {
+		if (_immersiveGeometryDriven) {
+			return;
+		}
+		const auto progress = _immersiveShiftAnimation.value(1.);
+		_immersiveFallbackShift = int((target * progress) + 0.5);
+		applyImmersiveShift();
+	}, _immersiveFallbackShift, target, st::slideWrapDuration);
+}
+
 void MainMenu::applyImmersiveShift() {
 	const auto main = _controller->widget()->sessionContent();
 	if (!main) {
@@ -651,7 +668,7 @@ void MainMenu::applyImmersiveShift() {
 	auto shift = 0;
 	if (_immersiveAnimation) {
 		shift = _immersiveGeometryDriven
-			? std::min(visibleMenuWidthForImmersive() / 6, 44)
+			? desiredImmersiveShift(visibleMenuWidthForImmersive())
 			: _immersiveFallbackShift;
 	}
 	auto geometry = main->geometry();
@@ -862,8 +879,7 @@ void MainMenu::showFinished() {
 		Core::App().settings().mainMenuAccountsShown(),
 		false);
 	if (!_immersiveGeometryDriven) {
-		_immersiveFallbackShift = std::min(width() / 6, 44);
-		applyImmersiveShift();
+		animateImmersiveShiftTo(desiredImmersiveShift(width()));
 	}
 }
 

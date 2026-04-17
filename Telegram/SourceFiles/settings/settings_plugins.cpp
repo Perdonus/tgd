@@ -1811,12 +1811,20 @@ public:
 
 private:
 	void rebuild() {
-		_content->clear();
-		Ui::AddDivider(_content);
-		Ui::AddSkip(_content);
-
 		const auto state = LookupPluginState(_pluginId);
 		if (!state) {
+			if (_lastKnownState && !_missingStateRetryScheduled) {
+				_missingStateRetryScheduled = true;
+				QTimer::singleShot(150, this, [=] {
+					_missingStateRetryScheduled = false;
+					rebuild();
+				});
+				return;
+			}
+			_lastKnownState.reset();
+			_content->clear();
+			Ui::AddDivider(_content);
+			Ui::AddSkip(_content);
 			_title = PluginUiText(u"Plugin"_q, u"Плагин"_q);
 			Ui::AddDividerText(
 				_content,
@@ -1827,6 +1835,10 @@ private:
 			return;
 		}
 
+		_lastKnownState = *state;
+		_content->clear();
+		Ui::AddDivider(_content);
+		Ui::AddSkip(_content);
 		_title = FormatPluginTitle(*state);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
 		const auto refreshDetails = [=] {
@@ -1957,6 +1969,8 @@ private:
 	QString _title;
 	rpl::lifetime _stateChangesLifetime;
 	bool _rebuildScheduled = false;
+	bool _missingStateRetryScheduled = false;
+	std::optional<::Plugins::PluginState> _lastKnownState;
 };
 
 struct PluginDetailsFactory final
@@ -2080,7 +2094,6 @@ void Plugins::refreshPending() {
 
 void Plugins::rebuildList() {
 	_listRefreshPending = false;
-	_list->clear();
 	const auto scheduleRefresh = crl::guard(this, [=] {
 		Logs::writeClient(u"[plugins-ui] scheduled list refresh"_q);
 		_listRefreshPending = true;
@@ -2101,7 +2114,16 @@ void Plugins::rebuildList() {
 		"[plugins-ui] rebuild list: safeMode=%1 pluginCount=%2")
 		.arg(Core::App().plugins().safeModeEnabled() ? u"true"_q : u"false"_q)
 		.arg(plugins.size()));
+	if (plugins.empty() && (_lastRenderedPluginCount > 0)) {
+		Logs::writeClient(
+			u"[plugins-ui] transient empty plugin list observed, keeping previous cards"_q);
+		_listRefreshPending = true;
+		scheduleRebuildList(150);
+		return;
+	}
+	_list->clear();
 	if (plugins.empty()) {
+		_lastRenderedPluginCount = 0;
 		Ui::AddDividerText(
 			_list,
 			rpl::single(PluginUiText(
@@ -2161,6 +2183,7 @@ void Plugins::rebuildList() {
 			state,
 			scheduleRefresh);
 	}
+	_lastRenderedPluginCount = int(plugins.size());
 
 	Ui::ResizeFitChild(this, _content);
 }
