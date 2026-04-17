@@ -181,15 +181,46 @@ QString PluginSourceBadgeText(const Plugins::PackagePreviewState &preview) {
 			u"Неподтверждённый источник"_q);
 }
 
+QString KnownPluginSourceChannelTitle(int64 channelId) {
+	switch (channelId) {
+	case -1003814280064LL: return u"AstroPlugins"_q;
+	case -1003641835839LL: return u"Astrogram"_q;
+	default: return QString();
+	}
+}
+
+QString KnownPluginSourceChannelUsername(int64 channelId) {
+	switch (channelId) {
+	case -1003814280064LL: return u"astroplugin"_q;
+	case -1003641835839LL: return u"astrogramchannel"_q;
+	default: return QString();
+	}
+}
+
+QString PluginSourceChannelLabel(int64 channelId) {
+	const auto title = KnownPluginSourceChannelTitle(channelId).trimmed();
+	const auto username = KnownPluginSourceChannelUsername(channelId).trimmed();
+	if (!title.isEmpty() && !username.isEmpty()) {
+		return title + u" · @"_q + username;
+	}
+	if (!title.isEmpty()) {
+		return title;
+	}
+	if (!username.isEmpty()) {
+		return u"@"_q + username;
+	}
+	return QString::number(channelId);
+}
+
 QString PluginSourceBadgeDetails(const Plugins::PackagePreviewState &preview) {
 	const auto addOrigin = [&](QString text) {
 		if (!preview.sourceChannelId || (preview.sourceMessageId <= 0)) {
 			return text;
 		}
 		return text + u"\n"_q + PluginUiText(
-			u"Source: channel %1, post %2."_q,
-			u"Источник: канал %1, пост %2."_q).arg(
-				QString::number(preview.sourceChannelId),
+			u"Source: %1 · post %2."_q,
+			u"Источник: %1 · пост %2."_q).arg(
+				PluginSourceChannelLabel(preview.sourceChannelId),
 				QString::number(preview.sourceMessageId));
 	};
 	if (preview.sourceVerified) {

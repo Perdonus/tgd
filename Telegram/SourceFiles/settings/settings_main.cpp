@@ -98,39 +98,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 }
 
 [[nodiscard]] rpl::producer<QString> AdvancedLabelWithUpdateBadge() {
-	auto checker = Core::UpdateChecker();
-	const auto makeLabel = []() -> QString {
-		const auto checker = Core::UpdateChecker();
-		const auto ready = !Core::UpdaterDisabled()
-			&& (checker.state() == Core::UpdateChecker::State::Ready);
-		const auto info = checker.releaseInfo();
-		const auto versionText = !info.versionText.isEmpty()
-			? info.versionText
-			: (info.version > 0)
-			? Core::FormatVersionWithBuild(info.version)
-			: QString();
-		const auto appendVersion = [&](QString label) {
-			return versionText.isEmpty()
-				? label
-				: (label + u" · "_q + versionText);
-		};
-		return (ready
-			|| info.available
-			|| info.changelogLoading
-			|| !info.changelog.isEmpty()
-			|| info.changelogFailed)
-			? appendVersion(RuEn("Расширенные • Обновление доступно", "Advanced • Update available"))
-			: tr::lng_settings_advanced(tr::now);
-	};
-	return rpl::merge(
-		rpl::single(rpl::empty_value()),
-		checker.ready(),
-		checker.checking(),
-		checker.isLatest(),
-		checker.failed(),
-		checker.progress() | rpl::to_empty,
-		checker.releaseInfoChanged()
-	) | rpl::map(makeLabel);
+	return tr::lng_settings_advanced();
 }
 
 [[nodiscard]] rpl::producer<QString> UpdateSectionLabel() {
