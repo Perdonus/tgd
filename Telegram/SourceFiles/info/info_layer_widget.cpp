@@ -41,7 +41,7 @@ namespace {
 		bool settingsContent) {
 	const auto limit = std::max(0, parentWidth - 2 * st::infoMinimalLayerMargin);
 	auto desired = st::infoDesiredWidth;
-	if (settingsContent && Settings::LoadShellModePreferences().wideSettingsPane) {
+	if (settingsContent && ::Settings::LoadShellModePreferences().wideSettingsPane) {
 		desired = std::max(desired, 520);
 	}
 	return std::min(limit, desired);
@@ -306,7 +306,7 @@ QRect LayerWidget::countGeometry(int newWidth) {
 	const auto &parentSize = parentWidget()->size();
 	const auto windowWidth = parentSize.width();
 	const auto windowHeight = parentSize.height();
-	const auto shellModes = Settings::LoadShellModePreferences();
+	const auto shellModes = ::Settings::LoadShellModePreferences();
 	const auto leftEdgeSettings = shellModes.leftEdgeSettings
 		&& IsSettingsLayerContent(_contentWrap);
 	const auto newLeft = leftEdgeSettings
