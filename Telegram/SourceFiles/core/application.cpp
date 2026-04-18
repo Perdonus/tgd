@@ -94,11 +94,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QStandardPaths>
 #include <QtCore/QMimeDatabase>
+#include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 
 #include <ksandbox.h>
+
+#include <algorithm>
+#include <memory>
 
 namespace Core {
 namespace {
@@ -106,8 +110,115 @@ namespace {
 constexpr auto kQuitPreventTimeoutMs = crl::time(1500);
 constexpr auto kAutoLockTimeoutLateMs = crl::time(3000);
 constexpr auto kClearEmojiImageSourceTimeout = 10 * crl::time(1000);
+constexpr auto kDeferredPluginStartMs = 200;
+constexpr auto kDeferredPluginStartRetryMs = 250;
+constexpr auto kDeferredPluginStartMaxAttempts = 20;
+constexpr auto kStartupWindowRecoveryDelayMs = 1400;
+constexpr auto kStartupWindowRecoveryFollowupMs = 450;
+constexpr auto kStartupWindowWatchdogPeriodMs = crl::time(1000);
+constexpr auto kStartupWindowWatchdogMaxAttempts = 90;
+constexpr auto kStartupWindowRecoveryMargin = 48;
 
 LaunchState GlobalLaunchState/* = LaunchState::Running*/;
+
+[[nodiscard]] QScreen *ChooseWindowScreen(not_null<::MainWindow*> window) {
+	if (const auto handle = window->windowHandle()) {
+		if (const auto screen = handle->screen()) {
+			return screen;
+		}
+	}
+	if (const auto screen = window->screen()) {
+		return screen;
+	}
+	const auto frame = window->frameGeometry();
+	if (frame.isValid()) {
+		if (const auto screen = QGuiApplication::screenAt(frame.center())) {
+			return screen;
+		}
+	}
+	return QGuiApplication::primaryScreen();
+}
+
+[[nodiscard]] QRect RecoverableWindowRect(
+		not_null<::MainWindow*> window,
+		const QRect &available) {
+	auto size = window->frameGeometry().size();
+	if (size.width() < st::windowMinWidth) {
+		size.setWidth(st::windowMinWidth);
+	}
+	if (size.height() < st::windowMinHeight) {
+		size.setHeight(st::windowMinHeight);
+	}
+	if (available.isValid()) {
+		size.setWidth(std::min(size.width(), available.width()));
+		size.setHeight(std::min(size.height(), available.height()));
+		const auto x = available.x()
+			+ std::max(0, (available.width() - size.width()) / 2);
+		const auto y = available.y()
+			+ std::max(0, (available.height() - size.height()) / 2);
+		return QRect(QPoint(x, y), size);
+	}
+	return QRect(window->pos(), size);
+}
+
+[[nodiscard]] bool StartupWindowLooksReady(
+		not_null<Window::Controller*> controller) {
+	const auto window = controller->widget();
+	if (!window->testAttribute(Qt::WA_WState_Created)) {
+		return false;
+	}
+	if (!window->isVisible()) {
+		return false;
+	}
+	if (window->windowState() & Qt::WindowMinimized) {
+		return false;
+	}
+	const auto screen = ChooseWindowScreen(window);
+	if (!screen) {
+		return true;
+	}
+	const auto available = screen->availableGeometry().adjusted(
+		-kStartupWindowRecoveryMargin,
+		-kStartupWindowRecoveryMargin,
+		kStartupWindowRecoveryMargin,
+		kStartupWindowRecoveryMargin);
+	const auto frame = window->frameGeometry();
+	return frame.isValid() && frame.intersects(available);
+}
+
+[[nodiscard]] bool RecoverPrimaryWindowVisibility(
+		not_null<Window::Controller*> controller) {
+	const auto window = controller->widget();
+	const auto screen = ChooseWindowScreen(window);
+	const auto available = screen ? screen->availableGeometry() : QRect();
+	const auto frame = window->frameGeometry();
+	const auto visible = window->isVisible();
+	const auto minimized = bool(window->windowState() & Qt::WindowMinimized);
+	const auto intersecting = !available.isValid()
+		|| (frame.isValid()
+			&& frame.intersects(available.adjusted(
+				-kStartupWindowRecoveryMargin,
+				-kStartupWindowRecoveryMargin,
+				kStartupWindowRecoveryMargin,
+				kStartupWindowRecoveryMargin)));
+	const auto tooSmall = frame.width() < st::windowMinWidth
+		|| frame.height() < st::windowMinHeight;
+	const auto needsRecovery = !visible || minimized || !intersecting || tooSmall;
+	if (!needsRecovery) {
+		return false;
+	}
+	DEBUG_LOG(("Application Info: recovering primary window visibility."));
+	window->setWindowState(window->windowState() & ~Qt::WindowMinimized);
+	if (available.isValid() && (!intersecting || tooSmall)) {
+		window->setGeometry(RecoverableWindowRect(window, available));
+	}
+	window->setWindowOpacity(1.0);
+	window->showNormal();
+	window->show();
+	window->raise();
+	window->activateWindow();
+	return true;
+}
 
 void SetCrashAnnotationsGL() {
 #ifdef DESKTOP_APP_USE_ANGLE
@@ -263,7 +374,6 @@ void Application::run() {
 	_notifications = std::make_unique<Window::Notifications::System>();
 
 	startLocalStorage();
-	_plugins->start();
 
 	style::SetCustomFont(settings().customFontFamily());
 	style::internal::StartFonts();
@@ -420,6 +530,64 @@ void Application::run() {
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);
+	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [this] {
+		if (!_lastActivePrimaryWindow) {
+			return;
+		}
+		if (RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow)) {
+			QTimer::singleShot(kStartupWindowRecoveryFollowupMs, this, [this] {
+				if (_lastActivePrimaryWindow) {
+					RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow);
+				}
+			});
+		}
+	});
+	const auto startupWindowWatchdog = std::make_shared<Fn<void(int)>>();
+	*startupWindowWatchdog = [this, startupWindowWatchdog](int attempt) {
+		if (!_lastActivePrimaryWindow
+			|| attempt >= kStartupWindowWatchdogMaxAttempts) {
+			return;
+		}
+		const auto sessionReady = _domain->started()
+			&& _domain->active().sessionExists();
+		if (!StartupWindowLooksReady(_lastActivePrimaryWindow)) {
+			RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow);
+		}
+		if (sessionReady && StartupWindowLooksReady(_lastActivePrimaryWindow)) {
+			return;
+		}
+		QTimer::singleShot(
+			kStartupWindowWatchdogPeriodMs,
+			this,
+			[startupWindowWatchdog, attempt] {
+				(*startupWindowWatchdog)(attempt + 1);
+			});
+	};
+	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [startupWindowWatchdog] {
+		(*startupWindowWatchdog)(0);
+	});
+	const auto deferredPluginStart = std::make_shared<Fn<void(int)>>();
+	*deferredPluginStart = [this, deferredPluginStart](int attempt) {
+		if (!_lastActivePrimaryWindow) {
+			return;
+		}
+		if (StartupWindowLooksReady(_lastActivePrimaryWindow)) {
+			DEBUG_LOG(("Application Info: starting plugins after first live window show..."));
+			_plugins->start();
+			return;
+		}
+		if (attempt >= kDeferredPluginStartMaxAttempts) {
+			DEBUG_LOG(("Application Info: plugin start reached retry limit, forcing startup recovery and skipping plugin startup for this session."));
+			RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow);
+			return;
+		}
+		QTimer::singleShot(kDeferredPluginStartRetryMs, this, [deferredPluginStart, attempt] {
+			(*deferredPluginStart)(attempt + 1);
+		});
+	};
+	QTimer::singleShot(kDeferredPluginStartMs, this, [deferredPluginStart] {
+		(*deferredPluginStart)(0);
+	});
 }
 
 void Application::autoRegisterUrlScheme() {

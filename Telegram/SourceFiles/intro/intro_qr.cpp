@@ -442,6 +442,7 @@ void QrWidget::handleTokenResult(const MTPauth_LoginToken &result) {
 void QrWidget::showTokenError(const MTP::Error &error) {
 	_requestId = 0;
 	if (error.type() == u"SESSION_PASSWORD_NEEDED"_q) {
+		LOG(("Auth flow: QR sign-in requires cloud password, requesting password state."));
 		sendCheckPasswordRequest();
 	} else if (base::take(_forceRefresh)) {
 		refreshCode();
@@ -493,7 +494,13 @@ void QrWidget::sendCheckPasswordRequest() {
 				}));
 				return;
 			}
-			goReplace<PasswordCheckWidget>(Animate::Forward);
+			LOG(("Auth flow: QR password state loaded, queueing PasswordCheckWidget transition."));
+			const auto weak = base::make_weak(this);
+			crl::on_main(this, [weak] {
+				if (const auto strong = weak.get()) {
+					strong->goReplace<PasswordCheckWidget>(Animate::Forward);
+				}
+			});
 		});
 	}).fail([=](const MTP::Error &error) {
 		showTokenError(error);

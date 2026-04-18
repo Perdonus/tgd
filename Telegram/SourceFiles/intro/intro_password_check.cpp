@@ -38,6 +38,9 @@ PasswordCheckWidget::PasswordCheckWidget(
 , _toRecover(this, tr::lng_signin_recover(tr::now))
 , _toPassword(this, tr::lng_signin_try_password(tr::now)) {
 	Expects(_passwordState.hasPassword);
+	LOG(("Auth flow: PasswordCheckWidget constructed, hasRecovery=%1 hintEmpty=%2")
+		.arg(_passwordState.hasRecovery ? 1 : 0)
+		.arg(_passwordState.hint.isEmpty() ? 1 : 0));
 
 	Lang::Updated(
 	) | rpl::on_next([=] {
@@ -113,6 +116,9 @@ void PasswordCheckWidget::setInnerFocus() {
 }
 
 void PasswordCheckWidget::activate() {
+	LOG(("Auth flow: PasswordCheckWidget activate, pwdHidden=%1 codeHidden=%2")
+		.arg(_pwdField->isHidden() ? 1 : 0)
+		.arg(_codeField->isHidden() ? 1 : 0));
 	if (_pwdField->isHidden() && _codeField->isHidden()) {
 		Step::activate();
 		_pwdField->show();
@@ -187,6 +193,7 @@ void PasswordCheckWidget::checkPasswordHash() {
 }
 
 void PasswordCheckWidget::requestPasswordData() {
+	LOG(("Auth flow: PasswordCheckWidget requesting fresh cloud password state."));
 	api().request(base::take(_sentRequest)).cancel();
 	_sentRequest = api().request(
 		MTPaccount_GetPassword()
@@ -201,6 +208,7 @@ void PasswordCheckWidget::requestPasswordData() {
 }
 
 void PasswordCheckWidget::passwordChecked() {
+	LOG(("Auth flow: PasswordCheckWidget submitting cloud password hash."));
 	const auto check = Core::ComputeCloudPasswordCheck(
 		_passwordState.mtp.request,
 		_passwordHash);

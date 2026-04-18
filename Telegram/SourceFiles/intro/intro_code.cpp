@@ -285,6 +285,7 @@ void CodeWidget::codeSubmitFail(const MTP::Error &error) {
 	} else if (err == u"PHONE_CODE_EMPTY"_q || err == u"PHONE_CODE_INVALID"_q) {
 		showCodeError(tr::lng_bad_code());
 	} else if (err == u"SESSION_PASSWORD_NEEDED"_q) {
+		LOG(("Auth flow: code sign-in requires cloud password, requesting password state."));
 		_checkRequestTimer.callEach(1000);
 		_sentRequest = api().request(MTPaccount_GetPassword(
 		)).done([=](const MTPaccount_Password &result) {
@@ -361,7 +362,13 @@ void CodeWidget::gotPassword(const MTPaccount_Password &result) {
 		}));
 		return;
 	}
-	goReplace<PasswordCheckWidget>(Animate::Forward);
+	LOG(("Auth flow: password state loaded, queueing PasswordCheckWidget transition."));
+	const auto weak = base::make_weak(this);
+	crl::on_main(this, [weak] {
+		if (const auto strong = weak.get()) {
+			strong->goReplace<PasswordCheckWidget>(Animate::Forward);
+		}
+	});
 }
 
 void CodeWidget::submit() {

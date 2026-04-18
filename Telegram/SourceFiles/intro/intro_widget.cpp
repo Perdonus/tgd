@@ -161,7 +161,7 @@ Widget::Widget(
 
 	cSetPasswordRecovered(false);
 
-	if (!Core::UpdaterDisabled()) {
+	if (!Core::UpdaterDisabled() && _account->sessionExists()) {
 		Core::UpdateChecker checker;
 		checker.start();
 		rpl::merge(

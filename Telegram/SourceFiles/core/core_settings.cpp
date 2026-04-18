@@ -247,7 +247,7 @@ QByteArray Settings::serialize() const {
 		+ Serialize::stringSize(_editedMarkText.current())
 		+ Serialize::stringSize(_deletedMarkIcon.current())
 		+ Serialize::stringSize(_deletedMarkText.current())
-		+ sizeof(qint32) * 4
+		+ sizeof(qint32) * 6
 		+ Serialize::bytearraySize(_scheduledMessageEditsStorage);
 
 	auto result = QByteArray();
