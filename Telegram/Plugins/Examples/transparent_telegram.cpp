@@ -5,6 +5,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 #include "plugins/plugins_api.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QPointer>
@@ -25,7 +26,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 TGD_PLUGIN_PREVIEW(
 	"astro.transparent",
 	"AstroTransparent",
-	"3.1",
+	"3.4",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
 	"",
@@ -42,6 +43,9 @@ constexpr int kDefaultTextOpacityPercent = 100;
 constexpr int kMinOpacityPercent = 20;
 constexpr int kMaxOpacityPercent = 100;
 constexpr int kAppearanceApplyDelayMs = 16;
+constexpr int kStartupAppearanceGraceMs = 1800;
+constexpr int kNoWindowRetryDelayMs = 120;
+constexpr int kMaxTrackedTargetsPerKind = 160;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
@@ -78,6 +82,10 @@ bool IsSupportedWindowWidget(QWidget *widget) {
 
 bool IsReadyWindowWidget(QWidget *widget) {
 	return IsSupportedWindowWidget(widget) && IsReadyWidget(widget);
+}
+
+bool IsVisibleWindowWidget(QWidget *widget) {
+	return IsReadyWindowWidget(widget) && widget->isVisible();
 }
 
 QByteArray WidgetClassName(QWidget *widget) {
@@ -409,7 +417,7 @@ public:
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
-		_info.version = QStringLiteral("3.1");
+		_info.version = QStringLiteral("3.4");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
@@ -429,6 +437,8 @@ public:
 		_windowOpacityPercent = readWindowOpacityPercent();
 		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();
+		_appearanceBlockedUntil = QDateTime::currentMSecsSinceEpoch()
+			+ kStartupAppearanceGraceMs;
 
 		_settingsPageId = _host->registerSettingsPage(
 			_info.id,
@@ -452,7 +462,7 @@ public:
 			});
 		});
 
-		scheduleAppearanceApply();
+		scheduleAppearanceApply(kStartupAppearanceGraceMs);
 	}
 
 	void onUnload() override {
@@ -564,22 +574,37 @@ private:
 		applyCurrentAppearance();
 	}
 
-	void scheduleAppearanceApply() {
+	void scheduleAppearanceApply(int delayMs = kAppearanceApplyDelayMs) {
 		if (_appearanceApplyScheduled) {
 			return;
 		}
 		_appearanceApplyScheduled = true;
-		QTimer::singleShot(kAppearanceApplyDelayMs, this, [this] {
+		QTimer::singleShot(std::max(delayMs, kAppearanceApplyDelayMs), this, [this] {
 			_appearanceApplyScheduled = false;
 			applyCurrentAppearance();
 		});
 	}
 
 	void applyCurrentAppearance() {
+		if (const auto delay = remainingStartupDelayMs(); delay > 0) {
+			scheduleAppearanceApply(delay);
+			return;
+		}
 		auto interfaceTargets = QSet<QWidget*>();
 		auto messageTargets = QSet<QWidget*>();
 		auto textTargets = QSet<QWidget*>();
 		const auto windows = WindowRoots(_host);
+		auto hasVisibleWindow = false;
+		for (auto *window : windows) {
+			if (IsVisibleWindowWidget(window)) {
+				hasVisibleWindow = true;
+				break;
+			}
+		}
+		if (!hasVisibleWindow) {
+			scheduleAppearanceApply(kNoWindowRetryDelayMs);
+			return;
+		}
 		for (auto *window : windows) {
 			if (IsReadyWindowWidget(window)) {
 				window->setWindowOpacity(1.0);
@@ -621,6 +646,7 @@ private:
 				continue;
 			}
 			if (_messageOpacityPercent < kMaxOpacityPercent
+				&& int(messageTargets.size()) < kMaxTrackedTargetsPerKind
 				&& LooksLikeMessageContainer(widget, root)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedDescendant(widget, messageTargets)) {
@@ -633,6 +659,7 @@ private:
 				continue;
 			}
 			if (_textOpacityPercent < kMaxOpacityPercent
+				&& int(textTargets.size()) < kMaxTrackedTargetsPerKind
 				&& LooksLikeTextWidget(widget)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedAncestor(widget, textTargets)
@@ -646,6 +673,7 @@ private:
 				continue;
 			}
 			if (_windowOpacityPercent < kMaxOpacityPercent
+				&& int(interfaceTargets.size()) < kMaxTrackedTargetsPerKind
 				&& LooksLikeInterfaceTarget(widget, root)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedDescendant(widget, messageTargets)
@@ -726,6 +754,13 @@ private:
 		clearEffects(_textEffects);
 	}
 
+	int remainingStartupDelayMs() const {
+		const auto now = QDateTime::currentMSecsSinceEpoch();
+		return (_appearanceBlockedUntil > now)
+			? int(_appearanceBlockedUntil - now)
+			: 0;
+	}
+
 	void clearEffects(QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> &storage) {
 		for (auto it = storage.begin(); it != storage.end(); ++it) {
 			if (it.key() && it.value() && it.key()->graphicsEffect() == it.value()) {
@@ -781,6 +816,7 @@ private:
 	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _messageEffects;
 	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _textEffects;
 	bool _appearanceApplyScheduled = false;
+	qint64 _appearanceBlockedUntil = 0;
 };
 
 TGD_PLUGIN_ENTRY {
