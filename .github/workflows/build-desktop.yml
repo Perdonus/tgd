@@ -761,7 +761,27 @@ jobs:
           @echo on
           setlocal EnableExtensions EnableDelayedExpansion
           cd /d "%GITHUB_WORKSPACE%\\Telegram"
-          cmake --build ..\out --config Release --parallel 1 --target Updater Packer
+          set "CI_LOGS_DIR=%GITHUB_WORKSPACE%\\ci-logs"
+          if not exist "%CI_LOGS_DIR%" mkdir "%CI_LOGS_DIR%"
+          set "PACK_CFG_LOG=%CI_LOGS_DIR%\\configure-packaging.log"
+          set "PACK_BUILD_LOG=%CI_LOGS_DIR%\\build-packaging-tools.log"
+          set "API_ID=17349"
+          set "API_HASH=344583e45741c457fe1862106095a5eb"
+          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+
+          call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF -D DESKTOP_APP_SPECIAL_TARGET=win64 > "%PACK_CFG_LOG%" 2>&1
+          if errorlevel 1 (
+            echo [packaging] configure failed
+            powershell -NoProfile -Command "Get-Content -Path '%PACK_CFG_LOG%' -Tail 120"
+            exit /b 1
+          )
+
+          cmake --build ..\out --config Release --parallel 1 --target Updater Packer > "%PACK_BUILD_LOG%" 2>&1
+          if errorlevel 1 (
+            echo [packaging] updater tools build failed
+            powershell -NoProfile -Command "Get-Content -Path '%PACK_BUILD_LOG%' -Tail 120"
+            exit /b 1
+          )
 
       - name: Pack beta update bundle
         if: ${{ always() && steps.locate_exe.outcome == 'success' && github.ref != 'refs/heads/main' }}
@@ -793,7 +813,10 @@ jobs:
             (Join-Path $workspace "out\\Release"),
             (Join-Path $workspace "Telegram\\out\\Release")
           )
-          $astroExe = Find-SingleExe "Astrogram.exe" $roots
+          $astroExe = Join-Path $workspace "dist\\Astrogram.exe"
+          if (-not (Test-Path -LiteralPath $astroExe)) {
+            $astroExe = Find-SingleExe "Astrogram.exe" $roots
+          }
           $updaterExe = Find-SingleExe "Updater.exe" $roots
           $packerExe = Find-SingleExe "Packer.exe" $roots
           if (-not $astroExe) {
