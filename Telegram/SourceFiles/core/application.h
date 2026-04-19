@@ -365,6 +365,8 @@ private:
 	void clearEmojiSourceImages();
 	[[nodiscard]] auto prepareEmojiSourceImages()
 		-> std::shared_ptr<Ui::Emoji::UniversalImages>;
+	void scheduleDeferredPluginsStart();
+	void schedulePostAuthPrimaryWindowRecovery();
 	void startLocalStorage();
 	void startShortcuts();
 	void startDomain();
@@ -442,6 +444,9 @@ private:
 	Window::Controller *_lastActiveWindow = nullptr;
 	Window::Controller *_lastActivePrimaryWindow = nullptr;
 	Window::Controller *_windowInSettings = nullptr;
+	bool _pluginsStartScheduled = false;
+	bool _pluginsStarted = false;
+	bool _postAuthWindowRecoveryScheduled = false;
 
 	std::unique_ptr<Media::View::OverlayWidget> _mediaView;
 	const std::unique_ptr<Lang::Instance> _langpack;

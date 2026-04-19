@@ -309,6 +309,14 @@ Application::Application()
 			UpdateChecker().setMtproto(session);
 		}
 	}, _lifetime);
+
+	_domain->activeSessionValue(
+	) | rpl::filter([](Main::Session *session) {
+		return session != nullptr;
+	}) | rpl::take(1) | rpl::on_next([=](Main::Session*) {
+		schedulePostAuthPrimaryWindowRecovery();
+		scheduleDeferredPluginsStart();
+	}, _lifetime);
 }
 
 void Application::closeAdditionalWindows() {
@@ -526,37 +534,58 @@ void Application::run() {
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);
-	const auto startupWindow = _lastActivePrimaryWindow
-		? base::make_weak(_lastActivePrimaryWindow)
-		: base::weak_ptr<Window::Controller>();
-	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [startupWindow] {
-		const auto controller = startupWindow.get();
-		if (!controller) {
-			return;
-		}
-		if (RecoverPrimaryWindowVisibility(controller)) {
-			QTimer::singleShot(kStartupWindowRecoveryFollowupMs, [startupWindow] {
-				if (const auto controller = startupWindow.get()) {
-					RecoverPrimaryWindowVisibility(controller);
-				}
-			});
-		}
-	});
-	QTimer::singleShot(kDeferredPluginStartMs, this, [this, startupWindow] {
-		if (const auto controller = startupWindow.get()) {
-			if (!StartupWindowLooksReady(controller)) {
-				RecoverPrimaryWindowVisibility(controller);
-			}
-		}
-		DEBUG_LOG(("Application Info: starting plugins after deferred startup guard."));
-		_plugins->start();
-	});
 }
 
 void Application::autoRegisterUrlScheme() {
 	if (!OptionSkipUrlSchemeRegister.value()) {
 		InvokeQueued(this, [] { RegisterUrlScheme(); });
 	}
+}
+
+void Application::scheduleDeferredPluginsStart() {
+	if (_pluginsStarted || _pluginsStartScheduled) {
+		return;
+	}
+	_pluginsStartScheduled = true;
+	const auto startupWindow = _lastActivePrimaryWindow
+		? base::make_weak(_lastActivePrimaryWindow)
+		: base::weak_ptr<Window::Controller>();
+	QTimer::singleShot(kDeferredPluginStartMs, this, [=] {
+		_pluginsStartScheduled = false;
+		if (_pluginsStarted) {
+			return;
+		}
+		if (const auto controller = startupWindow.get()) {
+			if (!StartupWindowLooksReady(controller)) {
+				RecoverPrimaryWindowVisibility(controller);
+			}
+		}
+		DEBUG_LOG(("Application Info: starting plugins after post-auth startup guard."));
+		_plugins->start();
+		_pluginsStarted = true;
+	});
+}
+
+void Application::schedulePostAuthPrimaryWindowRecovery() {
+	if (_postAuthWindowRecoveryScheduled) {
+		return;
+	}
+	_postAuthWindowRecoveryScheduled = true;
+	const auto startupWindow = _lastActivePrimaryWindow
+		? base::make_weak(_lastActivePrimaryWindow)
+		: base::weak_ptr<Window::Controller>();
+	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [=] {
+		_postAuthWindowRecoveryScheduled = false;
+		if (const auto controller = startupWindow.get()) {
+			if (RecoverPrimaryWindowVisibility(controller)) {
+				QTimer::singleShot(kStartupWindowRecoveryFollowupMs, this, [startupWindow] {
+					if (const auto controller = startupWindow.get()) {
+						RecoverPrimaryWindowVisibility(controller);
+					}
+				});
+			}
+		}
+	});
 }
 
 void Application::showAccount(not_null<Main::Account*> account) {

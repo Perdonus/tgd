@@ -2952,11 +2952,14 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 
 void MainWidget::windowShown() {
 	_history->windowShown();
-	constexpr auto kOnboardingShowDelayMs = 3000;
+	constexpr auto kOnboardingShowDelayMs = 8000;
+	LOG(("Application Info: main window shown, scheduling onboarding in %1 ms.")
+		.arg(kOnboardingShowDelayMs));
 	const auto weak = base::make_weak(_controller);
 	QTimer::singleShot(kOnboardingShowDelayMs, this, [weak] {
 		if (const auto controller = weak.get()) {
 			if (controller->widget()->isVisible()) {
+				LOG(("Application Info: attempting deferred onboarding after post-auth startup."));
 				MaybeShowAstrogramOnboarding(controller);
 			}
 		}

@@ -206,9 +206,11 @@ void Step::finish(const MTPUser &user, QImage &&photo) {
 
 	api().request(MTPmessages_GetDialogFilters(
 	)).done([=](const MTPmessages_DialogFilters &result) {
+		LOG(("Auth flow: password accepted, received dialog filters, creating session."));
 		const auto &d = result.data();
 		createSession(user, photo, d.vfilters().v, d.is_tags_enabled());
 	}).fail([=] {
+		LOG(("Auth flow: password accepted, dialog filters request failed, creating session with defaults."));
 		createSession(user, photo, QVector<MTPDialogFilter>(), false);
 	}).send();
 }
@@ -218,6 +220,9 @@ void Step::createSession(
 		QImage photo,
 		const QVector<MTPDialogFilter> &filters,
 		bool tagsEnabled) {
+	LOG(("Auth flow: createSession start, filters=%1 tagsEnabled=%2")
+		.arg(filters.size())
+		.arg(tagsEnabled ? 1 : 0));
 	// Save the default language if we've suggested some other and user ignored it.
 	const auto currentId = Lang::Id();
 	const auto defaultId = Lang::DefaultLanguageId();
@@ -241,6 +246,9 @@ void Step::createSession(
 	account->local().enforceModernStorageIdBots();
 	account->local().writeMtpData();
 	auto &session = account->session();
+	LOG(("Auth flow: createSession done, sessionUniqueId=%1 supportMode=%2")
+		.arg(session.uniqueId())
+		.arg(session.supportMode() ? 1 : 0));
 	session.data().chatsFilters().setPreloaded(filters, tagsEnabled);
 	if (hasFilters) {
 		session.saveSettingsDelayed();
@@ -254,7 +262,9 @@ void Step::createSession(
 	if (session.supportMode()) {
 		PrepareSupportMode(&session);
 	}
+	LOG(("Auth flow: createSession syncing local state and handing off to main window."));
 	Local::sync();
+	LOG(("Auth flow: createSession handoff complete."));
 }
 
 void Step::paintEvent(QPaintEvent *e) {

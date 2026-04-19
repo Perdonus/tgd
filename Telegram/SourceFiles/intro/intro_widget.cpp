@@ -161,18 +161,7 @@ Widget::Widget(
 
 	cSetPasswordRecovered(false);
 
-	if (!Core::UpdaterDisabled() && _account->sessionExists()) {
-		Core::UpdateChecker checker;
-		checker.start();
-		rpl::merge(
-			rpl::single(rpl::empty),
-			checker.isLatest(),
-			checker.failed(),
-			checker.ready()
-		) | rpl::on_next([=] {
-			checkUpdateStatus();
-		}, lifetime());
-	}
+	LOG(("Auth flow: intro update check skipped until live session startup."));
 }
 
 rpl::producer<> Widget::showSettingsRequested() const {
