@@ -859,6 +859,10 @@ void MaybeShowAstrogramUpdateNotice(
 		not_null<Window::SessionController*> controller) {
 	static auto shown = QSet<QString>();
 
+	if (!controller->widget()->isVisible() || controller->isLayerShown()) {
+		return;
+	}
+
 	const auto checker = Core::UpdateChecker();
 	const auto info = checker.releaseInfo();
 	if (!info.available || info.changelogLoading) {
@@ -1188,7 +1192,6 @@ MainWidget::MainWidget(
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
-		checker.start();
 		const auto maybeShowUpdateNotice = [=] {
 			MaybeShowAstrogramUpdateNotice(_controller);
 		};
@@ -1198,6 +1201,16 @@ MainWidget::MainWidget(
 		checker.ready() | rpl::on_next(
 			maybeShowUpdateNotice,
 			lifetime());
+		constexpr auto kDeferredMainWindowUpdateCheckMs = 15000;
+		const auto weak = base::make_weak(_controller);
+		QTimer::singleShot(kDeferredMainWindowUpdateCheckMs, this, [weak] {
+			if (const auto controller = weak.get()) {
+				if (controller->widget()->isVisible()) {
+					LOG(("Application Info: starting deferred update check after main session startup."));
+					Core::UpdateChecker().start();
+				}
+			}
+		});
 	}
 
 	cSetOtherOnline(0);
