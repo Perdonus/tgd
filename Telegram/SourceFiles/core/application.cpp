@@ -110,13 +110,9 @@ namespace {
 constexpr auto kQuitPreventTimeoutMs = crl::time(1500);
 constexpr auto kAutoLockTimeoutLateMs = crl::time(3000);
 constexpr auto kClearEmojiImageSourceTimeout = 10 * crl::time(1000);
-constexpr auto kDeferredPluginStartMs = 200;
-constexpr auto kDeferredPluginStartRetryMs = 250;
-constexpr auto kDeferredPluginStartMaxAttempts = 20;
+constexpr auto kDeferredPluginStartMs = 1200;
 constexpr auto kStartupWindowRecoveryDelayMs = 1400;
 constexpr auto kStartupWindowRecoveryFollowupMs = 450;
-constexpr auto kStartupWindowWatchdogPeriodMs = crl::time(1000);
-constexpr auto kStartupWindowWatchdogMaxAttempts = 90;
 constexpr auto kStartupWindowRecoveryMargin = 48;
 
 LaunchState GlobalLaunchState/* = LaunchState::Running*/;
@@ -530,63 +526,30 @@ void Application::run() {
 	}
 
 	processCreatedWindow(_lastActivePrimaryWindow);
-	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [this] {
-		if (!_lastActivePrimaryWindow) {
+	const auto startupWindow = _lastActivePrimaryWindow
+		? base::make_weak(_lastActivePrimaryWindow)
+		: base::weak_ptr<Window::Controller>();
+	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [startupWindow] {
+		const auto controller = startupWindow.get();
+		if (!controller) {
 			return;
 		}
-		if (RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow)) {
-			QTimer::singleShot(kStartupWindowRecoveryFollowupMs, this, [this] {
-				if (_lastActivePrimaryWindow) {
-					RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow);
+		if (RecoverPrimaryWindowVisibility(controller)) {
+			QTimer::singleShot(kStartupWindowRecoveryFollowupMs, [startupWindow] {
+				if (const auto controller = startupWindow.get()) {
+					RecoverPrimaryWindowVisibility(controller);
 				}
 			});
 		}
 	});
-	const auto startupWindowWatchdog = std::make_shared<Fn<void(int)>>();
-	*startupWindowWatchdog = [this, startupWindowWatchdog](int attempt) {
-		if (!_lastActivePrimaryWindow
-			|| attempt >= kStartupWindowWatchdogMaxAttempts) {
-			return;
+	QTimer::singleShot(kDeferredPluginStartMs, this, [this, startupWindow] {
+		if (const auto controller = startupWindow.get()) {
+			if (!StartupWindowLooksReady(controller)) {
+				RecoverPrimaryWindowVisibility(controller);
+			}
 		}
-		const auto sessionReady = _domain->started()
-			&& _domain->active().sessionExists();
-		if (!StartupWindowLooksReady(_lastActivePrimaryWindow)) {
-			RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow);
-		}
-		if (sessionReady && StartupWindowLooksReady(_lastActivePrimaryWindow)) {
-			return;
-		}
-		QTimer::singleShot(
-			kStartupWindowWatchdogPeriodMs,
-			this,
-			[startupWindowWatchdog, attempt] {
-				(*startupWindowWatchdog)(attempt + 1);
-			});
-	};
-	QTimer::singleShot(kStartupWindowRecoveryDelayMs, this, [startupWindowWatchdog] {
-		(*startupWindowWatchdog)(0);
-	});
-	const auto deferredPluginStart = std::make_shared<Fn<void(int)>>();
-	*deferredPluginStart = [this, deferredPluginStart](int attempt) {
-		if (!_lastActivePrimaryWindow) {
-			return;
-		}
-		if (StartupWindowLooksReady(_lastActivePrimaryWindow)) {
-			DEBUG_LOG(("Application Info: starting plugins after first live window show..."));
-			_plugins->start();
-			return;
-		}
-		if (attempt >= kDeferredPluginStartMaxAttempts) {
-			DEBUG_LOG(("Application Info: plugin start reached retry limit, forcing startup recovery and skipping plugin startup for this session."));
-			RecoverPrimaryWindowVisibility(_lastActivePrimaryWindow);
-			return;
-		}
-		QTimer::singleShot(kDeferredPluginStartRetryMs, this, [deferredPluginStart, attempt] {
-			(*deferredPluginStart)(attempt + 1);
-		});
-	};
-	QTimer::singleShot(kDeferredPluginStartMs, this, [deferredPluginStart] {
-		(*deferredPluginStart)(0);
+		DEBUG_LOG(("Application Info: starting plugins after deferred startup guard."));
+		_plugins->start();
 	});
 }
 

@@ -2952,9 +2952,14 @@ QPixmap MainWidget::grabForShowAnimation(const Window::SectionSlideParams &param
 
 void MainWidget::windowShown() {
 	_history->windowShown();
-	constexpr auto kOnboardingShowDelayMs = 900;
-	QTimer::singleShot(kOnboardingShowDelayMs, this, [controller = _controller] {
-		MaybeShowAstrogramOnboarding(controller);
+	constexpr auto kOnboardingShowDelayMs = 3000;
+	const auto weak = base::make_weak(_controller);
+	QTimer::singleShot(kOnboardingShowDelayMs, this, [weak] {
+		if (const auto controller = weak.get()) {
+			if (controller->widget()->isVisible()) {
+				MaybeShowAstrogramOnboarding(controller);
+			}
+		}
 	});
 }
 
