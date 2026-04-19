@@ -28,10 +28,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session_settings.h"
 
+#include <QtCore/QTimer>
+
 namespace Main {
 namespace {
 
 constexpr auto kWideIdsTag = ~uint64(0);
+constexpr auto kDeferredAccountStartupMs = 2500;
 
 [[nodiscard]] QString ComposeDataString(const QString &dataName, int index) {
 	auto result = dataName;
@@ -76,14 +79,25 @@ std::unique_ptr<MTP::Config> Account::prepareToStart(
 }
 
 void Account::start(std::unique_ptr<MTP::Config> config) {
+	LOG(("Account startup: begin, hasStoredConfig=%1 hasStoredSessionUser=%2")
+		.arg(config ? 1 : 0)
+		.arg(_sessionUserId ? 1 : 0));
 	_appConfig = std::make_unique<AppConfig>(this);
 	startMtp(config
 		? std::move(config)
 		: std::make_unique<MTP::Config>(
 			Core::App().fallbackProductionConfig()));
-	_appConfig->start();
-	watchProxyChanges();
-	watchSessionChanges();
+	LOG(("Account startup: mtp/session bootstrap finished, deferring appConfig/watchers."));
+	const auto weak = base::make_weak(this);
+	QTimer::singleShot(kDeferredAccountStartupMs, [weak] {
+		if (const auto account = weak.get()) {
+			LOG(("Account startup: starting deferred appConfig/watchers."));
+			account->_appConfig->start();
+			account->watchProxyChanges();
+			account->watchSessionChanges();
+			LOG(("Account startup: deferred appConfig/watchers started."));
+		}
+	});
 }
 
 void Account::prepareToStartAdded(
@@ -146,6 +160,10 @@ void Account::createSession(
 		QByteArray serialized,
 		int streamVersion,
 		std::unique_ptr<SessionSettings> settings) {
+	LOG(("Account startup: createSession(from storage) begin, userId=%1 serialized=%2 streamVersion=%3")
+		.arg(id.bare)
+		.arg(serialized.size())
+		.arg(streamVersion));
 	DEBUG_LOG(("sessionUserSerialized.size: %1").arg(serialized.size()));
 	QDataStream peekStream(serialized);
 	const auto phone = Serialize::peekUserPhone(streamVersion, peekStream);
@@ -190,11 +208,19 @@ void Account::createSession(
 	Expects(_session == nullptr);
 	Expects(_sessionValue.current() == nullptr);
 
+	LOG(("Account startup: constructing Session, serializedSelf=%1 streamVersion=%2")
+		.arg(serialized.size())
+		.arg(streamVersion));
 	_session = std::make_unique<Session>(this, user, std::move(settings));
+	LOG(("Account startup: Session constructed."));
 	if (!serialized.isEmpty()) {
-		local().readSelf(_session.get(), serialized, streamVersion);
+		LOG(("Account startup: skipping immediate local self preload during startup, bytes=%1 streamVersion=%2")
+			.arg(serialized.size())
+			.arg(streamVersion));
 	}
 	_sessionValue = _session.get();
+	LOG(("Account startup: sessionValue published, uniqueId=%1")
+		.arg(_session->uniqueId()));
 
 	Ensures(_session != nullptr);
 }
@@ -415,6 +441,9 @@ void Account::setMtpAuthorization(const QByteArray &serialized) {
 void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	Expects(!_mtp);
 
+	LOG(("Account startup: startMtp begin, configPresent=%1 sessionUserId=%2")
+		.arg(config ? 1 : 0)
+		.arg(_sessionUserId.bare));
 	auto fields = base::take(_mtpFields);
 	fields.config = std::move(config);
 	fields.deviceModel = Platform::DeviceModelPretty();
@@ -422,6 +451,7 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	_mtp = std::make_unique<MTP::Instance>(
 		MTP::Instance::Mode::Normal,
 		std::move(fields));
+	LOG(("Account startup: MTP instance created."));
 
 	const auto writingKeys = _mtp->lifetime().make_state<bool>(false);
 	_mtp->writeKeysRequests(
@@ -477,6 +507,7 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	}
 
 	if (_sessionUserId) {
+		LOG(("Account startup: stored session user found, creating Session from storage."));
 		createSession(
 			_sessionUserId,
 			base::take(_sessionUserSerialized),
@@ -490,9 +521,11 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	if (const auto session = maybeSession()) {
 		// Skip all pending self updates so that we won't local().writeSelf.
 		session->changes().sendNotifications();
+		LOG(("Account startup: session notifications primed."));
 	}
 
 	_mtpValue = _mtp.get();
+	LOG(("Account startup: mtpValue published."));
 }
 
 bool Account::checkForUpdates(const MTP::Response &message) {
