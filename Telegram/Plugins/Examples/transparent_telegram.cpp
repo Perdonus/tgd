@@ -5,6 +5,7 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 #include "plugins/plugins_api.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QPointer>
@@ -25,10 +26,10 @@ Adds separate host-managed sliders for interface, message, and text opacity.
 TGD_PLUGIN_PREVIEW(
 	"astro.transparent",
 	"AstroTransparent",
-	"3.3",
+	"3.4",
 	"@etopizdesblin",
 	"Adds separate interface, message, and text transparency controls for Astrogram.",
-	"https://sosiskibot.ru",
+	"",
 	"GusTheDuck/4")
 
 namespace {
@@ -36,12 +37,15 @@ namespace {
 constexpr auto kPluginId = "astro.transparent";
 constexpr auto kLegacyPluginId = "example.transparent_telegram";
 
-constexpr int kDefaultWindowOpacityPercent = 85;
+constexpr int kDefaultWindowOpacityPercent = 100;
 constexpr int kDefaultMessageOpacityPercent = 100;
 constexpr int kDefaultTextOpacityPercent = 100;
 constexpr int kMinOpacityPercent = 20;
 constexpr int kMaxOpacityPercent = 100;
 constexpr int kAppearanceApplyDelayMs = 16;
+constexpr int kStartupAppearanceGraceMs = 1800;
+constexpr int kNoWindowRetryDelayMs = 120;
+constexpr int kMaxTrackedTargetsPerKind = 160;
 
 QString Latin1(const char *value) {
 	return QString::fromLatin1(value);
@@ -80,6 +84,10 @@ bool IsReadyWindowWidget(QWidget *widget) {
 	return IsSupportedWindowWidget(widget) && IsReadyWidget(widget);
 }
 
+bool IsVisibleWindowWidget(QWidget *widget) {
+	return IsReadyWindowWidget(widget) && widget->isVisible();
+}
+
 QByteArray WidgetClassName(QWidget *widget) {
 	return widget
 		? QByteArray(widget->metaObject()->className()).toLower()
@@ -114,17 +122,17 @@ bool IsTextWidgetClass(QWidget *widget) {
 			|| widget->inherits("QPlainTextEdit"));
 }
 
-bool LooksLikeMessageContainer(QWidget *widget) {
+bool LooksLikeMessageContainer(QWidget *widget, QWidget *root = nullptr) {
 	if (!widget || widget->isWindow() || !IsReadyWidget(widget)) {
 		return false;
 	}
 	if (widget->width() < 36 || widget->height() < 20) {
 		return false;
 	}
-		if (HasAnyNameToken(widget, {
-				"tooltip",
-				"menu",
-				"button",
+	if (HasAnyNameToken(widget, {
+			"tooltip",
+			"menu",
+			"button",
 			"checkbox",
 			"radio",
 			"slider",
@@ -136,16 +144,16 @@ bool LooksLikeMessageContainer(QWidget *widget) {
 				"controls",
 				"title",
 				"subtitle",
-				"header",
-				"sidebar",
-				"panel",
-			})) {
-			return false;
-		}
-		if (IsTextWidgetClass(widget) || widget->inherits("QAbstractButton")) {
-			return false;
-		}
-		if (HasAnyNameToken(widget, {
+			"header",
+			"sidebar",
+			"panel",
+		})) {
+		return false;
+	}
+	if (IsTextWidgetClass(widget) || widget->inherits("QAbstractButton")) {
+		return false;
+	}
+	if (HasAnyNameToken(widget, {
 			"message",
 			"bubble",
 			"media",
@@ -158,49 +166,29 @@ bool LooksLikeMessageContainer(QWidget *widget) {
 			"webpage",
 			"attachment",
 		})) {
-			return true;
-		}
-		return WidgetDepth(widget) >= 4
-			&& widget->width() >= 120
-			&& widget->height() >= 18
-			&& HasAnyNameToken(widget, {
-				"history",
-				"element",
-				"item",
-				"entry",
-			});
-}
-
-bool BelongsToConversationTree(QWidget *widget) {
-	const auto matches = [](QWidget *candidate) {
-		return HasAnyNameToken(candidate, {
-			"history",
-			"message",
-			"bubble",
-			"media",
-			"photo",
-			"video",
-			"sticker",
-			"gif",
-			"album",
-			"reply",
-			"attachment",
-			"webpage",
-			"reactions",
-			"comments",
-		});
-	};
-	if (matches(widget)) {
 		return true;
 	}
-	for (auto *parent = widget ? widget->parentWidget() : nullptr;
-		parent;
-		parent = parent->parentWidget()) {
-		if (matches(parent)) {
-			return true;
-		}
-	}
-	return false;
+	const auto parentWidth = widget->parentWidget()
+		? widget->parentWidget()->width()
+		: 0;
+	const auto rootWidth = root ? root->width() : 0;
+	const auto relativeToParent = (parentWidth > 0)
+		? (double(widget->width()) / double(parentWidth))
+		: 1.0;
+	const auto relativeToRoot = (rootWidth > 0)
+		? (double(widget->width()) / double(rootWidth))
+		: 1.0;
+	return WidgetDepth(widget) >= 6
+		&& widget->width() >= 120
+		&& widget->height() >= 18
+		&& relativeToParent < 0.97
+		&& relativeToRoot < 0.90
+		&& HasAnyNameToken(widget, {
+			"history",
+			"element",
+			"item",
+			"entry",
+		});
 }
 
 bool LooksLikeTextWidget(QWidget *widget) {
@@ -256,6 +244,8 @@ bool LooksLikeInterfaceWidget(QWidget *widget) {
 		"panel",
 		"background",
 		"sidebar",
+		"history",
+		"chat",
 		"list",
 		"footer",
 		"header",
@@ -263,6 +253,7 @@ bool LooksLikeInterfaceWidget(QWidget *widget) {
 		"controls",
 		"search",
 		"compose",
+		"reply",
 		"tabs",
 		"navigation",
 		"info",
@@ -316,11 +307,43 @@ bool LooksLikeInterfaceContainer(QWidget *widget) {
 		"background",
 		"column",
 		"chatlist",
+		"history",
 		"compose",
+		"content",
 		"wrap",
 		"container",
+		"body",
+		"main",
+		"stack",
 		"settings",
 	});
+}
+
+bool LooksLikeInterfaceTarget(QWidget *widget, QWidget *root) {
+	if (!widget || widget->isWindow() || !IsReadyWidget(widget)) {
+		return false;
+	}
+	if (LooksLikeMessageContainer(widget, root) || LooksLikeTextWidget(widget)) {
+		return false;
+	}
+	if (!(LooksLikeInterfaceWidget(widget) || LooksLikeInterfaceContainer(widget))) {
+		return false;
+	}
+	if (!root) {
+		return true;
+	}
+	const auto rootWidth = root->width();
+	const auto rootHeight = root->height();
+	if (rootWidth <= 0 || rootHeight <= 0) {
+		return true;
+	}
+	const auto almostWholeWindow
+		= (widget->width() >= (rootWidth - 24))
+		&& (widget->height() >= (rootHeight - 24));
+	const auto oversizedPanel
+		= (widget->width() >= int(rootWidth * 0.96))
+		&& (widget->height() >= int(rootHeight * 0.65));
+	return !almostWholeWindow && !oversizedPanel;
 }
 
 bool HasTrackedAncestor(
@@ -394,13 +417,13 @@ public:
 	, _host(host) {
 		_info.id = Latin1(kPluginId);
 		_info.name = Tr(_host, "AstroTransparent", u8"АстроПрозрачность");
-			_info.version = QStringLiteral("3.2");
+		_info.version = QStringLiteral("3.4");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
 			"Adds separate interface, message, and text transparency controls for Astrogram.",
 			u8"Добавляет отдельные настройки прозрачности интерфейса, сообщений и текста в Astrogram.");
-		_info.website = QStringLiteral("https://sosiskibot.ru");
+		_info.website.clear();
 		_windowOpacityPercent = readWindowOpacityPercent();
 		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();
@@ -414,6 +437,8 @@ public:
 		_windowOpacityPercent = readWindowOpacityPercent();
 		_messageOpacityPercent = readMessageOpacityPercent();
 		_textOpacityPercent = readTextOpacityPercent();
+		_appearanceBlockedUntil = QDateTime::currentMSecsSinceEpoch()
+			+ kStartupAppearanceGraceMs;
 
 		_settingsPageId = _host->registerSettingsPage(
 			_info.id,
@@ -437,7 +462,7 @@ public:
 			});
 		});
 
-		scheduleAppearanceApply();
+		scheduleAppearanceApply(kStartupAppearanceGraceMs);
 	}
 
 	void onUnload() override {
@@ -455,8 +480,8 @@ private:
 		windowSlider.title = Tr(_host, "Interface opacity", u8"Прозрачность интерфейса");
 		windowSlider.description = Tr(
 			_host,
-			"Controls the overall opacity of the Astrogram interface.",
-			u8"Управляет общей прозрачностью интерфейса Astrogram.");
+			"Targets interface chrome such as sidebars, headers, list panels and compose areas without dimming the whole window.",
+			u8"Влияет на оболочку интерфейса: боковые панели, заголовки, списки и область ввода, не затемняя окно целиком.");
 		windowSlider.type = Plugins::SettingControl::IntSlider;
 		windowSlider.intValue = _windowOpacityPercent;
 		windowSlider.intMinimum = kMinOpacityPercent;
@@ -497,8 +522,8 @@ private:
 		info.title = Tr(_host, "How it works", u8"Как это работает");
 		info.description = Tr(
 			_host,
-			"Interface opacity targets Astrogram chrome only. Message opacity targets message and media containers. Text opacity targets text controls outside those message containers.",
-			u8"Прозрачность интерфейса влияет только на оболочку Astrogram. Прозрачность сообщений нацелена на контейнеры сообщений и медиа. Прозрачность текста нацелена на текстовые контролы вне этих контейнеров сообщений.");
+			"Interface opacity targets Astrogram chrome only. Message opacity targets message and media containers. Text opacity targets labels and inputs outside message bubbles. Each slider is applied separately.",
+			u8"Прозрачность интерфейса влияет только на оболочку Astrogram. Прозрачность сообщений нацелена на контейнеры сообщений и медиа. Прозрачность текста нацелена на надписи и поля ввода вне пузырей сообщений. Каждый ползунок применяется отдельно.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -549,62 +574,71 @@ private:
 		applyCurrentAppearance();
 	}
 
-	void scheduleAppearanceApply() {
+	void scheduleAppearanceApply(int delayMs = kAppearanceApplyDelayMs) {
 		if (_appearanceApplyScheduled) {
 			return;
 		}
 		_appearanceApplyScheduled = true;
-		QTimer::singleShot(kAppearanceApplyDelayMs, this, [this] {
+		QTimer::singleShot(std::max(delayMs, kAppearanceApplyDelayMs), this, [this] {
 			_appearanceApplyScheduled = false;
 			applyCurrentAppearance();
-			QTimer::singleShot(120, this, [this] {
-				applyCurrentAppearance();
-			});
-			QTimer::singleShot(420, this, [this] {
-				applyCurrentAppearance();
-			});
 		});
 	}
 
-		void applyCurrentAppearance() {
-			auto interfaceTargets = QSet<QWidget*>();
-			auto messageTargets = QSet<QWidget*>();
-			auto textTargets = QSet<QWidget*>();
-			const auto windows = WindowRoots(_host);
-			for (auto *window : windows) {
-				collectTargets(window, interfaceTargets, messageTargets, textTargets);
+	void applyCurrentAppearance() {
+		if (const auto delay = remainingStartupDelayMs(); delay > 0) {
+			scheduleAppearanceApply(delay);
+			return;
+		}
+		auto interfaceTargets = QSet<QWidget*>();
+		auto messageTargets = QSet<QWidget*>();
+		auto textTargets = QSet<QWidget*>();
+		const auto windows = WindowRoots(_host);
+		auto hasVisibleWindow = false;
+		for (auto *window : windows) {
+			if (IsVisibleWindowWidget(window)) {
+				hasVisibleWindow = true;
+				break;
 			}
-
-			syncEffects(_interfaceEffects, interfaceTargets, interfaceOpacityValue());
-			syncEffects(_messageEffects, messageTargets, messageOpacityValue());
-			syncEffects(_textEffects, textTargets, textOpacityValue());
+		}
+		if (!hasVisibleWindow) {
+			scheduleAppearanceApply(kNoWindowRetryDelayMs);
+			return;
+		}
+		for (auto *window : windows) {
+			if (IsReadyWindowWidget(window)) {
+				window->setWindowOpacity(1.0);
+			}
+			collectTargets(window, interfaceTargets, messageTargets, textTargets);
 		}
 
-		void applyToWindow(QWidget *widget) {
-			if (!IsReadyWindowWidget(widget)) {
-				return;
-			}
-			scheduleAppearanceApply();
-		}
+		syncEffects(_interfaceEffects, interfaceTargets, interfaceOpacityValue());
+		syncEffects(_messageEffects, messageTargets, messageOpacityValue());
+		syncEffects(_textEffects, textTargets, textOpacityValue());
+	}
 
-		void collectTargets(
-				QWidget *root,
-				QSet<QWidget*> &interfaceTargets,
-				QSet<QWidget*> &messageTargets,
-				QSet<QWidget*> &textTargets) {
+	void applyToWindow(QWidget *widget) {
+		if (!IsReadyWindowWidget(widget)) {
+			return;
+		}
+		widget->setWindowOpacity(1.0);
+		scheduleAppearanceApply();
+	}
+
+	void collectTargets(
+			QWidget *root,
+			QSet<QWidget*> &interfaceTargets,
+			QSet<QWidget*> &messageTargets,
+			QSet<QWidget*> &textTargets) {
 		if (!IsReadyWindowWidget(root)) {
 			return;
 		}
-		auto widgets = QList<QWidget*>{ root };
-		const auto children = root->findChildren<QWidget*>();
-		for (auto *child : children) {
-			widgets.push_back(child);
-		}
+		auto widgets = root->findChildren<QWidget*>();
 		std::sort(
 			widgets.begin(),
 			widgets.end(),
 			[](QWidget *a, QWidget *b) {
-				return WidgetDepth(a) < WidgetDepth(b);
+				return WidgetDepth(a) > WidgetDepth(b);
 			});
 
 		for (auto *widget : widgets) {
@@ -612,7 +646,8 @@ private:
 				continue;
 			}
 			if (_messageOpacityPercent < kMaxOpacityPercent
-				&& LooksLikeMessageContainer(widget)
+				&& int(messageTargets.size()) < kMaxTrackedTargetsPerKind
+				&& LooksLikeMessageContainer(widget, root)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedDescendant(widget, messageTargets)) {
 				messageTargets.insert(widget);
@@ -624,8 +659,8 @@ private:
 				continue;
 			}
 			if (_textOpacityPercent < kMaxOpacityPercent
+				&& int(textTargets.size()) < kMaxTrackedTargetsPerKind
 				&& LooksLikeTextWidget(widget)
-				&& !BelongsToConversationTree(widget)
 				&& !HasTrackedAncestor(widget, messageTargets)
 				&& !HasTrackedAncestor(widget, textTargets)
 				&& !HasTrackedDescendant(widget, textTargets)) {
@@ -638,18 +673,18 @@ private:
 				continue;
 			}
 			if (_windowOpacityPercent < kMaxOpacityPercent
-				&& (LooksLikeInterfaceContainer(widget) || LooksLikeInterfaceWidget(widget))
-				&& !BelongsToConversationTree(widget)
+				&& int(interfaceTargets.size()) < kMaxTrackedTargetsPerKind
+				&& LooksLikeInterfaceTarget(widget, root)
 				&& !HasTrackedAncestor(widget, messageTargets)
-				&& !HasTrackedAncestor(widget, textTargets)
-				&& !HasTrackedAncestor(widget, interfaceTargets)
 				&& !HasTrackedDescendant(widget, messageTargets)
-				&& !HasTrackedDescendant(widget, textTargets)) {
+				&& !HasTrackedAncestor(widget, textTargets)
+				&& !HasTrackedDescendant(widget, textTargets)
+				&& !HasTrackedAncestor(widget, interfaceTargets)
+				&& !HasTrackedDescendant(widget, interfaceTargets)) {
 				interfaceTargets.insert(widget);
 			}
 		}
-
-		}
+	}
 
 	void syncEffects(
 			QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> &storage,
@@ -709,9 +744,21 @@ private:
 	}
 
 	void restoreDefaults() {
+		for (auto *widget : WindowRoots(_host)) {
+			if (IsReadyWindowWidget(widget)) {
+				widget->setWindowOpacity(1.0);
+			}
+		}
 		clearEffects(_interfaceEffects);
 		clearEffects(_messageEffects);
 		clearEffects(_textEffects);
+	}
+
+	int remainingStartupDelayMs() const {
+		const auto now = QDateTime::currentMSecsSinceEpoch();
+		return (_appearanceBlockedUntil > now)
+			? int(_appearanceBlockedUntil - now)
+			: 0;
 	}
 
 	void clearEffects(QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> &storage) {
@@ -769,6 +816,7 @@ private:
 	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _messageEffects;
 	QHash<QWidget*, QPointer<QGraphicsOpacityEffect>> _textEffects;
 	bool _appearanceApplyScheduled = false;
+	qint64 _appearanceBlockedUntil = 0;
 };
 
 TGD_PLUGIN_ENTRY {
