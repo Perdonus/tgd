@@ -5,6 +5,8 @@ Allows scale tuning and loading a custom font from a local file.
 #include "plugins/plugins_api.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
@@ -28,7 +30,7 @@ TGD_PLUGIN_PREVIEW(
 	"1.9",
 	"@etopizdesblin",
 	"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
-	"https://sosiskibot.ru",
+	"",
 	"GusTheDuck/11")
 
 namespace {
@@ -108,13 +110,13 @@ public:
 			_host,
 			"Font Tuner",
 			u8"Тюнер шрифтов");
-			_info.version = QStringLiteral("1.9");
+		_info.version = QStringLiteral("1.9");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,
 			"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
 			u8"Настраивает шрифты Astrogram, загружает пользовательский шрифт из файла и применяет изменения сразу.");
-		_info.website = QStringLiteral("https://sosiskibot.ru");
+		_info.website.clear();
 		_baseFont = QApplication::font();
 		_scalePercent = readScalePercent();
 		const auto storageRoot = StorageRoot(_host);
@@ -147,11 +149,28 @@ public:
 			_host->unregisterSettingsPage(_settingsPageId);
 			_settingsPageId = 0;
 		}
+		if (_fileDialog) {
+			_fileDialog->close();
+			_fileDialog = nullptr;
+		}
 		unloadApplicationFont();
 		QApplication::setFont(_baseFont);
+		auto fontChangeEvent = QEvent(QEvent::ApplicationFontChange);
+		for (auto *widget : QApplication::allWidgets()) {
+			if (widget) {
+				QCoreApplication::sendEvent(widget, &fontChangeEvent);
+				widget->updateGeometry();
+				widget->update();
+			}
+		}
 	}
 
 private:
+	enum class LoadMode {
+		UserSelection,
+		SilentRestore,
+	};
+
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
 		auto scale = Plugins::SettingDescriptor();
 		scale.id = Latin1(kScaleSettingId);
@@ -189,11 +208,11 @@ private:
 
 		auto info = Plugins::SettingDescriptor();
 		info.id = Latin1(kInfoSettingId);
-		info.title = Tr(_host, "How it works", u8"Как это работает");
+		info.title = Tr(_host, "Current behavior", u8"Текущее поведение");
 		info.description = Tr(
 			_host,
-			"The plugin stores the last imported font in tdata/plugin-fonts/font_tuner and reapplies it on restart. Only local .ttf and .otf files are supported.",
-			u8"Плагин хранит последний импортированный шрифт в tdata/plugin-fonts/font_tuner и применяет его после перезапуска. Поддерживаются только локальные файлы .ttf и .otf.");
+			"The plugin stores the last imported local font in tdata/plugin-fonts/font_tuner and reapplies it on restart. Supported formats: .ttf and .otf.",
+			u8"Плагин хранит последний локально импортированный шрифт в tdata/plugin-fonts/font_tuner и применяет его после перезапуска. Поддерживаются форматы .ttf и .otf.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -250,10 +269,10 @@ private:
 			return;
 		}
 		_chooseFileScheduled = true;
-			QTimer::singleShot(140, this, [this] {
-				_chooseFileScheduled = false;
-				chooseFontFileNow();
-			});
+		QTimer::singleShot(120, this, [this] {
+			_chooseFileScheduled = false;
+			chooseFontFileNow();
+		});
 	}
 
 	QWidget *resolveDialogParent() const {
@@ -296,31 +315,41 @@ private:
 	}
 
 	void chooseFontFileNow() {
+		if (_fileDialog) {
+			_fileDialog->raise();
+			_fileDialog->activateWindow();
+			return;
+		}
 		auto *parent = resolveDialogParent();
-		QFileDialog dialog(
+		const auto startDirectory = QFileInfo(_loadedFontPath).exists()
+			? QFileInfo(_loadedFontPath).absolutePath()
+			: QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+		auto *dialog = new QFileDialog(
 			parent,
 			Tr(_host, "Choose font file", u8"Выберите файл шрифта"),
-			QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+			startDirectory,
 			Tr(
 				_host,
 				"Fonts (*.ttf *.otf);;All files (*.*)",
 				u8"Шрифты (*.ttf *.otf);;Все файлы (*.*)"));
-		dialog.setFileMode(QFileDialog::ExistingFile);
-		dialog.setAcceptMode(QFileDialog::AcceptOpen);
-		dialog.setOption(QFileDialog::ReadOnly, true);
-		dialog.setOption(QFileDialog::DontUseNativeDialog, true);
-		dialog.setWindowFlag(Qt::WindowStaysOnTopHint, true);
-		dialog.setWindowModality(Qt::ApplicationModal);
-		dialog.raise();
-		dialog.activateWindow();
-		if (dialog.exec() != QDialog::Accepted) {
-			return;
-		}
-		const auto files = dialog.selectedFiles();
-		const auto path = files.isEmpty() ? QString() : files.front();
-		if (!path.isEmpty()) {
+		dialog->setAttribute(Qt::WA_DeleteOnClose);
+		dialog->setFileMode(QFileDialog::ExistingFile);
+		dialog->setAcceptMode(QFileDialog::AcceptOpen);
+		dialog->setOption(QFileDialog::ReadOnly, true);
+		dialog->setOption(QFileDialog::DontUseNativeDialog, true);
+		dialog->setWindowModality(Qt::WindowModal);
+		_fileDialog = dialog;
+
+		QObject::connect(dialog, &QFileDialog::fileSelected, this, [this](const QString &path) {
 			importFontFile(path);
-		}
+		});
+		QObject::connect(dialog, &QObject::destroyed, this, [this] {
+			_fileDialog = nullptr;
+		});
+
+		dialog->open();
+		dialog->raise();
+		dialog->activateWindow();
 	}
 
 	void importFontFile(const QString &path) {
@@ -343,7 +372,7 @@ private:
 		const auto target = QDir(_fontsDir).filePath(
 			SafeFileStem(sourceInfo.fileName()));
 		if (sourceInfo.absoluteFilePath() == QFileInfo(target).absoluteFilePath()) {
-			loadFontFromPath(target);
+			loadFontFromPath(target, LoadMode::UserSelection);
 			return;
 		}
 		if (QFile::exists(target) && !QFile::remove(target)) {
@@ -360,46 +389,58 @@ private:
 				u8"Не удалось импортировать выбранный файл шрифта."));
 			return;
 		}
-		loadFontFromPath(target);
+		loadFontFromPath(target, LoadMode::UserSelection);
 	}
 
-	void loadFontFromPath(const QString &path) {
+	bool loadFontFromPath(const QString &path, LoadMode mode) {
+		const auto notifyUser = (mode == LoadMode::UserSelection);
 		const auto fileInfo = QFileInfo(path);
 		if (!fileInfo.exists() || !fileInfo.isFile()) {
-			_host->showToast(Tr(
-				_host,
-				"The selected font file no longer exists.",
-				u8"Выбранный файл шрифта больше не существует."));
-			return;
+			if (notifyUser) {
+				_host->showToast(Tr(
+					_host,
+					"The selected font file no longer exists.",
+					u8"Выбранный файл шрифта больше не существует."));
+			}
+			return false;
 		}
 		unloadApplicationFont();
 		const auto fontId = QFontDatabase::addApplicationFont(
 			fileInfo.absoluteFilePath());
 		if (fontId < 0) {
-			_host->showToast(Tr(
-				_host,
-				"Qt could not load this font file.",
-				u8"Qt не смог загрузить этот файл шрифта."));
-			return;
+			if (notifyUser) {
+				_host->showToast(Tr(
+					_host,
+					"Qt could not load this font file.",
+					u8"Qt не смог загрузить этот файл шрифта."));
+			}
+			return false;
 		}
 		const auto families = QFontDatabase::applicationFontFamilies(fontId);
 		if (families.empty()) {
 			QFontDatabase::removeApplicationFont(fontId);
-			_host->showToast(Tr(
-				_host,
-				"The font loaded but exposed no families.",
-				u8"Шрифт загрузился, но не дал ни одного семейства."));
-			return;
+			if (notifyUser) {
+				_host->showToast(Tr(
+					_host,
+					"The font loaded but exposed no families.",
+					u8"Шрифт загрузился, но не дал ни одного семейства."));
+			}
+			return false;
 		}
 		_applicationFontId = fontId;
 		_loadedFontPath = fileInfo.absoluteFilePath();
 		_loadedFamily = families.front();
-		saveLocalState();
+		if (mode == LoadMode::UserSelection) {
+			saveLocalState();
+		}
 		applyConfiguredFont();
-		_host->showToast(Tr(
-			_host,
-			"Custom font applied.",
-			u8"Пользовательский шрифт применён."));
+		if (notifyUser) {
+			_host->showToast(Tr(
+				_host,
+				"Custom font applied.",
+				u8"Пользовательский шрифт применён."));
+		}
+		return true;
 	}
 
 	void applyConfiguredFont() {
@@ -415,8 +456,10 @@ private:
 				int(std::lround(font.pixelSize() * _scalePercent / 100.0))));
 		}
 		QApplication::setFont(font);
+		auto fontChangeEvent = QEvent(QEvent::ApplicationFontChange);
 		for (auto *widget : QApplication::allWidgets()) {
 			if (widget) {
+				QCoreApplication::sendEvent(widget, &fontChangeEvent);
 				widget->updateGeometry();
 				widget->update();
 			}
@@ -454,7 +497,7 @@ private:
 		if (path.isEmpty() || !QFileInfo::exists(path)) {
 			return;
 		}
-		loadFontFromPath(path);
+		loadFontFromPath(path, LoadMode::SilentRestore);
 	}
 
 	void saveLocalState() const {
@@ -480,6 +523,7 @@ private:
 	int _applicationFontId = -1;
 	int _scalePercent = kDefaultScalePercent;
 	bool _chooseFileScheduled = false;
+	QPointer<QFileDialog> _fileDialog;
 };
 
 TGD_PLUGIN_ENTRY {

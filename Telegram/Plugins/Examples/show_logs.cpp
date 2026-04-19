@@ -12,7 +12,9 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QHideEvent>
 #include <QtGui/QScreen>
+#include <QtGui/QShowEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QHBoxLayout>
@@ -33,13 +35,13 @@ TGD_PLUGIN_PREVIEW(
 	"1.5",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
-	"https://sosiskibot.ru",
+	"",
 	"GusTheDuck/24")
 
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.3";
+constexpr auto kPluginVersion = "1.5";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
@@ -85,6 +87,33 @@ QString PluginLogsPath(const Plugins::Host *host) {
 	return QDir(WorkingRoot(host)).filePath(QStringLiteral("tdata/plugins.log"));
 }
 
+QStringList ClientLogCandidatePaths(const Plugins::Host *host) {
+	const auto root = QDir(WorkingRoot(host));
+	auto result = QStringList{
+		root.filePath(QStringLiteral("client.log")),
+		root.filePath(QStringLiteral("tdata/client.log")),
+	};
+	result.removeDuplicates();
+	return result;
+}
+
+QString TraceLogsPath(const Plugins::Host *host) {
+	return QDir(WorkingRoot(host)).filePath(QStringLiteral("tdata/plugins.trace.jsonl"));
+}
+
+QStringList AvailableLogPaths(const Plugins::Host *host) {
+	auto result = ClientLogCandidatePaths(host);
+	result.push_back(PluginLogsPath(host));
+	result.push_back(TraceLogsPath(host));
+	result.erase(
+		std::remove_if(result.begin(), result.end(), [](const QString &path) {
+			return path.trimmed().isEmpty();
+		}),
+		result.end());
+	result.removeDuplicates();
+	return result;
+}
+
 QStringList TailLines(const QString &path, int wantedLines) {
 	if (wantedLines <= 0) {
 		return {};
@@ -120,6 +149,72 @@ QStringList TailLines(const QString &path, int wantedLines) {
 	return lines;
 }
 
+QString PathShortLabel(const QString &path) {
+	const auto name = QFileInfo(path).fileName().trimmed();
+	return name.isEmpty() ? path : name;
+}
+
+struct LogLineEntry {
+	QString sortKey;
+	QString rendered;
+	int order = 0;
+};
+
+QString TimestampSortKey(const QString &line) {
+	const auto trimmed = line.trimmed();
+	const auto firstToken = trimmed.section(QChar::fromLatin1(' '), 0, 0);
+	if (firstToken.size() >= 20
+		&& firstToken[4] == QChar::fromLatin1('-')
+		&& firstToken[7] == QChar::fromLatin1('-')
+		&& firstToken.contains(QChar::fromLatin1('T'))) {
+		return firstToken;
+	}
+	const auto key = QStringLiteral("\"timestampUtc\":\"");
+	const auto index = trimmed.indexOf(key);
+	if (index >= 0) {
+		const auto start = index + key.size();
+		const auto end = trimmed.indexOf(QChar::fromLatin1('\"'), start);
+		if (end > start) {
+			return trimmed.mid(start, end - start);
+		}
+	}
+	return QString();
+}
+
+QStringList TailMergedLines(const Plugins::Host *host, int wantedLines) {
+	auto entries = std::vector<LogLineEntry>();
+	const auto paths = AvailableLogPaths(host);
+	const auto perFile = std::max(wantedLines, 1);
+	auto order = 0;
+	for (const auto &path : paths) {
+		const auto prefix = QStringLiteral("[%1] ").arg(PathShortLabel(path));
+		for (const auto &line : TailLines(path, perFile)) {
+			entries.push_back(LogLineEntry{
+				TimestampSortKey(line),
+				prefix + line,
+				order++,
+			});
+		}
+	}
+	std::stable_sort(entries.begin(), entries.end(), [](const LogLineEntry &a, const LogLineEntry &b) {
+		if (a.sortKey.isEmpty() != b.sortKey.isEmpty()) {
+			return !a.sortKey.isEmpty();
+		}
+		if (a.sortKey != b.sortKey) {
+			return a.sortKey < b.sortKey;
+		}
+		return a.order < b.order;
+	});
+	if (int(entries.size()) > wantedLines) {
+		entries.erase(entries.begin(), entries.end() - wantedLines);
+	}
+	auto result = QStringList();
+	for (const auto &entry : entries) {
+		result.push_back(entry.rendered);
+	}
+	return result;
+}
+
 QStringList ApplyFilter(QStringList lines, const QString &filter) {
 	const auto trimmed = filter.trimmed();
 	if (trimmed.isEmpty()) {
@@ -143,9 +238,15 @@ void CenterOver(QWidget *anchor, QWidget *widget) {
 	if (!widget) {
 		return;
 	}
-	const auto geometry = anchor
-		? QRect(QPoint(0, 0), anchor->size())
-		: QApplication::primaryScreen()->availableGeometry();
+	auto geometry = QRect();
+	if (anchor) {
+		geometry = anchor->frameGeometry();
+	} else if (const auto screen = QApplication::primaryScreen()) {
+		geometry = screen->availableGeometry();
+	}
+	if (!geometry.isValid()) {
+		geometry = QRect(0, 0, 960, 720);
+	}
 	const auto size = widget->size();
 	widget->move(
 		geometry.center().x() - (size.width() / 2),
@@ -187,25 +288,24 @@ public:
 		ReadHandler readHandler,
 		ClearHandler clearHandler,
 		ToastHandler toastHandler,
-		QWidget *parent)
-		: QDialog(parent)
+		QWidget *anchor)
+		: QDialog(
+			nullptr,
+			Qt::Dialog
+				| Qt::Tool
+				| Qt::FramelessWindowHint
+				| Qt::NoDropShadowWindowHint)
 	, _host(host)
 	, _readHandler(std::move(readHandler))
 	, _clearHandler(std::move(clearHandler))
-		, _toastHandler(std::move(toastHandler)) {
-			setWindowFlags(
-				Qt::Dialog
-				| Qt::WindowTitleHint
-				| Qt::WindowCloseButtonHint
-				| Qt::WindowStaysOnTopHint
-				| Qt::CustomizeWindowHint);
-			setAttribute(Qt::WA_DeleteOnClose, false);
-			setAttribute(Qt::WA_StyledBackground, true);
-			setModal(false);
-			setWindowModality(Qt::NonModal);
-			setWindowOpacity(0.94);
-			setWindowTitle(Tr(_host, "Plugin Logs", u8"Логи плагинов"));
-			resize(760, 560);
+	, _toastHandler(std::move(toastHandler))
+	, _anchor(anchor) {
+		setModal(false);
+		setAttribute(Qt::WA_DeleteOnClose, false);
+		setAttribute(Qt::WA_QuitOnClose, false);
+		setAttribute(Qt::WA_TranslucentBackground, true);
+		setAttribute(Qt::WA_StyledBackground, true);
+		resize(820, 580);
 		setObjectName(QStringLiteral("showLogsOverlay"));
 		setStyleSheet(QStringLiteral(
 			"#showLogsOverlay {"
@@ -239,7 +339,7 @@ public:
 		auto headerLayout = new QHBoxLayout();
 		headerLayout->setSpacing(10);
 		auto title = new QLabel(
-			Tr(_host, "Plugin Logs", u8"Логи плагинов"),
+			Tr(_host, "Client & Plugin Logs", u8"Логи клиента и плагинов"),
 			this);
 		title->setStyleSheet(QStringLiteral(
 			"font-size: 18px; font-weight: 700; color: #fff7f0;"));
@@ -266,14 +366,32 @@ public:
 		_filterEdit->setPlaceholderText(
 			Tr(
 				_host,
-				"Filter by plugin id or name",
-				u8"Фильтр по id или имени плагина"));
+				"Filter by plugin id, phase, runtime or error",
+				u8"Фильтр по id плагина, phase, runtime или ошибке"));
 		auto applyFilterButton = new QPushButton(
 			Tr(_host, "Filter", u8"Фильтр"),
 			this);
 		filterLayout->addWidget(_filterEdit, 1);
 		filterLayout->addWidget(applyFilterButton);
 		layout->addLayout(filterLayout);
+
+		auto quickFilters = new QHBoxLayout();
+		quickFilters->setSpacing(8);
+		const auto addQuickFilter = [=](const QString &label, const QString &value) {
+			auto button = new QPushButton(label, this);
+			quickFilters->addWidget(button);
+			connect(button, &QPushButton::clicked, this, [=] {
+				_filterEdit->setText(value);
+				_filter = value;
+				refreshNow();
+			});
+		};
+		addQuickFilter(Tr(_host, "All", u8"Все"), QString());
+		addQuickFilter(Tr(_host, "Errors", u8"Ошибки"), QStringLiteral("failed"));
+		addQuickFilter(Tr(_host, "Runtime", u8"Runtime"), QStringLiteral("runtime-api"));
+		addQuickFilter(Tr(_host, "Recovery", u8"Recovery"), QStringLiteral("recovery"));
+		quickFilters->addStretch(1);
+		layout->addLayout(quickFilters);
 
 		_statusLabel = new QLabel(this);
 		_statusLabel->setStyleSheet(QStringLiteral("color: rgba(244,235,227,0.72);"));
@@ -308,10 +426,14 @@ public:
 			}
 		});
 		connect(closeButton, &QPushButton::clicked, this, [this] {
-			hide();
+			close();
 		});
 		connect(applyFilterButton, &QPushButton::clicked, this, [this] {
 			_filter = _filterEdit->text().trimmed();
+			refreshNow();
+		});
+		connect(_filterEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+			_filter = text.trimmed();
 			refreshNow();
 		});
 		connect(_filterEdit, &QLineEdit::returnPressed, this, [this] {
@@ -321,7 +443,6 @@ public:
 		connect(&_refreshTimer, &QTimer::timeout, this, [this] {
 			refreshNow();
 		});
-		_refreshTimer.start(kRefreshIntervalMs);
 	}
 
 	void setMaxLines(int maxLines) {
@@ -329,16 +450,49 @@ public:
 		refreshNow();
 	}
 
+	void setAnchor(QWidget *anchor) {
+		_anchor = StableAnchorWindow(anchor);
+		CenterOver(_anchor.data(), this);
+	}
+
 	void refreshNow() {
 		const auto fetchCount = std::max(_maxLines * 6, 240);
 		auto lines = _readHandler(fetchCount, _filter);
+		auto sourceLabels = QStringList();
+		for (const auto &path : AvailableLogPaths(_host)) {
+			sourceLabels.push_back(PathShortLabel(path));
+		}
 		if (lines.size() > _maxLines) {
 			lines = lines.mid(lines.size() - _maxLines);
 		}
 		_view->setPlainText(lines.join(QChar::fromLatin1('\n')));
+		const auto host = _host->hostInfo();
+		const auto runtimeText = host.runtimeApiEnabled
+			? Tr(_host, "enabled", u8"включён") + QStringLiteral(" :%1").arg(host.runtimeApiPort)
+			: Tr(_host, "disabled", u8"выключен");
 		_statusLabel->setText(
 			Tr(_host, "Shown lines:", u8"Показано строк:")
-			+ QStringLiteral(" %1").arg(lines.size()));
+			+ QStringLiteral(" %1 • ").arg(lines.size())
+			+ Tr(_host, "Sources:", u8"Источники:")
+			+ QStringLiteral(" %1 • ").arg(sourceLabels.join(QStringLiteral(", ")))
+			+ Tr(_host, "Safe mode:", u8"Safe mode:")
+			+ QStringLiteral(" %1 • ").arg(host.safeModeEnabled ? Tr(_host, "enabled", u8"включён") : Tr(_host, "disabled", u8"выключен"))
+			+ Tr(_host, "Runtime API:", u8"Runtime API:")
+			+ QStringLiteral(" %1").arg(runtimeText));
+		CenterOver(_anchor.data(), this);
+	}
+
+protected:
+	void showEvent(QShowEvent *event) override {
+		QDialog::showEvent(event);
+		refreshNow();
+		_refreshTimer.start(kRefreshIntervalMs);
+		CenterOver(_anchor.data(), this);
+	}
+
+	void hideEvent(QHideEvent *event) override {
+		_refreshTimer.stop();
+		QDialog::hideEvent(event);
 	}
 
 private:
@@ -346,6 +500,7 @@ private:
 	ReadHandler _readHandler;
 	ClearHandler _clearHandler;
 	ToastHandler _toastHandler;
+	QPointer<QWidget> _anchor;
 	QLineEdit *_filterEdit = nullptr;
 	QLabel *_statusLabel = nullptr;
 	QPlainTextEdit *_view = nullptr;
@@ -402,7 +557,7 @@ public:
 			_actionId = 0;
 		}
 		if (_overlay) {
-			_overlay->hide();
+			_overlay->close();
 			_overlay->deleteLater();
 			_overlay = nullptr;
 		}
@@ -416,9 +571,9 @@ private:
 		_info.author = Latin1(kPluginAuthor);
 		_info.description = Tr(
 			_host,
-			"Opens a semi-transparent overlay with plugin logs, filtering and copy/clear actions.",
-			u8"Открывает полупрозрачное overlay-окно с логами плагинов, фильтром и кнопками копирования/очистки.");
-		_info.website = QStringLiteral("https://sosiskibot.ru");
+			"Opens a semi-transparent overlay with client.log, plugins.log and plugins.trace.jsonl, plus quick filters for errors/runtime/recovery.",
+			u8"Открывает полупрозрачное overlay-окно с client.log, plugins.log и plugins.trace.jsonl, плюс быстрые фильтры по ошибкам/runtime/recovery.");
+		_info.website.clear();
 	}
 
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
@@ -450,8 +605,8 @@ private:
 		info.title = Tr(_host, "Source", u8"Источник");
 		info.description = Tr(
 			_host,
-			"Reads Astrogram plugin logs from tdata/plugins.log. Use the filter field inside the overlay to show only one plugin.",
-			u8"Читает логи плагинов Astrogram из tdata/plugins.log. Фильтр внутри overlay позволяет оставить только один плагин.");
+			"Reads tdata/client.log, tdata/plugins.log and tdata/plugins.trace.jsonl. Quick buttons switch to error/runtime/recovery slices.",
+			u8"Читает tdata/client.log, tdata/plugins.log и tdata/plugins.trace.jsonl. Быстрые кнопки переключают срезы error/runtime/recovery.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -480,21 +635,22 @@ private:
 			kMaxMaxLines);
 	}
 
-	QString logsPath() const {
-		return PluginLogsPath(_host);
-	}
-
 	QStringList readLogs(int fetchCount, const QString &filter) const {
-		return ApplyFilter(TailLines(logsPath(), fetchCount), filter);
+		return ApplyFilter(TailMergedLines(_host, fetchCount), filter);
 	}
 
 	bool clearLogs() const {
-		QFile file(logsPath());
-		if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-			return false;
+		auto clearedAny = false;
+		for (const auto &path : AvailableLogPaths(_host)) {
+			QDir().mkpath(QFileInfo(path).absolutePath());
+			QFile file(path);
+			if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+				continue;
+			}
+			file.close();
+			clearedAny = true;
 		}
-		file.close();
-		return true;
+		return clearedAny;
 	}
 
 	QWidget *resolveOverlayAnchor() const {
@@ -541,10 +697,6 @@ private:
 				u8"Не удалось найти окно Astrogram для overlay с логами."));
 			return;
 		}
-		if (_overlay && _overlay->parentWidget() != anchor) {
-			_overlay->close();
-			_overlay = nullptr;
-		}
 		if (!_overlay) {
 			_overlay = new LogsOverlay(
 				_host,
@@ -560,13 +712,11 @@ private:
 					anchor);
 			_overlay->setMaxLines(_maxLines);
 		}
+		_overlay->setAnchor(anchor);
 		_overlay->setMaxLines(_maxLines);
 		CenterOver(anchor, _overlay);
-		if (_overlay->isHidden()) {
-			_overlay->show();
-		} else {
-			_overlay->showNormal();
-		}
+		_overlay->show();
+		_overlay->showNormal();
 		_overlay->raise();
 		_overlay->activateWindow();
 	}
