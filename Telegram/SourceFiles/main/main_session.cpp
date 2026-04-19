@@ -248,6 +248,8 @@ Session::Session(
 	_api->requestFullPeer(_user);
 
 	_api->instance().setUserPhone(_user->phone());
+	_data->finishConstructedSession();
+	LOG(("Session init: data session startup hooks scheduled."));
 
 	// Load current userpic and keep it loaded.
 	_user->loadUserpic();

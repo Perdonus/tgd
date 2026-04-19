@@ -396,24 +396,6 @@ Session::Session(not_null<Main::Session*> session)
 	subscribeForTopicRepliesLists();
 	LOG(("Data session init: topic replies subscribed."));
 
-	crl::on_main(_session, [=] {
-		AmPremiumValue(
-			_session
-		) | rpl::on_next([=] {
-			for (const auto &[document, items] : _documentItems) {
-				if (document->isVoiceMessage()) {
-					for (const auto &item : items) {
-						requestItemResize(item);
-					}
-				}
-			}
-		}, _lifetime);
-
-		if (!Core::App().settings().disableStories()) {
-			_stories->loadMore(Data::StorySourcesList::NotHidden);
-		}
-	});
-
 	session->appConfig().ignoredRestrictionReasonsChanges(
 	) | rpl::on_next([=](std::vector<QString> &&changed) {
 		auto refresh = std::vector<not_null<const HistoryItem*>>();
@@ -430,6 +412,28 @@ Session::Session(not_null<Main::Session*> session)
 		}
 	}, _lifetime);
 	LOG(("Data session init: constructor body finished."));
+}
+
+void Session::finishConstructedSession() {
+	LOG(("Data session init: finishConstructedSession begin."));
+	crl::on_main(_session, [=] {
+		LOG(("Data session init: startup hooks armed."));
+		AmPremiumValue(
+			_session
+		) | rpl::on_next([=] {
+			for (const auto &[document, items] : _documentItems) {
+				if (document->isVoiceMessage()) {
+					for (const auto &item : items) {
+						requestItemResize(item);
+					}
+				}
+			}
+		}, _lifetime);
+
+		if (!Core::App().settings().disableStories()) {
+			_stories->loadMore(Data::StorySourcesList::NotHidden);
+		}
+	});
 }
 
 void Session::subscribeForTopicRepliesLists() {
@@ -625,7 +629,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		return data.vid().v;
 	});
 	LOG(("Data session: processUser begin, id=%1 kind=%2")
-		.arg(userId.bare)
+		.arg(userId)
 		.arg(data.type() == mtpc_user ? "user" : "userEmpty"));
 	const auto result = user(userId);
 	auto minimal = false;
@@ -876,7 +880,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			flags |= UpdateFlag::ColorProfile;
 		}
 		LOG(("Data session: processUser payload applied, id=%1 minimal=%2 deleted=%3 self=%4")
-			.arg(userId.bare)
+			.arg(userId)
 			.arg(minimal ? 1 : 0)
 			.arg(data.is_deleted() ? 1 : 0)
 			.arg(data.is_self() ? 1 : 0));
@@ -900,7 +904,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		}
 	}
 	LOG(("Data session: processUser finalized, id=%1 minimal=%2 hasFlags=%3 loaded=%4 botInfo=%5")
-		.arg(userId.bare)
+		.arg(userId)
 		.arg(minimal ? 1 : 0)
 		.arg(flags ? 1 : 0)
 		.arg(int(result->loadedStatus()))
@@ -909,7 +913,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 	if (flags) {
 		session().changes().peerUpdated(result, flags);
 	}
-	LOG(("Data session: processUser done, id=%1").arg(userId.bare));
+	LOG(("Data session: processUser done, id=%1").arg(userId));
 	return result;
 }
 

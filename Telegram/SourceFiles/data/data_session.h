@@ -167,6 +167,7 @@ public:
 	[[nodiscard]] const Groups &groups() const {
 		return _groups;
 	}
+	void finishConstructedSession();
 	[[nodiscard]] ChatFilters &chatsFilters() const {
 		return *_chatsFilters;
 	}
