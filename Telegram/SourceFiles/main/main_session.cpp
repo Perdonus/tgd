@@ -66,6 +66,17 @@ namespace {
 
 constexpr auto kTmpPasswordReserveTime = TimeId(10);
 
+template <typename Result, typename Factory>
+[[nodiscard]] Result MakeSessionInitLogged(
+		const char *label,
+		Factory &&factory) {
+	const auto text = QString::fromLatin1(label);
+	LOG(("Session init: begin %1").arg(text));
+	auto result = factory();
+	LOG(("Session init: done %1").arg(text));
+	return result;
+}
+
 [[nodiscard]] QString ValidatedInternalLinksDomain(
 		not_null<const Session*> session) {
 	// This domain should start with 'http[s]://' and end with '/'.
@@ -98,32 +109,91 @@ Session::Session(
 : _userId(user.c_user().vid())
 , _account(account)
 , _settings(std::move(settings))
-, _changes(std::make_unique<Data::Changes>(this))
-, _api(std::make_unique<ApiWrap>(this))
-, _updates(std::make_unique<Api::Updates>(this))
-, _sendProgressManager(std::make_unique<Api::SendProgressManager>(this))
-, _downloader(std::make_unique<Storage::DownloadManagerMtproto>(_api.get()))
-, _uploader(std::make_unique<Storage::Uploader>(_api.get()))
-, _storage(std::make_unique<Storage::Facade>())
-, _data(std::make_unique<Data::Session>(this))
-, _user(_data->processUser(user))
-, _emojiStickersPack(std::make_unique<Stickers::EmojiPack>(this))
-, _diceStickersPacks(std::make_unique<Stickers::DicePacks>(this))
-, _giftBoxStickersPacks(std::make_unique<Stickers::GiftBoxPack>(this))
-, _sendAsPeers(std::make_unique<SendAsPeers>(this))
-, _attachWebView(std::make_unique<InlineBots::AttachWebView>(this))
-, _recentPeers(std::make_unique<Data::RecentPeers>(this))
-, _recentSharedGifts(std::make_unique<Data::RecentSharedMediaGifts>(this))
-, _giftAuctions(std::make_unique<Data::GiftAuctions>(this))
-, _scheduledMessages(std::make_unique<Data::ScheduledMessages>(this))
-, _sponsoredMessages(std::make_unique<Data::SponsoredMessages>(this))
-, _topPeers(std::make_unique<Data::TopPeers>(this, Data::TopPeerType::Chat))
-, _topBotApps(
-	std::make_unique<Data::TopPeers>(this, Data::TopPeerType::BotApp))
-, _factchecks(std::make_unique<Data::Factchecks>(this))
-, _locationPickers(std::make_unique<Data::LocationPickers>())
-, _credits(std::make_unique<Data::Credits>(this))
-, _promoSuggestions(std::make_unique<Data::PromoSuggestions>(this, [=] {
+, _changes(MakeSessionInitLogged<std::unique_ptr<Data::Changes>>(
+	"changes",
+	[=] { return std::make_unique<Data::Changes>(this); }))
+, _api(MakeSessionInitLogged<std::unique_ptr<ApiWrap>>(
+	"api",
+	[=] { return std::make_unique<ApiWrap>(this); }))
+, _updates(MakeSessionInitLogged<std::unique_ptr<Api::Updates>>(
+	"updates",
+	[=] { return std::make_unique<Api::Updates>(this); }))
+, _sendProgressManager(
+	MakeSessionInitLogged<std::unique_ptr<Api::SendProgressManager>>(
+	"sendProgressManager",
+	[=] { return std::make_unique<Api::SendProgressManager>(this); }))
+, _downloader(
+	MakeSessionInitLogged<std::unique_ptr<Storage::DownloadManagerMtproto>>(
+	"downloader",
+	[=] { return std::make_unique<Storage::DownloadManagerMtproto>(_api.get()); }))
+, _uploader(MakeSessionInitLogged<std::unique_ptr<Storage::Uploader>>(
+	"uploader",
+	[=] { return std::make_unique<Storage::Uploader>(_api.get()); }))
+, _storage(MakeSessionInitLogged<std::unique_ptr<Storage::Facade>>(
+	"storage",
+	[] { return std::make_unique<Storage::Facade>(); }))
+, _data(MakeSessionInitLogged<std::unique_ptr<Data::Session>>(
+	"data.session",
+	[=] { return std::make_unique<Data::Session>(this); }))
+, _user(MakeSessionInitLogged<not_null<UserData*>>(
+	"data.processUser",
+	[=] { return _data->processUser(user); }))
+, _emojiStickersPack(MakeSessionInitLogged<std::unique_ptr<Stickers::EmojiPack>>(
+	"stickers.emojiPack",
+	[=] { return std::make_unique<Stickers::EmojiPack>(this); }))
+, _diceStickersPacks(MakeSessionInitLogged<std::unique_ptr<Stickers::DicePacks>>(
+	"stickers.dicePacks",
+	[=] { return std::make_unique<Stickers::DicePacks>(this); }))
+, _giftBoxStickersPacks(MakeSessionInitLogged<std::unique_ptr<Stickers::GiftBoxPack>>(
+	"stickers.giftBoxPack",
+	[=] { return std::make_unique<Stickers::GiftBoxPack>(this); }))
+, _sendAsPeers(MakeSessionInitLogged<std::unique_ptr<SendAsPeers>>(
+	"sendAsPeers",
+	[=] { return std::make_unique<SendAsPeers>(this); }))
+, _attachWebView(MakeSessionInitLogged<std::unique_ptr<InlineBots::AttachWebView>>(
+	"attachWebView",
+	[=] { return std::make_unique<InlineBots::AttachWebView>(this); }))
+, _recentPeers(MakeSessionInitLogged<std::unique_ptr<Data::RecentPeers>>(
+	"recentPeers",
+	[=] { return std::make_unique<Data::RecentPeers>(this); }))
+, _recentSharedGifts(
+	MakeSessionInitLogged<std::unique_ptr<Data::RecentSharedMediaGifts>>(
+	"recentSharedGifts",
+	[=] { return std::make_unique<Data::RecentSharedMediaGifts>(this); }))
+, _giftAuctions(MakeSessionInitLogged<std::unique_ptr<Data::GiftAuctions>>(
+	"giftAuctions",
+	[=] { return std::make_unique<Data::GiftAuctions>(this); }))
+, _scheduledMessages(
+	MakeSessionInitLogged<std::unique_ptr<Data::ScheduledMessages>>(
+	"scheduledMessages",
+	[=] { return std::make_unique<Data::ScheduledMessages>(this); }))
+, _sponsoredMessages(
+	MakeSessionInitLogged<std::unique_ptr<Data::SponsoredMessages>>(
+	"sponsoredMessages",
+	[=] { return std::make_unique<Data::SponsoredMessages>(this); }))
+, _topPeers(MakeSessionInitLogged<std::unique_ptr<Data::TopPeers>>(
+	"topPeers.chat",
+	[=] { return std::make_unique<Data::TopPeers>(
+		this,
+		Data::TopPeerType::Chat); }))
+, _topBotApps(MakeSessionInitLogged<std::unique_ptr<Data::TopPeers>>(
+	"topPeers.botApps",
+	[=] { return std::make_unique<Data::TopPeers>(
+		this,
+		Data::TopPeerType::BotApp); }))
+, _factchecks(MakeSessionInitLogged<std::unique_ptr<Data::Factchecks>>(
+	"factchecks",
+	[=] { return std::make_unique<Data::Factchecks>(this); }))
+, _locationPickers(
+	MakeSessionInitLogged<std::unique_ptr<Data::LocationPickers>>(
+	"locationPickers",
+	[] { return std::make_unique<Data::LocationPickers>(); }))
+, _credits(MakeSessionInitLogged<std::unique_ptr<Data::Credits>>(
+	"credits",
+	[=] { return std::make_unique<Data::Credits>(this); }))
+, _promoSuggestions(MakeSessionInitLogged<std::unique_ptr<Data::PromoSuggestions>>(
+	"promoSuggestions",
+	[=] { return std::make_unique<Data::PromoSuggestions>(this, [=] {
 	using State = Data::SetupEmailState;
 	if (_promoSuggestions->setupEmailState() == State::Setup
 		|| _promoSuggestions->setupEmailState() == State::SetupNoSkip) {
@@ -155,13 +225,24 @@ Session::Session(
 			saveSettingsDelayed(200);
 		}
 	}
-}))
-, _passkeys(std::make_unique<Data::Passkeys>(this))
-, _cachedReactionIconFactory(std::make_unique<ReactionIconFactory>())
-, _supportHelper(Support::Helper::Create(this))
-, _fastButtonsBots(std::make_unique<Support::FastButtonsBots>(this))
+	}); }))
+, _passkeys(MakeSessionInitLogged<std::unique_ptr<Data::Passkeys>>(
+	"passkeys",
+	[=] { return std::make_unique<Data::Passkeys>(this); }))
+, _cachedReactionIconFactory(
+	MakeSessionInitLogged<std::unique_ptr<ReactionIconFactory>>(
+	"reactionIconFactory",
+	[] { return std::make_unique<ReactionIconFactory>(); }))
+, _supportHelper(MakeSessionInitLogged<std::unique_ptr<Support::Helper>>(
+	"supportHelper",
+	[=] { return Support::Helper::Create(this); }))
+, _fastButtonsBots(
+	MakeSessionInitLogged<std::unique_ptr<Support::FastButtonsBots>>(
+	"fastButtonsBots",
+	[=] { return std::make_unique<Support::FastButtonsBots>(this); }))
 , _saveSettingsTimer([=] { saveSettings(); }) {
 	Expects(_settings != nullptr);
+	LOG(("Session init: constructor body entered."));
 
 	_api->requestTermsUpdate();
 	_api->requestFullPeer(_user);
@@ -241,6 +322,7 @@ Session::Session(
 	) | rpl::on_next([=] {
 		appConfigRefreshed();
 	}, _lifetime);
+	LOG(("Session init: constructor body finished."));
 }
 
 void Session::appConfigRefreshed() {

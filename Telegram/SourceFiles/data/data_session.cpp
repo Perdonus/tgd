@@ -92,6 +92,17 @@ constexpr auto kNextForUpgradeGiftTimeout = 5 * crl::time(1000);
 
 using ViewElement = HistoryView::Element;
 
+template <typename Result, typename Factory>
+[[nodiscard]] Result MakeDataSessionInitLogged(
+		const char *label,
+		Factory &&factory) {
+	const auto text = QString::fromLatin1(label);
+	LOG(("Data session init: begin %1").arg(text));
+	auto result = factory();
+	LOG(("Data session init: done %1").arg(text));
+	return result;
+}
+
 // s: box 100x100
 // m: box 320x320
 // x: box 800x800
@@ -235,16 +246,35 @@ void CheckForSwitchInlineButton(not_null<HistoryItem*> item) {
 
 Session::Session(not_null<Main::Session*> session)
 : _session(session)
-, _cache(Core::App().databases().get(
-	_session->local().cachePath(),
-	_session->local().cacheSettings()))
-, _bigFileCache(Core::App().databases().get(
-	_session->local().cacheBigFilePath(),
-	_session->local().cacheBigFileSettings()))
-, _groupFreeTranscribeLevel(session->appConfig().value(
+, _cache(MakeDataSessionInitLogged<decltype(Core::App().databases().get(
+		session->local().cachePath(),
+		session->local().cacheSettings()))>(
+	"cache",
+	[=] {
+		return Core::App().databases().get(
+			session->local().cachePath(),
+			session->local().cacheSettings());
+	}))
+, _bigFileCache(MakeDataSessionInitLogged<decltype(Core::App().databases().get(
+		session->local().cacheBigFilePath(),
+		session->local().cacheBigFileSettings()))>(
+	"cache.bigFile",
+	[=] {
+		return Core::App().databases().get(
+			session->local().cacheBigFilePath(),
+			session->local().cacheBigFileSettings());
+	}))
+, _groupFreeTranscribeLevel(MakeDataSessionInitLogged<decltype(session->appConfig().value(
 ) | rpl::map([limits = Data::LevelLimits(session)] {
 	return limits.groupTranscribeLevelMin();
-}))
+}))>(
+	"groupFreeTranscribeLevel",
+	[=] {
+		return session->appConfig().value(
+		) | rpl::map([limits = Data::LevelLimits(session)] {
+			return limits.groupTranscribeLevelMin();
+		});
+	}))
 , _chatsList(
 	session,
 	FilterId(),
@@ -255,27 +285,69 @@ Session::Session(not_null<Main::Session*> session)
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
 , _pollsClosingTimer([=] { checkPollsClosings(); })
 , _watchForOfflineTimer([=] { checkLocalUsersWentOffline(); })
-, _groups(this)
-, _chatsFilters(std::make_unique<ChatFilters>(this))
-, _cloudThemes(std::make_unique<CloudThemes>(session))
-, _sendActionManager(std::make_unique<SendActionManager>())
-, _streaming(std::make_unique<Streaming>(this))
-, _mediaRotation(std::make_unique<MediaRotation>())
-, _histories(std::make_unique<Histories>(this))
-, _stickers(std::make_unique<Stickers>(this))
-, _reactions(std::make_unique<Reactions>(this))
-, _emojiStatuses(std::make_unique<EmojiStatuses>(this))
-, _forumIcons(std::make_unique<ForumIcons>(this))
-, _notifySettings(std::make_unique<NotifySettings>(this))
-, _customEmojiManager(std::make_unique<CustomEmojiManager>(this))
-, _stories(std::make_unique<Stories>(this))
-, _savedMusic(std::make_unique<SavedMusic>(this))
-, _savedMessages(std::make_unique<SavedMessages>(this))
-, _chatbots(std::make_unique<Chatbots>(this))
-, _businessInfo(std::make_unique<BusinessInfo>(this))
-, _shortcutMessages(std::make_unique<ShortcutMessages>(this)) {
+, _groups(MakeDataSessionInitLogged<Groups>(
+	"groups",
+	[=] { return Groups(this); }))
+, _chatsFilters(MakeDataSessionInitLogged<std::unique_ptr<ChatFilters>>(
+	"chatFilters",
+	[=] { return std::make_unique<ChatFilters>(this); }))
+, _cloudThemes(MakeDataSessionInitLogged<std::unique_ptr<CloudThemes>>(
+	"cloudThemes",
+	[=] { return std::make_unique<CloudThemes>(session); }))
+, _sendActionManager(MakeDataSessionInitLogged<std::unique_ptr<SendActionManager>>(
+	"sendActionManager",
+	[] { return std::make_unique<SendActionManager>(); }))
+, _streaming(MakeDataSessionInitLogged<std::unique_ptr<Streaming>>(
+	"streaming",
+	[=] { return std::make_unique<Streaming>(this); }))
+, _mediaRotation(MakeDataSessionInitLogged<std::unique_ptr<MediaRotation>>(
+	"mediaRotation",
+	[] { return std::make_unique<MediaRotation>(); }))
+, _histories(MakeDataSessionInitLogged<std::unique_ptr<Histories>>(
+	"histories",
+	[=] { return std::make_unique<Histories>(this); }))
+, _stickers(MakeDataSessionInitLogged<std::unique_ptr<Stickers>>(
+	"stickers",
+	[=] { return std::make_unique<Stickers>(this); }))
+, _reactions(MakeDataSessionInitLogged<std::unique_ptr<Reactions>>(
+	"reactions",
+	[=] { return std::make_unique<Reactions>(this); }))
+, _emojiStatuses(MakeDataSessionInitLogged<std::unique_ptr<EmojiStatuses>>(
+	"emojiStatuses",
+	[=] { return std::make_unique<EmojiStatuses>(this); }))
+, _forumIcons(MakeDataSessionInitLogged<std::unique_ptr<ForumIcons>>(
+	"forumIcons",
+	[=] { return std::make_unique<ForumIcons>(this); }))
+, _notifySettings(MakeDataSessionInitLogged<std::unique_ptr<NotifySettings>>(
+	"notifySettings",
+	[=] { return std::make_unique<NotifySettings>(this); }))
+, _customEmojiManager(
+	MakeDataSessionInitLogged<std::unique_ptr<CustomEmojiManager>>(
+	"customEmojiManager",
+	[=] { return std::make_unique<CustomEmojiManager>(this); }))
+, _stories(MakeDataSessionInitLogged<std::unique_ptr<Stories>>(
+	"stories",
+	[=] { return std::make_unique<Stories>(this); }))
+, _savedMusic(MakeDataSessionInitLogged<std::unique_ptr<SavedMusic>>(
+	"savedMusic",
+	[=] { return std::make_unique<SavedMusic>(this); }))
+, _savedMessages(MakeDataSessionInitLogged<std::unique_ptr<SavedMessages>>(
+	"savedMessages",
+	[=] { return std::make_unique<SavedMessages>(this); }))
+, _chatbots(MakeDataSessionInitLogged<std::unique_ptr<Chatbots>>(
+	"chatbots",
+	[=] { return std::make_unique<Chatbots>(this); }))
+, _businessInfo(MakeDataSessionInitLogged<std::unique_ptr<BusinessInfo>>(
+	"businessInfo",
+	[=] { return std::make_unique<BusinessInfo>(this); }))
+, _shortcutMessages(
+	MakeDataSessionInitLogged<std::unique_ptr<ShortcutMessages>>(
+	"shortcutMessages",
+	[=] { return std::make_unique<ShortcutMessages>(this); })) {
+	LOG(("Data session init: constructor body entered."));
 	_cache->open(_session->local().cacheKey());
 	_bigFileCache->open(_session->local().cacheBigFileKey());
+	LOG(("Data session init: caches opened."));
 
 	if constexpr (Platform::IsLinux()) {
 		const auto wasVersion = _session->local().oldMapVersion();
@@ -289,6 +361,7 @@ Session::Session(not_null<Main::Session*> session)
 	setupChannelLeavingViewer();
 	setupPeerNameViewer();
 	setupUserIsContactViewer();
+	LOG(("Data session init: viewers wired."));
 
 	_chatsList.unreadStateChanges(
 	) | rpl::on_next([=] {
@@ -318,8 +391,10 @@ Session::Session(not_null<Main::Session*> session)
 	) | rpl::on_next([=](uint64 processId) {
 		highlightProcessDone(processId);
 	}, _lifetime);
+	LOG(("Data session init: spellchecker hook wired."));
 
 	subscribeForTopicRepliesLists();
+	LOG(("Data session init: topic replies subscribed."));
 
 	crl::on_main(_session, [=] {
 		AmPremiumValue(
@@ -354,6 +429,7 @@ Session::Session(not_null<Main::Session*> session)
 			requestItemViewRefresh(item);
 		}
 	}, _lifetime);
+	LOG(("Data session init: constructor body finished."));
 }
 
 void Session::subscribeForTopicRepliesLists() {
@@ -545,9 +621,13 @@ ChannelData *Session::channelLoaded(ChannelId id) const {
 }
 
 not_null<UserData*> Session::processUser(const MTPUser &data) {
-	const auto result = user(data.match([](const auto &data) {
+	const auto userId = data.match([](const auto &data) {
 		return data.vid().v;
-	}));
+	});
+	LOG(("Data session: processUser begin, id=%1 kind=%2")
+		.arg(userId.bare)
+		.arg(data.type() == mtpc_user ? "user" : "userEmpty"));
+	const auto result = user(userId);
 	auto minimal = false;
 	const MTPUserStatus *status = nullptr;
 	const MTPUserStatus emptyStatus = MTP_userStatusEmpty();
@@ -795,6 +875,11 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 		if (result->changeColorProfile(data.vprofile_color())) {
 			flags |= UpdateFlag::ColorProfile;
 		}
+		LOG(("Data session: processUser payload applied, id=%1 minimal=%2 deleted=%3 self=%4")
+			.arg(userId.bare)
+			.arg(minimal ? 1 : 0)
+			.arg(data.is_deleted() ? 1 : 0)
+			.arg(data.is_self() ? 1 : 0));
 	});
 
 	if (minimal) {
@@ -814,10 +899,17 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			flags |= UpdateFlag::OnlineStatus;
 		}
 	}
+	LOG(("Data session: processUser finalized, id=%1 minimal=%2 hasFlags=%3 loaded=%4 botInfo=%5")
+		.arg(userId.bare)
+		.arg(minimal ? 1 : 0)
+		.arg(flags ? 1 : 0)
+		.arg(int(result->loadedStatus()))
+		.arg(result->botInfo ? 1 : 0));
 
 	if (flags) {
 		session().changes().peerUpdated(result, flags);
 	}
+	LOG(("Data session: processUser done, id=%1").arg(userId.bare));
 	return result;
 }
 
