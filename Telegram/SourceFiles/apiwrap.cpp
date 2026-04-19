@@ -350,6 +350,14 @@ void ShowChannelsLimitBox(not_null<PeerData*> peer) {
 		: QString::number(seconds);
 }
 
+template <typename T, typename Factory>
+[[nodiscard]] T MakeApiWrapInitLogged(const char *label, Factory factory) {
+	LOG(("ApiWrap init: begin %1", label));
+	auto result = factory();
+	LOG(("ApiWrap init: done %1", label));
+	return result;
+}
+
 } // namespace
 
 namespace Api {
@@ -366,36 +374,88 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _messageDataResolveDelayed([=] { resolveMessageDatas(); })
 , _webPagesTimer([=] { resolveWebPages(); })
 , _draftsSaveTimer([=] { saveDraftsToCloud(); })
-, _scheduledMessageEditsTimer([=] { processScheduledMessageEdits(); })
 , _featuredSetsReadTimer([=] { readFeaturedSets(); })
-, _dialogsLoadState(std::make_unique<DialogsLoadState>())
-, _fileLoader(std::make_unique<TaskQueue>(kFileLoaderQueueStopTimeout))
+, _scheduledMessageEditsTimer([=] { processScheduledMessageEdits(); })
+, _dialogsLoadState(MakeApiWrapInitLogged<std::unique_ptr<DialogsLoadState>>(
+	"dialogsLoadState",
+	[] { return std::make_unique<DialogsLoadState>(); }))
+, _fileLoader(MakeApiWrapInitLogged<std::unique_ptr<TaskQueue>>(
+	"fileLoader",
+	[] { return std::make_unique<TaskQueue>(kFileLoaderQueueStopTimeout); }))
 , _updateNotifyTimer([=] { sendNotifySettingsUpdates(); })
 , _statsSessionKillTimer([=] { checkStatsSessions(); })
-, _authorizations(std::make_unique<Api::Authorizations>(this))
-, _attachedStickers(std::make_unique<Api::AttachedStickers>(this))
-, _blockedPeers(std::make_unique<Api::BlockedPeers>(this))
-, _cloudPassword(std::make_unique<Api::CloudPassword>(this))
-, _selfDestruct(std::make_unique<Api::SelfDestruct>(this))
-, _sensitiveContent(std::make_unique<Api::SensitiveContent>(this))
-, _globalPrivacy(std::make_unique<Api::GlobalPrivacy>(this))
-, _userPrivacy(std::make_unique<Api::UserPrivacy>(this))
-, _inviteLinks(std::make_unique<Api::InviteLinks>(this))
-, _chatLinks(std::make_unique<Api::ChatLinks>(this))
-, _views(std::make_unique<Api::ViewsManager>(this))
-, _confirmPhone(std::make_unique<Api::ConfirmPhone>(this))
-, _peerPhoto(std::make_unique<Api::PeerPhoto>(this))
-, _polls(std::make_unique<Api::Polls>(this))
-, _todoLists(std::make_unique<Api::TodoLists>(this))
-, _chatParticipants(std::make_unique<Api::ChatParticipants>(this))
-, _unreadThings(std::make_unique<Api::UnreadThings>(this))
-, _ringtones(std::make_unique<Api::Ringtones>(this))
-, _transcribes(std::make_unique<Api::Transcribes>(this))
-, _premium(std::make_unique<Api::Premium>(this))
-, _usernames(std::make_unique<Api::Usernames>(this))
-, _websites(std::make_unique<Api::Websites>(this))
-, _peerColors(std::make_unique<Api::PeerColors>(this)) {
+, _authorizations(MakeApiWrapInitLogged<std::unique_ptr<Api::Authorizations>>(
+	"authorizations",
+	[=] { return std::make_unique<Api::Authorizations>(this); }))
+, _attachedStickers(MakeApiWrapInitLogged<std::unique_ptr<Api::AttachedStickers>>(
+	"attachedStickers",
+	[=] { return std::make_unique<Api::AttachedStickers>(this); }))
+, _blockedPeers(MakeApiWrapInitLogged<std::unique_ptr<Api::BlockedPeers>>(
+	"blockedPeers",
+	[=] { return std::make_unique<Api::BlockedPeers>(this); }))
+, _cloudPassword(MakeApiWrapInitLogged<std::unique_ptr<Api::CloudPassword>>(
+	"cloudPassword",
+	[=] { return std::make_unique<Api::CloudPassword>(this); }))
+, _selfDestruct(MakeApiWrapInitLogged<std::unique_ptr<Api::SelfDestruct>>(
+	"selfDestruct",
+	[=] { return std::make_unique<Api::SelfDestruct>(this); }))
+, _sensitiveContent(MakeApiWrapInitLogged<std::unique_ptr<Api::SensitiveContent>>(
+	"sensitiveContent",
+	[=] { return std::make_unique<Api::SensitiveContent>(this); }))
+, _globalPrivacy(MakeApiWrapInitLogged<std::unique_ptr<Api::GlobalPrivacy>>(
+	"globalPrivacy",
+	[=] { return std::make_unique<Api::GlobalPrivacy>(this); }))
+, _userPrivacy(MakeApiWrapInitLogged<std::unique_ptr<Api::UserPrivacy>>(
+	"userPrivacy",
+	[=] { return std::make_unique<Api::UserPrivacy>(this); }))
+, _inviteLinks(MakeApiWrapInitLogged<std::unique_ptr<Api::InviteLinks>>(
+	"inviteLinks",
+	[=] { return std::make_unique<Api::InviteLinks>(this); }))
+, _chatLinks(MakeApiWrapInitLogged<std::unique_ptr<Api::ChatLinks>>(
+	"chatLinks",
+	[=] { return std::make_unique<Api::ChatLinks>(this); }))
+, _views(MakeApiWrapInitLogged<std::unique_ptr<Api::ViewsManager>>(
+	"views",
+	[=] { return std::make_unique<Api::ViewsManager>(this); }))
+, _confirmPhone(MakeApiWrapInitLogged<std::unique_ptr<Api::ConfirmPhone>>(
+	"confirmPhone",
+	[=] { return std::make_unique<Api::ConfirmPhone>(this); }))
+, _peerPhoto(MakeApiWrapInitLogged<std::unique_ptr<Api::PeerPhoto>>(
+	"peerPhoto",
+	[=] { return std::make_unique<Api::PeerPhoto>(this); }))
+, _polls(MakeApiWrapInitLogged<std::unique_ptr<Api::Polls>>(
+	"polls",
+	[=] { return std::make_unique<Api::Polls>(this); }))
+, _todoLists(MakeApiWrapInitLogged<std::unique_ptr<Api::TodoLists>>(
+	"todoLists",
+	[=] { return std::make_unique<Api::TodoLists>(this); }))
+, _chatParticipants(MakeApiWrapInitLogged<std::unique_ptr<Api::ChatParticipants>>(
+	"chatParticipants",
+	[=] { return std::make_unique<Api::ChatParticipants>(this); }))
+, _unreadThings(MakeApiWrapInitLogged<std::unique_ptr<Api::UnreadThings>>(
+	"unreadThings",
+	[=] { return std::make_unique<Api::UnreadThings>(this); }))
+, _ringtones(MakeApiWrapInitLogged<std::unique_ptr<Api::Ringtones>>(
+	"ringtones",
+	[=] { return std::make_unique<Api::Ringtones>(this); }))
+, _transcribes(MakeApiWrapInitLogged<std::unique_ptr<Api::Transcribes>>(
+	"transcribes",
+	[=] { return std::make_unique<Api::Transcribes>(this); }))
+, _premium(MakeApiWrapInitLogged<std::unique_ptr<Api::Premium>>(
+	"premium",
+	[=] { return std::make_unique<Api::Premium>(this); }))
+, _usernames(MakeApiWrapInitLogged<std::unique_ptr<Api::Usernames>>(
+	"usernames",
+	[=] { return std::make_unique<Api::Usernames>(this); }))
+, _websites(MakeApiWrapInitLogged<std::unique_ptr<Api::Websites>>(
+	"websites",
+	[=] { return std::make_unique<Api::Websites>(this); }))
+, _peerColors(MakeApiWrapInitLogged<std::unique_ptr<Api::PeerColors>>(
+	"peerColors",
+	[=] { return std::make_unique<Api::PeerColors>(this); })) {
+	LOG(("ApiWrap init: constructor body entered."));
 	crl::on_main(session, [=] {
+		LOG(("ApiWrap init: deferred startup begin."));
 		// You can't use _session->lifetime() in the constructor,
 		// only queued, because it is not constructed yet.
 		_session->data().chatsFilters().changed(
@@ -405,8 +465,11 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 			requestMoreDialogsIfNeeded();
 		}, _session->lifetime());
 
+		LOG(("ApiWrap init: deferred support mode."));
 		setupSupportMode();
+		LOG(("ApiWrap init: deferred scheduled edit restore."));
 		restoreScheduledMessageEdits();
+		LOG(("ApiWrap init: deferred startup finished."));
 	});
 }
 

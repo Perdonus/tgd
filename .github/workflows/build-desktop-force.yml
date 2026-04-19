@@ -757,7 +757,7 @@ jobs:
             throw "ASTROGRAM_UPDATES_PRIVATE_BETA_KEY secret is missing."
           }
 
-          $desktopPrivate = Join-Path $env:GITHUB_WORKSPACE "DesktopPrivate"
+          $desktopPrivate = Join-Path (Resolve-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "..")).Path "DesktopPrivate"
           New-Item -ItemType Directory -Path $desktopPrivate -Force | Out-Null
 
           $packerPrivate = @(
@@ -776,7 +776,7 @@ jobs:
             [System.Text.UTF8Encoding]::new($false))
           [System.IO.File]::WriteAllText(
             (Join-Path $desktopPrivate "alpha_private.h"),
-            "const char *AlphaPrivateKey = \"\";`n",
+            'const char *AlphaPrivateKey = "";' + "`n",
             [System.Text.UTF8Encoding]::new($false))
 
       - name: Build updater tools (Release)

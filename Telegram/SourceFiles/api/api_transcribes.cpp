@@ -374,10 +374,12 @@ namespace Api {
 Transcribes::Transcribes(not_null<ApiWrap*> api)
 : _session(&api->session())
 , _api(&api->instance()) {
-	_session->data().itemDataChanges(
-	) | rpl::on_next([=](not_null<HistoryItem*> item) {
-		maybeRetryPendingLocal(item);
-	}, _lifetime);
+	crl::on_main(_session, [=] {
+		_session->data().itemDataChanges(
+		) | rpl::on_next([=](not_null<HistoryItem*> item) {
+			maybeRetryPendingLocal(item);
+		}, _lifetime);
+	});
 }
 
 Transcribes::~Transcribes() = default;

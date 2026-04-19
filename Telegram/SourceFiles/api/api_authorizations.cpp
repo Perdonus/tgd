@@ -98,7 +98,12 @@ Authorizations::Authorizations(not_null<ApiWrap*> api)
 	api->session().saveSettingsDelayed();
 }) {
 	_unreviewed = api->session().settings().unreviewed();
-	crl::on_main(&api->session(), [=] { removeExpiredUnreviewed(); });
+	crl::on_main(&api->session(), [=] {
+		removeExpiredUnreviewed();
+		if (Core::App().settings().disableCallsLegacy()) {
+			toggleCallsDisabledHere(true);
+		}
+	});
 	Core::App().settings().deviceModelChanges(
 	) | rpl::on_next([=](const QString &model) {
 		auto changed = false;
@@ -112,10 +117,6 @@ Authorizations::Authorizations(not_null<ApiWrap*> api)
 			_listChanges.fire({});
 		}
 	}, _lifetime);
-
-	if (Core::App().settings().disableCallsLegacy()) {
-		toggleCallsDisabledHere(true);
-	}
 }
 
 void Authorizations::reload() {
