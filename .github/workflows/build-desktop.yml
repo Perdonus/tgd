@@ -754,6 +754,44 @@ jobs:
           Copy-Item -LiteralPath $picked.FullName -Destination "$PWD/dist/Astrogram.exe" -Force
           Write-Host "Picked binary: $($picked.FullName)"
 
+      - name: Prepare updater signing headers
+        if: ${{ always() && steps.locate_exe.outcome == 'success' && github.ref != 'refs/heads/main' }}
+        shell: pwsh
+        env:
+          ASTROGRAM_UPDATES_PRIVATE_KEY: ${{ secrets.ASTROGRAM_UPDATES_PRIVATE_KEY }}
+          ASTROGRAM_UPDATES_PRIVATE_BETA_KEY: ${{ secrets.ASTROGRAM_UPDATES_PRIVATE_BETA_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:ASTROGRAM_UPDATES_PRIVATE_KEY)) {
+            throw "ASTROGRAM_UPDATES_PRIVATE_KEY secret is missing."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:ASTROGRAM_UPDATES_PRIVATE_BETA_KEY)) {
+            throw "ASTROGRAM_UPDATES_PRIVATE_BETA_KEY secret is missing."
+          }
+
+          $desktopPrivate = Join-Path $env:GITHUB_WORKSPACE "DesktopPrivate"
+          New-Item -ItemType Directory -Path $desktopPrivate -Force | Out-Null
+
+          $packerPrivate = @(
+            'const char *PrivateKey = R"ASTROGRAMKEY(',
+            $env:ASTROGRAM_UPDATES_PRIVATE_KEY.TrimEnd("`r", "`n"),
+            ')ASTROGRAMKEY";',
+            '',
+            'const char *PrivateBetaKey = R"ASTROGRAMKEY(',
+            $env:ASTROGRAM_UPDATES_PRIVATE_BETA_KEY.TrimEnd("`r", "`n"),
+            ')ASTROGRAMKEY";',
+            ''
+          ) -join "`n"
+          [System.IO.File]::WriteAllText(
+            (Join-Path $desktopPrivate "packer_private.h"),
+            $packerPrivate,
+            [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText(
+            (Join-Path $desktopPrivate "alpha_private.h"),
+            "const char *AlphaPrivateKey = \"\";`n",
+            [System.Text.UTF8Encoding]::new($false))
+
       - name: Build updater tools (Release)
         if: ${{ always() && steps.locate_exe.outcome == 'success' && github.ref != 'refs/heads/main' }}
         shell: cmd
