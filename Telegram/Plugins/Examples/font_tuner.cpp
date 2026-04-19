@@ -27,7 +27,7 @@ Allows scale tuning and loading a custom font from a local file.
 TGD_PLUGIN_PREVIEW(
 	"astro.font_tuner",
 	"Font Tuner",
-	"1.8",
+	"1.9",
 	"@etopizdesblin",
 	"Tunes Astrogram fonts, loads a custom font from file, and applies the changes live.",
 	"",
@@ -110,7 +110,7 @@ public:
 			_host,
 			"Font Tuner",
 			u8"Тюнер шрифтов");
-		_info.version = QStringLiteral("1.8");
+		_info.version = QStringLiteral("1.9");
 		_info.author = QStringLiteral("@etopizdesblin");
 		_info.description = Tr(
 			_host,

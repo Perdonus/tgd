@@ -32,7 +32,7 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.4",
+	"1.5",
 	"@etopizdesblin",
 	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
 	"",
@@ -41,7 +41,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.4";
+constexpr auto kPluginVersion = "1.5";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
@@ -87,8 +87,14 @@ QString PluginLogsPath(const Plugins::Host *host) {
 	return QDir(WorkingRoot(host)).filePath(QStringLiteral("tdata/plugins.log"));
 }
 
-QString ClientLogsPath(const Plugins::Host *host) {
-	return QDir(WorkingRoot(host)).filePath(QStringLiteral("tdata/client.log"));
+QStringList ClientLogCandidatePaths(const Plugins::Host *host) {
+	const auto root = QDir(WorkingRoot(host));
+	auto result = QStringList{
+		root.filePath(QStringLiteral("client.log")),
+		root.filePath(QStringLiteral("tdata/client.log")),
+	};
+	result.removeDuplicates();
+	return result;
 }
 
 QString TraceLogsPath(const Plugins::Host *host) {
@@ -96,11 +102,9 @@ QString TraceLogsPath(const Plugins::Host *host) {
 }
 
 QStringList AvailableLogPaths(const Plugins::Host *host) {
-	auto result = QStringList{
-		ClientLogsPath(host),
-		PluginLogsPath(host),
-		TraceLogsPath(host),
-	};
+	auto result = ClientLogCandidatePaths(host);
+	result.push_back(PluginLogsPath(host));
+	result.push_back(TraceLogsPath(host));
 	result.erase(
 		std::remove_if(result.begin(), result.end(), [](const QString &path) {
 			return path.trimmed().isEmpty();

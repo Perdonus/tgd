@@ -44,7 +44,7 @@ Intercepts /ai, keeps a per-window dialog, and talks to a user-configured endpoi
 TGD_PLUGIN_PREVIEW(
 	"astrogram.ai_chat",
 	"AI Chat",
-	"2.0",
+	"2.1",
 	"@etopizdesblin",
 	"Intercepts /ai, opens the built-in Astrogram AI chat, and uses a user-configured API endpoint.",
 	"",
@@ -53,7 +53,7 @@ TGD_PLUGIN_PREVIEW(
 namespace {
 
 constexpr auto kPluginId = "astrogram.ai_chat";
-constexpr auto kPluginVersion = "2.0";
+constexpr auto kPluginVersion = "2.1";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kModelName = "gpt-4o-mini";
 
