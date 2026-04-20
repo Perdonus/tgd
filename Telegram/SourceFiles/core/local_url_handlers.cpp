@@ -157,18 +157,6 @@ using Match = qthelp::RegularExpressionMatch;
 	return u"@"_q + AstrogramSupportUsername(session);
 }
 
-[[nodiscard]] QString AstrogramSupportPriceLine(not_null<Main::Session*> session) {
-	return RuEn(
-		AstrogramSupportConfigValue(
-			session,
-			u"astrogram_support_price_line_ru"_q,
-			u"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN"_q),
-		AstrogramSupportConfigValue(
-			session,
-			u"astrogram_support_price_line_en"_q,
-			u"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN"_q));
-}
-
 [[nodiscard]] QString AstrogramSupportPriceFeatureLine(not_null<Main::Session*> session) {
 	return RuEn(
 		AstrogramSupportConfigValue(
@@ -206,20 +194,33 @@ using Match = qthelp::RegularExpressionMatch;
 }
 
 [[nodiscard]] QString AstrogramSupportSubtitle(not_null<Main::Session*> session) {
-	return AstrogramSupportPriceLine(session)
-		+ u"\n"_q
-		+ RuEn(
-			"Поддержите Astrogram и получите <b>серверный значок подписчика</b>, который видят другие пользователи клиента.",
-			"Support Astrogram and receive a <b>server-side subscriber badge</b> visible to other client users.");
+	const auto handle = AstrogramSupportHandle(session).toHtmlEscaped();
+	return RuEn(
+		QString(
+			u"Поддержите Astrogram и получите <b>серверный значок подписчика</b>.<br/>"
+			u"После доната напишите <b>%1</b> и отправьте свой Telegram ID для ручной активации."_q
+		).arg(handle),
+		QString(
+			u"Support Astrogram and receive a <b>server-side subscriber badge</b>.<br/>"
+			u"After the donation, message <b>%1</b> and send your Telegram ID for manual activation."_q
+		).arg(handle));
 }
 
 [[nodiscard]] QString AstrogramSupportBadgeNote(not_null<Main::Session*> session) {
-	const auto handle = AstrogramSupportHandle(session);
+	const auto handle = AstrogramSupportHandle(session).toHtmlEscaped();
+	const auto price = AstrogramSupportPriceFeatureLine(session).toHtmlEscaped();
+	const auto priceNote = AstrogramSupportPriceNote(session).toHtmlEscaped();
 	return RuEn(
 		QString(
-			u"<b>Серверный значок</b> выдаётся вручную после доната через <b>%1</b>. Это не локальная косметика: значок видят другие пользователи Astrogram."_q).arg(handle),
+			u"<b>Как это работает:</b> донат оформляется через <b>%1</b>, после чего значок активируется вручную на сервере."
+			u"<br/><b>Стоимость:</b> %2"
+			u"<br/>%3"_q
+		).arg(handle, price, priceNote),
 		QString(
-			u"The <b>server-side badge</b> is activated manually after your donation via <b>%1</b>. This is not a local cosmetic tweak: other Astrogram users can see it."_q).arg(handle));
+			u"<b>How it works:</b> the donation is handled via <b>%1</b>, and the badge is then activated manually on the server."
+			u"<br/><b>Price:</b> %2"
+			u"<br/>%3"_q
+		).arg(handle, price, priceNote));
 }
 
 void AddAstrogramSupportCover(
@@ -713,91 +714,70 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		const auto container = box->verticalLayout();
 		AddAstrogramSupportCover(container, session);
 		Ui::AddUniqueCloseButton(box);
+		box->addRow(object_ptr<Ui::PlainShadow>(box), st::cocoonJoinSeparatorPadding);
+		Ui::AddSubsectionTitle(
+			container,
+			rpl::single(RuEn("Как это работает", "How it works")),
+			style::margins(
+				st::boxRowPadding.left(),
+				st::defaultVerticalListSkip,
+				st::boxRowPadding.right(),
+				0));
 		const auto features = std::vector<Ui::FeatureListEntry>{
 			{
 				st::menuIconGiftPremium,
-				RuEn("Серверный значок", "Server-side badge"),
+				RuEn("Что вы получаете", "What you get"),
 				TextWithEntities{ RuEn(
-					"Это не локальная косметика: значок включается на стороне Astrogram и виден другим пользователям клиента.",
-					"This is not a local cosmetic tweak: the badge is enabled server-side and is visible to other Astrogram users.") },
+					"Серверный значок подписчика Astrogram. Это не локальная косметика: его видят другие пользователи клиента.",
+					"An Astrogram server-side subscriber badge. This is not a local cosmetic tweak: other client users can see it.") },
 			},
 			{
 				st::menuIconUsername,
-				RuEn("Кому писать", "Who to contact"),
+				RuEn("Куда писать", "Where to message"),
 				TextWithEntities{ RuEn(
 					QString(
-						u"Напишите %1, отправьте свой Telegram ID и после подтверждения доната вам вручную активируют значок."_q).arg(supportHandle),
+						u"Откройте чат с %1 после доната. Значок активируется вручную, поэтому подтверждение проходит через личный диалог."_q).arg(supportHandle),
 					QString(
-						u"Message %1, send your Telegram ID, and after the donation is confirmed your badge will be activated manually."_q).arg(supportHandle)) },
+						u"Open a chat with %1 after the donation. The badge is activated manually, so confirmation goes through a direct conversation."_q).arg(supportHandle)) },
+			},
+			{
+				st::menuIconInfo,
+				RuEn("Что отправить", "What to send"),
+				TextWithEntities{ RuEn(
+					"Отправьте свой Telegram ID, чтобы значок выдали именно вашему аккаунту Astrogram.",
+					"Send your Telegram ID so the badge is issued to the correct Astrogram account.") },
 			},
 			{
 				st::menuIconStats,
-				RuEn("Цена", "Price"),
+				RuEn("Цена и сроки", "Price and timing"),
 				TextWithEntities{ AstrogramSupportPriceFeatureLine(session)
 					+ u"\n"_q
 					+ AstrogramSupportPriceNote(session) },
 			},
 			{
-				st::menuIconInfo,
-				RuEn("Зачем это нужно", "What your support does"),
+				st::menuIconGiftPremium,
+				RuEn("Зачем это нужно", "What your support helps with"),
 				TextWithEntities{ RuEn(
-					"Донат помогает оплачивать разработку Astrogram, инфраструктуру, сборки и выпуск новых функций быстрее.",
+					"Донат помогает оплачивать разработку Astrogram, инфраструктуру, сборки и выпускать новые функции быстрее.",
 					"Your donation helps pay for Astrogram development, infrastructure, builds, and shipping new features faster.") },
 			},
 		};
-		auto margin = QMargins(0, st::defaultVerticalListSkip, 0, 0);
+		auto margin = QMargins(0, 0, 0, 0);
 		for (const auto &feature : features) {
 			box->addRow(
 				Ui::MakeFeatureListEntry(box, feature),
 				st::boxRowPadding + margin);
 			margin = {};
 		}
-
-		style::owned_color noteFg = style::owned_color{ QColor(0x12, 0x3f, 0x26) };
-		style::owned_color noteBoldFg = style::owned_color{ QColor(0x06, 0x22, 0x13) };
-		style::FlatLabel noteSt = st::cocoonSubtitle;
-		noteSt.textFg = noteFg.color();
-		noteSt.palette.linkFg = noteBoldFg.color();
-		const auto noteWrap = box->addRow(
-			object_ptr<Ui::RpWidget>(box),
-			style::margins(
-				st::boxRowPadding.left(),
-				st::defaultVerticalListSkip,
-				st::boxRowPadding.right(),
-				0));
-		const auto noteLabel = Ui::CreateChild<Ui::FlatLabel>(
-			noteWrap,
+		Ui::AddDividerText(
+			container,
 			rpl::single(tr::rich(RuEn(
 				QString(
-					u"<b>Как это работает:</b> донат оформляется через <b>%1</b>, а затем значок подписчика Astrogram выдаётся на сервере вручную."_q).arg(supportHandle),
+					u"<b>Важно:</b> после перевода напишите <b>%1</b> и отправьте свой Telegram ID. Значок выдаётся вручную, поэтому активация не происходит мгновенно."_q
+				).arg(supportHandle.toHtmlEscaped()),
 				QString(
-					u"<b>How it works:</b> the donation is handled via <b>%1</b>, then the Astrogram subscriber badge is issued manually on the server."_q).arg(supportHandle)))),
-			noteSt);
-		noteLabel->setTryMakeSimilarLines(true);
-		noteWrap->paintRequest() | rpl::on_next([=] {
-			auto p = Painter(noteWrap);
-			auto hq = PainterHighQualityEnabler(p);
-			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(0xe0, 0xff, 0xec));
-			p.drawRoundedRect(
-				noteWrap->rect().adjusted(0, 0, -1, -1),
-				st::buttonRadius,
-				st::buttonRadius);
-		}, noteWrap->lifetime());
-		noteWrap->widthValue() | rpl::on_next([=](int width) {
-			const auto padding = QMargins(
-				st::defaultVerticalListSkip,
-				st::defaultVerticalListSkip,
-				st::defaultVerticalListSkip,
-				st::defaultVerticalListSkip);
-			noteLabel->resizeToWidth(width - padding.left() - padding.right());
-			noteLabel->moveToLeft(padding.left(), padding.top());
-			noteWrap->resize(
-				width,
-				noteLabel->height() + padding.top() + padding.bottom());
-		}, noteWrap->lifetime());
-
-		box->addRow(object_ptr<Ui::PlainShadow>(box), st::cocoonJoinSeparatorPadding);
+					u"<b>Important:</b> after the transfer, message <b>%1</b> and send your Telegram ID. The badge is issued manually, so activation is not instant."_q
+				).arg(supportHandle.toHtmlEscaped())))));
 
 		box->addLeftButton(rpl::single(RuEn(
 			"Скопировать мой Telegram ID",
