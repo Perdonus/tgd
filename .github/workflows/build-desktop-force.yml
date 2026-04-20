@@ -1081,8 +1081,6 @@ jobs:
           generate_release_notes: true
           files: |
             ${{ steps.pack_release_zip.outputs.zip_rel }}
-            dist/update-feed/current
-            dist/update-feed/tx64upd*
 
       - name: Upload Windows artifact
         if: ${{ always() && steps.locate_exe.outcome == 'success' }}
