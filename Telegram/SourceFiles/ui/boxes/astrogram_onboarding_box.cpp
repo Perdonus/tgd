@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFileInfo>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
+#include <QtGui/QFontMetrics>
 
 #include <algorithm>
 #include <memory>
@@ -238,6 +239,34 @@ void AppendInlinePart(QString &base, QString part) {
 	return (step == Step::Finish)
 		? OnboardingBadgeTone::Official
 		: OnboardingBadgeTone::Pending;
+}
+
+[[nodiscard]] QString StepShortTitle(Step step) {
+	switch (step) {
+	case Step::Welcome: return RuEn("Старт", "Start");
+	case Step::Presets: return RuEn("Пресет", "Preset");
+	case Step::PluginsInfo: return RuEn("Плагины", "Plugins");
+	case Step::PluginsInstall: return RuEn("Установка", "Install");
+	case Step::MenuCustomization: return RuEn("Меню", "Menus");
+	case Step::ShellMode: return RuEn("Shell", "Shell");
+	case Step::ExperimentalTips: return RuEn("Тюнинг", "Tune");
+	case Step::Finish: return RuEn("Финиш", "Finish");
+	}
+	Unexpected("Unknown onboarding step.");
+}
+
+[[nodiscard]] std::optional<Step> PreviousStep(Step step) {
+	switch (step) {
+	case Step::Welcome: return std::nullopt;
+	case Step::Presets: return Step::Welcome;
+	case Step::PluginsInfo: return Step::Presets;
+	case Step::PluginsInstall: return Step::PluginsInfo;
+	case Step::MenuCustomization: return Step::PluginsInstall;
+	case Step::ShellMode: return Step::MenuCustomization;
+	case Step::ExperimentalTips: return Step::ShellMode;
+	case Step::Finish: return Step::ExperimentalTips;
+	}
+	Unexpected("Unknown onboarding step.");
 }
 
 [[nodiscard]] QString AstrogramKnownChannelUsername(qint64 channelId) {
@@ -966,6 +995,97 @@ not_null<Ui::RpWidget*> AddBadgePill(
 	return badge;
 }
 
+not_null<Ui::RpWidget*> AddStepTimeline(
+		not_null<Ui::VerticalLayout*> container,
+		Step current,
+		style::margins margins = style::margins(26, 4, 26, 4)) {
+	const auto wrap = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		margins,
+		style::al_top);
+	const auto steps = std::vector<Step>{
+		Step::Welcome,
+		Step::Presets,
+		Step::PluginsInfo,
+		Step::PluginsInstall,
+		Step::MenuCustomization,
+		Step::ShellMode,
+		Step::ExperimentalTips,
+		Step::Finish,
+	};
+	struct State {
+		std::vector<QRect> rects;
+		int height = 0;
+	};
+	const auto state = wrap->lifetime().make_state<State>();
+	const auto currentIndex = StepIndex(current);
+	const auto relayout = [=](int width) {
+		const auto available = std::max(width, 220);
+		const auto metrics = QFontMetrics(st::semiboldFont->f);
+		const auto pillHeight = metrics.height() + 12;
+		const auto gap = 8;
+		const auto horizontalPadding = 12;
+		auto x = 0;
+		auto y = 0;
+		state->rects.clear();
+		state->rects.reserve(steps.size());
+		for (const auto step : steps) {
+			const auto text = StepShortTitle(step);
+			const auto pillWidth = std::min(
+				available,
+				metrics.horizontalAdvance(text) + (horizontalPadding * 2));
+			if (x && (x + pillWidth > available)) {
+				x = 0;
+				y += pillHeight + gap;
+			}
+			state->rects.push_back(QRect(x, y, pillWidth, pillHeight));
+			x += pillWidth + gap;
+		}
+		state->height = y + pillHeight;
+		wrap->resize(width, state->height);
+		wrap->update();
+	};
+	wrap->widthValue() | rpl::on_next(relayout, wrap->lifetime());
+	relayout(std::max(wrap->width(), container->width() - 52));
+	wrap->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(wrap);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setFont(st::semiboldFont);
+		for (auto i = 0, count = int(steps.size()); i != count; ++i) {
+			const auto step = steps[i];
+			const auto &rect = state->rects[i];
+			const auto index = StepIndex(step);
+			const auto active = (index == currentIndex);
+			const auto completed = (index < currentIndex);
+			const auto palette = BadgeColors(
+				active
+					? StepBadgeTone(step)
+					: (completed
+						? OnboardingBadgeTone::Trusted
+						: OnboardingBadgeTone::Pending));
+			auto fill = palette.fill;
+			if (!active && !completed) {
+				fill = QColor(255, 255, 255, 180);
+			} else if (active) {
+				fill = QColor(
+					palette.fill.red(),
+					palette.fill.green(),
+					palette.fill.blue(),
+					68);
+			}
+			p.setPen(QPen(palette.border, 1.));
+			p.setBrush(fill);
+			p.drawRoundedRect(
+				QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5),
+				rect.height() / 2.,
+				rect.height() / 2.);
+			p.setPen(palette.fg);
+			p.drawText(rect, Qt::AlignCenter, StepShortTitle(step));
+		}
+	}, wrap->lifetime());
+	return wrap;
+}
+
 not_null<Ui::FlatLabel*> AddSecondaryNote(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
@@ -1183,6 +1303,27 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						st::boxRowPadding.right(),
 						0));
 			};
+			const auto addStepTimeline = [&](Step step) {
+				AddStepTimeline(
+					container,
+					step,
+					style::margins(
+						st::boxRowPadding.left(),
+						6,
+						st::boxRowPadding.right(),
+						0));
+			};
+			const auto goToStep = [&](Step step) {
+				state->step = step;
+				(*rebuild)();
+			};
+			const auto addBackLink = [&] {
+				if (const auto previous = PreviousStep(state->step)) {
+					AddLinkAction(container, RuEn("Назад", "Back"), [=] {
+						goToStep(*previous);
+					});
+				}
+			};
 			const auto pluginStatusText = [](const AstrogramOnboardingPlugin &plugin) {
 				if (plugin.invalidServerData) {
 					return RuEn(
@@ -1214,13 +1355,14 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					RuEn("Добро пожаловать в", "Welcome to"),
 					RuEn(
-						"Astrogram Desktop\nЗа минуту настроим стартовый профиль, плагины и боковое меню без резкого слома привычного интерфейса.",
-						"Astrogram Desktop\nIn a minute we'll set up your starter profile, plugins and side menu without abruptly breaking the familiar interface."),
+						"Astrogram Desktop\nСейчас аккуратно соберём твой старт: пресет, доверенные плагины, меню и финальные точки входа без резкой ломки привычного Telegram Desktop.",
+						"Astrogram Desktop\nLet's assemble your starting setup: preset, trusted plugins, menus and final entry points without abruptly breaking the familiar Telegram Desktop feel."),
 					QColor(0x08, 0x15, 0x11),
 					QColor(0x10, 0x2b, 0x20),
 					QColor(0x2d, 0xd1, 0x85),
 					QColor(0xa1, 0xff, 0xcc));
 				addStepBadge(Step::Welcome);
+				addStepTimeline(Step::Welcome);
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
@@ -1230,8 +1372,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Главная точка входа Astrogram",
 							"Your main Astrogram home"),
 						.description = RuEn(
-							"Здесь живут anti-recall, ghost mode, local premium, плагины и будущие клиентские функции. Гайд просто проведёт к ним быстрее.",
-							"This is where anti-recall, ghost mode, local premium, plugins and future client-only features live. The guide just gets you there faster."),
+							"Здесь живут anti-recall, ghost mode, local premium, плагины, экспериментальные меню и будущие клиентские функции. Гайд просто раскладывает старт по понятным шагам.",
+							"This is where anti-recall, ghost mode, local premium, plugins, experimental menus and future client-only features live. The guide just lays out the start in a clean order."),
 						.footer = RuEn("Дом Astrogram-функций", "Home of Astrogram features"),
 						.icon = &st::menuIconSettings,
 						.tone = OnboardingBadgeTone::Official,
@@ -1245,8 +1387,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Сначала пресет, потом плагины и меню",
 							"Preset first, then plugins and menu"),
 						.description = RuEn(
-							"Гайд идёт по порядку: подберёт базовый профиль, покажет доверенный AstroPlugins, отдельно объяснит кастомизацию меню и только потом предложит shell-настройку.",
-							"The guide moves in order: it picks your baseline profile, shows trusted AstroPlugins, explains menu customization separately and only then suggests shell tuning."),
+							"Шаги не свалены в кучу: сначала базовый профиль, потом доверенные рекомендации AstroPlugins, затем ручная настройка меню и только после этого shell-режимы.",
+							"The steps are not mashed together: first a baseline profile, then trusted AstroPlugins recommendations, then manual menu tuning, and only after that shell modes."),
 						.footer = RuEn("Нормальный дефолт без лишней агрессии", "A sane default without aggressive changes"),
 						.icon = &st::menuIconCustomize,
 						.tone = OnboardingBadgeTone::Trusted,
@@ -1260,8 +1402,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Живые editor-ы и shell-режимы никуда не спрятаны",
 							"Live editors and shell modes stay visible"),
 						.description = RuEn(
-							"Вступительный гайд ведёт в реальные поверхности клиента: later можно открыть Experimental и дотюнить side menu уже без скрытых жестов и магии.",
-							"The onboarding guide leads into real client surfaces: later you can open Experimental and fine-tune the side menu without hidden gestures or magic."),
+							"Гайд ведёт в реальные поверхности клиента: после него можно открыть Experimental и дотюнить боковую панель, shell и карточки меню уже без скрытых жестов.",
+							"The guide leads into real client surfaces: after it you can open Experimental and fine-tune the side panel, shell and menu cards without hidden gestures."),
 						.footer = RuEn("Guide only shortens the path", "The guide only shortens the path"),
 						.icon = &st::menuIconExperimental,
 						.tone = OnboardingBadgeTone::Pending,
@@ -1280,17 +1422,17 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					style::margins(st::boxRowPadding.left(), -2, st::boxRowPadding.right(), 4));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
-					state->step = Step::Presets;
-					(*rebuild)();
+					goToStep(Step::Presets);
 				});
 			} break;
 			case Step::Presets: {
 				addStepBadge(Step::Presets);
+				addStepTimeline(Step::Presets);
 				addTitle(
 					RuEn("Выбери стартовый пресет", "Choose a startup preset"),
 					RuEn(
-						"Это меняет только стартовые prefs клиента. Позже всё можно спокойно дотюнить в настройках Astrogram.",
-						"This only changes the client's starter prefs. You can calmly fine-tune everything later in Astrogram settings."));
+						"Это только стартовые prefs клиента: выбор нужен, чтобы сразу не собирать базу по десятку переключателей вручную.",
+						"These are only the client's starter prefs: the choice is here so you don't have to assemble the basics through ten different toggles right away."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
@@ -1300,8 +1442,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Только стартовые привычки клиента",
 							"Only the client's starter habits"),
 						.description = RuEn(
-							"Пресет не закрывает путь назад: он просто включает полезный набор опций, с которого удобнее стартовать в Astrogram.",
-							"A preset does not close the way back: it just enables a useful option set that makes Astrogram easier to start with."),
+							"Пресет не закрывает путь назад: он просто раскладывает стартовый набор опций, а дальше всё можно вручную подкрутить в Astrogram settings.",
+							"A preset does not close the way back: it simply lays out the starter option set, and then everything can still be tuned manually in Astrogram settings."),
 						.footer = RuEn("Любой вариант можно поменять позже", "Any choice can be changed later"),
 						.icon = &st::menuIconSettings,
 						.tone = OnboardingBadgeTone::Pending,
@@ -1318,8 +1460,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						if (args.applyPreset) {
 							args.applyPreset(AstrogramOnboardingPreset::Recommended);
 						}
-						state->step = Step::PluginsInfo;
-						(*rebuild)();
+						goToStep(Step::PluginsInfo);
 					});
 				AddChoiceButton(
 					container,
@@ -1332,8 +1473,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						if (args.applyPreset) {
 							args.applyPreset(AstrogramOnboardingPreset::Private);
 						}
-						state->step = Step::PluginsInfo;
-						(*rebuild)();
+						goToStep(Step::PluginsInfo);
 					});
 				AddChoiceButton(
 					container,
@@ -1346,23 +1486,23 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						if (args.applyPreset) {
 							args.applyPreset(AstrogramOnboardingPreset::Minimal);
 						}
-						state->step = Step::PluginsInfo;
-						(*rebuild)();
+						goToStep(Step::PluginsInfo);
 					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddLinkAction(container, RuEn("Выбрать позже", "Choose later"), [=] {
-					state->step = Step::PluginsInfo;
-					(*rebuild)();
+					goToStep(Step::PluginsInfo);
 				});
+				addBackLink();
 				Ui::AddSkip(container, st::settingsCheckboxesSkip);
 			} break;
 			case Step::PluginsInfo: {
 				addStepBadge(Step::PluginsInfo);
+				addStepTimeline(Step::PluginsInfo);
 				addTitle(
 					RuEn("Плагины внутри Astrogram", "Plugins inside Astrogram"),
 					RuEn(
-						"Раздел Plugins / Плагины — это встроенный менеджер пакетов, документации и диагностики, а не случайный набор скрытых переключателей.",
-						"The Plugins / Плагины section is a built-in package, documentation and diagnostics manager, not a random pile of hidden switches."));
+						"Раздел Plugins / Плагины — это встроенный менеджер пакетов, документации и диагностики. Сейчас быстро покажем, что именно в нём живёт.",
+						"The Plugins / Плагины section is a built-in package, documentation and diagnostics manager. Let's quickly show what actually lives there."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
@@ -1402,16 +1542,15 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Первые 3 рекомендации приходят server-driven",
 							"The first 3 recommendations arrive server-driven"),
 						.description = RuEn(
-							"Onboarding берёт стартовые пакеты из доверенного канала AstroPlugins: @astroplugin / -1003814280064. Ниже покажем их отдельным экраном.",
-							"The onboarding flow pulls starter packages from the trusted AstroPlugins channel: @astroplugin / -1003814280064. We'll show them on a separate screen next."),
+							"Onboarding берёт стартовые пакеты из доверенного канала AstroPlugins: @astroplugin / -1003814280064. Следующий экран уже покажет живые карточки постов и сами .tgd-пакеты.",
+							"The onboarding flow pulls starter packages from the trusted AstroPlugins channel: @astroplugin / -1003814280064. The next screen will already show the live post cards and the actual .tgd packages."),
 						.footer = RuEn("Доверенный канал рекомендаций", "Trusted recommendation channel"),
 						.icon = &st::menuIconIpAddress,
 						.tone = OnboardingBadgeTone::Pending,
 					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Показать 3 рекомендации", "Show 3 recommendations"), [=] {
-					state->step = Step::PluginsInstall;
-					(*rebuild)();
+					goToStep(Step::PluginsInstall);
 				});
 				if (args.openAllPlugins) {
 					AddLinkAction(container, RuEn("Открыть раздел Plugins", "Open Plugins"), [=] {
@@ -1419,9 +1558,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					});
 				}
 				AddLinkAction(container, RuEn("Позже", "Later"), [=] {
-					state->step = Step::MenuCustomization;
-					(*rebuild)();
+					goToStep(Step::MenuCustomization);
 				});
+				addBackLink();
 			} break;
 			case Step::PluginsInstall: {
 				if (!state->autoReloadTriggered && args.reloadPlugins) {
@@ -1429,11 +1568,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					(*requestPluginsReload)();
 				}
 				addStepBadge(Step::PluginsInstall);
+				addStepTimeline(Step::PluginsInstall);
 				addTitle(
 					RuEn("3 рекомендации AstroPlugins", "3 AstroPlugins recommendations"),
 					RuEn(
-						"Карточка канала и первые пакеты подтягиваются server-driven из app config и живых постов AstroPlugins прямо во время онбординга.",
-						"The channel card and the first packages are pulled server-driven from app config plus live AstroPlugins posts right during onboarding."));
+						"Карточка канала и первые пакеты подтягиваются server-driven из app config и живых постов AstroPlugins прямо во время онбординга, без перезапуска клиента.",
+						"The channel card and the first packages are pulled server-driven from app config plus live AstroPlugins posts right during onboarding, without restarting the client."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				const auto fallbackPluginsTitle = args.pluginsChannelTitle.isEmpty()
 					? RuEn("AstroPlugins", "AstroPlugins")
@@ -1482,6 +1622,28 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						style::al_top);
 				}
 				if (plugins->empty()) {
+					AddInfoCard(
+						container,
+						InfoCardDescriptor{
+							.eyebrow = RuEn("Server-driven feed", "Server-driven feed"),
+							.title = state->reloadingPlugins
+								? RuEn(
+									"Тянем живые карточки из AstroPlugins",
+									"Fetching live AstroPlugins cards")
+								: RuEn(
+									"Рекомендации ещё не приехали",
+									"Recommendations have not arrived yet"),
+							.description = state->reloadingPlugins
+								? RuEn(
+									"Сейчас клиент сверяет post id из app config, подтягивает посты канала и собирает .tgd-карточки прямо на этом экране.",
+									"The client is now resolving post ids from app config, fetching the channel posts and assembling the .tgd cards right on this screen.")
+								: RuEn(
+									"Как только сервер отдаст `astrogram_onboarding_plugin_post_ids`, этот экран сам наполнится карточками и кнопками установки.",
+									"As soon as the server provides `astrogram_onboarding_plugin_post_ids`, this screen will populate itself with cards and install buttons."),
+							.footer = RuEn("Окно не требует перезапуска", "This screen does not require a restart"),
+							.icon = &st::menuIconDownload,
+							.tone = OnboardingBadgeTone::Pending,
+						});
 					container->add(
 						object_ptr<Ui::FlatLabel>(
 							container,
@@ -1496,6 +1658,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
 						style::al_top);
 				} else {
+					const auto visiblePlugins = std::min<int>(plugins->size(), 3);
 					Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
 					Ui::AddSubsectionTitle(
 						container,
@@ -1503,13 +1666,14 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					AddSecondaryNote(
 						container,
 						RuEn(
-							"Каждая карточка ниже собирается из живого поста AstroPlugins и проверенного .tgd-пакета.",
-							"Each card below is assembled from a live AstroPlugins post plus a verified .tgd package."),
+							"Каждая карточка ниже собирается из живого поста AstroPlugins и проверенного .tgd-пакета. Тут сознательно показываем только первые три стартовые рекомендации.",
+							"Each card below is assembled from a live AstroPlugins post plus a verified .tgd package. We intentionally show only the first three starter recommendations here."),
 						style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 6));
 					const auto channel = state->pluginsChannelPeer
 						? state->pluginsChannelPeer->asChannel()
 						: nullptr;
-					for (const auto &plugin : *plugins) {
+					for (auto i = 0; i != visiblePlugins; ++i) {
+						const auto &plugin = (*plugins)[i];
 						if (channel
 							&& (plugin.postId > 0)
 							&& !state->requestedPluginPosts.contains(plugin.postId)
@@ -1569,22 +1733,23 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				}
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить к меню", "Continue to menu"), [=] {
-					state->step = Step::MenuCustomization;
-					(*rebuild)();
+					goToStep(Step::MenuCustomization);
 				});
 				if (args.openAllPlugins) {
 					AddLinkAction(container, RuEn("Открыть весь список в Plugins", "Open the full list in Plugins"), [=] {
 						args.openAllPlugins();
 					});
 				}
+				addBackLink();
 			} break;
 			case Step::MenuCustomization: {
 				addStepBadge(Step::MenuCustomization);
+				addStepTimeline(Step::MenuCustomization);
 				addTitle(
 					RuEn("Кастомизируй меню Astrogram", "Customize Astrogram menus"),
 					RuEn(
-						"Сначала разложим меню и боковую панель, а уже потом выберем стартовый shell-режим.",
-						"First lay out the menus and side panel, then choose the starter shell mode."));
+						"Сначала разложим меню и боковую панель, а уже потом выберем стартовый shell-режим. Здесь важна именно понятная ручная раскладка.",
+						"First lay out the menus and side panel, then choose the starter shell mode. The point here is a clean manual layout, not a fake preview."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
@@ -1594,8 +1759,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Ручная раскладка боковой панели уже в клиенте",
 							"Manual side panel layout is already inside the client"),
 						.description = RuEn(
-							"Внутри Experimental можно менять порядок пунктов боковой панели руками, скрывать их и сразу видеть скрытые элементы отдельными таблетками внизу.",
-							"Inside Experimental you can reorder side panel items by hand, hide them, and immediately see hidden items as separate pills at the bottom."),
+							"Внутри Experimental можно менять порядок пунктов боковой панели руками, скрывать их и сразу видеть скрытые элементы отдельными таблетками внизу без отдельного visual editor.",
+							"Inside Experimental you can reorder side panel items by hand, hide them, and immediately see hidden items as separate pills at the bottom without a separate visual editor."),
 						.footer = RuEn("Порядок, скрытие и возврат пунктов без лишнего визуального редактора", "Order, hide and restore items without an extra visual editor"),
 						.icon = &st::menuIconEdit,
 						.tone = OnboardingBadgeTone::Official,
@@ -1624,8 +1789,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"Пресеты живут в гайде, ручная доводка остаётся в настройках",
 							"Presets live in onboarding, manual tuning stays in settings"),
 						.description = RuEn(
-							"На следующем шаге ты выберешь стартовый shell-пресет прямо здесь, а внутри Experimental останутся только обычные нативные настройки без пресетов и без visual editor.",
-							"On the next step you will choose the starter shell preset right here, while Experimental keeps only regular native settings without presets and without a visual editor."),
+							"На следующем шаге ты выберешь стартовый shell-пресет прямо здесь, а внутри Experimental останутся только обычные нативные настройки без пресетов и без visual editor-мусора.",
+							"On the next step you will choose the starter shell preset right here, while Experimental keeps only regular native settings without presets and without visual-editor clutter."),
 						.footer = RuEn("Гайд даёт старт, Experimental оставляет только нативную ручную настройку", "Onboarding gives the start, Experimental keeps only native manual tuning"),
 						.icon = &st::menuIconExperimental,
 						.tone = OnboardingBadgeTone::Pending,
@@ -1646,18 +1811,19 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					style::margins(st::boxRowPadding.left(), -2, st::boxRowPadding.right(), 4));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Продолжить к shell-режимам", "Continue to shell modes"), [=] {
-					state->step = Step::ShellMode;
-					(*rebuild)();
+					goToStep(Step::ShellMode);
 				});
 				AddLinkAction(container, RuEn("Открыть Experimental сейчас", "Open Experimental now"), openExperimental);
+				addBackLink();
 			} break;
 			case Step::ShellMode: {
 				addStepBadge(Step::ShellMode);
+				addStepTimeline(Step::ShellMode);
 				addTitle(
 					RuEn("Выбери shell-режим", "Choose a shell mode"),
 					RuEn(
-						"После шага про меню здесь выбирается стартовый shell-пресет, а точная ручная доводка остаётся в Experimental обычными нативными переключателями.",
-						"After the menu step, choose the starter shell preset here, while precise manual tuning stays in Experimental through regular native switches."));
+						"После шага про меню здесь выбирается стартовый shell-пресет. Точная ручная доводка после этого остаётся в Experimental обычными нативными переключателями.",
+						"After the menu step, choose the starter shell preset here. Precise manual tuning after that remains in Experimental through regular native switches."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
@@ -1716,17 +1882,18 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Открыть Experimental сейчас", "Open Experimental now"), openExperimental);
 				AddLinkAction(container, RuEn("Продолжить к подсказкам", "Continue to tips"), [=] {
-					state->step = Step::ExperimentalTips;
-					(*rebuild)();
+					goToStep(Step::ExperimentalTips);
 				});
+				addBackLink();
 			} break;
 			case Step::ExperimentalTips: {
 				addStepBadge(Step::ExperimentalTips);
+				addStepTimeline(Step::ExperimentalTips);
 				addTitle(
 					RuEn("Живые подсказки по Experimental", "Live Experimental tips"),
 					RuEn(
-						"Experimental в Astrogram уже не набор demo-only флажков: онбординг ведёт в реальные runtime-поверхности клиента.",
-						"Experimental in Astrogram is no longer a pile of demo-only flags: onboarding leads you into real runtime surfaces of the client."));
+						"Experimental в Astrogram уже не набор demo-only флажков: онбординг ведёт в реальные runtime-поверхности клиента и оставляет только нужные ручные точки входа.",
+						"Experimental in Astrogram is no longer a pile of demo-only flags: onboarding leads into real runtime surfaces of the client and leaves only the manual entry points you actually need."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddInfoCard(
 					container,
@@ -1736,8 +1903,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"menu_layout.json, restore-tray и live preview",
 							"menu_layout.json, restore tray and live preview"),
 						.description = RuEn(
-							"Редактор уже работает напрямую с menu_layout.json: видимые пункты остаются в основном списке, скрытые уходят в restore-tray, а preview сразу подсвечивает выбранное действие без переоткрытия поверхности.",
-							"The editor already works directly with menu_layout.json: visible items stay in the main list, hidden ones move into the restore tray, and the preview highlights the selected action immediately without reopening the surface."),
+							"Редактор уже работает напрямую с menu_layout.json: видимые пункты остаются в основном списке, скрытые уходят в restore-tray, а выбранное действие сразу подсвечивается без переоткрытия поверхности.",
+							"The editor already works directly with menu_layout.json: visible items stay in the main list, hidden ones move into the restore tray, and the selected action is highlighted immediately without reopening the surface."),
 						.footer = RuEn("Редактор бокового меню", "Side menu editor"),
 						.icon = &st::menuIconEdit,
 						.tone = OnboardingBadgeTone::Official,
@@ -1766,8 +1933,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							"После гайда остаётся только нативная ручная настройка",
 							"After onboarding only native manual tuning remains"),
 						.description = RuEn(
-							"Этот гайд специально убирает лишнюю сложность на старте: после него в Experimental остаются обычные нативные настройки оболочки и боковой панели без отдельного visual editor.",
-							"This guide intentionally removes extra complexity at the start: after it, Experimental keeps only regular native shell and side panel settings without a separate visual editor."),
+							"Этот гайд специально убирает лишнюю сложность на старте: после него в Experimental остаются только обычные нативные настройки оболочки и боковой панели без лишних дубликатов.",
+							"This guide intentionally removes extra complexity at the start: after it, Experimental keeps only the regular native shell and side panel settings without duplicate clutter."),
 						.footer = RuEn("Нативные настройки без visual editor", "Native settings without a visual editor"),
 						.icon = &st::menuIconCustomize,
 						.tone = OnboardingBadgeTone::Trusted,
@@ -1775,22 +1942,38 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddPrimaryButton(container, RuEn("Открыть Experimental", "Open Experimental"), openExperimental);
 				AddLinkAction(container, RuEn("Продолжить к финалу", "Continue to final"), [=] {
-					state->step = Step::Finish;
-					(*rebuild)();
+					goToStep(Step::Finish);
 				});
+				addBackLink();
 			} break;
 			case Step::Finish: {
 				AddHeroCover(
 					container,
 					RuEn("Всё готово", "You're all set"),
 					RuEn(
-						"Профиль, плагины и боковое меню уже разложены. Держи рядом официальный канал Astrogram для сборок, новостей и новых функций.",
-						"Your profile, plugins and side menu are already laid out. Keep the official Astrogram channel nearby for builds, news and new features."),
+						"Профиль, плагины и боковое меню уже разложены. Ниже оставили две понятные точки на будущее: официальный канал и поддержку Astrogram.",
+						"Your profile, plugins and side menu are already laid out. Below are the two clean next stops: the official channel and Astrogram support."),
 					QColor(0x08, 0x13, 0x1f),
 					QColor(0x0f, 0x2b, 0x3f),
 					QColor(0x44, 0xc0, 0xff),
 					QColor(0x9c, 0xff, 0xd3));
 				addStepBadge(Step::Finish);
+				addStepTimeline(Step::Finish);
+				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+				AddInfoCard(
+					container,
+					InfoCardDescriptor{
+						.eyebrow = RuEn("После гайда", "After onboarding"),
+						.title = RuEn(
+							"Дальше достаточно двух точек входа",
+							"Two entry points are enough from here"),
+						.description = RuEn(
+							"Официальный канал держит рядом сборки и новости Astrogram, а support-box ведёт в донат и серверный значок без лишнего поиска по меню.",
+							"The official channel keeps Astrogram builds and news nearby, while the support box leads into donations and the server-side badge without making you hunt through menus."),
+						.footer = RuEn("Канал + поддержка", "Channel + support"),
+						.icon = &st::menuIconGiftPremium,
+						.tone = OnboardingBadgeTone::Official,
+					});
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 				AddChannelCard(
 					container,
@@ -1841,6 +2024,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						args.openOfficialChannel();
 					});
 				}
+				addBackLink();
 			} break;
 			}
 		};

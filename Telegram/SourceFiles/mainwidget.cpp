@@ -545,7 +545,7 @@ void MaybeShowAstrogramOnboarding(
 		not_null<Window::SessionController*> controller) {
 	static auto shown = QSet<quint64>();
 	const auto onboardingMarkerPath = cWorkingDir()
-		+ u"tdata/astrogram_onboarding_v5"_q;
+		+ u"tdata/astrogram_onboarding_v6"_q;
 	const auto onboardingMigrated = QFileInfo::exists(onboardingMarkerPath);
 
 	const auto sessionKey = quint64(controller->session().uniqueId());
@@ -656,7 +656,7 @@ void MaybeShowAstrogramOnboarding(
 			if (const auto controller = weak.get()) {
 				controller->session().settings().setAstrogramOnboardingShown(true);
 				controller->session().saveSettingsDelayed();
-				auto marker = QFile(cWorkingDir() + u"tdata/astrogram_onboarding_v5"_q);
+				auto marker = QFile(cWorkingDir() + u"tdata/astrogram_onboarding_v6"_q);
 				if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
 					marker.write("1");
 					marker.close();
