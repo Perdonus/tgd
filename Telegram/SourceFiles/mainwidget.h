@@ -92,6 +92,10 @@ namespace Core {
 class Changelogs;
 } // namespace Core
 
+void ShowAstrogramOnboardingGuide(
+	not_null<Window::SessionController*> controller,
+	bool force = true);
+
 class MainWidget final
 	: public Ui::RpWidget
 	, private Media::Player::FloatDelegate {

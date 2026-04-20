@@ -541,24 +541,29 @@ void ApplyAstrogramOnboardingPreset(Ui::AstrogramOnboardingPreset preset) {
 	}
 }
 
+[[nodiscard]] QString AstrogramOnboardingMarkerPath() {
+	return cWorkingDir() + u"tdata/astrogram_onboarding_v6"_q;
+}
+
 void MaybeShowAstrogramOnboarding(
-		not_null<Window::SessionController*> controller) {
+		not_null<Window::SessionController*> controller,
+		bool force = false) {
 	static auto shown = QSet<quint64>();
-	const auto onboardingMarkerPath = cWorkingDir()
-		+ u"tdata/astrogram_onboarding_v6"_q;
+	const auto onboardingMarkerPath = AstrogramOnboardingMarkerPath();
 	const auto onboardingMigrated = QFileInfo::exists(onboardingMarkerPath);
 
 	const auto sessionKey = quint64(controller->session().uniqueId());
-	if (shown.contains(sessionKey)
+	if (!force
+		&& (shown.contains(sessionKey)
 			|| (controller->session().settings().astrogramOnboardingShown()
-				&& onboardingMigrated)) {
+				&& onboardingMigrated))) {
 		return;
 	}
 	if (controller->isLayerShown()) {
 		const auto weak = base::make_weak(controller);
-		QTimer::singleShot(1200, controller->content(), [weak] {
+		QTimer::singleShot(1200, controller->content(), [weak, force] {
 			if (const auto controller = weak.get()) {
-				MaybeShowAstrogramOnboarding(controller);
+				MaybeShowAstrogramOnboarding(controller, force);
 			}
 		});
 		return;
@@ -656,7 +661,7 @@ void MaybeShowAstrogramOnboarding(
 			if (const auto controller = weak.get()) {
 				controller->session().settings().setAstrogramOnboardingShown(true);
 				controller->session().saveSettingsDelayed();
-				auto marker = QFile(cWorkingDir() + u"tdata/astrogram_onboarding_v6"_q);
+				auto marker = QFile(AstrogramOnboardingMarkerPath());
 				if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
 					marker.write("1");
 					marker.close();
@@ -787,6 +792,17 @@ void MaybeShowAstrogramOnboarding(
 	});
 }
 
+void ShowAstrogramOnboardingGuideImpl(
+		not_null<Window::SessionController*> controller,
+		bool force) {
+	if (force) {
+		controller->session().settings().setAstrogramOnboardingShown(false);
+		controller->session().saveSettingsDelayed();
+		QFile::remove(AstrogramOnboardingMarkerPath());
+	}
+	MaybeShowAstrogramOnboarding(controller, force);
+}
+
 void ShowAstrogramUpdateNotice(
 		not_null<Window::SessionController*> controller,
 		const Core::UpdateReleaseInfo &info) {
@@ -877,6 +893,12 @@ void MaybeShowAstrogramUpdateNotice(
 }
 
 } // namespace
+
+void ShowAstrogramOnboardingGuide(
+		not_null<Window::SessionController*> controller,
+		bool force) {
+	ShowAstrogramOnboardingGuideImpl(controller, force);
+}
 
 enum StackItemType {
 	HistoryStackItem,

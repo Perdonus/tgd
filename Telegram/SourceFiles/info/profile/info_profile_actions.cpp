@@ -1533,7 +1533,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		return result;
 	};
 	const auto addIdLine = [&](v::text::data &&label, const QString &id) {
-		if (!ShowPeerIdBelowAbout.value() || id.isEmpty()) {
+		if (id.isEmpty()) {
 			return;
 		}
 		addInfoOneLine(

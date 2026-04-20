@@ -2292,6 +2292,20 @@ bool HandleAstrogramSupport(
 	return true;
 }
 
+bool HandleAstrogramGuide(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	Q_UNUSED(match);
+	Q_UNUSED(context);
+	if (!controller) {
+		return false;
+	}
+	ShowAstrogramOnboardingGuide(controller, true);
+	controller->window().activate();
+	return true;
+}
+
 } // namespace
 
 const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
@@ -2407,6 +2421,10 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 		{
 			u"^(support|donate)$"_q,
 			HandleAstrogramSupport
+		},
+		{
+			u"^guide/?(\\?.*)?(#|$)"_q,
+			HandleAstrogramGuide
 		},
 		{
 			u"^([^\\?]+)(\\?|#|$)"_q,
