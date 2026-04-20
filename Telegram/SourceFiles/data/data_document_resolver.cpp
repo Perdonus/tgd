@@ -520,9 +520,9 @@ public:
 		std::shared_ptr<rpl::variable<Plugins::PackagePreviewState>> preview)
 	: Ui::RpWidget(parent)
 	, _preview(std::move(preview)) {
-		const auto height = st::semiboldFont->height + 12;
-		setMinimumHeight(height);
-		setMaximumHeight(height);
+		const auto widgetHeight = st::semiboldFont->height + 12;
+		setMinimumHeight(widgetHeight);
+		setMaximumHeight(widgetHeight);
 		_preview->value() | rpl::on_next([=](const auto &previewState) {
 			if (previewState.sourceTrustLoading) {
 				if (!_timer.isActive()) {
@@ -758,7 +758,7 @@ void ShowPluginPackageBox(
 				&& (pluginId.isEmpty()
 					|| change.pluginId.isEmpty()
 					|| change.pluginId == pluginId);
-		}) | rpl::start_with_next([=](const Plugins::ManagerStateChange &) {
+		}) | rpl::on_next([=](const Plugins::ManagerStateChange &) {
 			refreshPreviewState();
 			if (!refreshTimer->isActive()
 				&& (previewState->current().sourceTrustLoading
