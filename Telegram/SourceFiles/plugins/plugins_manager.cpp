@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "boxes/abstract_box.h"
 #include "api/api_common.h"
+#include "base/call_delayed.h"
 #include "core/application.h"
 #include "core/launcher.h"
 #include "core/update_checker.h"
@@ -59,7 +60,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 #include <QtNetwork/QAbstractSocket>
 #include <QtNetwork/QHostAddress>
+#include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkInterface>
+#include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QTcpServer>
 #include <QtNetwork/QTcpSocket>
 #include <QtWidgets/QApplication>
@@ -93,6 +96,11 @@ constexpr auto kNoPluginsArgument = "-noplugins";
 constexpr auto kRecoveryDuckSize = 72;
 constexpr auto kMaxPluginLogBytes = qsizetype(25 * 1024 * 1024);
 constexpr auto kMaxPluginLogBackups = 5;
+constexpr auto kServerPluginTrustSuccessTtl = crl::time(5 * 60 * 1000);
+constexpr auto kServerPluginTrustRetryTtl = crl::time(15 * 1000);
+constexpr auto kServerPluginTrustRetryMaxTtl = crl::time(5 * 60 * 1000);
+constexpr auto kServerPluginTrustChangesRetryTtl = crl::time(5 * 1000);
+constexpr auto kServerPluginTrustChangesLongPollSeconds = 25;
 
 [[nodiscard]] bool UseRussianPluginUi() {
 	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
@@ -113,6 +121,77 @@ constexpr auto kMaxPluginLogBackups = 5;
 		text = text.left(std::max(0, maxLength - 1)).trimmed() + u"…"_q;
 	}
 	return text;
+}
+
+[[nodiscard]] QString NormalizeSha256Hash(QString value) {
+	value = value.trimmed().toLower();
+	if (value.startsWith(u"sha256:"_q)) {
+		value = value.mid(7);
+	}
+	if (value.size() != 64) {
+		return QString();
+	}
+	for (const auto ch : value) {
+		const auto hex = ch.unicode();
+		const auto digit = (hex >= '0' && hex <= '9');
+		const auto lower = (hex >= 'a' && hex <= 'f');
+		if (!digit && !lower) {
+			return QString();
+		}
+	}
+	return value;
+}
+
+[[nodiscard]] crl::time ServerPluginTrustRetryDelay(int retryCount) {
+	auto delay = kServerPluginTrustRetryTtl;
+	for (auto i = 1; (i < retryCount) && (delay < kServerPluginTrustRetryMaxTtl); ++i) {
+		delay = std::min(delay * 2, kServerPluginTrustRetryMaxTtl);
+	}
+	return delay;
+}
+
+[[nodiscard]] bool JsonTruthy(const QJsonValue &value) {
+	if (value.isBool()) {
+		return value.toBool();
+	} else if (value.isDouble()) {
+		return (value.toInt() != 0);
+	} else if (value.isString()) {
+		const auto lowered = value.toString().trimmed().toLower();
+		return (lowered == u"1"_q
+			|| lowered == u"true"_q
+			|| lowered == u"yes"_q
+			|| lowered == u"on"_q
+			|| lowered == u"enabled"_q
+			|| lowered == u"active"_q
+			|| lowered == u"verified"_q
+			|| lowered == u"trusted"_q
+			|| lowered == u"confirmed"_q);
+	}
+	return false;
+}
+
+[[nodiscard]] QString JsonStringFirstOf(
+		const QJsonObject &object,
+		std::initializer_list<QString> keys) {
+	for (const auto &key : keys) {
+		const auto value = object.value(key).toString().trimmed();
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+	return QString();
+}
+
+[[nodiscard]] int64 JsonInt64FirstOf(
+		const QJsonObject &object,
+		std::initializer_list<QString> keys) {
+	for (const auto &key : keys) {
+		const auto value = object.value(key).toVariant().toLongLong();
+		if (value != 0) {
+			return value;
+		}
+	}
+	return 0;
 }
 
 [[nodiscard]] bool ShouldMirrorPluginEventToClient(
@@ -1061,19 +1140,161 @@ bool ParseRuntimeHttpRequest(
 	return true;
 }
 
+struct PluginSourceTrustSnapshot {
+	bool verified = false;
+	QString trustText;
+	QString trustDetails;
+	QString trustReason;
+	int64 channelId = 0;
+	int64 messageId = 0;
+	QString channelTitle;
+	QString channelUsername;
+};
+
+[[nodiscard]] bool SamePluginSourceTrustSnapshot(
+		const PluginSourceTrustSnapshot &a,
+		const PluginSourceTrustSnapshot &b) {
+	return a.verified == b.verified
+		&& a.trustText == b.trustText
+		&& a.trustDetails == b.trustDetails
+		&& a.trustReason == b.trustReason
+		&& a.channelId == b.channelId
+		&& a.messageId == b.messageId
+		&& a.channelTitle == b.channelTitle
+		&& a.channelUsername == b.channelUsername;
+}
+
+[[nodiscard]] QUrl BuildPluginSourceTrustUrl(
+		const QString &sha256,
+		const QString &pluginId) {
+	auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/v1/plugins/"_q + sha256);
+	auto query = QUrlQuery();
+	if (!pluginId.trimmed().isEmpty()) {
+		query.addQueryItem(u"plugin_id"_q, pluginId.trimmed());
+	}
+	url.setQuery(query);
+	return url;
+}
+
+[[nodiscard]] QUrl BuildPluginSourceTrustChangesUrl(int sinceRevision) {
+	auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/v1/changes"_q);
+	auto query = QUrlQuery();
+	query.addQueryItem(
+		u"since_revision"_q,
+		QString::number(std::max(sinceRevision, 0)));
+	query.addQueryItem(
+		u"timeout"_q,
+		QString::number(kServerPluginTrustChangesLongPollSeconds));
+	url.setQuery(query);
+	return url;
+}
+
+[[nodiscard]] std::optional<PluginSourceTrustSnapshot> ParsePluginSourceTrustResponse(
+		const QJsonObject &root) {
+	auto payload = root;
+	for (const auto &key : { u"data"_q, u"result"_q, u"payload"_q }) {
+		if (const auto value = root.value(key); value.isObject()) {
+			payload = value.toObject();
+			break;
+		}
+	}
+	const auto pluginRecord = payload.value(u"plugin_record"_q).toObject();
+	const auto trustedSource = payload.value(u"trusted_source"_q).toObject();
+	const auto status = JsonStringFirstOf(
+		payload,
+		{ u"status"_q, u"trust_status"_q, u"source_status"_q });
+	const auto verified = JsonTruthy(payload.value(u"verified"_q))
+		|| JsonTruthy(payload.value(u"trusted"_q))
+		|| (status == u"verified"_q);
+	const auto found = payload.contains(u"found"_q)
+		? JsonTruthy(payload.value(u"found"_q))
+		: !pluginRecord.isEmpty();
+
+	auto result = PluginSourceTrustSnapshot();
+	result.verified = verified;
+	result.trustText = JsonStringFirstOf(
+		payload,
+		{ u"badge"_q, u"badge_text"_q, u"sourceTrustText"_q });
+	result.trustReason = JsonStringFirstOf(
+		payload,
+		{ u"reason"_q, u"sourceTrustReason"_q });
+	result.trustDetails = JsonStringFirstOf(
+		payload,
+		{ u"details"_q, u"sourceTrustDetails"_q });
+
+	if (result.trustReason.isEmpty()) {
+		result.trustReason = verified
+			? u"exact-sha256-trusted-record"_q
+			: (status == u"known_record"_q)
+			? u"hash-found-in-untrusted-channel"_q
+			: found
+			? u"hash-found-in-untrusted-channel"_q
+			: u"hash-not-in-trusted-records"_q;
+	}
+	if (result.trustText.isEmpty()) {
+		result.trustText = verified ? u"verified"_q : u"unverified"_q;
+	}
+
+	result.channelId = JsonInt64FirstOf(
+		trustedSource,
+		{ u"channel_id"_q, u"channelId"_q });
+	if (!result.channelId) {
+		result.channelId = JsonInt64FirstOf(
+			payload,
+			{ u"channel_id"_q, u"channelId"_q });
+	}
+	if (!result.channelId) {
+		result.channelId = JsonInt64FirstOf(
+			pluginRecord,
+			{ u"channel_id"_q, u"channelId"_q });
+	}
+	result.messageId = JsonInt64FirstOf(
+		pluginRecord,
+		{ u"message_id"_q, u"messageId"_q, u"post_id"_q, u"postId"_q });
+	if (!result.messageId) {
+		result.messageId = JsonInt64FirstOf(
+			payload,
+			{ u"message_id"_q, u"messageId"_q, u"post_id"_q, u"postId"_q });
+	}
+	result.channelTitle = JsonStringFirstOf(
+		trustedSource,
+		{ u"title"_q, u"name"_q, u"channel_title"_q, u"channelTitle"_q });
+	result.channelUsername = JsonStringFirstOf(
+		trustedSource,
+		{ u"username"_q, u"channel_username"_q, u"channelUsername"_q });
+
+	if (result.trustDetails.isEmpty()) {
+		result.trustDetails = JsonStringFirstOf(
+			pluginRecord,
+			{ u"label"_q, u"title"_q, u"name"_q });
+	}
+	if (result.trustDetails.isEmpty()) {
+		result.trustDetails = JsonStringFirstOf(
+			trustedSource,
+			{ u"label"_q, u"title"_q, u"name"_q });
+	}
+	return result;
+}
+
 QString RuntimeSourceBadgeKind(const PluginState &state) {
+	if (state.sourceTrustLoading) {
+		return u"loading"_q;
+	}
 	return state.sourceVerified ? u"confirmed"_q : u"unconfirmed"_q;
 }
 
 QJsonObject RuntimePluginJson(const PluginState &state) {
 	const auto source = QJsonObject{
 		{ u"verified"_q, state.sourceVerified },
+		{ u"loading"_q, state.sourceTrustLoading },
 		{ u"badge"_q, state.sourceTrustText },
 		{ u"badgeKind"_q, RuntimeSourceBadgeKind(state) },
 		{ u"details"_q, state.sourceTrustDetails },
 		{ u"reason"_q, state.sourceTrustReason },
 		{ u"channelId"_q, QString::number(state.sourceChannelId) },
 		{ u"messageId"_q, QString::number(state.sourceMessageId) },
+		{ u"channelTitle"_q, state.sourceChannelTitle },
+		{ u"channelUsername"_q, state.sourceChannelUsername },
 		{ u"sha256"_q, state.sha256 },
 	};
 	return QJsonObject{
@@ -1090,6 +1311,7 @@ QJsonObject RuntimePluginJson(const PluginState &state) {
 		{ u"disabledByRecovery"_q, state.disabledByRecovery },
 		{ u"recoverySuspected"_q, state.recoverySuspected },
 		{ u"recoveryReason"_q, state.recoveryReason },
+		{ u"sourceTrustLoading"_q, state.sourceTrustLoading },
 		{ u"sourceVerified"_q, state.sourceVerified },
 		{ u"sourceBadgeKind"_q, RuntimeSourceBadgeKind(state) },
 		{ u"sourceTrustText"_q, state.sourceTrustText },
@@ -1097,6 +1319,8 @@ QJsonObject RuntimePluginJson(const PluginState &state) {
 		{ u"sourceTrustReason"_q, state.sourceTrustReason },
 		{ u"sourceChannelId"_q, QString::number(state.sourceChannelId) },
 		{ u"sourceMessageId"_q, QString::number(state.sourceMessageId) },
+		{ u"sourceChannelTitle"_q, state.sourceChannelTitle },
+		{ u"sourceChannelUsername"_q, state.sourceChannelUsername },
 		{ u"source"_q, source },
 	};
 }
@@ -1278,6 +1502,363 @@ Manager::Manager(QObject *parent) : QObject(parent) {
 Manager::~Manager() {
 	stopRuntimeApiServer();
 	unloadAll();
+}
+
+struct Manager::PluginSourceTrustEntry {
+	bool inFlight = false;
+	bool resolved = false;
+	bool refreshScheduled = false;
+	crl::time nextRequestAt = 0;
+	int retryCount = 0;
+	QString lastPluginId;
+	PluginSourceTrustSnapshot snapshot;
+};
+
+void Manager::applyPluginSourceTrustState(
+		const QString &sha256,
+		PluginState &state) const {
+	state.sourceTrustLoading = false;
+	state.sourceVerified = false;
+	state.sourceTrustText = u"unverified"_q;
+	state.sourceTrustDetails.clear();
+	state.sourceTrustReason.clear();
+	state.sourceChannelId = 0;
+	state.sourceMessageId = 0;
+	state.sourceChannelTitle.clear();
+	state.sourceChannelUsername.clear();
+
+	if (sha256.isEmpty()) {
+		state.sourceTrustReason = u"sha256-unavailable"_q;
+		state.sourceTrustDetails = u"sha256-unavailable"_q;
+		return;
+	}
+	const auto it = _pluginSourceTrustBySha.constFind(sha256);
+	if (it == _pluginSourceTrustBySha.cend() || !it.value()) {
+		state.sourceTrustLoading = true;
+		state.sourceTrustText = u"loading"_q;
+		state.sourceTrustReason = u"server-refreshing"_q;
+		return;
+	}
+	const auto &entry = *it.value();
+	if (!entry.resolved) {
+		state.sourceTrustLoading = true;
+		state.sourceTrustText = u"loading"_q;
+		state.sourceTrustReason = u"server-refreshing"_q;
+		return;
+	}
+	state.sourceVerified = entry.snapshot.verified;
+	state.sourceTrustText = entry.snapshot.trustText.isEmpty()
+		? (entry.snapshot.verified ? u"verified"_q : u"unverified"_q)
+		: entry.snapshot.trustText;
+	state.sourceTrustDetails = entry.snapshot.trustDetails;
+	state.sourceTrustReason = entry.snapshot.trustReason;
+	state.sourceChannelId = entry.snapshot.channelId;
+	state.sourceMessageId = entry.snapshot.messageId;
+	state.sourceChannelTitle = entry.snapshot.channelTitle;
+	state.sourceChannelUsername = entry.snapshot.channelUsername;
+}
+
+void Manager::requestPluginSourceTrustIfNeeded(
+		const QString &sha256,
+		const QString &pluginId) {
+	if (sha256.isEmpty()) {
+		return;
+	}
+	auto &entryRef = _pluginSourceTrustBySha[sha256];
+	if (!entryRef) {
+		entryRef = std::make_shared<PluginSourceTrustEntry>();
+	}
+	const auto entry = entryRef;
+	if (!pluginId.trimmed().isEmpty()) {
+		entry->lastPluginId = pluginId.trimmed();
+	}
+	requestPluginSourceTrustFeedIfNeeded();
+	if (entry->inFlight) {
+		return;
+	}
+	if (entry->nextRequestAt > crl::now()) {
+		if (!entry->refreshScheduled) {
+			entry->refreshScheduled = true;
+			const auto delay = std::max(entry->nextRequestAt - crl::now(), crl::time(0));
+			base::call_delayed(delay, this, [=] {
+				const auto it = _pluginSourceTrustBySha.constFind(sha256);
+				if (it == _pluginSourceTrustBySha.cend() || !it.value()) {
+					return;
+				}
+				it.value()->refreshScheduled = false;
+				requestPluginSourceTrustIfNeeded(sha256, pluginId);
+			});
+		}
+		return;
+	}
+	if (!_pluginSourceTrustManager) {
+		_pluginSourceTrustManager = std::make_unique<QNetworkAccessManager>();
+	}
+
+	entry->inFlight = true;
+	entry->refreshScheduled = false;
+
+	const auto url = BuildPluginSourceTrustUrl(sha256, pluginId);
+	logEvent(
+		u"plugin-source-trust"_q,
+		u"request-start"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+			{ u"sha256"_q, sha256 },
+			{ u"url"_q, url.toString(QUrl::FullyEncoded) },
+		});
+
+	QNetworkRequest request(url);
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::NoLessSafeRedirectPolicy);
+	request.setRawHeader("Accept", "application/json");
+	request.setRawHeader("User-Agent", "AstrogramDesktop");
+	request.setRawHeader("Cache-Control", "no-cache");
+	auto *reply = _pluginSourceTrustManager->get(request);
+	QObject::connect(
+		reply,
+		&QNetworkReply::finished,
+		this,
+		[=] {
+			const auto it = _pluginSourceTrustBySha.find(sha256);
+			if (it == _pluginSourceTrustBySha.end() || !it.value()) {
+				reply->deleteLater();
+				return;
+			}
+			const auto entry = it.value();
+			entry->inFlight = false;
+
+			const auto previous = entry->snapshot;
+			const auto hadResolved = entry->resolved;
+			auto changed = false;
+			auto retryReason = QString();
+			auto nextRequestAt = crl::now() + kServerPluginTrustSuccessTtl;
+			const auto statusCode = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			const auto body = reply->readAll();
+
+			if (reply->error() == QNetworkReply::NoError) {
+				const auto parsed = QJsonDocument::fromJson(body);
+				if (parsed.isObject()) {
+					if (const auto trust = ParsePluginSourceTrustResponse(parsed.object())) {
+						entry->snapshot = *trust;
+						entry->resolved = true;
+						entry->retryCount = 0;
+						changed = !hadResolved || !SamePluginSourceTrustSnapshot(previous, entry->snapshot);
+						logEvent(
+							u"plugin-source-trust"_q,
+							u"request-finished"_q,
+							QJsonObject{
+								{ u"pluginId"_q, pluginId },
+								{ u"sha256"_q, sha256 },
+								{ u"http"_q, statusCode },
+								{ u"verified"_q, entry->snapshot.verified },
+								{ u"reason"_q, entry->snapshot.trustReason },
+								{ u"channelId"_q, QString::number(entry->snapshot.channelId) },
+								{ u"messageId"_q, QString::number(entry->snapshot.messageId) },
+							});
+					} else {
+						retryReason = u"invalid-response"_q;
+					}
+				} else {
+					retryReason = u"invalid-json"_q;
+				}
+			} else {
+				retryReason = reply->errorString();
+			}
+
+			if (!retryReason.isEmpty()) {
+				auto fallback = previous;
+				fallback.verified = false;
+				fallback.trustText = u"unverified"_q;
+				fallback.trustReason = u"server-request-failed"_q;
+				fallback.trustDetails = retryReason;
+				fallback.channelId = 0;
+				fallback.messageId = 0;
+				fallback.channelTitle.clear();
+				fallback.channelUsername.clear();
+				entry->snapshot = fallback;
+				entry->resolved = true;
+				entry->retryCount = std::min(entry->retryCount + 1, 16);
+				nextRequestAt = crl::now() + ServerPluginTrustRetryDelay(entry->retryCount);
+				changed = !hadResolved || !SamePluginSourceTrustSnapshot(previous, entry->snapshot);
+				logEvent(
+					u"plugin-source-trust"_q,
+					u"request-failed"_q,
+					QJsonObject{
+						{ u"pluginId"_q, pluginId },
+						{ u"sha256"_q, sha256 },
+						{ u"http"_q, statusCode },
+						{ u"reason"_q, retryReason },
+					});
+			}
+
+			entry->nextRequestAt = nextRequestAt;
+			if (!entry->refreshScheduled) {
+				entry->refreshScheduled = true;
+				const auto delay = std::max(entry->nextRequestAt - crl::now(), crl::time(0));
+				base::call_delayed(delay, this, [=] {
+					const auto refreshIt = _pluginSourceTrustBySha.constFind(sha256);
+					if (refreshIt == _pluginSourceTrustBySha.cend() || !refreshIt.value()) {
+						return;
+					}
+					refreshIt.value()->refreshScheduled = false;
+					requestPluginSourceTrustIfNeeded(sha256, pluginId);
+				});
+			}
+			if (changed) {
+				notifyStateChanged(u"plugin-source-trust-refresh"_q, pluginId, false, false);
+			}
+			reply->deleteLater();
+		});
+}
+
+void Manager::schedulePluginSourceTrustFeedRequest(crl::time delay) {
+	if (_pluginSourceTrustFeedScheduled) {
+		return;
+	}
+	_pluginSourceTrustFeedScheduled = true;
+	base::call_delayed(std::max(delay, crl::time(0)), this, [=] {
+		_pluginSourceTrustFeedScheduled = false;
+		requestPluginSourceTrustFeedIfNeeded();
+	});
+}
+
+void Manager::invalidatePluginSourceTrustEntry(
+		const QString &sha256,
+		const QString &reason) {
+	const auto it = _pluginSourceTrustBySha.find(sha256);
+	if (it == _pluginSourceTrustBySha.end() || !it.value()) {
+		return;
+	}
+	const auto entry = it.value();
+	if (!entry->lastPluginId.trimmed().isEmpty()) {
+		logEvent(
+			u"plugin-source-trust"_q,
+			u"server-change"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry->lastPluginId },
+				{ u"sha256"_q, sha256 },
+				{ u"reason"_q, reason },
+			});
+	}
+	entry->resolved = false;
+	entry->nextRequestAt = 0;
+	entry->retryCount = 0;
+	entry->refreshScheduled = false;
+	notifyStateChanged(
+		u"plugin-source-trust-server-change"_q,
+		entry->lastPluginId,
+		false,
+		false);
+	requestPluginSourceTrustIfNeeded(sha256, entry->lastPluginId);
+}
+
+void Manager::requestPluginSourceTrustFeedIfNeeded() {
+	if (_pluginSourceTrustFeedInFlight || _pluginSourceTrustBySha.isEmpty()) {
+		return;
+	}
+	if (!_pluginSourceTrustManager) {
+		_pluginSourceTrustManager = std::make_unique<QNetworkAccessManager>();
+	}
+	_pluginSourceTrustFeedInFlight = true;
+	const auto url = BuildPluginSourceTrustChangesUrl(_pluginSourceTrustRevision);
+	logEvent(
+		u"plugin-source-trust"_q,
+		u"changes-feed-start"_q,
+		QJsonObject{
+			{ u"revision"_q, _pluginSourceTrustRevision },
+			{ u"trackedEntries"_q, int(_pluginSourceTrustBySha.size()) },
+			{ u"url"_q, url.toString(QUrl::FullyEncoded) },
+		});
+
+	QNetworkRequest request(url);
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::NoLessSafeRedirectPolicy);
+	request.setRawHeader("Accept", "application/json");
+	request.setRawHeader("User-Agent", "AstrogramDesktop");
+	request.setRawHeader("Cache-Control", "no-cache");
+	auto *reply = _pluginSourceTrustManager->get(request);
+	QObject::connect(
+		reply,
+		&QNetworkReply::finished,
+		this,
+		[=] {
+			_pluginSourceTrustFeedInFlight = false;
+
+			auto delay = crl::time(0);
+			auto reason = QString(u"success-refresh"_q);
+			auto success = false;
+			auto changedEntries = 0;
+			const auto statusCode = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			const auto body = reply->readAll();
+
+			if (reply->error() == QNetworkReply::NoError) {
+				const auto parsed = QJsonDocument::fromJson(body);
+				if (parsed.isObject()) {
+					const auto root = parsed.object();
+					_pluginSourceTrustRevision = std::max(
+						_pluginSourceTrustRevision,
+						root.value(u"revision"_q).toInt(_pluginSourceTrustRevision));
+					const auto changes = root.value(u"changes"_q).toObject();
+					auto shasToRefresh = QSet<QString>();
+					const auto pluginChanges = changes.value(u"plugin_records"_q).toArray();
+					for (const auto &change : pluginChanges) {
+						if (!change.isObject()) {
+							continue;
+						}
+						const auto sha = NormalizeSha256Hash(
+							JsonStringFirstOf(
+								change.toObject(),
+								{ u"sha256"_q }));
+						if (!sha.isEmpty() && _pluginSourceTrustBySha.contains(sha)) {
+							shasToRefresh.insert(sha);
+						}
+					}
+					if (!changes.value(u"trusted_sources"_q).toArray().isEmpty()) {
+						for (auto i = _pluginSourceTrustBySha.cbegin();
+							i != _pluginSourceTrustBySha.cend();
+							++i) {
+							shasToRefresh.insert(i.key());
+						}
+					}
+					for (const auto &sha : shasToRefresh) {
+						++changedEntries;
+						invalidatePluginSourceTrustEntry(sha, u"server-change"_q);
+					}
+					success = true;
+					logEvent(
+						u"plugin-source-trust"_q,
+						u"changes-feed-finished"_q,
+						QJsonObject{
+							{ u"http"_q, statusCode },
+							{ u"revision"_q, _pluginSourceTrustRevision },
+							{ u"changed"_q, root.value(u"changed"_q).toBool() },
+							{ u"refreshedEntries"_q, changedEntries },
+						});
+				}
+			}
+			if (!success) {
+				delay = kServerPluginTrustChangesRetryTtl;
+				reason = reply->error() == QNetworkReply::NoError
+					? u"invalid-response"_q
+					: reply->errorString();
+				logEvent(
+					u"plugin-source-trust"_q,
+					u"changes-feed-failed"_q,
+					QJsonObject{
+						{ u"http"_q, statusCode },
+						{ u"reason"_q, reason },
+						{ u"body"_q, CompactClientLogText(QString::fromUtf8(body)) },
+					});
+			}
+
+			schedulePluginSourceTrustFeedRequest(delay);
+			reply->deleteLater();
+		});
 }
 
 void Manager::loadRecoveryState() {
@@ -2048,6 +2629,7 @@ QByteArray Manager::processRuntimeApiRequest(
 		auto loadedCount = 0;
 		auto errorCount = 0;
 		auto recoveryCount = 0;
+		auto loadingSourceCount = 0;
 		auto verifiedSourceCount = 0;
 		auto unverifiedSourceCount = 0;
 		for (const auto &state : states) {
@@ -2055,19 +2637,12 @@ QByteArray Manager::processRuntimeApiRequest(
 			loadedCount += state.loaded ? 1 : 0;
 			errorCount += !state.error.trimmed().isEmpty() ? 1 : 0;
 			recoveryCount += (state.recoverySuspected || state.disabledByRecovery) ? 1 : 0;
-			verifiedSourceCount += state.sourceVerified ? 1 : 0;
-			unverifiedSourceCount += state.sourceVerified ? 0 : 1;
-		}
-		auto trustedChannelIds = std::vector<int64>();
-		auto trustedRecords = std::vector<QString>();
-		if (session) {
-			const auto &appConfig = session->appConfig();
-			trustedChannelIds = appConfig.astrogramTrustedPluginChannelIds();
-			trustedRecords = appConfig.astrogramTrustedPluginRecords();
-		}
-		auto trustedChannelsJson = QJsonArray();
-		for (const auto channelId : trustedChannelIds) {
-			trustedChannelsJson.push_back(QString::number(channelId));
+			if (state.sourceTrustLoading) {
+				++loadingSourceCount;
+			} else {
+				verifiedSourceCount += state.sourceVerified ? 1 : 0;
+				unverifiedSourceCount += state.sourceVerified ? 0 : 1;
+			}
 		}
 		return RuntimeOkResponse(QJsonObject{
 			{ u"safeModeEnabled"_q, safeModeEnabled() },
@@ -2093,12 +2668,13 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"loaded"_q, loadedCount },
 				{ u"errors"_q, errorCount },
 				{ u"recoveryDisabled"_q, recoveryCount },
+				{ u"loadingSources"_q, loadingSourceCount },
 				{ u"verifiedSources"_q, verifiedSourceCount },
 				{ u"unverifiedSources"_q, unverifiedSourceCount },
 			} },
 			{ u"trustedSources"_q, QJsonObject{
-				{ u"channels"_q, trustedChannelsJson },
-				{ u"recordsCount"_q, int(trustedRecords.size()) },
+				{ u"serverBacked"_q, true },
+				{ u"cacheEntries"_q, int(_pluginSourceTrustBySha.size()) },
 			} },
 		});
 	}
@@ -2517,12 +3093,15 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 		trustProbe.path = path;
 		syncSourceTrustState(trustProbe);
 		result.sha256 = trustProbe.sha256;
+		result.sourceTrustLoading = trustProbe.sourceTrustLoading;
 		result.sourceVerified = trustProbe.sourceVerified;
 		result.sourceTrustText = trustProbe.sourceTrustText;
 		result.sourceTrustDetails = trustProbe.sourceTrustDetails;
 		result.sourceTrustReason = trustProbe.sourceTrustReason;
 		result.sourceChannelId = trustProbe.sourceChannelId;
 		result.sourceMessageId = trustProbe.sourceMessageId;
+		result.sourceChannelTitle = trustProbe.sourceChannelTitle;
+		result.sourceChannelUsername = trustProbe.sourceChannelUsername;
 	}
 
 	if (result.info.id.isEmpty()) {
@@ -2550,6 +3129,7 @@ PackagePreviewState Manager::inspectPackage(const QString &path) const {
 			{ u"installed"_q, result.installed },
 			{ u"update"_q, result.update },
 			{ u"sourceVerified"_q, result.sourceVerified },
+			{ u"sourceTrustLoading"_q, result.sourceTrustLoading },
 			{ u"sourceTrustReason"_q, result.sourceTrustReason },
 			{ u"sourceChannelId"_q, QString::number(result.sourceChannelId) },
 			{ u"sourceMessageId"_q, QString::number(result.sourceMessageId) },
@@ -4786,6 +5366,7 @@ QJsonObject Manager::pluginStateToJson(const PluginState &state) const {
 	result.insert(u"disabledByRecovery"_q, state.disabledByRecovery);
 	result.insert(u"recoverySuspected"_q, state.recoverySuspected);
 	result.insert(u"recoveryReason"_q, state.recoveryReason);
+	result.insert(u"sourceTrustLoading"_q, state.sourceTrustLoading);
 	result.insert(u"sourceVerified"_q, state.sourceVerified);
 	result.insert(u"sourceBadgeKind"_q, RuntimeSourceBadgeKind(state));
 	result.insert(u"sourceTrustText"_q, state.sourceTrustText);
@@ -4793,6 +5374,8 @@ QJsonObject Manager::pluginStateToJson(const PluginState &state) const {
 	result.insert(u"sourceTrustReason"_q, state.sourceTrustReason);
 	result.insert(u"sourceChannelId"_q, QString::number(state.sourceChannelId));
 	result.insert(u"sourceMessageId"_q, QString::number(state.sourceMessageId));
+	result.insert(u"sourceChannelTitle"_q, state.sourceChannelTitle);
+	result.insert(u"sourceChannelUsername"_q, state.sourceChannelUsername);
 	return result;
 }
 
@@ -4976,187 +5559,10 @@ QString Manager::fileSha256(const QString &path) const {
 }
 
 void Manager::syncSourceTrustState(PluginState &state) const {
-	const auto normalizeHash = [](QString value) {
-		value = value.trimmed().toLower();
-		if (value.startsWith(u"sha256:"_q)) {
-			value = value.mid(7);
-		}
-		if (value.size() != 64) {
-			return QString();
-		}
-		for (const auto ch : value) {
-			const auto hex = ch.unicode();
-			const auto digit = (hex >= '0' && hex <= '9');
-			const auto lower = (hex >= 'a' && hex <= 'f');
-			if (!digit && !lower) {
-				return QString();
-			}
-		}
-		return value;
-	};
-	struct ParsedRecord {
-		QString sha256;
-		int64 channelId = 0;
-		int64 messageId = 0;
-		QString label;
-	};
-	const auto parseRecordObject = [&](const QJsonObject &object) -> ParsedRecord {
-		auto result = ParsedRecord();
-		for (const auto &key : { u"sha256"_q, u"hash"_q, u"digest"_q }) {
-			const auto value = object.value(key).toString().trimmed();
-			if (!value.isEmpty()) {
-				result.sha256 = normalizeHash(value);
-				if (!result.sha256.isEmpty()) {
-					break;
-				}
-			}
-		}
-		for (const auto &key : {
-			u"channel_id"_q,
-			u"channelId"_q,
-			u"source_channel_id"_q,
-			u"sourceChannelId"_q,
-		}) {
-			const auto value = object.value(key).toVariant().toLongLong();
-			if (value != 0) {
-				result.channelId = value;
-				break;
-			}
-		}
-		for (const auto &key : {
-			u"message_id"_q,
-			u"messageId"_q,
-			u"post_id"_q,
-			u"postId"_q,
-			u"source_message_id"_q,
-			u"sourceMessageId"_q,
-		}) {
-			const auto value = object.value(key).toVariant().toLongLong();
-			if (value != 0) {
-				result.messageId = value;
-				break;
-			}
-		}
-		for (const auto &key : { u"label"_q, u"title"_q, u"name"_q }) {
-			const auto value = object.value(key).toString().trimmed();
-			if (!value.isEmpty()) {
-				result.label = value;
-				break;
-			}
-		}
-		return result;
-	};
-	const auto parseRecord = [&](QString raw) -> ParsedRecord {
-		raw = raw.trimmed();
-		if (raw.isEmpty()) {
-			return {};
-		}
-		if (raw.startsWith(u'{')) {
-			const auto document = QJsonDocument::fromJson(raw.toUtf8());
-			if (document.isObject()) {
-				return parseRecordObject(document.object());
-			}
-		}
-		auto delimiter = u'|';
-		auto parts = raw.split(delimiter, Qt::KeepEmptyParts);
-		if (parts.size() < 3) {
-			delimiter = u';';
-			parts = raw.split(delimiter, Qt::KeepEmptyParts);
-		}
-		if (parts.size() < 3) {
-			return {};
-		}
-		auto result = ParsedRecord();
-		result.sha256 = normalizeHash(parts[0]);
-		result.channelId = parts[1].trimmed().toLongLong();
-		result.messageId = parts[2].trimmed().toLongLong();
-		if (parts.size() > 3) {
-			result.label = parts.mid(3).join(delimiter).trimmed();
-		}
-		return result;
-	};
-
-	state.sha256 = normalizeHash(fileSha256(state.path));
-	state.sourceVerified = false;
-	state.sourceTrustText = u"unverified"_q;
-	state.sourceTrustDetails.clear();
-	state.sourceTrustReason.clear();
-	state.sourceChannelId = 0;
-	state.sourceMessageId = 0;
-
-	if (state.sha256.isEmpty()) {
-		state.sourceTrustReason = u"sha256-unavailable"_q;
-		state.sourceTrustDetails = u"sha256-unavailable"_q;
-		return;
-	}
-	const auto session = activeSession();
-	if (!session) {
-		state.sourceTrustReason = u"no-active-session"_q;
-		state.sourceTrustDetails = u"no-active-session"_q;
-		return;
-	}
-	const auto &appConfig = session->appConfig();
-	const std::vector<int64> trustedChannels
-		= appConfig.astrogramTrustedPluginChannelIds();
-	const std::vector<QString> trustedRecords
-		= appConfig.astrogramTrustedPluginRecords();
-	auto matchedHashInUntrustedChannel = false;
-	auto matchedHashWithoutOrigin = false;
-	auto hasValidTrustedRecord = false;
-	auto matchedChannelId = int64(0);
-	auto matchedMessageId = int64(0);
-	for (const auto &rawRecord : trustedRecords) {
-		const auto record = parseRecord(rawRecord);
-		if (!record.sha256.isEmpty()) {
-			hasValidTrustedRecord = true;
-		}
-		if (record.sha256.isEmpty() || record.sha256 != state.sha256) {
-			continue;
-		}
-		if (!record.channelId || (record.messageId <= 0)) {
-			matchedHashWithoutOrigin = true;
-			continue;
-		}
-		if (record.channelId) {
-			const auto trusted = !trustedChannels.empty()
-				&& (std::find(
-					trustedChannels.begin(),
-					trustedChannels.end(),
-					record.channelId) != trustedChannels.end());
-			if (!trusted) {
-				matchedHashInUntrustedChannel = true;
-				matchedChannelId = record.channelId;
-				matchedMessageId = record.messageId;
-				continue;
-			}
-		}
-		state.sourceVerified = true;
-		state.sourceTrustText = u"verified"_q;
-		state.sourceTrustReason = u"exact-sha256-trusted-record"_q;
-		state.sourceChannelId = record.channelId;
-		state.sourceMessageId = record.messageId;
-		state.sourceTrustDetails = !record.label.isEmpty()
-			? record.label
-			: (record.channelId
-				? (QString::number(record.channelId)
-					+ u":"_q
-					+ QString::number(record.messageId))
-				: QString());
-		return;
-	}
-
-	state.sourceChannelId = matchedChannelId;
-	state.sourceMessageId = matchedMessageId;
-	state.sourceTrustReason = trustedRecords.empty()
-		? u"no-trusted-records"_q
-		: !hasValidTrustedRecord
-		? u"no-valid-trusted-records"_q
-		: matchedHashInUntrustedChannel
-		? u"hash-found-in-untrusted-channel"_q
-		: matchedHashWithoutOrigin
-		? u"matching-record-missing-origin"_q
-		: u"hash-not-in-trusted-records"_q;
-	state.sourceTrustDetails = state.sourceTrustReason;
+	state.sha256 = NormalizeSha256Hash(fileSha256(state.path));
+	const auto manager = const_cast<Manager*>(this);
+	manager->requestPluginSourceTrustIfNeeded(state.sha256, state.info.id);
+	applyPluginSourceTrustState(state.sha256, state);
 }
 
 QJsonValue Manager::storedSettingValue(

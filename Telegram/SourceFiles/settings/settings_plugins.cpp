@@ -241,6 +241,11 @@ enum class PluginSourceBadgeMode {
 };
 
 QString PluginSourceBadgeText(const ::Plugins::PluginState &state) {
+	if (state.sourceTrustLoading) {
+		return PluginUiText(
+			u"Updating source data..."_q,
+			u"Обновление данных..."_q);
+	}
 	return state.sourceVerified
 		? PluginUiText(
 			u"Verified source"_q,
@@ -250,27 +255,9 @@ QString PluginSourceBadgeText(const ::Plugins::PluginState &state) {
 			u"Неподтверждённый источник"_q);
 }
 
-QString KnownAstrogramSourceChannelTitle(int64 channelId) {
-	switch (channelId) {
-	case -1003814280064LL: return u"AstroPlugins"_q;
-	case -1003641835839LL: return u"Astrogram"_q;
-	case -1003703089035LL: return u"Astrogram Trusted Source"_q;
-	}
-	return QString();
-}
-
-QString KnownAstrogramSourceChannelUsername(int64 channelId) {
-	switch (channelId) {
-	case -1003814280064LL: return u"astroplugin"_q;
-	case -1003641835839LL: return u"astrogramchannel"_q;
-	case -1003703089035LL: return QString();
-	}
-	return QString();
-}
-
-QString PluginSourceChannelLabel(int64 channelId) {
-	const auto title = KnownAstrogramSourceChannelTitle(channelId).trimmed();
-	const auto username = KnownAstrogramSourceChannelUsername(channelId).trimmed();
+QString PluginSourceChannelLabel(const ::Plugins::PluginState &state) {
+	const auto title = state.sourceChannelTitle.trimmed();
+	const auto username = state.sourceChannelUsername.trimmed();
 	if (!title.isEmpty() && !username.isEmpty()) {
 		return title + u" · @"_q + username;
 	}
@@ -282,7 +269,7 @@ QString PluginSourceChannelLabel(int64 channelId) {
 	}
 	return PluginUiText(
 		u"Channel %1"_q,
-		u"Канал %1"_q).arg(QString::number(channelId));
+		u"Канал %1"_q).arg(QString::number(state.sourceChannelId));
 }
 
 QString PluginSourceOriginText(const ::Plugins::PluginState &state) {
@@ -292,7 +279,7 @@ QString PluginSourceOriginText(const ::Plugins::PluginState &state) {
 	return PluginUiText(
 		u"Source channel: %1 · post %2"_q,
 		u"Канал-источник: %1 · пост %2"_q)
-			.arg(PluginSourceChannelLabel(state.sourceChannelId))
+			.arg(PluginSourceChannelLabel(state))
 			.arg(QString::number(state.sourceMessageId));
 }
 
@@ -366,6 +353,11 @@ QString PluginSourceBadgeDetailText(
 		}
 		return result;
 	}
+	if (state.sourceTrustLoading) {
+		return PluginUiText(
+			u"Astrogram is requesting trusted source data from the server."_q,
+			u"Astrogram запрашивает данные доверенного источника с сервера."_q);
+	}
 	const auto reason = PluginSourceReasonCode(state);
 	if (mode == PluginSourceBadgeMode::Card) {
 		return QString();
@@ -375,13 +367,18 @@ QString PluginSourceBadgeDetailText(
 			u"Could not compute the plugin SHA-256 hash."_q,
 			u"Не удалось вычислить SHA-256 хеш плагина."_q);
 	}
-	if (reason == u"no-active-session"_q) {
+	if (reason == u"no-active-session"_q || reason == u"server-refreshing"_q) {
 		return PluginUiText(
-			u"Trusted source records will become available after the active session finishes loading."_q,
-			u"Доверенные записи источников станут доступны после полной загрузки активной сессии."_q);
+			u"Astrogram is waiting for the server to return trusted source data."_q,
+			u"Astrogram ждёт ответ сервера с данными доверенного источника."_q);
 	}
 	if (reason == u"no-trusted-records"_q) {
 		return QString();
+	}
+	if (reason == u"server-request-failed"_q) {
+		return PluginUiText(
+			u"Could not update trusted source data from the server yet."_q,
+			u"Пока не удалось обновить данные доверенного источника с сервера."_q);
 	}
 	if (reason == u"no-valid-trusted-records"_q) {
 		return (mode == PluginSourceBadgeMode::Card)
@@ -428,13 +425,62 @@ QString PluginSourceBadgeDetailText(
 	return result;
 }
 
+void DrawPluginSourceBadgeGlyph(
+		Painter &p,
+		QRectF rect,
+		const QColor &fg,
+		bool loading,
+		bool verified) {
+	p.setPen(QPen(fg, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+	if (loading) {
+		const auto cy = rect.center().y();
+		const auto startX = rect.left() + 2.;
+		for (auto i = 0; i != 3; ++i) {
+			auto color = fg;
+			if (i == 2) {
+				color.setAlpha(110);
+			}
+			p.setPen(Qt::NoPen);
+			p.setBrush(color);
+			p.drawEllipse(
+				QRectF(
+					startX + (i * 4.5),
+					cy - 1.5,
+					3.,
+					3.));
+		}
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(fg, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+		return;
+	}
+	if (verified) {
+		p.setBrush(Qt::NoBrush);
+		p.drawEllipse(rect.adjusted(0.8, 0.8, -0.8, -0.8));
+		p.drawLine(
+			QPointF(rect.left() + 3.5, rect.center().y() + 0.6),
+			QPointF(rect.left() + 6.1, rect.bottom() - 3.6));
+		p.drawLine(
+			QPointF(rect.left() + 6.1, rect.bottom() - 3.6),
+			QPointF(rect.right() - 3.0, rect.top() + 3.2));
+		return;
+	}
+	p.setBrush(Qt::NoBrush);
+	const auto top = QPointF(rect.center().x(), rect.top() + 1.5);
+	const auto left = QPointF(rect.left() + 2.4, rect.bottom() - 2.1);
+	const auto right = QPointF(rect.right() - 2.4, rect.bottom() - 2.1);
+	p.drawLine(top, left);
+	p.drawLine(left, right);
+	p.drawLine(right, top);
+	p.drawLine(
+		QPointF(rect.center().x(), rect.top() + 4.0),
+		QPointF(rect.center().x(), rect.center().y() + 1.5));
+	p.drawPoint(QPointF(rect.center().x(), rect.bottom() - 4.3));
+}
+
 void AddPluginSourceBadge(
 		not_null<Ui::VerticalLayout*> container,
 		const ::Plugins::PluginState &state,
 		PluginSourceBadgeMode mode = PluginSourceBadgeMode::Card) {
-	if ((mode == PluginSourceBadgeMode::Card) && !state.sourceVerified) {
-		return;
-	}
 	const auto badge = container->add(
 		object_ptr<Ui::RpWidget>(container),
 		style::margins(
@@ -444,17 +490,24 @@ void AddPluginSourceBadge(
 			0),
 		style::al_top);
 	const auto text = PluginSourceBadgeText(state);
-	const auto fill = state.sourceVerified
-		? QColor(0x2e, 0xa4, 0xff, 44)
+	const auto fill = state.sourceTrustLoading
+		? QColor(0xf2, 0xc9, 0x4c, 44)
+		: state.sourceVerified
+		? QColor(0x27, 0xae, 0x60, 38)
 		: QColor(0xeb, 0x57, 0x57, 34);
-	const auto border = state.sourceVerified
-		? QColor(0x5c, 0xba, 0xff)
+	const auto border = state.sourceTrustLoading
+		? QColor(0xd8, 0xa1, 0x00)
+		: state.sourceVerified
+		? QColor(0x21, 0x96, 0x53)
 		: QColor(0xeb, 0x57, 0x57);
-	const auto fg = state.sourceVerified
-		? QColor(0x1d, 0x7f, 0xff)
+	const auto fg = state.sourceTrustLoading
+		? QColor(0x8a, 0x67, 0x00)
+		: state.sourceVerified
+		? QColor(0x1b, 0x8f, 0x50)
 		: QColor(0xcf, 0x45, 0x45);
 	const auto badgeHeight = st::semiboldFont->height + 12;
 	const auto horizontalPadding = 12;
+	const auto iconWidth = 18;
 	container->widthValue() | rpl::on_next([=](int width) {
 		badge->resize(std::max(0, width), badgeHeight);
 	}, badge->lifetime());
@@ -465,18 +518,30 @@ void AddPluginSourceBadge(
 		p.setFont(st::semiboldFont);
 		const auto pillWidth = std::min(
 			badge->width(),
-			st::semiboldFont->width(text) + (horizontalPadding * 2));
+			st::semiboldFont->width(text)
+				+ (horizontalPadding * 2)
+				+ iconWidth);
 		const auto rect = QRectF(0, 0, pillWidth, badge->height() - 1)
 			.adjusted(0.5, 0.5, -0.5, -0.5);
 		p.setPen(QPen(border, 1.));
 		p.setBrush(fill);
 		p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
 		p.setPen(fg);
+		DrawPluginSourceBadgeGlyph(
+			p,
+			QRectF(
+				horizontalPadding,
+				(badge->height() - 14.) / 2.,
+				14.,
+				14.),
+			fg,
+			state.sourceTrustLoading,
+			state.sourceVerified);
 		p.drawText(
 			QRect(
-				horizontalPadding,
+				horizontalPadding + iconWidth,
 				0,
-				std::max(1, pillWidth - (horizontalPadding * 2)),
+				std::max(1, pillWidth - (horizontalPadding * 2) - iconWidth),
 				badge->height()),
 			Qt::AlignLeft | Qt::AlignVCenter,
 			text);

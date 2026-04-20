@@ -26,11 +26,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 
 #include <algorithm>
-#include <array>
 
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUrlQuery>
@@ -78,6 +78,8 @@ namespace {
 constexpr auto kServerBadgeSuccessTtl = crl::time(5 * 60 * 1000);
 constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
+constexpr auto kServerBadgeChangesRetryTtl = crl::time(5 * 1000);
+constexpr auto kServerBadgeChangesLongPollSeconds = 25;
 
 [[nodiscard]] crl::time ServerBadgeRetryDelay(int retryCount) {
 	auto delay = kServerBadgeRetryTtl;
@@ -121,37 +123,20 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		: QString();
 }
 
-[[nodiscard]] ChannelId AstrogramChannelBareId(int64 channelId) {
-	constexpr auto kBotApiChannelOffset = 1000000000000LL;
-	if (channelId <= -kBotApiChannelOffset) {
-		const auto bare = (-channelId) - kBotApiChannelOffset;
-		return (bare > 0) ? ChannelId(uint64(bare)) : ChannelId();
-	}
-	return (channelId > 0) ? ChannelId(uint64(channelId)) : ChannelId();
-}
-
-[[nodiscard]] bool IsKnownAstrogramBadgePeer(PeerId peerId) {
-	if (!peerId.is<ChannelId>()) {
-		return false;
-	}
-	const auto channelId = peerToChannel(peerId);
-	for (const auto knownId : std::array<int64, 3>{
-		-1003814280064LL,
-		-1003641835839LL,
-		-1003703089035LL,
+[[nodiscard]] uint64 PeerIdFromServerChange(const QJsonObject &object) {
+	for (const auto &key : {
+		u"peer_id"_q,
+		u"peerId"_q,
+		u"id"_q,
 	}) {
-		if (channelId == AstrogramChannelBareId(knownId)) {
-			return true;
+		if (const auto parsed = JsonToUint64(object.value(key)); parsed != 0) {
+			return parsed;
 		}
 	}
-	return false;
-}
-
-[[nodiscard]] std::optional<EmojiStatusId> KnownAstrogramBadgeStatus(
-		PeerId peerId) {
-	return IsKnownAstrogramBadgePeer(peerId)
-		? std::optional<EmojiStatusId>(EmojiStatusId())
-		: std::nullopt;
+	if (const auto value = object.value(u"value"_q); value.isObject()) {
+		return PeerIdFromServerChange(value.toObject());
+	}
+	return 0;
 }
 
 [[nodiscard]] QString BadgeTypeForLog(BadgeType type) {
@@ -235,6 +220,9 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		u"isSubscriber"_q,
 		u"has_badge"_q,
 		u"hasBadge"_q,
+		u"verified"_q,
+		u"trusted"_q,
+		u"confirmed"_q,
 		u"premium"_q,
 		u"emoji_status"_q,
 		u"emojiStatus"_q,
@@ -260,6 +248,9 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 		|| object.contains(u"isSubscriber"_q)
 		|| object.contains(u"has_badge"_q)
 		|| object.contains(u"hasBadge"_q)
+		|| object.contains(u"verified"_q)
+		|| object.contains(u"trusted"_q)
+		|| object.contains(u"confirmed"_q)
 		|| object.contains(u"premium"_q);
 	const auto hasStatusIdField = object.contains(u"emoji_status_id"_q)
 		|| object.contains(u"emojiStatusId"_q)
@@ -298,6 +289,9 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 			|| JsonTruthy(object.value(u"isSubscriber"_q))
 			|| JsonTruthy(object.value(u"has_badge"_q))
 			|| JsonTruthy(object.value(u"hasBadge"_q))
+			|| JsonTruthy(object.value(u"verified"_q))
+			|| JsonTruthy(object.value(u"trusted"_q))
+			|| JsonTruthy(object.value(u"confirmed"_q))
 			|| JsonTruthy(object.value(u"premium"_q))
 			|| (statusId != 0))
 		: (statusId != 0);
@@ -312,6 +306,10 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 
 [[nodiscard]] std::optional<std::optional<EmojiStatusId>> ParseServerBadgeResponse(
 		const QJsonObject &root) {
+	if (root.contains(u"found"_q) && !JsonTruthy(root.value(u"found"_q))) {
+		return std::optional<std::optional<EmojiStatusId>>(
+			std::optional<EmojiStatusId>());
+	}
 	if (const auto parsed = ParseServerBadgeObject(root)) {
 		return parsed;
 	}
@@ -343,15 +341,6 @@ public:
 
 	[[nodiscard]] rpl::producer<std::optional<EmojiStatusId>> badgeValue(
 			not_null<PeerData*> peer) {
-		if (const auto known = KnownAstrogramBadgeStatus(peer->id);
-			known.has_value()) {
-			Logs::writeClient(QString::fromLatin1(
-				"[badge] built-in badge allowlist hit: peer=%1 bare=%2 type=%3")
-				.arg(QString::number(qulonglong(peer->id.value)))
-				.arg(QString::number(qulonglong(PeerBareId(peer->id))))
-				.arg(PeerTypeForLog(peer->id)));
-			return rpl::single(known);
-		}
 		const auto key = uint64(peer->id.value);
 		auto i = _entries.find(key);
 		if (i == end(_entries)) {
@@ -361,6 +350,7 @@ public:
 		Expects(i != end(_entries));
 		const auto entry = i->second.get();
 		requestIfNeeded(peer->id, entry);
+		requestChangesFeedIfNeeded();
 		return rpl::single(entry->emojiStatusId) | rpl::then(
 			entry->updated.events() | rpl::map([=] {
 				return entry->emojiStatusId;
@@ -378,15 +368,11 @@ private:
 	};
 
 	[[nodiscard]] static QUrl BuildRequestUrl(PeerId peerId) {
-		// Server-side subscriber badge endpoint.
-		// Expected JSON:
-		// { "badge": true, "emoji_status_id": 1234567890 }
-		// or { "subscriber": true, "emoji_status_id": 1234567890 }
-		auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/subscriber-badge"_q);
+		auto url = QUrl(
+			u"https://sosiskibot.ru/api/astrogram/v1/peers/"_q
+			+ QString::number(qulonglong(peerId.value))
+			+ u"/badge"_q);
 		auto query = QUrlQuery();
-		query.addQueryItem(
-			u"peer_id"_q,
-			QString::number(qulonglong(peerId.value)));
 		if (const auto peerRef = PeerRefForServer(peerId); !peerRef.isEmpty()) {
 			query.addQueryItem(u"peer_ref"_q, peerRef);
 		}
@@ -416,6 +402,128 @@ private:
 		}
 		url.setQuery(query);
 		return url;
+	}
+
+	[[nodiscard]] static QUrl BuildChangesUrl(int sinceRevision) {
+		auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/v1/changes"_q);
+		auto query = QUrlQuery();
+		query.addQueryItem(
+			u"since_revision"_q,
+			QString::number(std::max(sinceRevision, 0)));
+		query.addQueryItem(
+			u"timeout"_q,
+			QString::number(kServerBadgeChangesLongPollSeconds));
+		url.setQuery(query);
+		return url;
+	}
+
+	void scheduleChangesFeedRetry(const QString &reason, crl::time delay) {
+		if (_entries.empty()) {
+			return;
+		}
+		if (!_changesRetryTimer) {
+			_changesRetryTimer = std::make_unique<base::Timer>([=] {
+				requestChangesFeedIfNeeded();
+			});
+		}
+		_changesRetryTimer->callOnce(std::max(delay, crl::time(0)));
+		Logs::writeClient(QString::fromLatin1(
+			"[badge] changes feed scheduled: delay_ms=%1 reason=%2 tracked=%3 revision=%4")
+			.arg(QString::number(delay))
+			.arg(reason)
+			.arg(QString::number(_entries.size()))
+			.arg(QString::number(_changesRevision)));
+	}
+
+	void requestChangesFeedIfNeeded() {
+		if (_changesInFlight || _entries.empty()) {
+			return;
+		}
+		if (_changesRetryTimer) {
+			_changesRetryTimer->cancel();
+		}
+		_changesInFlight = true;
+
+		const auto url = BuildChangesUrl(_changesRevision);
+		QNetworkRequest request(url);
+		request.setAttribute(
+			QNetworkRequest::RedirectPolicyAttribute,
+			QNetworkRequest::NoLessSafeRedirectPolicy);
+		request.setRawHeader("Accept", "application/json");
+		request.setRawHeader("User-Agent", "AstrogramDesktop");
+		request.setRawHeader("Cache-Control", "no-cache");
+
+		Logs::writeClient(QString::fromLatin1(
+			"[badge] changes feed started: revision=%1 tracked=%2 url=%3")
+			.arg(QString::number(_changesRevision))
+			.arg(QString::number(_entries.size()))
+			.arg(url.toString(QUrl::FullyEncoded)));
+
+		auto *reply = _manager.get(request);
+		QObject::connect(
+			reply,
+			&QNetworkReply::finished,
+			reply,
+			[=] {
+				_changesInFlight = false;
+
+				auto retryDelay = crl::time(0);
+				auto retryReason = u"success-refresh"_q;
+				auto success = false;
+				const auto statusCode = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute).toInt();
+				const auto body = reply->readAll();
+
+				if (reply->error() == QNetworkReply::NoError) {
+					const auto parsed = QJsonDocument::fromJson(body);
+					if (parsed.isObject()) {
+						const auto root = parsed.object();
+						_changesRevision = std::max(
+							_changesRevision,
+							root.value(u"revision"_q).toInt(_changesRevision));
+						const auto peerChanges = root.value(u"changes"_q)
+							.toObject()
+							.value(u"peer_badges"_q)
+							.toArray();
+						for (const auto &change : peerChanges) {
+							if (!change.isObject()) {
+								continue;
+							}
+							const auto peerKey = PeerIdFromServerChange(change.toObject());
+							if (!peerKey) {
+								continue;
+							}
+							const auto it = _entries.find(peerKey);
+							if (it == end(_entries)) {
+								continue;
+							}
+							it->second->nextRequestAt = 0;
+							it->second->retryCount = 0;
+							requestIfNeeded(PeerId(PeerIdHelper{ peerKey }), it->second.get());
+						}
+						success = true;
+						Logs::writeClient(QString::fromLatin1(
+							"[badge] changes feed finished: http=%1 revision=%2 changed=%3 peerChanges=%4")
+							.arg(statusCode)
+							.arg(QString::number(_changesRevision))
+							.arg(root.value(u"changed"_q).toBool() ? u"true"_q : u"false"_q)
+							.arg(QString::number(peerChanges.size())));
+					}
+				}
+				if (!success) {
+					retryDelay = kServerBadgeChangesRetryTtl;
+					retryReason = reply->error() == QNetworkReply::NoError
+						? u"invalid-response"_q
+						: reply->errorString();
+					Logs::writeClient(QString::fromLatin1(
+						"[badge] changes feed failed: http=%1 reason=%2 body=%3")
+						.arg(QString::number(statusCode))
+						.arg(retryReason)
+						.arg(ServerBadgeLogText(body)));
+				}
+				scheduleChangesFeedRetry(retryReason, retryDelay);
+				reply->deleteLater();
+			});
 	}
 
 	void scheduleRetry(PeerId peerId, Entry *entry, const QString &reason) {
@@ -533,14 +641,18 @@ private:
 					stored->emojiStatusId = next;
 					stored->updated.fire({});
 				}
-				if (!resolved) {
-					scheduleRetry(peerId, stored.get(), retryReason);
-				}
+				scheduleRetry(
+					peerId,
+					stored.get(),
+					resolved ? u"success-refresh"_q : retryReason);
 				reply->deleteLater();
 			});
 	}
 
 	std::map<uint64, std::unique_ptr<Entry>> _entries;
+	bool _changesInFlight = false;
+	int _changesRevision = 0;
+	std::unique_ptr<base::Timer> _changesRetryTimer;
 	QNetworkAccessManager _manager;
 };
 
@@ -801,9 +913,7 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 				badge = BadgeType::Premium;
 				emojiStatusId = *serverBadgeStatus;
 			} else {
-				badge = IsKnownAstrogramBadgePeer(peer->id)
-					? BadgeType::Verified
-					: BadgeType::Premium;
+				badge = BadgeType::Verified;
 				emojiStatusId = EmojiStatusId();
 			}
 		}

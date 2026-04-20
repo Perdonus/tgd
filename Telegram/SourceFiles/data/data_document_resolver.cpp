@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFileInfo>
 #include <QtCore/QMimeType>
 #include <QtCore/QMimeDatabase>
+#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QDesktopServices>
 
@@ -172,6 +173,11 @@ QString PluginPackageButtonText(const Plugins::PackagePreviewState &preview) {
 }
 
 QString PluginSourceBadgeText(const Plugins::PackagePreviewState &preview) {
+	if (preview.sourceTrustLoading) {
+		return PluginUiText(
+			u"Updating source data..."_q,
+			u"Обновление данных..."_q);
+	}
 	return preview.sourceVerified
 		? PluginUiText(
 			u"Verified source"_q,
@@ -181,27 +187,9 @@ QString PluginSourceBadgeText(const Plugins::PackagePreviewState &preview) {
 			u"Неподтверждённый источник"_q);
 }
 
-QString KnownPluginSourceChannelTitle(int64 channelId) {
-	switch (channelId) {
-	case -1003814280064LL: return u"AstroPlugins"_q;
-	case -1003641835839LL: return u"Astrogram"_q;
-	case -1003703089035LL: return u"Astrogram Trusted Source"_q;
-	default: return QString();
-	}
-}
-
-QString KnownPluginSourceChannelUsername(int64 channelId) {
-	switch (channelId) {
-	case -1003814280064LL: return u"astroplugin"_q;
-	case -1003641835839LL: return u"astrogramchannel"_q;
-	case -1003703089035LL: return QString();
-	default: return QString();
-	}
-}
-
-QString PluginSourceChannelLabel(int64 channelId) {
-	const auto title = KnownPluginSourceChannelTitle(channelId).trimmed();
-	const auto username = KnownPluginSourceChannelUsername(channelId).trimmed();
+QString PluginSourceChannelLabel(const Plugins::PackagePreviewState &preview) {
+	const auto title = preview.sourceChannelTitle.trimmed();
+	const auto username = preview.sourceChannelUsername.trimmed();
 	if (!title.isEmpty() && !username.isEmpty()) {
 		return title + u" · @"_q + username;
 	}
@@ -211,7 +199,9 @@ QString PluginSourceChannelLabel(int64 channelId) {
 	if (!username.isEmpty()) {
 		return u"@"_q + username;
 	}
-	return QString::number(channelId);
+	return preview.sourceChannelId
+		? QString::number(preview.sourceChannelId)
+		: QString();
 }
 
 QString PluginSourceBadgeDetails(const Plugins::PackagePreviewState &preview) {
@@ -222,9 +212,14 @@ QString PluginSourceBadgeDetails(const Plugins::PackagePreviewState &preview) {
 		return text + u"\n"_q + PluginUiText(
 			u"Source: %1 · post %2."_q,
 			u"Источник: %1 · пост %2."_q).arg(
-				PluginSourceChannelLabel(preview.sourceChannelId),
+				PluginSourceChannelLabel(preview),
 				QString::number(preview.sourceMessageId));
 	};
+	if (preview.sourceTrustLoading) {
+		return PluginUiText(
+			u"Astrogram is requesting trusted source data from the server."_q,
+			u"Astrogram запрашивает данные доверенного источника с сервера."_q);
+	}
 	if (preview.sourceVerified) {
 		return addOrigin(PluginUiText(
 			u"This exact plugin binary matches a trusted source record."_q,
@@ -250,12 +245,67 @@ QString PluginSourceBadgeDetails(const Plugins::PackagePreviewState &preview) {
 			u"Could not calculate the plugin SHA-256 for verification."_q,
 			u"Не удалось вычислить SHA-256 плагина для проверки."_q);
 	}
-	if (preview.sourceTrustReason == u"no-trusted-records"_q) {
-		return QString();
+	if (preview.sourceTrustReason == u"server-request-failed"_q) {
+		return PluginUiText(
+			u"Could not update trusted source data from the server yet."_q,
+			u"Пока не удалось обновить данные доверенного источника с сервера."_q);
 	}
 	return PluginUiText(
 		u"This exact plugin binary was not found in the trusted source records."_q,
 		u"Точный бинарник этого плагина не найден в доверенных записях источников."_q);
+}
+
+void DrawPluginSourceBadgeGlyph(
+		Painter &p,
+		QRectF rect,
+		const QColor &fg,
+		bool loading,
+		bool verified,
+		int loadingFrame) {
+	p.setPen(QPen(fg, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+	if (loading) {
+		const auto cy = rect.center().y();
+		const auto startX = rect.left() + 2.;
+		for (auto i = 0; i != 3; ++i) {
+			auto color = fg;
+			if (i >= std::max(1, loadingFrame)) {
+				color.setAlpha(110);
+			}
+			p.setPen(Qt::NoPen);
+			p.setBrush(color);
+			p.drawEllipse(
+				QRectF(
+					startX + (i * 4.5),
+					cy - 1.5,
+					3.,
+					3.));
+		}
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(fg, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+		return;
+	}
+	if (verified) {
+		p.setBrush(Qt::NoBrush);
+		p.drawEllipse(rect.adjusted(0.8, 0.8, -0.8, -0.8));
+		p.drawLine(
+			QPointF(rect.left() + 3.5, rect.center().y() + 0.6),
+			QPointF(rect.left() + 6.1, rect.bottom() - 3.6));
+		p.drawLine(
+			QPointF(rect.left() + 6.1, rect.bottom() - 3.6),
+			QPointF(rect.right() - 3.0, rect.top() + 3.2));
+		return;
+	}
+	p.setBrush(Qt::NoBrush);
+	const auto top = QPointF(rect.center().x(), rect.top() + 1.5);
+	const auto left = QPointF(rect.left() + 2.4, rect.bottom() - 2.1);
+	const auto right = QPointF(rect.right() - 2.4, rect.bottom() - 2.1);
+	p.drawLine(top, left);
+	p.drawLine(left, right);
+	p.drawLine(right, top);
+	p.drawLine(
+		QPointF(rect.center().x(), rect.top() + 4.0),
+		QPointF(rect.center().x(), rect.center().y() + 1.5));
+	p.drawPoint(QPointF(rect.center().x(), rect.bottom() - 4.3));
 }
 
 QString PluginInstalledVersionNotice(
@@ -463,9 +513,107 @@ private:
 	std::shared_ptr<Data::StickersSetThumbnailView> _thumbnailView;
 };
 
+class PluginSourceBadgeWidget final : public Ui::RpWidget {
+public:
+	PluginSourceBadgeWidget(
+		QWidget *parent,
+		std::shared_ptr<rpl::variable<Plugins::PackagePreviewState>> preview)
+	: Ui::RpWidget(parent)
+	, _preview(std::move(preview)) {
+		const auto height = st::semiboldFont->height + 12;
+		setMinimumHeight(height);
+		setMaximumHeight(height);
+		_preview->value() | rpl::on_next([=](const auto &previewState) {
+			if (previewState.sourceTrustLoading) {
+				if (!_timer.isActive()) {
+					_timer.start(420);
+				}
+			} else {
+				_timer.stop();
+				_loadingFrame = 0;
+			}
+			update();
+		}, lifetime());
+		_timer.setInterval(420);
+		QObject::connect(&_timer, &QTimer::timeout, this, [=] {
+			_loadingFrame = (_loadingFrame + 1) % 4;
+			update();
+		});
+		paintRequest() | rpl::on_next([=] {
+			const auto previewState = _preview->current();
+			const auto loading = previewState.sourceTrustLoading;
+			const auto text = loading
+				? (PluginUiText(
+					u"Updating source data"_q,
+					u"Обновление данных"_q)
+					+ QString(
+						std::max(1, _loadingFrame),
+						QChar::fromLatin1('.')))
+				: PluginSourceBadgeText(previewState);
+			const auto fill = loading
+				? QColor(0xf2, 0xc9, 0x4c, 44)
+				: previewState.sourceVerified
+				? QColor(0x27, 0xae, 0x60, 38)
+				: QColor(0xeb, 0x57, 0x57, 34);
+			const auto border = loading
+				? QColor(0xd8, 0xa1, 0x00)
+				: previewState.sourceVerified
+				? QColor(0x21, 0x96, 0x53)
+				: QColor(0xeb, 0x57, 0x57);
+			const auto fg = loading
+				? QColor(0x8a, 0x67, 0x00)
+				: previewState.sourceVerified
+				? QColor(0x1b, 0x8f, 0x50)
+				: QColor(0xcf, 0x45, 0x45);
+
+			auto p = Painter(this);
+			auto hq = PainterHighQualityEnabler(p);
+			p.setFont(st::semiboldFont);
+			const auto iconWidth = 18;
+			const auto horizontalPadding = 12;
+			const auto pillWidth = std::min(
+				width(),
+				st::semiboldFont->width(text)
+					+ (horizontalPadding * 2)
+					+ iconWidth);
+			const auto rect = QRectF(0, 0, pillWidth, height() - 1)
+				.adjusted(0.5, 0.5, -0.5, -0.5);
+			p.setPen(QPen(border, 1.));
+			p.setBrush(fill);
+			p.drawRoundedRect(rect, rect.height() / 2., rect.height() / 2.);
+			p.setPen(fg);
+			DrawPluginSourceBadgeGlyph(
+				p,
+				QRectF(
+					horizontalPadding,
+					(height() - 14.) / 2.,
+					14.,
+					14.),
+				fg,
+				loading,
+				previewState.sourceVerified,
+				_loadingFrame);
+			p.drawText(
+				QRect(
+					horizontalPadding + iconWidth,
+					0,
+					std::max(1, pillWidth - (horizontalPadding * 2) - iconWidth),
+					height()),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				text);
+		}, lifetime());
+	}
+
+private:
+	std::shared_ptr<rpl::variable<Plugins::PackagePreviewState>> _preview;
+	QTimer _timer;
+	int _loadingFrame = 0;
+};
+
 void ShowPluginPackageBox(
 		not_null<Window::SessionController*> controller,
 		const Plugins::PackagePreviewState &preview) {
+	const auto previewState = std::make_shared<rpl::variable<Plugins::PackagePreviewState>>(preview);
 	const auto title = !preview.info.name.trimmed().isEmpty()
 		? preview.info.name.trimmed()
 		: (!preview.info.id.trimmed().isEmpty()
@@ -473,10 +621,11 @@ void ShowPluginPackageBox(
 			: QFileInfo(preview.sourcePath).fileName());
 	controller->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setWidth(st::boxWideWidth);
-		box->setTitle(rpl::single(
-			preview.update
+		box->setTitle(previewState->value() | rpl::map([](const auto &current) {
+			return current.update
 				? PluginUiText(u"Update Plugin"_q, u"Обновить плагин"_q)
-				: PluginUiText(u"Install Plugin"_q, u"Установить плагин"_q)));
+				: PluginUiText(u"Install Plugin"_q, u"Установить плагин"_q);
+		}));
 
 		box->addRow(object_ptr<PluginPackageIcon>(
 			box,
@@ -491,7 +640,9 @@ void ShowPluginPackageBox(
 			style::al_top);
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
-			rpl::single(PluginVersionText(preview)),
+			previewState->value() | rpl::map([](const auto &current) {
+				return PluginVersionText(current);
+			}),
 			st::sessionDateLabel),
 			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 			style::al_top);
@@ -512,10 +663,9 @@ void ShowPluginPackageBox(
 				style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 				style::al_top);
 		}
-		box->addRow(object_ptr<Ui::FlatLabel>(
+		box->addRow(object_ptr<PluginSourceBadgeWidget>(
 			box,
-			rpl::single(PluginSourceBadgeText(preview)),
-			st::sessionDateLabel),
+			previewState),
 			style::margins(
 				st::boxPadding.left(),
 				st::boxPadding.bottom() / 2,
@@ -524,11 +674,13 @@ void ShowPluginPackageBox(
 			style::al_top);
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
-			rpl::single(PluginSourceBadgeDetails(preview)),
+			previewState->value() | rpl::map([](const auto &current) {
+				return PluginSourceBadgeDetails(current);
+			}),
 			st::defaultFlatLabel),
 			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 			style::al_top);
-		if (const auto versionNotice = PluginInstalledVersionNotice(preview);
+		if (const auto versionNotice = PluginInstalledVersionNotice(previewState->current());
 			!versionNotice.isEmpty()) {
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
@@ -541,10 +693,12 @@ void ShowPluginPackageBox(
 					0),
 				style::al_top);
 		}
-		if (!preview.error.trimmed().isEmpty()) {
+		if (!previewState->current().error.trimmed().isEmpty()) {
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(preview.error.trimmed()),
+				previewState->value() | rpl::map([](const auto &current) {
+					return current.error.trimmed();
+				}),
 				st::boxLabel),
 				style::margins(
 					st::boxPadding.left(),
@@ -558,10 +712,13 @@ void ShowPluginPackageBox(
 			box->closeBox();
 		});
 
-		if (preview.compatible) {
-			box->addButton(rpl::single(PluginPackageButtonText(preview)), [=] {
+		if (previewState->current().compatible) {
+			box->addButton(previewState->value() | rpl::map([](const auto &current) {
+				return PluginPackageButtonText(current);
+			}), [=] {
+				const auto current = previewState->current();
 				auto error = QString();
-				if (!Core::App().plugins().installPackage(preview.sourcePath, &error)) {
+				if (!Core::App().plugins().installPackage(current.sourcePath, &error)) {
 					controller->showToast(
 						error.isEmpty()
 							? PluginUiText(
@@ -570,16 +727,50 @@ void ShowPluginPackageBox(
 							: error);
 					return;
 				}
-				if (preview.sourcePath.startsWith(
+				if (current.sourcePath.startsWith(
 					cWorkingDir() + QString::fromLatin1(kPluginIncomingFolder))) {
-					QFile::remove(preview.sourcePath);
+					QFile::remove(current.sourcePath);
 				}
 				controller->showToast(
-					preview.update
+					current.update
 						? PluginUiText(u"Plugin updated."_q, u"Плагин обновлён."_q)
 						: PluginUiText(u"Plugin installed."_q, u"Плагин установлен."_q));
 				box->closeBox();
 			});
+		}
+		auto *refreshTimer = new QTimer(box.get());
+		refreshTimer->setInterval(600);
+		const auto refreshPreviewState = [=] {
+			const auto current = previewState->current();
+			const auto updated = Core::App().plugins().inspectPackage(current.sourcePath);
+			previewState->force_assign(updated);
+			if (!updated.sourceTrustLoading
+				&& updated.sourceTrustReason != u"server-request-failed"_q
+				&& updated.sourceTrustReason != u"server-refreshing"_q) {
+				refreshTimer->stop();
+			}
+		};
+		QObject::connect(refreshTimer, &QTimer::timeout, box.get(), refreshPreviewState);
+		Core::App().plugins().stateChanges(
+		) | rpl::filter([=](const Plugins::ManagerStateChange &change) {
+			const auto pluginId = previewState->current().info.id.trimmed();
+			return change.reason.startsWith(u"plugin-source-trust"_q)
+				&& (pluginId.isEmpty()
+					|| change.pluginId.isEmpty()
+					|| change.pluginId == pluginId);
+		}) | rpl::start_with_next([=](const Plugins::ManagerStateChange &) {
+			refreshPreviewState();
+			if (!refreshTimer->isActive()
+				&& (previewState->current().sourceTrustLoading
+					|| previewState->current().sourceTrustReason == u"server-refreshing"_q
+					|| previewState->current().sourceTrustReason == u"server-request-failed"_q)) {
+				refreshTimer->start();
+			}
+		}, box->lifetime());
+		if (previewState->current().sourceTrustLoading
+			|| previewState->current().sourceTrustReason == u"server-request-failed"_q
+			|| previewState->current().sourceTrustReason == u"server-refreshing"_q) {
+			refreshTimer->start();
 		}
 	}));
 }

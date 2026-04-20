@@ -39,6 +39,7 @@ class Controller;
 
 class QTcpServer;
 class QTcpSocket;
+class QNetworkAccessManager;
 
 namespace Plugins {
 
@@ -52,12 +53,15 @@ struct PluginState {
 	bool disabledByRecovery = false;
 	bool recoverySuspected = false;
 	QString recoveryReason;
+	bool sourceTrustLoading = false;
 	bool sourceVerified = false;
 	QString sourceTrustText;
 	QString sourceTrustDetails;
 	QString sourceTrustReason;
 	int64 sourceChannelId = 0;
 	int64 sourceMessageId = 0;
+	QString sourceChannelTitle;
+	QString sourceChannelUsername;
 };
 
 struct ActionState {
@@ -87,11 +91,14 @@ struct PackagePreviewState {
 	QString sha256;
 	QString installedVersion;
 	QString installedPath;
+	bool sourceTrustLoading = false;
 	QString sourceTrustText;
 	QString sourceTrustDetails;
 	QString sourceTrustReason;
 	int64 sourceChannelId = 0;
 	int64 sourceMessageId = 0;
+	QString sourceChannelTitle;
+	QString sourceChannelUsername;
 	bool compatible = false;
 	bool previewAvailable = false;
 	bool installed = false;
@@ -376,6 +383,17 @@ private:
 	void rebuildPluginIndex();
 	void moveLastPluginRecordToIndex(int index);
 	void syncSourceTrustState(PluginState &state) const;
+	void requestPluginSourceTrustIfNeeded(
+		const QString &sha256,
+		const QString &pluginId);
+	void requestPluginSourceTrustFeedIfNeeded();
+	void schedulePluginSourceTrustFeedRequest(crl::time delay);
+	void invalidatePluginSourceTrustEntry(
+		const QString &sha256,
+		const QString &reason);
+	void applyPluginSourceTrustState(
+		const QString &sha256,
+		PluginState &state) const;
 	void scanPlugins(bool metadataOnly = false);
 	void loadPluginMetadataOnly(const QString &path);
 	void loadPlugin(const QString &path);
@@ -445,6 +463,12 @@ private:
 	QString _tracePath;
 	QString _safeModePath;
 	QString _recoveryPath;
+	struct PluginSourceTrustEntry;
+	std::unique_ptr<QNetworkAccessManager> _pluginSourceTrustManager;
+	QHash<QString, std::shared_ptr<PluginSourceTrustEntry>> _pluginSourceTrustBySha;
+	bool _pluginSourceTrustFeedInFlight = false;
+	bool _pluginSourceTrustFeedScheduled = false;
+	int _pluginSourceTrustRevision = 0;
 	bool _runtimeApiEnabled = false;
 	int _runtimeApiPort = 37080;
 	std::unique_ptr<QTcpServer> _runtimeApiServer;
