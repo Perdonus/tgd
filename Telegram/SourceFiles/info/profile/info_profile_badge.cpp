@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 
 #include <algorithm>
+#include <array>
 
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
@@ -118,6 +119,39 @@ constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 	return (bareId != 0)
 		? (PeerTypeForLog(peerId) + u':' + QString::number(qulonglong(bareId)))
 		: QString();
+}
+
+[[nodiscard]] ChannelId AstrogramChannelBareId(int64 channelId) {
+	constexpr auto kBotApiChannelOffset = 1000000000000LL;
+	if (channelId <= -kBotApiChannelOffset) {
+		const auto bare = (-channelId) - kBotApiChannelOffset;
+		return (bare > 0) ? ChannelId(uint64(bare)) : ChannelId();
+	}
+	return (channelId > 0) ? ChannelId(uint64(channelId)) : ChannelId();
+}
+
+[[nodiscard]] bool IsKnownAstrogramBadgePeer(PeerId peerId) {
+	if (!peerId.is<ChannelId>()) {
+		return false;
+	}
+	const auto channelId = peerToChannel(peerId);
+	for (const auto knownId : std::array<int64, 3>{
+		-1003814280064LL,
+		-1003641835839LL,
+		-1003703089035LL,
+	}) {
+		if (channelId == AstrogramChannelBareId(knownId)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] std::optional<EmojiStatusId> KnownAstrogramBadgeStatus(
+		PeerId peerId) {
+	return IsKnownAstrogramBadgePeer(peerId)
+		? std::optional<EmojiStatusId>(EmojiStatusId())
+		: std::nullopt;
 }
 
 [[nodiscard]] QString BadgeTypeForLog(BadgeType type) {
@@ -309,6 +343,15 @@ public:
 
 	[[nodiscard]] rpl::producer<std::optional<EmojiStatusId>> badgeValue(
 			not_null<PeerData*> peer) {
+		if (const auto known = KnownAstrogramBadgeStatus(peer->id);
+			known.has_value()) {
+			Logs::writeClient(QString::fromLatin1(
+				"[badge] built-in badge allowlist hit: peer=%1 bare=%2 type=%3")
+				.arg(QString::number(qulonglong(peer->id.value)))
+				.arg(QString::number(qulonglong(PeerBareId(peer->id))))
+				.arg(PeerTypeForLog(peer->id)));
+			return rpl::single(known);
+		}
 		const auto key = uint64(peer->id.value);
 		auto i = _entries.find(key);
 		if (i == end(_entries)) {

@@ -322,6 +322,10 @@ std::vector<int64> AppConfig::astrogramTrustedPluginChannelIds() const {
 		u"astrogram_trusted_plugin_channel_ids"_q,
 		std::vector<int64>());
 	values.insert(values.begin(), -1003703089035LL);
+	const auto officialChannelId = astrogramOfficialChannelId();
+	if (officialChannelId) {
+		values.insert(values.begin(), officialChannelId);
+	}
 	const auto defaultChannelId = astrogramPluginsChannelId();
 	if (defaultChannelId) {
 		values.insert(values.begin(), defaultChannelId);

@@ -185,6 +185,7 @@ QString KnownPluginSourceChannelTitle(int64 channelId) {
 	switch (channelId) {
 	case -1003814280064LL: return u"AstroPlugins"_q;
 	case -1003641835839LL: return u"Astrogram"_q;
+	case -1003703089035LL: return u"Astrogram Trusted Source"_q;
 	default: return QString();
 	}
 }
@@ -193,6 +194,7 @@ QString KnownPluginSourceChannelUsername(int64 channelId) {
 	switch (channelId) {
 	case -1003814280064LL: return u"astroplugin"_q;
 	case -1003641835839LL: return u"astrogramchannel"_q;
+	case -1003703089035LL: return QString();
 	default: return QString();
 	}
 }
