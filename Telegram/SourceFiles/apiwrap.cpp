@@ -352,9 +352,10 @@ void ShowChannelsLimitBox(not_null<PeerData*> peer) {
 
 template <typename T, typename Factory>
 [[nodiscard]] T MakeApiWrapInitLogged(const char *label, Factory factory) {
-	LOG(("ApiWrap init: begin %1", label));
+	const auto text = QString::fromLatin1(label);
+	LOG(("ApiWrap init: begin %1").arg(text));
 	auto result = factory();
-	LOG(("ApiWrap init: done %1", label));
+	LOG(("ApiWrap init: done %1").arg(text));
 	return result;
 }
 
