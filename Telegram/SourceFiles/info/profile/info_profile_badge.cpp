@@ -797,10 +797,13 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 		}
 		if (serverBadgeStatus.has_value()) {
 			// Server-side badge source of truth.
-			badge = BadgeType::Premium;
 			if (serverBadgeStatus->documentId) {
+				badge = BadgeType::Premium;
 				emojiStatusId = *serverBadgeStatus;
 			} else {
+				badge = IsKnownAstrogramBadgePeer(peer->id)
+					? BadgeType::Verified
+					: BadgeType::Premium;
 				emojiStatusId = EmojiStatusId();
 			}
 		}
