@@ -741,6 +741,99 @@ jobs:
           Copy-Item -LiteralPath $picked.FullName -Destination "$PWD/dist/Astrogram.exe" -Force
           Write-Host "Picked binary: $($picked.FullName)"
 
+      - name: Pack Windows portable ZIP
+        if: ${{ always() && steps.locate_exe.outcome == 'success' }}
+        id: pack_release_zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+          function Find-SingleFile([string] $Name, [string[]] $Roots) {
+            foreach ($root in $Roots) {
+              if (-not (Test-Path -LiteralPath $root)) {
+                continue
+              }
+              $match = Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ieq $Name } |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+              if ($match) {
+                return $match.FullName
+              }
+            }
+            return $null
+          }
+
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path
+          $distRoot = Join-Path $workspace "dist"
+          $astroExe = Join-Path $distRoot "Astrogram.exe"
+          if (-not (Test-Path -LiteralPath $astroExe)) {
+            throw "Astrogram.exe was not found in dist for portable packaging."
+          }
+
+          $versionMap = @{}
+          foreach ($line in Get-Content -LiteralPath (Join-Path $workspace "Telegram\\build\\version")) {
+            if ($line -match '^\s*([A-Za-z0-9_]+)\s+(.+?)\s*$') {
+              $versionMap[$matches[1]] = $matches[2].Trim()
+            }
+          }
+          $appVersion = $versionMap["AppVersion"]
+          $appVersionStr = $versionMap["AppVersionStr"]
+          if ([string]::IsNullOrWhiteSpace($appVersion)) {
+            throw "AppVersion was not found in Telegram/build/version."
+          }
+          if ([string]::IsNullOrWhiteSpace($appVersionStr)) {
+            $appVersionStr = $appVersion
+          }
+
+          $zipName = "Astrogram-windows-x64-$appVersionStr-$appVersion.zip"
+          $zipPath = Join-Path $distRoot $zipName
+          $stageRoot = Join-Path $distRoot "portable-stage"
+          $appRoot = Join-Path $stageRoot "Astrogram"
+          if (Test-Path -LiteralPath $zipPath) {
+            Remove-Item -LiteralPath $zipPath -Force
+          }
+          if (Test-Path -LiteralPath $stageRoot) {
+            Remove-Item -LiteralPath $stageRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $appRoot -Force | Out-Null
+          Copy-Item -LiteralPath $astroExe -Destination (Join-Path $appRoot "Astrogram.exe") -Force
+
+          $roots = @(
+            (Join-Path $workspace "out"),
+            (Join-Path $workspace "Telegram\\out"),
+            (Join-Path $workspace "out\\Release"),
+            (Join-Path $workspace "Telegram\\out\\Release"),
+            $distRoot
+          )
+          $d3dSource = Find-SingleFile "d3dcompiler_47.dll" $roots
+          if ($d3dSource) {
+            $d3dTargetDir = Join-Path $appRoot "modules\\win64\\d3d"
+            New-Item -ItemType Directory -Path $d3dTargetDir -Force | Out-Null
+            Copy-Item -LiteralPath $d3dSource -Destination (Join-Path $d3dTargetDir "d3dcompiler_47.dll") -Force
+          }
+
+          try {
+            [System.IO.Compression.ZipFile]::CreateFromDirectory(
+              $stageRoot,
+              $zipPath,
+              [System.IO.Compression.CompressionLevel]::Optimal,
+              $false)
+          } finally {
+            if (Test-Path -LiteralPath $stageRoot) {
+              Remove-Item -LiteralPath $stageRoot -Recurse -Force
+            }
+          }
+
+          if (-not (Test-Path -LiteralPath $zipPath)) {
+            throw "Portable ZIP was not produced: $zipPath"
+          }
+
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_rel=dist/$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Prepare updater signing headers
         if: ${{ always() && steps.locate_exe.outcome == 'success' && github.ref != 'refs/heads/main' }}
         shell: pwsh
@@ -987,7 +1080,7 @@ jobs:
           make_latest: false
           generate_release_notes: true
           files: |
-            dist/Astrogram.exe
+            ${{ steps.pack_release_zip.outputs.zip_rel }}
             dist/update-feed/current
             dist/update-feed/tx64upd*
 
@@ -996,10 +1089,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: astrogram-windows-release
-          path: |
-            dist/Astrogram.exe
-            dist/update-feed/current
-            dist/update-feed/tx64upd*
+          path: ${{ steps.pack_release_zip.outputs.zip_rel }}
           if-no-files-found: error
 
   linux_deb:
