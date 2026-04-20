@@ -289,11 +289,6 @@ void SetupExperimental(
 		rpl::single(RuEn(
 			"Экспериментальные настройки Astrogram",
 			"Astrogram experimental settings")));
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Здесь оставлены только переключатели оболочки Astrogram. Пресеты и стартовая настройка вынесены во вступительный гайд, а визуальный редактор из этого раздела убран.",
-			"Only Astrogram shell switches stay here now. Presets and first-run setup have been moved into onboarding, and the visual editor has been removed from this section.")));
 
 	const auto shellState = container->lifetime().make_state<ShellModeUiState>();
 	shellState->prefs = LoadShellModePreferences();
@@ -302,24 +297,8 @@ void SetupExperimental(
 	Ui::AddSubsectionTitle(
 		container,
 		rpl::single(RuEn(
-			"Меню Astrogram и режимы оболочки",
-			"Astrogram menu and shell modes")));
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Ниже только реальные runtime-переключатели клиента: ширина боковой панели, левый торец для окон, иммерсивная анимация и ширина настроек.",
-			"Only the real client runtime switches stay below: side panel width, left-edge surfaces, immersive animation, and wider settings.")));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn(
-			"Переключатели оболочки",
-			"Shell switches")));
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Эти параметры применяются сразу и влияют на настоящее боковое меню, окна настроек и анимацию открытия.",
-			"These preferences apply immediately and affect the real side menu, settings surfaces, and opening animation.")));
+			"Оболочка и окна",
+			"Shell and windows")));
 	AddShellModeToggle(
 		window,
 		container,
@@ -327,9 +306,7 @@ void SetupExperimental(
 		RuEn(
 			"Расширенная боковая панель",
 			"Expanded side panel"),
-		RuEn(
-			"Делает настоящее боковое меню шире и даёт больше места для пунктов и разделителей.",
-			"Makes the real side menu wider and gives more room for items and separators."),
+		QString(),
 		[](const ShellModePreferences &prefs) {
 			return prefs.expandedSidePanel;
 		},
@@ -341,11 +318,9 @@ void SetupExperimental(
 		container,
 		shellState,
 		RuEn(
-			"Левоторцевые settings/info surfaces",
-			"Left-edge settings/info surfaces"),
-		RuEn(
-			"Сдвигает окна настроек и информации к левому краю, чтобы они ощущались частью оболочки клиента.",
-			"Moves settings and info surfaces closer to the left edge so they feel like part of the client shell."),
+			"Левый край для всплывающих окон",
+			"Left-edge popup windows"),
+		QString(),
 		[](const ShellModePreferences &prefs) {
 			return prefs.leftEdgeSettings;
 		},
@@ -357,39 +332,16 @@ void SetupExperimental(
 		container,
 		shellState,
 		RuEn(
-			"Иммерсивная анимация бокового меню",
-			"Immersive side menu animation"),
-		RuEn(
-			"При открытии бокового меню основной интерфейс двигается вместе с ним. Если анимация мешает или выглядит нестабильно, отключай её здесь.",
-			"When the side menu opens, the main interface moves together with it. If the animation feels distracting or unstable, disable it here."),
-		[](const ShellModePreferences &prefs) {
-			return prefs.immersiveAnimation;
-		},
-		[](ShellModePreferences &prefs, bool value) {
-			prefs.immersiveAnimation = value;
-		});
-	AddShellModeToggle(
-		window,
-		container,
-		shellState,
-		RuEn(
 			"Более широкая панель настроек",
 			"Wider settings pane"),
-		RuEn(
-			"Делает окно настроек шире, чтобы длинные строки и дополнительные элементы не ломались в узкой колонке.",
-			"Makes settings surfaces wider so longer rows and extra controls do not collapse into a narrow column."),
+		QString(),
 		[](const ShellModePreferences &prefs) {
 			return prefs.wideSettingsPane;
 		},
 		[](ShellModePreferences &prefs, bool value) {
 			prefs.wideSettingsPane = value;
 		});
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddDividerText(
-		container,
-		rpl::single(RuEn(
-			"Пресеты оболочки перенесены во вступительный гайд. Ниже остаётся только нативная ручная настройка настоящих меню клиента: без fake-preview и без старого visual editor.",
-			"Shell presets have been moved to onboarding. Below stays only the native manual editor for the real client menus: no fake preview and no old visual editor.")));
+	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 	AddMenuCustomizationEditor(controller, container);
 }
 

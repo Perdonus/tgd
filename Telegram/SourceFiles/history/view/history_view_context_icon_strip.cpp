@@ -24,13 +24,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace HistoryView {
 namespace {
 
-constexpr auto kStripHorizontalPadding = 8;
+constexpr auto kStripHorizontalPadding = 10;
 constexpr auto kStripVerticalPadding = 8;
 constexpr auto kStripButtonSize = 34;
-constexpr auto kStripButtonSpacing = 6;
-constexpr auto kStripSeparatorHeight = 1;
+constexpr auto kStripButtonSpacing = 8;
+constexpr auto kStripGapFromMenu = 8;
 constexpr auto kStripMaxButtons = 4;
-constexpr auto kStripRadius = 8;
+constexpr auto kStripRadius = 11;
 
 struct ContextIconStripButton {
 	QString id;
@@ -48,6 +48,8 @@ public:
 	: Ui::RpWidget(parent)
 	, _menu(menu)
 	, _buttons(std::move(buttons)) {
+		setAttribute(Qt::WA_TranslucentBackground);
+		setAttribute(Qt::WA_NoSystemBackground);
 		setMouseTracking(true);
 		resize(widthForButtons(), heightForButtons());
 	}
@@ -63,18 +65,19 @@ public:
 	}
 
 	[[nodiscard]] int heightForButtons() const {
-		return kStripSeparatorHeight
-			+ (kStripVerticalPadding * 2)
+		return (kStripVerticalPadding * 2)
 			+ kStripButtonSize;
 	}
 
 protected:
 	void paintEvent(QPaintEvent *e) override {
+		Q_UNUSED(e);
 		auto p = QPainter(this);
-		p.fillRect(e->rect(), st::windowBg);
-		p.fillRect(
-			QRect(0, 0, width(), kStripSeparatorHeight),
-			st::boxDividerBg);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto panel = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+		p.setPen(QPen(st::boxDividerBg, 1.0));
+		p.setBrush(st::windowBg);
+		p.drawRoundedRect(panel, kStripRadius, kStripRadius);
 		for (auto i = 0, count = int(_buttons.size()); i != count; ++i) {
 			const auto rect = buttonRect(i);
 			const auto hovered = (i == _hovered);
@@ -142,7 +145,7 @@ private:
 		return QRect(
 			kStripHorizontalPadding
 				+ (index * (kStripButtonSize + kStripButtonSpacing)),
-			kStripSeparatorHeight + kStripVerticalPadding,
+			kStripVerticalPadding,
 			kStripButtonSize,
 			kStripButtonSize);
 	}
@@ -255,7 +258,7 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 		menu.get(),
 		menu,
 		std::move(buttons));
-	const auto addedHeight = strip->heightForButtons();
+	const auto addedHeight = kStripGapFromMenu + strip->heightForButtons();
 	const auto origin = menu->preparedOrigin();
 	const auto expandDown = (origin == Ui::PanelAnimation::Origin::TopLeft)
 		|| (origin == Ui::PanelAnimation::Origin::TopRight);
@@ -273,11 +276,12 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 			menu->setFixedSize(updated.size());
 			menu->setGeometry(updated);
 		}
+		const auto stripWidth = strip->widthForButtons();
 		strip->setGeometry(
-			inner.x(),
-			inner.y() + inner.height(),
-			inner.width(),
-			addedHeight);
+			inner.x() + std::max(0, (inner.width() - stripWidth) / 2),
+			inner.y() + inner.height() + kStripGapFromMenu,
+			stripWidth,
+			strip->heightForButtons());
 	};
 	applyGeometry();
 	strip->show();

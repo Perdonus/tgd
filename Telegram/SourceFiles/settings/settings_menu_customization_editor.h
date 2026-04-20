@@ -22,7 +22,7 @@ class SessionController;
 namespace Settings {
 
 struct ShellModePreferences {
-	bool immersiveAnimation = true;
+	bool immersiveAnimation = false;
 	bool expandedSidePanel = false;
 	bool leftEdgeSettings = false;
 	bool wideSettingsPane = false;

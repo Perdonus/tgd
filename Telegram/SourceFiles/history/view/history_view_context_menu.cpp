@@ -210,6 +210,10 @@ constexpr auto kContextMenuActionMessageReschedule =
 	};
 }
 
+[[nodiscard]] bool IsContextMenuCustomSeparatorId(const QString &id) {
+	return id.startsWith(u"custom_separator_"_q);
+}
+
 enum class ContextActionSection {
 	Identity,
 	Copy,
@@ -308,7 +312,13 @@ public:
 		auto handled = base::flat_set<QString>();
 		auto hasLastSection = false;
 		auto lastSection = ContextActionSection::Identity;
+		auto pendingCustomSeparator = false;
 		auto appendAction = [&](const PendingAction &action) {
+			if (pendingCustomSeparator && !_menu->empty()) {
+				_menu->addSeparator(&st::expandedMenuSeparator);
+				pendingCustomSeparator = false;
+				hasLastSection = false;
+			}
 			const auto section = ContextActionSectionFor(action.id);
 			if (hasLastSection && (section != lastSection) && !_menu->empty()) {
 				_menu->addSeparator(&st::expandedMenuSeparator);
@@ -337,6 +347,12 @@ public:
 			}
 			if (!entry.visible) {
 				handled.emplace(entry.id);
+				continue;
+			}
+			if (IsContextMenuCustomSeparatorId(entry.id)) {
+				handled.emplace(entry.id);
+				pendingCustomSeparator = !_menu->empty();
+				hasLastSection = false;
 				continue;
 			}
 			appendById(entry.id);
@@ -1912,6 +1928,10 @@ void NormalizeStripEntries(std::vector<ContextMenuLayoutEntry> &entries) {
 	auto visible = 0;
 	for (auto &entry : entries) {
 		if (!entry.visible) {
+			continue;
+		}
+		if (IsContextMenuCustomSeparatorId(entry.id)) {
+			entry.visible = false;
 			continue;
 		}
 		if (visible >= kContextMenuStripLimit) {

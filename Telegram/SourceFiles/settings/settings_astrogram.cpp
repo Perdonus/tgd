@@ -1341,6 +1341,7 @@ void SetupAstrogramHome(
 		{
 			{ RuEn("Основные", "General"), AstrogramCore::Id(), { &st::menuIconPremium } },
 			{ RuEn("Приватность", "Privacy"), AstrogramPrivacy::Id(), { &st::menuIconLock } },
+			{ RuEn("Защита от удаления", "Anti-recall"), AstrogramAntiRecall::Id(), { &st::menuIconRestore } },
 			{ RuEn("Интерфейс", "Interface"), AstrogramInterface::Id(), { &st::menuIconPalette } },
 		});
 	Ui::AddSkip(container);
@@ -1350,7 +1351,6 @@ void SetupAstrogramHome(
 		RuEn("Модули", "Modules"),
 		{
 			{ RuEn("Плагины", "Plugins"), Plugins::Id(), { &st::menuIconCustomize } },
-			{ RuEn("Защита от удаления", "Anti-recall"), AstrogramAntiRecall::Id(), { &st::menuIconRestore } },
 		});
 	Ui::AddSkip(container);
 	AddSectionGroup(
@@ -1818,16 +1818,6 @@ void SetupAstrogramInterface(
 	)->addClickHandler([=] {
 		ShowSpeechModelDownloadBox(controller);
 	});
-	Ui::AddSkip(speechCard, st::settingsCheckboxesSkip / 4);
-	speechCard->add(
-		object_ptr<Ui::FlatLabel>(
-			speechCard,
-			rpl::single(RuEn(
-				"Если переключатель выше включён, кнопка transcribe будет идти в локальный путь. Отдельное окно показывает все языки сразу: у не скачанных моделей справа есть значок загрузки, прогресс идёт тонкой полосой снизу, после установки повторная загрузка скрывается.",
-				"If the toggle above is enabled, the transcribe button switches to the local path. The separate box shows all languages at once: not-downloaded models keep a download icon on the right, progress is shown as a thin bar at the bottom, and re-download is hidden after install.")),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
 	FinishSettingsCard(speechCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Текст и ввод", "Text & input"));

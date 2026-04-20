@@ -77,11 +77,11 @@ constexpr auto kPluginUiRebuildDebounceMs = 120;
 
 constexpr auto kPluginCardRadius = 20.;
 constexpr auto kPluginCardVerticalMargin = 12;
-constexpr auto kPluginCardContentInsetLeft = 18;
-constexpr auto kPluginCardContentInsetRight = 14;
-constexpr auto kPluginCardDescriptionInsetLeft = 24;
-constexpr auto kPluginCardActionRowTopMargin = 8;
-constexpr auto kPluginCardActionRowBottomPadding = 3;
+constexpr auto kPluginCardContentInsetLeft = 20;
+constexpr auto kPluginCardContentInsetRight = 16;
+constexpr auto kPluginCardDescriptionInsetLeft = 20;
+constexpr auto kPluginCardActionRowTopMargin = 12;
+constexpr auto kPluginCardActionRowBottomPadding = 8;
 constexpr auto kPluginCardActionGap = 8;
 
 [[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
@@ -183,7 +183,7 @@ void AddPluginMetaText(
 			container,
 			rpl::single(text),
 			st::defaultFlatLabel),
-		style::margins(kPluginCardContentInsetLeft, 0, kPluginCardContentInsetRight, 0),
+		style::margins(kPluginCardContentInsetLeft, 0, kPluginCardContentInsetRight, 4),
 		style::al_top);
 	WireExternalLinks(label);
 }
@@ -1860,45 +1860,11 @@ private:
 			stateChanged();
 		};
 
-		const auto meta = PluginCardMetaText(*state);
-		const auto summary = FormatPluginCardSummary(*state);
-		if (!meta.text.isEmpty()) {
-			AddPluginMetaText(_content, meta);
-		}
-		if (!summary.isEmpty()) {
-			AddPluginDescriptionText(_content, summary);
-		}
-		if (!meta.text.isEmpty() || !summary.isEmpty()) {
-			Ui::AddSkip(_content);
-		}
-		if (!state->path.trimmed().isEmpty()) {
-			AddSettingsActionButton(_content, PluginUiText(
-				u"Reveal plugin package"_q,
-				u"Показать пакет плагина"_q), [=] {
-				RevealPluginAuxFile(
-					_controller,
-					state->path,
-					PluginUiText(u"Plugin package file was not found."_q, u"Файл пакета плагина не найден."_q));
-			});
-		}
-		AddSettingsActionButton(_content, PluginUiText(
-			u"Copy plugin ID"_q,
-			u"Скопировать ID плагина"_q), [=] {
-			if (const auto clipboard = QGuiApplication::clipboard()) {
-				clipboard->setText(state->info.id);
-			}
-			_controller->window().showToast(PluginUiText(u"Plugin ID copied."_q, u"ID плагина скопирован."_q));
-		});
-		Ui::AddSkip(_content);
-
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto panels = Core::App().plugins().panelsFor(state->info.id);
 		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
 
 		if (!actions.empty()) {
-			Ui::AddSubsectionTitle(
-				_content,
-				rpl::single(PluginUiText(u"Actions"_q, u"Действия"_q)));
 			for (const auto &action : actions) {
 				Ui::AddSkip(_content);
 				const auto button = _content->add(object_ptr<Ui::SettingsButton>(
@@ -1921,15 +1887,9 @@ private:
 						rpl::single(action.description.trimmed()));
 				}
 			}
-			if (!panels.empty() || !settingsPages.empty()) {
-				Ui::AddSkip(_content);
-			}
 		}
 
 		if (!panels.empty()) {
-			Ui::AddSubsectionTitle(
-				_content,
-				rpl::single(PluginUiText(u"Panels"_q, u"Панели"_q)));
 			for (const auto &panel : panels) {
 				Ui::AddSkip(_content);
 				const auto button = _content->add(object_ptr<Ui::SettingsButton>(
@@ -1952,26 +1912,13 @@ private:
 						rpl::single(panel.description.trimmed()));
 				}
 			}
-			if (!settingsPages.empty()) {
-				Ui::AddSkip(_content);
-			}
 		}
 
 		if (!settingsPages.empty()) {
-			Ui::AddSubsectionTitle(
-				_content,
-				rpl::single(PluginUiText(u"Settings"_q, u"Настройки"_q)));
 			for (const auto &page : settingsPages) {
 				Ui::AddSkip(_content);
 				AddPluginSettingsContent(_content, page, stateChanged);
 			}
-		} else {
-			Ui::AddSkip(_content);
-			Ui::AddDividerText(
-				_content,
-				rpl::single(PluginUiText(
-					u"This plugin does not expose separate settings yet."_q,
-					u"У этого плагина пока нет отдельных настроек."_q)));
 		}
 
 		Ui::ResizeFitChild(this, _content);
