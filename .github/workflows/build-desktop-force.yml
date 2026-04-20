@@ -959,7 +959,9 @@ jobs:
             }
           }
 
-          Copy-Item -LiteralPath (Join-Path $source "*") -Destination $publishRoot -Recurse -Force
+          Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $publishRoot -Recurse -Force
+          }
           Push-Location $publishRoot
           try {
             git add current tx64upd*
