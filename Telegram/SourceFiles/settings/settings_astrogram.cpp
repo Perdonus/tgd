@@ -875,8 +875,8 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		container->add(object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Все языковые модели показаны сразу. У не скачанных моделей справа есть кнопка загрузки, повторная загрузка скрыта после установки, а прогресс идёт тонкой полосой по нижнему торцу карточки. На Windows для языка может дополнительно понадобиться системный speech pack.",
-				"All language models are shown in one list. Not-downloaded models keep a download action on the right, re-download is hidden after install, and progress is shown as a thin bar on the bottom edge of the row. Windows may also require the matching system speech pack.")),
+				"Все языковые модели показаны сразу. Неустановленные можно скачать справа, а после установки повторная загрузка скрывается.",
+				"All language models are shown at once. Not-installed models can be downloaded on the right, and re-download is hidden after installation.")),
 			st::boxDividerLabel),
 			st::boxRowPadding);
 		container->add(
@@ -1334,32 +1334,38 @@ void SetupAstrogramHome(
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddAstrogramUpdateSection(controller, container);
 	Ui::AddSkip(container);
-	AddSectionGroup(
+	const auto sectionsCard = AddSettingsCard(container);
+	AddSectionButton(
 		controller,
-		container,
-		RuEn("Astrogram", "Astrogram"),
-		{
-			{ RuEn("Основные", "General"), AstrogramCore::Id(), { &st::menuIconPremium } },
-			{ RuEn("Приватность", "Privacy"), AstrogramPrivacy::Id(), { &st::menuIconLock } },
-			{ RuEn("Защита от удаления", "Anti-recall"), AstrogramAntiRecall::Id(), { &st::menuIconRestore } },
-			{ RuEn("Интерфейс", "Interface"), AstrogramInterface::Id(), { &st::menuIconPalette } },
-		});
-	Ui::AddSkip(container);
-	AddSectionGroup(
+		sectionsCard,
+		RuEn("Основные", "General"),
+		AstrogramCore::Id(),
+		{ &st::menuIconPremium });
+	AddSectionButton(
 		controller,
-		container,
-		RuEn("Модули", "Modules"),
-		{
-			{ RuEn("Плагины", "Plugins"), Plugins::Id(), { &st::menuIconCustomize } },
-		});
-	Ui::AddSkip(container);
-	AddSectionGroup(
+		sectionsCard,
+		RuEn("Приватность", "Privacy"),
+		AstrogramPrivacy::Id(),
+		{ &st::menuIconLock });
+	AddSectionButton(
 		controller,
-		container,
-		RuEn("Эксперименты", "Experiments"),
-		{
-			{ RuEn("Экспериментальные", "Experimental"), Experimental::Id(), { &st::menuIconExperimental } },
-		});
+		sectionsCard,
+		RuEn("Интерфейс", "Interface"),
+		AstrogramInterface::Id(),
+		{ &st::menuIconPalette });
+	AddSectionButton(
+		controller,
+		sectionsCard,
+		RuEn("Плагины", "Plugins"),
+		Plugins::Id(),
+		{ &st::menuIconCustomize });
+	AddSectionButton(
+		controller,
+		sectionsCard,
+		RuEn("Экспериментальные", "Experimental"),
+		Experimental::Id(),
+		{ &st::menuIconExperimental });
+	FinishSettingsCard(sectionsCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Ссылки", "Links"));
 	Ui::AddDivider(container);
@@ -1543,6 +1549,11 @@ void SetupAstrogramPrivacy(
 		settings.semiTransparentDeletedMessagesValue(),
 		RuEn("Полупрозрачные удалённые сообщения", "Semi-transparent deleted messages"),
 		[&](bool toggled) { settings.setSemiTransparentDeletedMessages(toggled); });
+	AddActionButton(
+		historyCard,
+		RuEn("Показать журнал защиты", "Show anti-recall log"),
+		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); },
+		{ &st::menuIconShowInFolder });
 	FinishSettingsCard(historyCard);
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Отметки изменений и удаления", "Edited & deleted tags"));

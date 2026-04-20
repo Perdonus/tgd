@@ -9,13 +9,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common.h"
 #include "settings/cloud_password/settings_cloud_password_common.h"
 
+#include "api/api_common.h"
 #include "boxes/abstract_box.h"
+#include "boxes/share_box.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "data/data_chat_participant_status.h"
+#include "data/data_thread.h"
+#include "data/data_user.h"
+#include "history/history_item_helpers.h"
 #include "logs.h"
 #include "lang/lang_keys.h"
 #include "lang/lang_text_entity.h"
+#include "main/main_session.h"
 #include "plugins/plugins_manager.h"
+#include "storage/localimageloader.h"
+#include "storage/storage_media_prepare.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
@@ -1394,19 +1403,101 @@ std::optional<::Plugins::PluginState> LookupPluginState(
 void SharePluginPackage(
 		not_null<Window::SessionController*> controller,
 		const ::Plugins::PluginState &state) {
-	if (state.path.trimmed().isEmpty()) {
+	const auto path = state.path.trimmed();
+	if (path.isEmpty()) {
 		controller->window().showToast(PluginUiText(
 			u"Plugin file path is unavailable."_q,
 			u"Путь к файлу плагина недоступен."_q));
 		return;
 	}
-	if (const auto clipboard = QGuiApplication::clipboard()) {
-		clipboard->setText(QDir::toNativeSeparators(state.path));
+	if (!QFileInfo(path).isFile()) {
+		controller->window().showToast(PluginUiText(
+			u"The plugin package file could not be found."_q,
+			u"Файл пакета плагина не найден."_q));
+		return;
 	}
-	File::ShowInFolder(state.path);
-	controller->window().showToast(PluginUiText(
-		u"Plugin package path copied and file revealed."_q,
-		u"Путь к пакету плагина скопирован, файл показан."_q));
+	const auto box = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
+	const auto sending = std::make_shared<bool>(false);
+	auto countMessagesCallback = [=](const TextWithTags &) {
+		return 1;
+	};
+	auto submitCallback = [=](
+			std::vector<not_null<Data::Thread*>> &&result,
+			Fn<bool()> checkPaid,
+			TextWithTags &&comment,
+			Api::SendOptions options,
+			Data::ForwardOptions) {
+		if (*sending || result.empty()) {
+			return;
+		}
+		const auto error = GetErrorForSending(
+			result,
+			{
+				.text = comment.text.isEmpty() ? nullptr : &comment,
+				.messagesCount = 1,
+			});
+		if (error.error) {
+			if (*box) {
+				(*box)->uiShow()->showBox(MakeSendErrorBox(
+					error,
+					result.size() > 1));
+			}
+			return;
+		} else if (!checkPaid()) {
+			return;
+		}
+
+		*sending = true;
+		const auto premium = controller->session().user()->isPremium();
+		for (const auto thread : result) {
+			auto list = Storage::PrepareMediaList(
+				QStringList{ path },
+				st::sendMediaPreviewSize,
+				premium);
+			if (list.error != Ui::PreparedList::Error::None || list.files.empty()) {
+				*sending = false;
+				controller->window().showToast(PluginUiText(
+					u"Could not prepare the plugin package for sending."_q,
+					u"Не удалось подготовить пакет плагина к отправке."_q));
+				return;
+			}
+			auto action = Api::SendAction(thread, options);
+			action.clearDraft = false;
+			auto caption = comment;
+			thread->session().api().sendFiles(
+				std::move(list),
+				SendMediaType::File,
+				std::move(caption),
+				nullptr,
+				action);
+		}
+		if (*box) {
+			(*box)->closeBox();
+		}
+		controller->window().showToast(PluginUiText(
+			u"Plugin package sent."_q,
+			u"Пакет плагина отправлен."_q));
+	};
+	auto filterCallback = [](not_null<Data::Thread*> thread) {
+		if (const auto user = thread->peer()->asUser()) {
+			if (user->canSendIgnoreMoneyRestrictions()) {
+				return true;
+			}
+		}
+		return Data::CanSend(thread, ChatRestriction::SendFiles);
+	};
+	auto object = Box<ShareBox>(ShareBox::Descriptor{
+		.session = &controller->session(),
+		.countMessagesCallback = std::move(countMessagesCallback),
+		.submitCallback = std::move(submitCallback),
+		.filterCallback = std::move(filterCallback),
+		.titleOverride = rpl::single(PluginUiText(
+			u"Share plugin package"_q,
+			u"Поделиться плагином"_q)),
+		.moneyRestrictionError = ShareMessageMoneyRestrictionError(),
+	});
+	*box = base::make_weak(object.data());
+	controller->show(std::move(object));
 }
 
 void RequestPluginRemoval(
@@ -1881,11 +1972,6 @@ private:
 					}
 					refreshDetails();
 				});
-				if (!action.description.trimmed().isEmpty()) {
-					Ui::AddDividerText(
-						_content,
-						rpl::single(action.description.trimmed()));
-				}
 			}
 		}
 
@@ -1906,11 +1992,6 @@ private:
 					}
 					refreshDetails();
 				});
-				if (!panel.description.trimmed().isEmpty()) {
-					Ui::AddDividerText(
-						_content,
-						rpl::single(panel.description.trimmed()));
-				}
 			}
 		}
 

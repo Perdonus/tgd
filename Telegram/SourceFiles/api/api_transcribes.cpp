@@ -58,9 +58,12 @@ namespace {
 }
 
 constexpr auto kLocalSpeechTargetRate = 16000;
-
 [[nodiscard]] QString SpeechModelsRootPath() {
 	return QDir(cWorkingDir()).filePath(u"tdata/speech_models"_q);
+}
+
+[[nodiscard]] QString SpeechRuntimeRootPath() {
+	return QDir(cWorkingDir()).filePath(u"tdata/speech_runtime/vosk"_q);
 }
 
 [[nodiscard]] QStringList InstalledSpeechModelFolders() {
@@ -247,38 +250,90 @@ void AppendWaveLE32(not_null<QByteArray*> buffer, int value) {
 	return QByteArray(R"PS(
 param(
   [Parameter(Mandatory=$true)][string]$AudioPath,
-  [string]$Culture
+  [Parameter(Mandatory=$true)][string]$ModelPath,
+  [Parameter(Mandatory=$true)][string]$RuntimeRoot
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
-  Add-Type -AssemblyName System.Speech | Out-Null
-  $engine = $null
-  if ($Culture) {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+  if (-not (Test-Path -LiteralPath $AudioPath)) {
+    throw 'Audio payload for local transcription was not found.'
+  }
+  if (-not (Test-Path -LiteralPath $ModelPath)) {
+    throw 'The selected Vosk model was not found.'
+  }
+  $managedDll = Join-Path $RuntimeRoot 'lib\netstandard2.0\Vosk.dll'
+  $nativeDir = Join-Path $RuntimeRoot 'build\lib\win-x64'
+  $nativeDll = Join-Path $nativeDir 'libvosk.dll'
+  if ((-not (Test-Path -LiteralPath $managedDll)) -or (-not (Test-Path -LiteralPath $nativeDll))) {
+    if (Test-Path -LiteralPath $RuntimeRoot) {
+      Remove-Item -LiteralPath $RuntimeRoot -Recurse -Force
+    }
+    $parent = Split-Path -Parent $RuntimeRoot
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+      New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $package = Join-Path ([System.IO.Path]::GetTempPath()) ('astrogram-vosk-' + [Guid]::NewGuid().ToString('N') + '.nupkg')
     try {
-      $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine([System.Globalization.CultureInfo]::GetCultureInfo($Culture))
-    } catch {
-      $engine = $null
+      Invoke-WebRequest -UseBasicParsing -Uri 'https://www.nuget.org/api/v2/package/Vosk/0.3.38' -OutFile $package
+      [System.IO.Compression.ZipFile]::ExtractToDirectory($package, $RuntimeRoot)
+    } finally {
+      if (Test-Path -LiteralPath $package) {
+        Remove-Item -LiteralPath $package -Force
+      }
     }
   }
-  if ($null -eq $engine) {
-    $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+  if ((-not (Test-Path -LiteralPath $managedDll)) -or (-not (Test-Path -LiteralPath $nativeDll))) {
+    throw 'The local Vosk runtime is incomplete after extraction.'
   }
-  $engine.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
-  $engine.SetInputToWaveFile($AudioPath)
+  $env:PATH = $nativeDir + ';' + $env:PATH
+  [System.Reflection.Assembly]::LoadFrom($managedDll) | Out-Null
+  [Vosk.Vosk]::SetLogLevel(-1)
+  $model = [Vosk.Model]::new($ModelPath)
+  $recognizer = [Vosk.VoskRecognizer]::new($model, 16000.0)
   $parts = New-Object System.Collections.Generic.List[string]
-  while ($true) {
-    $result = $engine.Recognize()
-    if ($null -eq $result) {
-      break
+  $stream = [System.IO.File]::OpenRead($AudioPath)
+  try {
+    if ($stream.Length -gt 44) {
+      $stream.Position = 44
     }
-    if (-not [string]::IsNullOrWhiteSpace($result.Text)) {
-      $parts.Add($result.Text.Trim())
+    $buffer = New-Object byte[] 4000
+    while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+      if ($recognizer.AcceptWaveform($buffer, $read)) {
+        $chunk = $null
+        try {
+          $chunk = $recognizer.Result() | ConvertFrom-Json
+        } catch {
+          $chunk = $null
+        }
+        if (($null -ne $chunk) -and (-not [string]::IsNullOrWhiteSpace($chunk.text))) {
+          $parts.Add(([string]$chunk.text).Trim())
+        }
+      }
+    }
+    $final = $null
+    try {
+      $final = $recognizer.FinalResult() | ConvertFrom-Json
+    } catch {
+      $final = $null
+    }
+    if (($null -ne $final) -and (-not [string]::IsNullOrWhiteSpace($final.text))) {
+      $parts.Add(([string]$final.text).Trim())
+    }
+  } finally {
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+    if ($null -ne $recognizer -and $recognizer -is [System.IDisposable]) {
+      $recognizer.Dispose()
+    }
+    if ($null -ne $model -and $model -is [System.IDisposable]) {
+      $model.Dispose()
     }
   }
   @{
     ok = $true
     text = ($parts -join ' ')
-    culture = $engine.RecognizerInfo.Culture.Name
   } | ConvertTo-Json -Compress
 } catch {
   @{
@@ -290,81 +345,67 @@ try {
 )PS");
 }
 
-[[nodiscard]] QString BestInstalledSpeechCulture() {
+[[nodiscard]] QString BestInstalledSpeechModelPath() {
 	const auto installed = InstalledSpeechModelFolders();
-	const auto cultureFromFolder = [](const QString &folder) -> QString {
-		const auto value = folder.toLower();
-		if (value.contains(u"-ru-") || value.contains(u"-ru")) {
-			return u"ru-RU"_q;
-		} else if (value.contains(u"-uk-") || value.contains(u"-uk")) {
-			return u"uk-UA"_q;
-		} else if (value.contains(u"-de-") || value.contains(u"-de")) {
-			return u"de-DE"_q;
-		} else if (value.contains(u"-fr-") || value.contains(u"-fr")) {
-			return u"fr-FR"_q;
-		} else if (value.contains(u"-es-") || value.contains(u"-es")) {
-			return u"es-ES"_q;
-		} else if (value.contains(u"-pt-") || value.contains(u"-pt")) {
-			return u"pt-PT"_q;
-		} else if (value.contains(u"-it-") || value.contains(u"-it")) {
-			return u"it-IT"_q;
-		} else if (value.contains(u"-nl-") || value.contains(u"-nl")) {
-			return u"nl-NL"_q;
-		} else if (value.contains(u"-pl-") || value.contains(u"-pl")) {
-			return u"pl-PL"_q;
-		} else if (value.contains(u"-tr-") || value.contains(u"-tr")) {
-			return u"tr-TR"_q;
-		} else if (value.contains(u"-sv-") || value.contains(u"-sv")) {
-			return u"sv-SE"_q;
-		} else if (value.contains(u"-cs-") || value.contains(u"-cs")) {
-			return u"cs-CZ"_q;
-		} else if (value.contains(u"-ja-") || value.contains(u"-ja")) {
-			return u"ja-JP"_q;
-		} else if (value.contains(u"-ko-") || value.contains(u"-ko")) {
-			return u"ko-KR"_q;
-		} else if (value.contains(u"-cn-") || value.contains(u"-zh")) {
-			return u"zh-CN"_q;
-		} else if (value.contains(u"-hi-") || value.contains(u"-hi")) {
-			return u"hi-IN"_q;
-		} else if (value.contains(u"-fa-") || value.contains(u"-fa")) {
-			return u"fa-IR"_q;
-		} else if (value.contains(u"-vn-") || value.contains(u"-vi")) {
-			return u"vi-VN"_q;
-		} else if (value.contains(u"-en-") || value.contains(u"-en")) {
-			return u"en-US"_q;
+	if (installed.isEmpty()) {
+		return QString();
+	}
+	const auto modelsRoot = QDir(SpeechModelsRootPath());
+	const auto findByTokens = [&](const QStringList &tokens) -> QString {
+		for (const auto &folder : installed) {
+			const auto value = folder.toLower();
+			for (const auto &token : tokens) {
+				if (value.contains(token)) {
+					return modelsRoot.filePath(folder);
+				}
+			}
 		}
 		return QString();
 	};
-	for (const auto &folder : installed) {
-		if (const auto culture = cultureFromFolder(folder); !culture.isEmpty()) {
-			return culture;
-		}
-	}
 	const auto ui = Lang::LanguageIdOrDefault(Lang::Id()).toLower();
-	if (ui.startsWith(u"ru")) {
-		return u"ru-RU"_q;
-	} else if (ui.startsWith(u"uk")) {
-		return u"uk-UA"_q;
-	} else if (ui.startsWith(u"de")) {
-		return u"de-DE"_q;
-	} else if (ui.startsWith(u"fr")) {
-		return u"fr-FR"_q;
-	} else if (ui.startsWith(u"es")) {
-		return u"es-ES"_q;
-	} else if (ui.startsWith(u"pt")) {
-		return u"pt-PT"_q;
-	} else if (ui.startsWith(u"it")) {
-		return u"it-IT"_q;
-	} else if (ui.startsWith(u"pl")) {
-		return u"pl-PL"_q;
-	} else if (ui.startsWith(u"ja")) {
-		return u"ja-JP"_q;
-	} else if (ui.startsWith(u"ko")) {
-		return u"ko-KR"_q;
-	} else if (ui.startsWith(u"zh")) {
-		return u"zh-CN"_q;
+	const auto choose = [&](const QString &prefix, const QStringList &tokens) {
+		return ui.startsWith(prefix) ? findByTokens(tokens) : QString();
+	};
+	if (const auto path = choose(u"ru"_q, { u"-ru-"_q, u"-ru"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"uk"_q, { u"-uk-"_q, u"-uk"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"de"_q, { u"-de-"_q, u"-de"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"fr"_q, { u"-fr-"_q, u"-fr"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"es"_q, { u"-es-"_q, u"-es"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"pt"_q, { u"-pt-"_q, u"-pt"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"it"_q, { u"-it-"_q, u"-it"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"nl"_q, { u"-nl-"_q, u"-nl"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"pl"_q, { u"-pl-"_q, u"-pl"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"tr"_q, { u"-tr-"_q, u"-tr"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"sv"_q, { u"-sv-"_q, u"-sv"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"cs"_q, { u"-cs-"_q, u"-cs"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"ja"_q, { u"-ja-"_q, u"-ja"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"ko"_q, { u"-ko-"_q, u"-ko"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"zh"_q, { u"-cn-"_q, u"-zh"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"hi"_q, { u"-hi-"_q, u"-hi"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"fa"_q, { u"-fa-"_q, u"-fa"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"vi"_q, { u"-vn-"_q, u"-vi"_q }); !path.isEmpty()) {
+		return path;
+	} else if (const auto path = choose(u"en"_q, { u"-en-"_q, u"-en"_q }); !path.isEmpty()) {
+		return path;
 	}
-	return u"en-US"_q;
+	return modelsRoot.filePath(installed.front());
 }
 
 } // namespace
@@ -671,6 +712,18 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 	}
 	entry.pending = false;
 
+	const auto modelPath = BestInstalledSpeechModelPath();
+	if (modelPath.isEmpty()) {
+		entry.requestId = 0;
+		entry.failed = true;
+		entry.result = RuEn(
+			"Сначала скачайте хотя бы одну Vosk-модель в настройках Astrogram.",
+			"Download at least one Vosk model in Astrogram settings first.");
+		_session->data().requestItemResize(item);
+		_session->data().requestItemViewRefresh(item);
+		return;
+	}
+
 	auto decodeError = QString();
 	const auto wave = DecodeWaveForLocalSpeech(
 		path.isEmpty() ? Core::FileLocation() : Core::FileLocation(path),
@@ -737,14 +790,18 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 		scriptPath,
 		u"-AudioPath"_q,
 		wavPath,
+		u"-ModelPath"_q,
+		modelPath,
+		u"-RuntimeRoot"_q,
+		SpeechRuntimeRootPath(),
 	};
-	if (const auto culture = BestInstalledSpeechCulture(); !culture.isEmpty()) {
-		arguments.push_back(u"-Culture"_q);
-		arguments.push_back(culture);
-	}
 	process->setArguments(arguments);
 	process->setProcessChannelMode(QProcess::SeparateChannels);
 	auto *raw = process.get();
+	entry.pending = true;
+	entry.result = RuEn(
+		"Подготавливаю локальный движок и запускаю Vosk-распознавание...",
+		"Preparing the local runtime and starting Vosk transcription...");
 	QObject::connect(
 		raw,
 		&QProcess::errorOccurred,
@@ -765,8 +822,8 @@ void Transcribes::loadLocal(not_null<HistoryItem*> item) {
 			entry.pending = false;
 			entry.failed = true;
 			entry.result = RuEn(
-				"Не удалось запустить локальный speech runner (%1).",
-				"Could not start the local speech runner (%1).")
+				"Не удалось запустить локальный Vosk runner (%1).",
+				"Could not start the local Vosk runner (%1).")
 					.arg(QString::number(int(error)));
 			if (const auto updated = _session->data().message(id)) {
 				_session->data().requestItemResize(updated);

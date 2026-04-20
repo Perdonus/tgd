@@ -1423,15 +1423,6 @@ protected:
 			p.drawEllipse(QRect(strip.left() + 16 + (i * 34), strip.top() + 5, 20, 20));
 		}
 
-		p.setPen(QColor(0x5F, 0x6D, 0x7C));
-		p.setFont(st::normalFont->f);
-		p.drawText(
-			QRect(scene.left() + 18, scene.bottom() - 20, scene.width() - 36, 18),
-			Qt::AlignLeft | Qt::AlignVCenter,
-			RuEn(
-				"Архитектура уже разложена под native preview для side / peer / context / strip: runtime-сепараторы Astrogram-блоков уже живые, а сцены и строки разложены так, чтобы потом поверх них безболезненно посадить drag handles.",
-				"The architecture is already laid out for native previews of side / peer / context / strip: Astrogram runtime separators are already live, and these scenes plus rows are structured so drag handles can land on top later without breaking the current UX."));
-
 		p.setClipping(false);
 		p.setPen(QColor(0xD9, 0xE3, 0xEC));
 		p.drawRoundedRect(outer, kPreviewRadius, kPreviewRadius);
@@ -2823,10 +2814,10 @@ protected:
 				"%1 разделителей · %2 custom",
 				"%1 dividers · %2 custom").arg(side.visibleSeparators).arg(side.customSeparators),
 			RuEn(
-				"Expanded %1 · immersive %2",
-				"Expanded %1 · immersive %2")
+				"Expanded %1 · left-edge %2",
+				"Expanded %1 · left-edge %2")
 					.arg(_state->expandedSidePanel() ? RuEn("on", "on") : RuEn("off", "off"))
-					.arg(_state->immersiveAnimation() ? RuEn("on", "on") : RuEn("off", "off")));
+					.arg(_state->leftEdgeSettings() ? RuEn("on", "on") : RuEn("off", "off")));
 
 		drawCard(
 			3,
@@ -3835,8 +3826,8 @@ void AddMenuCustomizationEditor(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Ручная настройка меню",
-				"Manual menu tuning")),
+				"Настройка меню и панелей",
+				"Menus and panels")),
 			st::boxLabel),
 		st::defaultBoxDividerLabelPadding);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);

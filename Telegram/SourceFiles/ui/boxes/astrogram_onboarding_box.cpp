@@ -1606,11 +1606,11 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					InfoCardDescriptor{
 						.eyebrow = RuEn("Experimental -> Настройки оболочки", "Experimental -> Shell settings"),
 						.title = RuEn(
-							"Иммерсивная анимация и широкая оболочка настраиваются отдельно",
-							"Immersive animation and the wider shell are configured separately"),
+							"Широкая оболочка и левый край настраиваются отдельно",
+							"The wider shell and left-edge mode are configured separately"),
 						.description = RuEn(
-							"В том же разделе лежат expanded side panel, left-edge, widened settings и переключатель иммерсивной анимации, чтобы после гайда быстро дотюнить оболочку под себя.",
-							"In the same section you will find expanded side panel, left-edge, widened settings and the immersive animation switch, so after onboarding you can fine-tune the shell quickly."),
+							"В том же разделе лежат expanded side panel, left-edge и widened settings, чтобы после гайда быстро дотюнить оболочку под себя.",
+							"In the same section you will find expanded side panel, left-edge and widened settings, so after onboarding you can fine-tune the shell quickly."),
 						.footer = RuEn("Только реальные runtime-настройки без лишних preview-поверхностей", "Only real runtime settings without extra preview surfaces"),
 						.icon = &st::menuIconCustomize,
 						.tone = OnboardingBadgeTone::Trusted,
@@ -1634,8 +1634,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddBadgePill(
 					container,
 					RuEn(
-						"ручная раскладка меню · скрытые элементы снизу · иммерсивная анимация",
-						"manual menu layout · hidden pills below · immersive animation"),
+						"ручная раскладка меню · скрытые элементы снизу · shell-настройки",
+						"manual menu layout · hidden pills below · shell settings"),
 					OnboardingBadgeTone::Trusted,
 					style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
 				AddSecondaryNote(
@@ -1679,8 +1679,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					InfoCardDescriptor{
 						.eyebrow = RuEn("Экспериментальные режимы оболочки", "Experimental shell modes"),
 						.title = RuEn(
-							"Expanded side panel, widened settings, left-edge и immersive animation",
-							"Expanded side panel, widened settings, left-edge and immersive animation"),
+							"Expanded side panel, widened settings и left-edge",
+							"Expanded side panel, widened settings and left-edge"),
 						.description = RuEn(
 							"Пресеты ниже заранее включают те же runtime-переключатели, которые потом можно дотюнить вручную в Experimental, если захочется больше или спокойнее.",
 							"The presets below pre-apply the same runtime switches that you can later fine-tune by hand in Experimental if you want a stronger or calmer shell."),
@@ -1693,8 +1693,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					RuEn("Сбалансированный", "Balanced"),
 					RuEn(
-						"Компактная ширина, иммерсивная анимация и спокойный shell для повседневной работы.",
-						"Compact width, immersive animation and a calm shell for everyday work."),
+						"Компактная ширина и спокойный shell для повседневной работы.",
+						"Compact width and a calm shell for everyday work."),
 					&st::menuIconPalette,
 					[=] { applyShellPreset(AstrogramOnboardingShellPreset::Balanced); });
 				AddChoiceButton(
@@ -1748,8 +1748,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					InfoCardDescriptor{
 						.eyebrow = RuEn("Экспериментальные режимы оболочки / Experimental shell modes", "Experimental shell modes"),
 						.title = RuEn(
-							"Expanded side panel, left-edge, widened settings и immersive animation уже runtime",
-							"Expanded side panel, left-edge, widened settings and immersive animation are already runtime"),
+							"Expanded side panel, left-edge и widened settings уже runtime",
+							"Expanded side panel, left-edge and widened settings are already runtime"),
 						.description = RuEn(
 							"Эти переключатели больше не demo-only: они вынесены в явный верхний блок Experimental, пишутся в runtime prefs и сразу отражаются и в shell, и в preview.",
 							"These switches are no longer demo-only: they now live in a dedicated top Experimental block, write into runtime prefs and immediately reflect in both the shell and the preview."),
