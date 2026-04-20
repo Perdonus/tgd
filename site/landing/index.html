@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Astrogram Desktop</title>
+    <meta
+      name="description"
+      content="Astrogram Desktop — неофициальный Telegram-клиент для Windows и Linux с нативными плагинами, отдельным разделом Astrogram и собственной экосистемой."
+    />
+    <meta name="theme-color" content="#ff7b42" />
+    <meta property="og:title" content="Astrogram Desktop" />
+    <meta
+      property="og:description"
+      content="Нативные плагины, встроенные функции и единая экосистема Astrogram Desktop."
+    />
+    <meta property="og:image" content="https://astrogram.su/assets/astrogram-avatar.jpg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://astrogram.su" />
+    <link rel="icon" type="image/jpeg" href="./assets/astrogram-avatar.jpg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>
+      (() => {
+        const storedTheme = localStorage.getItem('astrogram-theme')
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        const theme = storedTheme || (systemDark ? 'dark' : 'light')
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#top">
+          <img src="./assets/astrogram-avatar.jpg" alt="Astrogram" />
+          <span class="brand__copy">
+            <strong>Astrogram</strong>
+            <small data-i18n="brand_caption">Desktop</small>
+          </span>
+        </a>
+
+        <nav class="topbar__nav" aria-label="Primary">
+          <a href="#product" data-i18n="nav_product">Продукт</a>
+          <a href="#ecosystem" data-i18n="nav_ecosystem">Экосистема</a>
+          <a href="https://docs.astrogram.su" target="_blank" rel="noreferrer" data-i18n="nav_docs"
+            >Документация</a
+          >
+          <a
+            href="https://github.com/Perdonus/tgd"
+            target="_blank"
+            rel="noreferrer"
+            data-i18n="nav_github"
+            >GitHub</a
+          >
+        </nav>
+
+        <div class="topbar__controls">
+          <div class="lang-switch" aria-label="Language switch">
+            <button class="lang-switch__button is-active" data-lang="ru">RU</button>
+            <button class="lang-switch__button" data-lang="en">EN</button>
+          </div>
+          <button class="theme-switch" type="button" aria-label="Toggle theme">
+            <span class="theme-switch__sun">Light</span>
+            <span class="theme-switch__moon">Dark</span>
+          </button>
+          <a
+            class="button button--ghost topbar__action"
+            href="https://t.me/astrogramchannel"
+            target="_blank"
+            rel="noreferrer"
+            data-i18n="nav_download"
+            >Скачать</a
+          >
+        </div>
+      </header>
+
+      <main class="landing">
+        <section class="hero" id="top">
+          <div class="hero__copy">
+            <span class="eyebrow" data-i18n="hero_eyebrow">Astrogram Desktop</span>
+            <h1 data-i18n="hero_title">Один клиент. Один runtime. Одна экосистема.</h1>
+            <p data-i18n="hero_text">
+              Astrogram собирает десктопные фишки, нативные `.tgd` плагины, документацию и отдельную
+              визуальную платформу в одном месте.
+            </p>
+
+            <div class="hero__actions">
+              <a
+                class="button button--primary"
+                href="https://t.me/astrogramchannel"
+                target="_blank"
+                rel="noreferrer"
+                data-i18n="hero_primary"
+                >Скачать</a
+              >
+              <a
+                class="button button--secondary"
+                href="https://docs.astrogram.su"
+                target="_blank"
+                rel="noreferrer"
+                data-i18n="hero_secondary"
+                >Открыть документацию</a
+              >
+            </div>
+
+            <ul class="hero__signals">
+              <li data-i18n="signal_client">Встроенные функции клиента</li>
+              <li data-i18n="signal_plugins">Нативные `.tgd` плагины</li>
+              <li data-i18n="signal_docs">Одна связка с docs.astrogram.su</li>
+            </ul>
+          </div>
+
+          <div class="hero__visual" aria-hidden="true">
+            <div class="hero-frame">
+              <div class="hero-frame__header">
+                <span></span>
+                <span></span>
+                <span></span>
+                <strong>Astrogram Desktop</strong>
+              </div>
+              <div class="hero-frame__body">
+                <aside class="hero-frame__sidebar">
+                  <div class="hero-frame__brand">
+                    <img src="./assets/astrogram-avatar.jpg" alt="" />
+                    <span>Astrogram</span>
+                  </div>
+                  <div class="hero-frame__slot is-active"></div>
+                  <div class="hero-frame__slot"></div>
+                  <div class="hero-frame__slot"></div>
+                  <div class="hero-frame__slot hero-frame__slot--short"></div>
+                </aside>
+                <div class="hero-frame__content">
+                  <article class="hero-card hero-card--accent">
+                    <span data-i18n="visual_label_main">Раздел Astrogram</span>
+                    <strong data-i18n="visual_title_main">Один вход для клиента, плагинов и документации</strong>
+                    <p data-i18n="visual_text_main">
+                      Не разрозненные сборки, а единый десктопный продукт с собственной логикой и
+                      маршрутом развития.
+                    </p>
+                  </article>
+
+                  <div class="hero-card-grid">
+                    <article class="hero-card">
+                      <span data-i18n="visual_label_plugins">Плагины</span>
+                      <strong data-i18n="visual_title_plugins">Host-side runtime</strong>
+                    </article>
+                    <article class="hero-card">
+                      <span data-i18n="visual_label_docs">Документация</span>
+                      <strong data-i18n="visual_title_docs">Один стиль с docs.astrogram.su</strong>
+                    </article>
+                    <article class="hero-card">
+                      <span data-i18n="visual_label_ui">Интерфейс</span>
+                      <strong data-i18n="visual_title_ui">Фирменный десктопный слой Astrogram</strong>
+                    </article>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section--product" id="product">
+          <div class="section__intro">
+            <span class="eyebrow" data-i18n="product_eyebrow">Продукт</span>
+            <h2 data-i18n="product_title">Astrogram ощущается как отдельный клиент, а не как случайный форк.</h2>
+            <p data-i18n="product_text">
+              Мы собираем в одном месте клиентские функции, фирменный интерфейс, систему плагинов и
+              понятную документацию. Без лишнего шума на главной.
+            </p>
+          </div>
+
+          <div class="product-grid">
+            <article class="product-card product-card--wide">
+              <span class="product-card__index">01</span>
+              <h3 data-i18n="product_card_one_title">Клиентские функции внутри Astrogram</h3>
+              <p data-i18n="product_card_one_text">
+                Не всё уезжает в плагины: часть логики живёт прямо в клиенте и попадает в отдельный
+                раздел настроек Astrogram.
+              </p>
+              <ul class="product-card__list">
+                <li data-i18n="product_card_one_item_one">Свои разделы и точки входа</li>
+                <li data-i18n="product_card_one_item_two">Десктопный UX и branding-слой</li>
+                <li data-i18n="product_card_one_item_three">Один визуальный язык с документацией</li>
+              </ul>
+            </article>
+
+            <article class="product-card">
+              <span class="product-card__index">02</span>
+              <h3 data-i18n="product_card_two_title">Платформа плагинов</h3>
+              <p data-i18n="product_card_two_text">
+                `.tgd` пакеты, host-side настройки, безопасный режим и нативная работа на стороне
+                клиента.
+              </p>
+            </article>
+
+            <article class="product-card">
+              <span class="product-card__index">03</span>
+              <h3 data-i18n="product_card_three_title">Десктопная экосистема</h3>
+              <p data-i18n="product_card_three_text">
+                docs.astrogram.su, канал, чат и исходники живут как один продукт, а не как набор
+                случайных ссылок.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section section--ecosystem" id="ecosystem">
+          <div class="section__intro">
+            <span class="eyebrow" data-i18n="ecosystem_eyebrow">Экосистема</span>
+            <h2 data-i18n="ecosystem_title">От landing до docs всё должно ощущаться единым Astrogram.</h2>
+            <p data-i18n="ecosystem_text">
+              Один бренд, одни цвета, одни точки входа. Сайт не спорит с документацией, а ведёт в неё.
+            </p>
+          </div>
+
+          <div class="ecosystem-grid">
+            <a class="ecosystem-card" href="https://docs.astrogram.su" target="_blank" rel="noreferrer">
+              <span data-i18n="ecosystem_docs_label">Документация</span>
+              <strong data-i18n="ecosystem_docs_title">docs.astrogram.su</strong>
+              <p data-i18n="ecosystem_docs_text">Runtime API, примеры, safe mode и карта платформы.</p>
+            </a>
+
+            <a class="ecosystem-card" href="https://t.me/astrogramchannel" target="_blank" rel="noreferrer">
+              <span data-i18n="ecosystem_channel_label">Канал</span>
+              <strong data-i18n="ecosystem_channel_title">@astrogramchannel</strong>
+              <p data-i18n="ecosystem_channel_text">Новые сборки, заметки по релизам и анонсы.</p>
+            </a>
+
+            <a class="ecosystem-card" href="https://t.me/astrogram_chat" target="_blank" rel="noreferrer">
+              <span data-i18n="ecosystem_chat_label">Чат</span>
+              <strong data-i18n="ecosystem_chat_title">@astrogram_chat</strong>
+              <p data-i18n="ecosystem_chat_text">Обсуждение клиента, багов, сборок и плагинов.</p>
+            </a>
+
+            <a class="ecosystem-card" href="https://github.com/Perdonus/tgd" target="_blank" rel="noreferrer">
+              <span data-i18n="ecosystem_github_label">GitHub</span>
+              <strong data-i18n="ecosystem_github_title">Perdonus/tgd</strong>
+              <p data-i18n="ecosystem_github_text">Код клиента, runtime и каталог плагинов.</p>
+            </a>
+          </div>
+        </section>
+
+        <section class="section section--cta">
+          <div class="cta-panel">
+            <div class="cta-panel__copy">
+              <span class="eyebrow" data-i18n="cta_eyebrow">Astrogram Desktop</span>
+              <h2 data-i18n="cta_title">Открывай клиент, документацию и обновления из одной экосистемы.</h2>
+              <p data-i18n="cta_text">
+                Astrogram.su ведёт в канал и docs, а docs возвращают обратно к платформе Astrogram без
+                ощущения двух разных сайтов.
+              </p>
+            </div>
+            <div class="cta-panel__actions">
+              <a
+                class="button button--primary"
+                href="https://t.me/astrogramchannel"
+                target="_blank"
+                rel="noreferrer"
+                data-i18n="cta_primary"
+                >Перейти к обновлениям</a
+              >
+              <a
+                class="button button--secondary"
+                href="https://docs.astrogram.su"
+                target="_blank"
+                rel="noreferrer"
+                data-i18n="cta_secondary"
+                >Открыть docs.astrogram.su</a
+              >
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div>
+          <strong>Astrogram Desktop</strong>
+          <span data-i18n="footer_text"
+            >Неофициальный Telegram-клиент с нативными плагинами и отдельной десктопной экосистемой.</span
+          >
+        </div>
+        <a href="#top" data-i18n="footer_top">Наверх</a>
+      </footer>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>
