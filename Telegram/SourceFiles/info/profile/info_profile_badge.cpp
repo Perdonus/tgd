@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "base/timer.h"
+#include "main/main_app_config.h"
 #include "ui/widgets/buttons.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
