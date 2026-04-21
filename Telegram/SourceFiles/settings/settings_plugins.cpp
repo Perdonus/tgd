@@ -1905,29 +1905,6 @@ private:
 		const auto refreshDetails = [=] {
 			stateChanged();
 		};
-		if (const auto path = state->path.trimmed();
-			!path.isEmpty() && QFileInfo(path).isFile()) {
-			Ui::AddSkip(_content);
-			const auto button = _content->add(object_ptr<Ui::SettingsButton>(
-				_content,
-				rpl::single(PluginUiText(
-					u"Share plugin package"_q,
-					u"Поделиться плагином"_q)),
-				st::settingsButtonNoIcon));
-			button->setClickedCallback([=] {
-				SharePluginPackage(_controller, *state);
-			});
-		}
-		Ui::AddSkip(_content);
-		const auto deleteButton = _content->add(object_ptr<Ui::SettingsButton>(
-			_content,
-			rpl::single(PluginUiText(
-				u"Delete plugin"_q,
-				u"Удалить плагин"_q)),
-			st::settingsButtonNoIcon));
-		deleteButton->setClickedCallback([=] {
-			RequestPluginRemoval(_controller, this, *state, stateChanged);
-		});
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto panels = Core::App().plugins().panelsFor(state->info.id);
