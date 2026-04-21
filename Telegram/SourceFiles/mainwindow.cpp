@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "apiwrap.h"
 #include "api/api_updates.h"
+#include "settings/settings_experimental.h"
 #include "settings/settings_intro.h"
 #include "base/options.h"
 #include "window/notifications_manager.h"
@@ -76,6 +77,29 @@ base::options::toggle AutoScrollInactiveChat({
 	.description = "Mark new messages as read and scroll the chat "
 		"even when the window is not in focus.",
 });
+
+[[nodiscard]] bool UseEmbeddedFiltersShellLayout() {
+	return Settings::LoadAstrogramShellLayoutOrder().indexOf(
+		QStringLiteral("folders")) > 0;
+}
+
+[[nodiscard]] int EmbeddedFiltersLeft(
+		const QStringList &order,
+		const Window::SessionController::ColumnLayout &layout) {
+	auto result = 0;
+	for (const auto &id : order) {
+		if (id == QStringLiteral("folders")) {
+			break;
+		} else if (id == QStringLiteral("dialogs")) {
+			result += layout.dialogsWidth;
+		} else if (id == QStringLiteral("chat")) {
+			result += layout.chatWidth;
+		} else if (id == QStringLiteral("info")) {
+			result += layout.thirdWidth;
+		}
+	}
+	return result;
+}
 
 } // namespace
 
@@ -330,6 +354,10 @@ void MainWindow::setupMain(
 		destroyLayer();
 	}
 	auto created = object_ptr<MainWidget>(bodyWidget(), sessionController());
+	created->controller()->filtersMenuChanged(
+	) | rpl::on_next([=] {
+		updateControlsGeometry();
+	}, created->lifetime());
 	clearWidgets();
 	_main = std::move(created);
 	updateControlsGeometry();
@@ -732,8 +760,17 @@ void MainWindow::updateControlsGeometry() {
 	auto mainWidth = body.width();
 	if (const auto session = sessionController()) {
 		if (const auto skip = session->filtersWidth()) {
-			mainLeft += skip;
-			mainWidth -= skip;
+			if (UseEmbeddedFiltersShellLayout()) {
+				session->setFiltersMenuLeft(EmbeddedFiltersLeft(
+					Settings::LoadAstrogramShellLayoutOrder(),
+					session->computeColumnLayout()));
+			} else {
+				mainLeft += skip;
+				mainWidth -= skip;
+				session->setFiltersMenuLeft(0);
+			}
+		} else {
+			session->setFiltersMenuLeft(0);
 		}
 	}
 	if (_main) {

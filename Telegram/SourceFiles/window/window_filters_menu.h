@@ -34,9 +34,11 @@ public:
 		not_null<Ui::RpWidget*> parent,
 		not_null<SessionController*> session);
 	~FiltersMenu();
+	void setLeft(int left);
 
 private:
 	void setup();
+	void updateGeometry();
 	void refresh();
 	void setupList();
 	void applyReorder(
@@ -55,6 +57,8 @@ private:
 	void showMenu(QPoint position, FilterId id);
 	void scrollToButton(not_null<Ui::RpWidget*> widget);
 	void openFiltersSettings();
+	[[nodiscard]] bool hasLeadingSeparator() const;
+	[[nodiscard]] bool hasTrailingSeparator() const;
 
 	const not_null<SessionController*> _session;
 	const not_null<Ui::RpWidget*> _parent;
@@ -84,6 +88,7 @@ private:
 	} _drag;
 
 	Ui::Animations::Simple _scrollToAnimation;
+	int _left = 0;
 
 };
 

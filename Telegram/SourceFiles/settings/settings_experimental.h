@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "settings/settings_common_session.h"
 
+#include <QtCore/QStringList>
+
 namespace Settings {
 
 struct ShellModePreferences;
@@ -23,6 +25,7 @@ enum class AstrogramShellPreset {
 	AstrogramShellPreset preset);
 [[nodiscard]] bool ApplyAstrogramShellPreset(
 	AstrogramShellPreset preset);
+[[nodiscard]] QStringList LoadAstrogramShellLayoutOrder();
 
 class Experimental : public Section<Experimental> {
 public:

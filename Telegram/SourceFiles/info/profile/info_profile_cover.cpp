@@ -319,6 +319,7 @@ Cover::Cover(
 		this,
 		st::infoBotVerifyBadge,
 		&peer->session(),
+		_peer,
 		BotVerifyBadgeForPeer(peer),
 		nullptr,
 		[=] {
@@ -332,18 +333,23 @@ Cover::Cover(
 		this,
 		st::infoPeerBadge,
 		&peer->session(),
+		_peer,
 		_badgeContent.value(),
 		_emojiStatusPanel.get(),
 		[=] {
 			return controller->isGifPausedAtLeastFor(
 				Window::GifPauseReason::Layer);
-		}))
+		},
+		0,
+		base::flags<BadgeType>::from_raw(-1),
+		true))
 , _verified(role == Role::EditContact
 	? nullptr
 	: std::make_unique<Badge>(
 		this,
 		st::infoPeerBadge,
 		&peer->session(),
+		_peer,
 		VerifiedContentForPeer(peer),
 		_emojiStatusPanel.get(),
 		[=] {

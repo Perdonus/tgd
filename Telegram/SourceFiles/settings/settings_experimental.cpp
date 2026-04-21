@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "plugins/plugins_manager.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/wrap/vertical_layout_reorder.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
@@ -47,6 +48,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QSaveFile>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 
@@ -76,6 +83,10 @@ bool ApplyAstrogramShellPreset(AstrogramShellPreset preset) {
 	return SaveShellModePreferences(ShellModePreferencesFor(preset));
 }
 
+void AddThreeDotsMenuCustomizationEditor(
+	not_null<Window::SessionController*> controller,
+	not_null<Ui::VerticalLayout*> container);
+
 namespace {
 
 [[nodiscard]] QString RuEn(const char *ru, const char *en) {
@@ -89,6 +100,130 @@ struct ShellModeUiState {
 	std::vector<std::function<void(const ShellModePreferences&)>> syncs;
 };
 
+struct SideMenuUiState {
+	::Menu::Customization::SideMenuOptions options;
+	std::vector<std::function<void(
+		const ::Menu::Customization::SideMenuOptions&)>> syncs;
+};
+
+struct ShellLayoutOrderUiState {
+	QStringList order;
+	std::vector<std::function<void(const QStringList&)>> syncs;
+};
+
+[[nodiscard]] QString ShellLayoutOrderPath() {
+	return cWorkingDir() + QStringLiteral("tdata/shell_layout_order.json");
+}
+
+[[nodiscard]] QStringList DefaultShellLayoutOrder() {
+	return {
+		QStringLiteral("folders"),
+		QStringLiteral("dialogs"),
+		QStringLiteral("chat"),
+		QStringLiteral("info"),
+	};
+}
+
+[[nodiscard]] QStringList NormalizeShellLayoutOrder(QStringList order) {
+	const auto defaults = DefaultShellLayoutOrder();
+	QStringList result;
+	for (const auto &id : order) {
+		if (defaults.contains(id) && !result.contains(id)) {
+			result.push_back(id);
+		}
+	}
+	for (const auto &id : defaults) {
+		if (!result.contains(id)) {
+			result.push_back(id);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QStringList LoadShellLayoutOrder() {
+	auto file = QFile(ShellLayoutOrderPath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return DefaultShellLayoutOrder();
+	}
+	const auto document = QJsonDocument::fromJson(file.readAll());
+	if (!document.isObject()) {
+		return DefaultShellLayoutOrder();
+	}
+	auto values = QStringList();
+	for (const auto &value : document.object().value(
+			QStringLiteral("order")).toArray()) {
+		const auto id = value.toString().trimmed();
+		if (!id.isEmpty()) {
+			values.push_back(id);
+		}
+	}
+	return NormalizeShellLayoutOrder(values);
+}
+
+[[nodiscard]] bool SaveShellLayoutOrder(const QStringList &order) {
+	const auto path = ShellLayoutOrderPath();
+	const auto directory = QFileInfo(path).absolutePath();
+	if (!directory.isEmpty() && !QDir().mkpath(directory)) {
+		return false;
+	}
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return false;
+	}
+	auto array = QJsonArray();
+	for (const auto &id : NormalizeShellLayoutOrder(order)) {
+		array.push_back(id);
+	}
+	const auto document = QJsonDocument(QJsonObject{
+		{ QStringLiteral("order"), array },
+	});
+	if (file.write(document.toJson(QJsonDocument::Indented)) < 0) {
+		file.cancelWriting();
+		return false;
+	}
+	return file.commit();
+}
+
+[[nodiscard]] QString ShellLayoutOrderItemLabel(const QString &id) {
+	if (id == QStringLiteral("folders")) {
+		return RuEn("Папки", "Folders");
+	} else if (id == QStringLiteral("dialogs")) {
+		return RuEn("Чаты", "Chats");
+	} else if (id == QStringLiteral("chat")) {
+		return RuEn("Чат", "Chat");
+	} else if (id == QStringLiteral("info")) {
+		return RuEn("Инфо", "Info");
+	}
+	return id;
+}
+
+[[nodiscard]] style::margins ExperimentalSectionTitlePadding() {
+	return QMargins(
+		st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+		0,
+		0,
+		0);
+}
+
+[[nodiscard]] not_null<Ui::FlatLabel*> AddExperimentalBlueTitle(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title) {
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		rpl::single(title),
+		ExperimentalSectionTitlePadding());
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	return label;
+}
+
+void AddExperimentalSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title) {
+	Ui::AddDivider(container);
+	AddExperimentalBlueTitle(container, title);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+}
+
 [[nodiscard]] bool SameShellModePreferences(
 		const ShellModePreferences &a,
 		const ShellModePreferences &b) {
@@ -100,6 +235,18 @@ struct ShellModeUiState {
 void NotifyShellModeState(ShellModeUiState *state) {
 	for (const auto &sync : state->syncs) {
 		sync(state->prefs);
+	}
+}
+
+void NotifySideMenuState(SideMenuUiState *state) {
+	for (const auto &sync : state->syncs) {
+		sync(state->options);
+	}
+}
+
+void NotifyShellLayoutOrderState(ShellLayoutOrderUiState *state) {
+	for (const auto &sync : state->syncs) {
+		sync(state->order);
 	}
 }
 
@@ -125,6 +272,44 @@ void NotifyShellModeState(ShellModeUiState *state) {
 	if (!successToast.isEmpty()) {
 		window->showToast(successToast);
 	}
+	return true;
+}
+
+[[nodiscard]] bool SaveSideMenuState(
+		not_null<Window::Controller*> window,
+		SideMenuUiState *state,
+		const ::Menu::Customization::SideMenuOptions &updated) {
+	if ((updated.showFooterText == state->options.showFooterText)
+		&& (updated.profileBlockPosition == state->options.profileBlockPosition)) {
+		return true;
+	}
+	if (!::Menu::Customization::SaveSideMenuOptions(updated)) {
+		window->showToast(RuEn(
+			"Не удалось сохранить параметры боковой панели Astrogram.",
+			"Could not save Astrogram side panel settings."));
+		return false;
+	}
+	state->options = ::Menu::Customization::LoadSideMenuOptions();
+	NotifySideMenuState(state);
+	return true;
+}
+
+[[nodiscard]] bool SaveShellLayoutOrderState(
+		not_null<Window::Controller*> window,
+		ShellLayoutOrderUiState *state,
+		const QStringList &updated) {
+	const auto normalized = NormalizeShellLayoutOrder(updated);
+	if (normalized == state->order) {
+		return true;
+	}
+	if (!SaveShellLayoutOrder(normalized)) {
+		window->showToast(RuEn(
+			"Не удалось сохранить порядок блоков Astrogram.",
+			"Could not save Astrogram block order."));
+		return false;
+	}
+	state->order = normalized;
+	NotifyShellLayoutOrderState(state);
 	return true;
 }
 
@@ -160,26 +345,122 @@ void AddShellModeToggle(
 	}
 }
 
+template <typename Getter, typename Setter>
+void AddSideMenuToggle(
+		not_null<Window::Controller*> window,
+		not_null<Ui::VerticalLayout*> container,
+		SideMenuUiState *state,
+		QString title,
+		Getter getter,
+		Setter setter) {
+	const auto toggles = container->lifetime().make_state<rpl::event_stream<bool>>();
+	const auto button = container->add(object_ptr<Button>(
+		container,
+		rpl::single(title),
+		st::settingsButtonNoIcon))->toggleOn(
+		toggles->events_starting_with(getter(state->options)));
+	state->syncs.push_back([=](const ::Menu::Customization::SideMenuOptions &options) {
+		toggles->fire_copy(getter(options));
+	});
+	button->toggledChanges() | rpl::on_next([=](bool toggled) {
+		auto updated = state->options;
+		setter(updated, toggled);
+		if (!SaveSideMenuState(window, state, updated)) {
+			toggles->fire_copy(getter(state->options));
+		}
+	}, container->lifetime());
+}
+
+void ApplyShellLayoutOrder(
+		not_null<Window::SessionController*> controller,
+		not_null<Window::Controller*> window,
+		ShellLayoutOrderUiState *state,
+		const QStringList &updated) {
+	if (!SaveShellLayoutOrderState(window, state, updated)) {
+		return;
+	}
+	controller->updateColumnLayout();
+	controller->window().widget()->updateControlsGeometry();
+	controller->widget()->updateControlsGeometry();
+}
+
+void AddShellLayoutOrderEditor(
+		not_null<Window::SessionController*> controller,
+		not_null<Window::Controller*> window,
+		not_null<Ui::VerticalLayout*> container,
+		ShellLayoutOrderUiState *state) {
+	const auto list = container->add(object_ptr<Ui::VerticalLayout>(container));
+	const auto reorder = container->lifetime().make_state<Ui::VerticalLayoutReorder>(
+		list);
+	const auto rebuilding = container->lifetime().make_state<bool>(false);
+	const auto rebuild = [=] {
+		*rebuilding = true;
+		reorder->cancel();
+		list->clear();
+		auto index = 1;
+		for (const auto &id : NormalizeShellLayoutOrder(state->order)) {
+			const auto title = QString::number(index++)
+				+ QStringLiteral(". ")
+				+ ShellLayoutOrderItemLabel(id);
+			const auto button = list->add(object_ptr<Button>(
+				list,
+				rpl::single(title),
+				st::settingsButtonNoIcon));
+			button->setProperty("astro_shell_block_id", id);
+		}
+		*rebuilding = false;
+	};
+	reorder->updates() | rpl::on_next([=](Ui::VerticalLayoutReorder::Single data) {
+		using ReorderState = Ui::VerticalLayoutReorder::State;
+		if ((data.state != ReorderState::Applied) || *rebuilding) {
+			return;
+		}
+		auto updated = QStringList();
+		updated.reserve(list->count());
+		for (auto i = 0; i != list->count(); ++i) {
+			const auto id = list->widgetAt(i)->property(
+				"astro_shell_block_id").toString().trimmed();
+			if (!id.isEmpty()) {
+				updated.push_back(id);
+			}
+		}
+		ApplyShellLayoutOrder(controller, window, state, updated);
+	}, list->lifetime());
+	state->syncs.push_back([=](const QStringList &) {
+		if (!*rebuilding) {
+			rebuild();
+		}
+	});
+	rebuild();
+	container->add(object_ptr<Button>(
+		container,
+		rpl::single(RuEn(
+			"Сбросить порядок блоков",
+			"Reset block order")),
+		st::settingsButtonNoIcon))->clicks() | rpl::on_next([=](Qt::MouseButton) {
+		ApplyShellLayoutOrder(
+			controller,
+			window,
+			state,
+			DefaultShellLayoutOrder());
+	}, container->lifetime());
+}
+
 void SetupExperimental(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	const auto window = &controller->window();
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-	Ui::AddSubsectionTitle(
-		container,
-		rpl::single(RuEn(
-			"Экспериментальные настройки Astrogram",
-			"Astrogram experimental settings")));
 
 	const auto shellState = container->lifetime().make_state<ShellModeUiState>();
+	const auto sideMenuState = container->lifetime().make_state<SideMenuUiState>();
+	const auto shellOrderState = container->lifetime().make_state<ShellLayoutOrderUiState>();
 	shellState->prefs = LoadShellModePreferences();
+	sideMenuState->options = ::Menu::Customization::LoadSideMenuOptions();
+	shellOrderState->order = LoadShellLayoutOrder();
 
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddSubsectionTitle(
+	AddExperimentalSectionHeader(
 		container,
-		rpl::single(RuEn(
-			"Общие функции",
-			"General features")));
+		RuEn("Окно и оболочка", "Window and shell"));
 	AddShellModeToggle(
 		window,
 		container,
@@ -222,17 +503,65 @@ void SetupExperimental(
 		[](ShellModePreferences &prefs, bool value) {
 			prefs.wideSettingsPane = value;
 		});
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-	Ui::AddSubsectionTitle(
+	AddExperimentalSectionHeader(
 		container,
-		rpl::single(RuEn(
-			"Настройка меню и панелей",
-			"Menus and panels")));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+		RuEn("Боковая панель", "Side panel"));
+	AddSideMenuToggle(
+		window,
+		container,
+		sideMenuState,
+		RuEn(
+			"Показывать footer-текст Astrogram Desktop и версию",
+			"Show Astrogram Desktop footer text and version"),
+		[](const ::Menu::Customization::SideMenuOptions &options) {
+			return options.showFooterText;
+		},
+		[](::Menu::Customization::SideMenuOptions &options, bool value) {
+			options.showFooterText = value;
+		});
+	AddSideMenuToggle(
+		window,
+		container,
+		sideMenuState,
+		RuEn(
+			"Профиль и список аккаунтов снизу",
+			"Move profile and account list to the bottom"),
+		[](const ::Menu::Customization::SideMenuOptions &options) {
+			return options.profileBlockPosition
+				== QString::fromLatin1(
+					::Menu::Customization::SideMenuProfileBlockPositionId::Bottom);
+		},
+		[](::Menu::Customization::SideMenuOptions &options, bool value) {
+			options.profileBlockPosition = value
+				? QString::fromLatin1(
+					::Menu::Customization::SideMenuProfileBlockPositionId::Bottom)
+				: QString::fromLatin1(
+					::Menu::Customization::SideMenuProfileBlockPositionId::Top);
+		});
+
+	AddExperimentalSectionHeader(
+		container,
+		RuEn("Редакторы меню", "Menu editors"));
 	AddMenuCustomizationEditor(controller, container);
+	AddThreeDotsMenuCustomizationEditor(controller, container);
+
+	AddExperimentalSectionHeader(
+		container,
+		RuEn(
+			"Порядок экранов",
+			"Screen order"));
+	AddShellLayoutOrderEditor(
+		controller,
+		window,
+		container,
+		shellOrderState);
 }
 
 } // namespace
+
+QStringList LoadAstrogramShellLayoutOrder() {
+	return LoadShellLayoutOrder();
+}
 
 Experimental::Experimental(
 	QWidget *parent,

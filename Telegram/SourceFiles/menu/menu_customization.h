@@ -60,6 +60,7 @@ inline constexpr auto Profile = "profile";
 inline constexpr auto Replies = "replies";
 inline constexpr auto Scheduled = "scheduled";
 inline constexpr auto Context = "context";
+inline constexpr auto ThreeDots = "three_dots";
 inline constexpr auto SubsectionTabs = "subsection_tabs";
 } // namespace PeerMenuSurfaceId
 
@@ -176,6 +177,13 @@ inline constexpr auto MessageReschedule = "message.reschedule";
 	const std::vector<PeerMenuEntry> &entries);
 [[nodiscard]] bool ResetPeerMenuLayout(
 	const QString &surfaceId,
+	const std::vector<PeerMenuEntry> &defaults);
+[[nodiscard]] std::vector<PeerMenuEntry> LoadThreeDotMenuLayout(
+	const std::vector<PeerMenuEntry> &defaults,
+	bool *changed = nullptr);
+[[nodiscard]] bool SaveThreeDotMenuLayout(
+	const std::vector<PeerMenuEntry> &entries);
+[[nodiscard]] bool ResetThreeDotMenuLayout(
 	const std::vector<PeerMenuEntry> &defaults);
 
 } // namespace Menu::Customization

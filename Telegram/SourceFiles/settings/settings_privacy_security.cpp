@@ -94,6 +94,36 @@ using Privacy = Api::UserPrivacy;
 	return image;
 }
 
+[[nodiscard]] style::margins SectionTitlePadding() {
+	return QMargins(
+		st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+		0,
+		0,
+		0);
+}
+
+void AddSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		rpl::producer<QString> title,
+		bool includeDivider = true) {
+	if (includeDivider) {
+		Ui::AddDivider(container);
+	}
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		std::move(title),
+		SectionTitlePadding());
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+}
+
+void AddSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		bool includeDivider = true) {
+	AddSectionHeader(container, rpl::single(title), includeDivider);
+}
+
 void AddPremiumStar(
 		not_null<Ui::SettingsButton*> button,
 		not_null<Main::Session*> session,
@@ -140,7 +170,6 @@ void OpenFileConfirmationsBox(not_null<Ui::GenericBox*> box) {
 			tr::lng_settings_edit_extensions(),
 			TextWithTags{ text }),
 		st::boxRowPadding + QMargins(0, 0, 0, st::settingsPrivacySkip));
-	Ui::AddDividerText(layout, tr::lng_settings_edit_extensions_about());
 	Ui::AddSkip(layout);
 	const auto ip = layout->add(object_ptr<Ui::SettingsButton>(
 		box,
@@ -148,7 +177,6 @@ void OpenFileConfirmationsBox(not_null<Ui::GenericBox*> box) {
 		st::settingsButtonNoIcon
 	))->toggleOn(rpl::single(settings->ipRevealWarning()));
 	Ui::AddSkip(layout);
-	Ui::AddDividerText(layout, tr::lng_settings_edit_ip_confirm_about());
 
 	box->setFocusCallback([=] {
 		extensions->setFocusFast();
@@ -398,8 +426,7 @@ void SetupPrivacy(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
 		rpl::producer<> updateTrigger) {
-	Ui::AddSkip(container, st::settingsPrivacySkip);
-	Ui::AddSubsectionTitle(container, tr::lng_settings_privacy_title());
+	AddSectionHeader(container, tr::lng_settings_privacy_title());
 
 	const auto session = &controller->session();
 
@@ -473,8 +500,6 @@ void SetupPrivacy(
 	session->api().userPrivacy().reload(
 		Api::UserPrivacy::Key::AddedByPhone);
 
-	Ui::AddSkip(container, st::settingsPrivacySecurityPadding);
-	Ui::AddDivider(container);
 }
 
 void SetupLocalPasscode(
@@ -695,8 +720,7 @@ void SetupLoginEmail(
 void SetupTopPeers(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(container, tr::lng_settings_top_peers_title());
+	AddSectionHeader(container, tr::lng_settings_top_peers_title());
 
 	const auto session = &controller->session();
 
@@ -716,17 +740,13 @@ void SetupTopPeers(
 	}) | rpl::on_next([=](bool enabled) {
 		session->topPeers().toggleDisabled(!enabled);
 	}, container->lifetime());
-
-	Ui::AddSkip(container);
-	Ui::AddDividerText(container, tr::lng_settings_top_peers_about());
 }
 
 void SetupSelfDestruction(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
 		rpl::producer<> updateTrigger) {
-	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(container, tr::lng_settings_destroy_title());
+	AddSectionHeader(container, tr::lng_settings_destroy_title());
 
 	const auto session = &controller->session();
 
@@ -817,8 +837,7 @@ auto ClearPaymentInfoBox(not_null<Main::Session*> session) {
 void SetupBotsAndWebsites(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(container, tr::lng_settings_security_bots());
+	AddSectionHeader(container, tr::lng_settings_security_bots());
 
 	const auto session = &controller->session();
 	container->add(object_ptr<Button>(
@@ -829,8 +848,6 @@ void SetupBotsAndWebsites(
 		controller->show(ClearPaymentInfoBox(session));
 	});
 
-	Ui::AddSkip(container);
-	Ui::AddDivider(container);
 }
 
 void SetupConfirmationExtensions(
@@ -841,8 +858,7 @@ void SetupConfirmationExtensions(
 		return;
 	}
 
-	Ui::AddSkip(container);
-	Ui::AddSubsectionTitle(container, tr::lng_settings_file_confirmations());
+	AddSectionHeader(container, tr::lng_settings_file_confirmations());
 
 	container->add(object_ptr<Button>(
 		container,
@@ -851,9 +867,6 @@ void SetupConfirmationExtensions(
 	))->addClickHandler([=] {
 		controller->show(Box(OpenFileConfirmationsBox));
 	});
-
-	Ui::AddSkip(container);
-	Ui::AddDividerText(container, tr::lng_settings_edit_extensions_about());
 }
 
 void SetupBlockedList(
@@ -949,7 +962,6 @@ void SetupSessionsList(
 	});
 
 	Ui::AddSkip(container);
-	Ui::AddDividerText(container, tr::lng_settings_sessions_about());
 }
 
 void SetupGlobalTTLList(
@@ -985,8 +997,7 @@ void SetupSecurity(
 		not_null<Ui::VerticalLayout*> container,
 		rpl::producer<> updateTrigger,
 		Fn<void(Type)> showOther) {
-	Ui::AddSkip(container, st::settingsPrivacySkip);
-	Ui::AddSubsectionTitle(container, tr::lng_settings_security());
+	AddSectionHeader(container, tr::lng_settings_security());
 
 	SetupCloudPassword(controller, container, showOther);
 	SetupGlobalTTLList(
@@ -1028,8 +1039,7 @@ void SetupSensitiveContent(
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto inner = wrap->entity();
 
-	Ui::AddSkip(inner);
-	Ui::AddSubsectionTitle(inner, tr::lng_settings_sensitive_title());
+	AddSectionHeader(inner, tr::lng_settings_sensitive_title());
 
 	const auto show = controller->uiShow();
 	const auto session = &controller->session();
@@ -1064,7 +1074,6 @@ void SetupSensitiveContent(
 	}, container->lifetime());
 
 	Ui::AddSkip(inner);
-	Ui::AddDividerText(inner, tr::lng_settings_sensitive_about());
 
 	wrap->toggleOn(session->api().sensitiveContent().canChange());
 }
@@ -1194,8 +1203,7 @@ void SetupArchiveAndMute(
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto inner = wrap->entity();
 
-	Ui::AddSkip(inner);
-	Ui::AddSubsectionTitle(inner, tr::lng_settings_new_unknown());
+	AddSectionHeader(inner, tr::lng_settings_new_unknown());
 
 	const auto session = &controller->session();
 
@@ -1215,7 +1223,6 @@ void SetupArchiveAndMute(
 	}, container->lifetime());
 
 	Ui::AddSkip(inner);
-	Ui::AddDividerText(inner, tr::lng_settings_auto_archive_about());
 
 	auto shown = rpl::single(
 		false

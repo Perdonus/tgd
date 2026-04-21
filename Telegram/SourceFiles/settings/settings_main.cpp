@@ -209,6 +209,7 @@ Cover::Cover(
 	this,
 	st::infoPeerBadge,
 	&user->session(),
+	user,
 	Info::Profile::BadgeContentForPeer(user),
 	&_emojiStatusPanel,
 	[=] {
@@ -216,7 +217,8 @@ Cover::Cover(
 			Window::GifPauseReason::Layer);
 	},
 	0, // customStatusLoopsLimit
-	Info::Profile::BadgeType::Premium)
+	Info::Profile::BadgeType::Premium,
+	true)
 , _userpic(
 	this,
 	controller,
@@ -444,6 +446,36 @@ void Cover::refreshUsernameGeometry(int newWidth) {
 	ministars->setCenter(ministarsContainer->rect());
 
 	return button;
+}
+
+[[nodiscard]] style::margins SectionTitlePadding() {
+	return QMargins(
+		st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+		0,
+		0,
+		0);
+}
+
+[[nodiscard]] not_null<Ui::FlatLabel*> AddSectionTitle(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text) {
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		rpl::single(text),
+		SectionTitlePadding());
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	return label;
+}
+
+void AddSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text,
+		bool includeDivider = true) {
+	if (includeDivider) {
+		Ui::AddDivider(container);
+	}
+	AddSectionTitle(container, text);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
 }
 
 } // namespace
@@ -677,15 +709,7 @@ void SetupSections(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
 		Fn<void(Type)> showOther) {
-	const auto showPhoneSuggestion = controller->session().promoSuggestions().current(
-		kSugValidatePhone.utf8());
-	const auto showPasswordSuggestion = !showPhoneSuggestion
-		&& controller->session().promoSuggestions().current(
-			Data::PromoSuggestions::SugValidatePassword());
 	Ui::AddDivider(container);
-	if (showPhoneSuggestion || showPasswordSuggestion) {
-		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	}
 
 	SetupValidatePhoneNumberSuggestion(
 		controller,
@@ -713,33 +737,6 @@ void SetupSections(
 		rpl::single(RuEn("Настройки Astrogram", "Astrogram Settings")),
 		Astrogram::Id(),
 		{ &st::menuIconCustomize });
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-
-	if (controller->session().supportMode()) {
-		SetupSupport(controller, container);
-
-		Ui::AddDivider(container);
-		Ui::AddSkip(container);
-	} else {
-		addSection(
-			tr::lng_settings_my_account(),
-			Information::Id(),
-			{ &st::menuIconProfile });
-	}
-
-	addSection(
-		tr::lng_settings_section_notify(),
-		Notifications::Id(),
-		{ &st::menuIconNotifications });
-	addSection(
-		tr::lng_settings_section_privacy(),
-		PrivacySecurity::Id(),
-		{ &st::menuIconLock });
-	addSection(
-		tr::lng_settings_section_chat_settings(),
-		Chat::Id(),
-		{ &st::menuIconChatBubble });
 
 	const auto updateWrap = container->add(
 		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
@@ -761,6 +758,30 @@ void SetupSections(
 		}
 		showOther(Astrogram::Id());
 	});
+
+	AddSectionHeader(container, RuEn("Аккаунт и чаты", "Account & chats"));
+
+	if (controller->session().supportMode()) {
+		SetupSupport(controller, container);
+	} else {
+		addSection(
+			tr::lng_settings_my_account(),
+			Information::Id(),
+			{ &st::menuIconProfile });
+	}
+
+	addSection(
+		tr::lng_settings_section_notify(),
+		Notifications::Id(),
+		{ &st::menuIconNotifications });
+	addSection(
+		tr::lng_settings_section_privacy(),
+		PrivacySecurity::Id(),
+		{ &st::menuIconLock });
+	addSection(
+		tr::lng_settings_section_chat_settings(),
+		Chat::Id(),
+		{ &st::menuIconChatBubble });
 
 	const auto preload = [=] {
 		controller->session().data().chatsFilters().requestSuggested();
@@ -805,6 +826,8 @@ void SetupSections(
 		showOther(Folders::Id());
 	});
 
+	AddSectionHeader(container, RuEn("Приложение", "Application"));
+
 	addSection(
 		AdvancedLabelWithUpdateBadge(),
 		Advanced::Id(),
@@ -827,8 +850,7 @@ void SetupPremium(
 	if (!controller->session().premiumPossible()) {
 		return;
 	}
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
+	AddSectionHeader(container, RuEn("Премиум и бизнес", "Premium & business"));
 
 	const auto isPaused = Window::PausedIn(
 		controller,
@@ -1125,8 +1147,7 @@ void Main::setupContent(not_null<Window::SessionController*> controller) {
 
 	SetupSections(controller, content, showOtherMethod());
 	if (HasInterfaceScale()) {
-		Ui::AddDivider(content);
-		Ui::AddSkip(content);
+		AddSectionHeader(content, RuEn("Интерфейс", "Interface"));
 		SetupInterfaceScale(&controller->window(), content);
 		Ui::AddSkip(content);
 	}

@@ -106,6 +106,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller_link_info.h"
 #include "settings/settings_main.h"
+#include "settings/settings_experimental.h"
 #include "settings/settings_premium.h"
 #include "settings/settings_privacy_security.h"
 #include "styles/style_window.h"
@@ -118,6 +119,29 @@ namespace {
 
 constexpr auto kCustomThemesInMemory = 5;
 constexpr auto kMaxChatEntryHistorySize = 50;
+
+[[nodiscard]] bool UseEmbeddedFiltersShellLayout() {
+	return Settings::LoadAstrogramShellLayoutOrder().indexOf(
+		QStringLiteral("folders")) > 0;
+}
+
+[[nodiscard]] int EmbeddedFiltersLeft(
+		const QStringList &order,
+		const SessionController::ColumnLayout &layout) {
+	auto result = 0;
+	for (const auto &id : order) {
+		if (id == QStringLiteral("folders")) {
+			break;
+		} else if (id == QStringLiteral("dialogs")) {
+			result += layout.dialogsWidth;
+		} else if (id == QStringLiteral("chat")) {
+			result += layout.chatWidth;
+		} else if (id == QStringLiteral("info")) {
+			result += layout.thirdWidth;
+		}
+	}
+	return result;
+}
 
 class MainWindowShow final : public ChatHelpers::Show {
 public:
@@ -1887,6 +1911,11 @@ void SessionController::toggleFiltersMenu(bool enabled) {
 		_filters = std::make_unique<FiltersMenu>(
 			widget()->bodyWidget(),
 			this);
+		const auto order = Settings::LoadAstrogramShellLayoutOrder();
+		const auto left = UseEmbeddedFiltersShellLayout()
+			? EmbeddedFiltersLeft(order, computeColumnLayout())
+			: 0;
+		_filters->setLeft(left);
 	} else {
 		_filters = nullptr;
 	}
@@ -2980,6 +3009,12 @@ not_null<MainWidget*> SessionController::content() const {
 
 int SessionController::filtersWidth() const {
 	return _filters ? st::windowFiltersWidth : 0;
+}
+
+void SessionController::setFiltersMenuLeft(int left) {
+	if (_filters) {
+		_filters->setLeft(left);
+	}
 }
 
 bool SessionController::enoughSpaceForFilters() const {

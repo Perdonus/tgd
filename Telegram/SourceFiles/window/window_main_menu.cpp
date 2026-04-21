@@ -87,6 +87,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QFileSystemWatcher>
+#include <QtCore/QTimer>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
@@ -118,27 +119,6 @@ constexpr auto kPlayStatusLimit = 2;
 	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
 		? QString::fromUtf8(ru)
 		: QString::fromUtf8(en);
-}
-
-enum class SideMenuSection {
-	Default,
-	Astrogram,
-};
-
-[[nodiscard]] SideMenuSection SideMenuSectionFor(const QString &id) {
-	namespace Id = ::Menu::Customization::SideMenuItemId;
-	return (id == QString::fromLatin1(Id::Plugins))
-		|| (id == QString::fromLatin1(Id::GhostMode))
-		? SideMenuSection::Astrogram
-		: SideMenuSection::Default;
-}
-
-[[nodiscard]] bool IsAstrogramBoundary(
-		SideMenuSection previous,
-		SideMenuSection current) {
-	return (previous != current)
-		&& ((previous == SideMenuSection::Astrogram)
-			|| (current == SideMenuSection::Astrogram));
 }
 
 [[nodiscard]] rpl::producer<TextWithEntities> SetStatusLabel(
@@ -361,11 +341,13 @@ MainMenu::MainMenu(
 	this,
 	st::settingsInfoPeerBadge,
 	&controller->session(),
+	controller->session().user(),
 	Info::Profile::BadgeContentForPeer(controller->session().user()),
 	_emojiStatusPanel.get(),
 	[=] { return controller->isGifPausedAtLeastFor(GifPauseReason::Layer); },
 	kPlayStatusLimit,
-	Info::Profile::BadgeType::Premium))
+	Info::Profile::BadgeType::Premium,
+	true))
 , _scroll(this, st::defaultSolidScroll)
 , _inner(_scroll->setOwnedWidget(
 	object_ptr<Ui::VerticalLayout>(_scroll.data())))
@@ -381,6 +363,12 @@ MainMenu::MainMenu(
 	object_ptr<Ui::VerticalLayout>(_inner.get()),
 	{ 0, st::mainMenuSkip / 2, 0, 0 }))
 , _menuActions(_menu->add(object_ptr<Ui::VerticalLayout>(_menu.get())))
+, _shadowBottom(_inner->add(object_ptr<Ui::SlideWrap<Ui::PlainShadow>>(
+	_inner.get(),
+	object_ptr<Ui::PlainShadow>(_inner.get()))))
+, _accountsBottom(_inner->add(object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+	_inner.get(),
+	object_ptr<Ui::VerticalLayout>(_inner.get()))))
 , _footer(_inner->add(object_ptr<Ui::RpWidget>(_inner.get())))
 , _telegram(
 	Ui::CreateChild<Ui::FlatLabel>(_footer.get(), st::mainMenuTelegramLabel))
@@ -388,6 +376,9 @@ MainMenu::MainMenu(
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	refreshShellModePreferences();
 	refreshSideMenuOptions();
+	_accountsScrollTimer.setCallback([=] {
+		syncAccountsScrollPosition();
+	});
 
 	setupUserpicButton();
 	setupAccountsToggle();
@@ -527,7 +518,9 @@ void MainMenu::refreshSideMenuOptions() {
 	const auto options = ::Menu::Customization::LoadSideMenuOptions();
 	_showFooterText = options.showFooterText;
 	_profileBlockPosition = options.profileBlockPosition;
-	_footer->setVisible(_showFooterText);
+	_footer->setVisible(footerVisible());
+	syncAccountsVisibility(Core::App().settings().mainMenuAccountsShown(), false);
+	scheduleAccountsScrollSync();
 }
 
 void MainMenu::watchCustomizationPath(const QString &path) {
@@ -613,6 +606,10 @@ int MainMenu::profileBlockTop() const {
 	return profileBlockAtBottom()
 		? std::max(height() - st::mainMenuCoverHeight, 0)
 		: 0;
+}
+
+bool MainMenu::footerVisible() const {
+	return _showFooterText && !profileBlockAtBottom();
 }
 
 int MainMenu::desiredMenuWidth() const {
@@ -811,13 +808,35 @@ void MainMenu::setupUserpicButton() {
 	_userpicButton->show();
 }
 
+bool MainMenu::accountsShown() const {
+	return _accounts->toggled() || _accountsBottom->toggled();
+}
+
 void MainMenu::toggleAccounts() {
-	syncAccountsVisibility(!_accounts->toggled(), true);
+	const auto shown = !accountsShown();
+	Core::App().settings().setMainMenuAccountsShown(shown);
+	Core::App().saveSettingsDelayed();
+	syncAccountsVisibility(shown, true);
 }
 
 void MainMenu::setupAccounts() {
-	const auto inner = _accounts->entity();
+	setupAccounts(_accounts);
+	setupAccounts(_accountsBottom);
 
+	syncAccountsVisibility(
+		Core::App().settings().mainMenuAccountsShown(),
+		_showFinished.current());
+	Core::App().settings().mainMenuAccountsShownValue(
+	) | rpl::distinct_until_changed() | rpl::on_next([=](bool shown) {
+		syncAccountsVisibility(shown, _showFinished.current());
+	}, lifetime());
+
+	_toggleAccounts->setToggled(accountsShown());
+}
+
+void MainMenu::setupAccounts(
+		not_null<Ui::SlideWrap<Ui::VerticalLayout>*> wrap) {
+	const auto inner = wrap->entity();
 	inner->add(object_ptr<Ui::FixedHeightWidget>(inner, st::mainMenuSkip));
 	auto events = Settings::SetupAccounts(inner, _controller);
 	inner->add(object_ptr<Ui::FixedHeightWidget>(inner, st::mainMenuSkip));
@@ -827,22 +846,6 @@ void MainMenu::setupAccounts() {
 	) | rpl::on_next([=] {
 		closeLayer();
 	}, inner->lifetime());
-
-	syncAccountsVisibility(
-		Core::App().settings().mainMenuAccountsShown(),
-		_showFinished.current());
-	Core::App().settings().mainMenuAccountsShownValue(
-	) | rpl::distinct_until_changed() | rpl::on_next([=](bool shown) {
-		syncAccountsVisibility(shown, _showFinished.current());
-	}, inner->lifetime());
-
-	_toggleAccounts->setToggled(_accounts->toggled());
-	_accounts->shownValue(
-	) | rpl::distinct_until_changed() | rpl::on_next([=](bool shown) {
-		_toggleAccounts->setToggled(shown);
-	}, inner->lifetime());
-
-	_shadow->setDuration(0)->toggleOn(_accounts->shownValue());
 }
 
 void MainMenu::setupAccountsToggle() {
@@ -874,17 +877,61 @@ void MainMenu::showFinished() {
 	syncAccountsVisibility(
 		Core::App().settings().mainMenuAccountsShown(),
 		false);
+	scheduleAccountsScrollSync();
 	if (_immersiveAnimation
 		&& (_immersiveFallbackShift != desiredImmersiveShift(width()))) {
 		animateImmersiveShiftTo(desiredImmersiveShift(width()));
 	}
 }
 
+void MainMenu::scheduleAccountsScrollSync(int delay) {
+	if (!_showFinished.current()
+		|| !accountsShown()
+		|| !profileBlockAtBottom()) {
+		_accountsScrollTimer.cancel();
+		return;
+	}
+	_accountsScrollTimer.callOnce(delay);
+}
+
+void MainMenu::syncAccountsScrollPosition() {
+	if (!_showFinished.current()
+		|| !accountsShown()
+		|| !profileBlockAtBottom()) {
+		return;
+	}
+	const auto target = _scroll->scrollTopMax();
+	if (_scroll->scrollTop() != target) {
+		_scroll->scrollToY(target);
+	}
+}
+
 void MainMenu::syncAccountsVisibility(bool shown, bool animated) {
-	_accounts->toggle(
-		shown,
-		animated ? anim::type::normal : anim::type::instant);
+	const auto type = animated ? anim::type::normal : anim::type::instant;
+	const auto bottom = profileBlockAtBottom();
+	_accounts->toggle(shown && !bottom, type);
+	_shadow->toggle(shown && !bottom, type);
+	_accountsBottom->toggle(shown && bottom, type);
+	_shadowBottom->toggle(shown && bottom, type);
 	_toggleAccounts->setToggled(shown);
+	_footer->setVisible(footerVisible());
+	updateInnerControlsGeometry();
+	if (!shown) {
+		_accountsScrollTimer.cancel();
+		return;
+	}
+	QTimer::singleShot(animated ? st::slideWrapDuration : 0, this, [=] {
+		if (profileBlockAtBottom() != bottom) {
+			return;
+		}
+		_footer->setVisible(footerVisible());
+		updateInnerControlsGeometry();
+		if (bottom) {
+			scheduleAccountsScrollSync();
+		} else {
+			_scroll->scrollToY(0);
+		}
+	});
 }
 
 void MainMenu::setupMenu() {
@@ -1176,23 +1223,16 @@ void MainMenu::setupMenu() {
 		hasLogsAction);
 	auto hasRenderedAction = false;
 	auto pendingSeparator = false;
-	auto hasLastSection = false;
-	auto lastSection = SideMenuSection::Default;
 	for (const auto &entry : layout) {
 		if (!entry.visible) {
 			continue;
 		} else if (entry.separator) {
 			pendingSeparator = hasRenderedAction;
-			hasLastSection = false;
 			continue;
 		}
 		const auto i = renderers.find(entry.id);
 		if (i == renderers.end()) {
 			continue;
-		}
-		const auto section = SideMenuSectionFor(entry.id);
-		if (hasLastSection && IsAstrogramBoundary(lastSection, section)) {
-			pendingSeparator = pendingSeparator || hasRenderedAction;
 		}
 		if (pendingSeparator) {
 			addSeparator();
@@ -1200,8 +1240,6 @@ void MainMenu::setupMenu() {
 		}
 		i->second();
 		hasRenderedAction = true;
-		hasLastSection = true;
-		lastSection = section;
 	}
 }
 
@@ -1246,18 +1284,25 @@ void MainMenu::updateControlsGeometry() {
 }
 
 void MainMenu::updateInnerControlsGeometry() {
-	const auto footerVisible = _footer->isVisible();
+	const auto showFooter = footerVisible();
+	if (_footer->isVisible() != showFooter) {
+		_footer->setVisible(showFooter);
+	}
+	const auto footerSpacing = showFooter ? st::mainMenuSkip : 0;
 	const auto contentHeight = _accounts->height()
 		+ _shadow->height()
-		+ st::mainMenuSkip
+		+ _shadowBottom->height()
+		+ _accountsBottom->height()
+		+ footerSpacing
 		+ _menu->height();
 	const auto available = height() - st::mainMenuCoverHeight - contentHeight;
-	const auto footerHeight = footerVisible
+	const auto footerHeight = showFooter
 		? std::max(available, st::mainMenuFooterHeightMin)
 		: 0;
 	if (_footer->height() != footerHeight) {
 		_footer->resize(_footer->width(), footerHeight);
 	}
+	scheduleAccountsScrollSync();
 }
 
 void MainMenu::chooseEmojiStatus() {

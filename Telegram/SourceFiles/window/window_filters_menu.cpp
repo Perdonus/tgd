@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h" // attentionBoxButton
 #include "styles/style_menu_icons.h"
 
+#include <algorithm>
+
 namespace Window {
 
 FiltersMenu::FiltersMenu(
@@ -64,6 +66,41 @@ FiltersMenu::FiltersMenu(
 
 FiltersMenu::~FiltersMenu() = default;
 
+bool FiltersMenu::hasLeadingSeparator() const {
+	const auto width = st::windowFiltersWidth;
+	const auto maxLeft = std::max(_parent->width() - width, 0);
+	return std::clamp(_left, 0, maxLeft) > 0;
+}
+
+bool FiltersMenu::hasTrailingSeparator() const {
+	const auto width = st::windowFiltersWidth;
+	const auto maxLeft = std::max(_parent->width() - width, 0);
+	const auto left = std::clamp(_left, 0, maxLeft);
+	return (left + width) < _parent->width();
+}
+
+void FiltersMenu::setLeft(int left) {
+	left = std::max(left, 0);
+	if (_left != left) {
+		_left = left;
+	}
+	updateGeometry();
+}
+
+void FiltersMenu::updateGeometry() {
+	const auto width = st::windowFiltersWidth;
+	const auto maxLeft = std::max(_parent->width() - width, 0);
+	const auto left = std::clamp(_left, 0, maxLeft);
+	const auto height = _parent->height();
+	_outer.setGeometry({ left, 0, width, height });
+	_menu.resizeToWidth(width);
+	_menu.move(0, 0);
+	_scroll.setGeometry(
+		{ 0, _menu.height(), width, height - _menu.height() });
+	_container->resizeToWidth(width);
+	_container->move(0, 0);
+}
+
 void FiltersMenu::setup() {
 	setupMainMenuIcon();
 	_menu.setAccessibleName(tr::lng_main_menu(tr::now));
@@ -76,18 +113,26 @@ void FiltersMenu::setup() {
 		p.setPen(Qt::NoPen);
 		p.setBrush(st::windowFiltersButton.textBg);
 		p.drawRect(clip);
+		const auto separatorColor = st::shadowFg;
+		if (hasLeadingSeparator()) {
+			p.fillRect(
+				QRect(0, clip.y(), st::lineWidth, clip.height()),
+				separatorColor);
+		}
+		if (hasTrailingSeparator()) {
+			p.fillRect(
+				QRect(
+					_outer.width() - st::lineWidth,
+					clip.y(),
+					st::lineWidth,
+					clip.height()),
+				separatorColor);
+		}
 	}, _outer.lifetime());
 
 	_parent->heightValue(
-	) | rpl::on_next([=](int height) {
-		const auto width = st::windowFiltersWidth;
-		_outer.setGeometry({ 0, 0, width, height });
-		_menu.resizeToWidth(width);
-		_menu.move(0, 0);
-		_scroll.setGeometry(
-			{ 0, _menu.height(), width, height - _menu.height() });
-		_container->resizeToWidth(width);
-		_container->move(0, 0);
+	) | rpl::on_next([=](int) {
+		updateGeometry();
 	}, _outer.lifetime());
 
 	auto premium = Data::AmPremiumValue(&_session->session());

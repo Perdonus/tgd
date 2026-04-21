@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_values.h"
 #include "info/profile/info_profile_badge.h"
 #include "lang/lang_keys.h"
+#include "lang/lang_instance.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/main_domain.h"
@@ -72,6 +73,35 @@ namespace {
 
 constexpr auto kSaveBioTimeout = 1000;
 constexpr auto kPlayStatusLimit = 2;
+
+[[nodiscard]] QString RuEn(const char *ru, const char *en) {
+	return Lang::GetInstance().id().startsWith(u"ru"_q, Qt::CaseInsensitive)
+		? QString::fromUtf8(ru)
+		: QString::fromUtf8(en);
+}
+
+[[nodiscard]] style::margins SectionTitlePadding() {
+	return QMargins(
+		st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+		0,
+		0,
+		0);
+}
+
+void AddSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		bool includeDivider = true) {
+	if (includeDivider) {
+		Ui::AddDivider(container);
+	}
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		rpl::single(title),
+		SectionTitlePadding());
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+}
 
 class ComposedBadge final : public Ui::RpWidget {
 public:
@@ -106,11 +136,13 @@ ComposedBadge::ComposedBadge(
 		this,
 		st::settingsInfoPeerBadge,
 		session,
+		session->user(),
 		Info::Profile::BadgeContentForPeer(session->user()),
 		nullptr,
 		std::move(animationPaused),
 		kPlayStatusLimit,
-		Info::Profile::BadgeType::Premium) {
+		Info::Profile::BadgeType::Premium,
+		true) {
 	if (hasUnread) {
 		_unread = CreateUnread(this, rpl::single(
 			rpl::empty
@@ -532,9 +564,6 @@ void SetupRows(
 			}, box->lifetime());
 		},
 		{ &st::menuIconUsername });
-
-	Ui::AddSkip(container);
-	Ui::AddDividerText(container, tr::lng_settings_username_about());
 }
 
 void SetupBio(
@@ -653,16 +682,14 @@ void SetupBio(
 		bio,
 		&self->session());
 	updated();
-
-	Ui::AddDividerText(container, tr::lng_settings_about_bio());
 }
 
 void SetupAccountsWrap(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<Window::SessionController*> controller) {
-	Ui::AddSkip(container);
-
+	AddSectionHeader(container, RuEn("Аккаунты", "Accounts"));
 	SetupAccounts(container, controller);
+	Ui::AddSkip(container);
 }
 
 [[nodiscard]] bool IsAltShift(Qt::KeyboardModifiers modifiers) {

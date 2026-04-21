@@ -267,7 +267,8 @@ struct StatusFields {
 		BadgeContentForPeer(peer),
 		VerifiedContentForPeer(peer)
 	) | rpl::map([](Badge::Content &&content, Badge::Content &&verified) {
-		if (verified.badge == BadgeType::Verified) {
+		if (content.badge == BadgeType::None
+			&& verified.badge == BadgeType::Verified) {
 			content.badge = BadgeType::Verified;
 		}
 		return content;
@@ -296,10 +297,13 @@ Item::Item(not_null<Ui::Menu::Menu*> parent, not_null<Data::Thread*> thread)
 		_top.get(),
 		st::settingsInfoPeerBadge,
 		_session,
+		_peer,
 		ContentForPeer(_peer),
 		nullptr,
 		nullptr,
-		1) {
+		1,
+		base::flags<Info::Profile::BadgeType>::from_raw(-1),
+		true) {
 	_chatStyle->apply(_theme.get());
 	setPointerCursor(false);
 	setMinWidth(st::previewMenu.menu.widthMin);

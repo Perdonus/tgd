@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_boxes.h"
 
+#include <QtWidgets/QAction>
 #include <QtCore/QPointer>
 
 #include <algorithm>
@@ -28,9 +29,10 @@ constexpr auto kStripHorizontalPadding = 10;
 constexpr auto kStripVerticalPadding = 8;
 constexpr auto kStripButtonSize = 34;
 constexpr auto kStripButtonSpacing = 8;
-constexpr auto kStripGapFromMenu = 8;
 constexpr auto kStripMaxButtons = 4;
 constexpr auto kStripRadius = 11;
+constexpr auto kStripGap = 0;
+constexpr auto kContextMenuActionIdProperty[] = "_astro_context_action_id";
 
 struct ContextIconStripButton {
 	QString id;
@@ -51,10 +53,10 @@ public:
 		setAttribute(Qt::WA_TranslucentBackground);
 		setAttribute(Qt::WA_NoSystemBackground);
 		setMouseTracking(true);
-		resize(widthForButtons(), heightForButtons());
+		resize(minimumWidthForButtons(), heightForButtons());
 	}
 
-	[[nodiscard]] int widthForButtons() const {
+	[[nodiscard]] int minimumWidthForButtons() const {
 		const auto count = int(_buttons.size());
 		if (!count) {
 			return 0;
@@ -74,10 +76,13 @@ protected:
 		Q_UNUSED(e);
 		auto p = QPainter(this);
 		p.setRenderHint(QPainter::Antialiasing);
-		const auto panel = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+		const auto panel = panelRect().adjusted(0, 0, -1, -1);
 		p.setPen(QPen(st::boxDividerBg, 1.0));
 		p.setBrush(st::windowBg);
-		p.drawRoundedRect(panel, kStripRadius, kStripRadius);
+		p.drawRoundedRect(
+			panel,
+			kStripRadius + 1,
+			kStripRadius + 1);
 		for (auto i = 0, count = int(_buttons.size()); i != count; ++i) {
 			const auto rect = buttonRect(i);
 			const auto hovered = (i == _hovered);
@@ -141,9 +146,24 @@ protected:
 	}
 
 private:
-	[[nodiscard]] QRect buttonRect(int index) const {
+	[[nodiscard]] int buttonsWidth() const {
+		return minimumWidthForButtons() - (kStripHorizontalPadding * 2);
+	}
+
+	[[nodiscard]] QRect panelRect() const {
+		const auto panelWidth = std::min(width(), minimumWidthForButtons());
 		return QRect(
-			kStripHorizontalPadding
+			std::max(0, (width() - panelWidth) / 2),
+			0,
+			panelWidth,
+			heightForButtons());
+	}
+
+	[[nodiscard]] QRect buttonRect(int index) const {
+		const auto panel = panelRect();
+		return QRect(
+			panel.x()
+				+ kStripHorizontalPadding
 				+ (index * (kStripButtonSize + kStripButtonSpacing)),
 			kStripVerticalPadding,
 			kStripButtonSize,
@@ -178,6 +198,12 @@ private:
 	int _pressed = -1;
 };
 
+[[nodiscard]] QString ContextMenuActionId(QAction *action) {
+	return action
+		? action->property(kContextMenuActionIdProperty).toString().trimmed()
+		: QString();
+}
+
 [[nodiscard]] std::vector<ContextIconStripButton> ResolveButtons(
 		const ContextMenuSurfaceLayout &layout,
 		const ContextMenuResolvedLayout &resolved) {
@@ -185,7 +211,6 @@ private:
 	for (const auto &action : resolved.actions) {
 		if (action.id.isEmpty()
 			|| !action.icon
-			|| !action.stripEligible
 			|| !action.trigger) {
 			continue;
 		}
@@ -193,15 +218,15 @@ private:
 	}
 
 	auto result = std::vector<ContextIconStripButton>();
-	result.reserve(std::min(kStripMaxButtons, int(layout.strip.size())));
+	result.reserve(kStripMaxButtons);
 	auto seen = base::flat_set<QString>();
-	for (const auto &entry : layout.strip) {
-		if (!entry.visible || seen.contains(entry.id)) {
-			continue;
+	const auto appendEntry = [&](const ContextMenuLayoutEntry &entry) {
+		if (!entry.visible || entry.id.isEmpty() || seen.contains(entry.id)) {
+			return false;
 		}
 		const auto it = available.find(entry.id);
 		if (it == available.end()) {
-			continue;
+			return false;
 		}
 		seen.emplace(entry.id);
 		result.push_back({
@@ -210,36 +235,89 @@ private:
 			.icon = it->second->icon,
 			.trigger = it->second->trigger,
 		});
-		if (int(result.size()) >= kStripMaxButtons) {
-			break;
+		return int(result.size()) >= kStripMaxButtons;
+	};
+	for (const auto &entry : layout.strip) {
+		if (appendEntry(entry)) {
+			return result;
 		}
 	}
 	if (!result.empty()) {
 		return result;
 	}
-	for (const auto &action : resolved.actions) {
-		if (action.id.isEmpty()
-			|| !action.icon
-			|| !action.stripEligible
-			|| !action.trigger
-			|| seen.contains(action.id)) {
-			continue;
-		}
-		seen.emplace(action.id);
-		result.push_back({
-			.id = action.id,
-			.text = action.text,
-			.icon = action.icon,
-			.trigger = action.trigger,
-		});
-		if (int(result.size()) >= kStripMaxButtons) {
-			break;
+	for (const auto &entry : layout.menu) {
+		if (appendEntry(entry)) {
+			return result;
 		}
 	}
 	return result;
 }
 
+void HideStripActionsInMenu(
+		not_null<Ui::PopupMenu*> menu,
+		const std::vector<ContextIconStripButton> &buttons) {
+	auto stripIds = base::flat_set<QString>();
+	for (const auto &button : buttons) {
+		if (!button.id.isEmpty()) {
+			stripIds.emplace(button.id);
+		}
+	}
+	if (stripIds.empty()) {
+		return;
+	}
+	for (const auto action : menu->actions()) {
+		if (!action || !action->isVisible()) {
+			continue;
+		}
+		const auto id = ContextMenuActionId(action);
+		if (!id.isEmpty() && stripIds.contains(id)) {
+			action->setVisible(false);
+		}
+	}
+	auto seenVisibleAction = false;
+	QAction *pendingSeparator = nullptr;
+	for (const auto action : menu->actions()) {
+		if (!action || !action->isVisible()) {
+			continue;
+		}
+		if (action->isSeparator()) {
+			if (!seenVisibleAction || pendingSeparator) {
+				action->setVisible(false);
+			} else {
+				pendingSeparator = action;
+			}
+			continue;
+		}
+		pendingSeparator = nullptr;
+		seenVisibleAction = true;
+	}
+	if (pendingSeparator) {
+		pendingSeparator->setVisible(false);
+	}
+}
+
 } // namespace
+
+void MarkContextMenuAction(QAction *action, const QString &id) {
+	if (!action || id.isEmpty()) {
+		return;
+	}
+	action->setProperty(kContextMenuActionIdProperty, id);
+}
+
+std::vector<QString> ResolveContextIconStripActionIds(
+		const ContextMenuSurfaceLayout &layout,
+		const ContextMenuResolvedLayout &resolved) {
+	const auto buttons = ResolveButtons(layout, resolved);
+	auto result = std::vector<QString>();
+	result.reserve(buttons.size());
+	for (const auto &button : buttons) {
+		if (!button.id.isEmpty()) {
+			result.push_back(button.id);
+		}
+	}
+	return result;
+}
 
 AttachContextIconStripResult AttachContextIconStripToMenu(
 		not_null<Ui::PopupMenu*> menu,
@@ -253,18 +331,20 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 	if (!menu->prepareGeometryFor(desiredPosition)) {
 		return AttachContextIconStripResult::Failed;
 	}
+	HideStripActionsInMenu(menu, buttons);
+	menu->prepareGeometryFor(desiredPosition);
 
 	const auto strip = Ui::CreateChild<ContextIconStrip>(
 		menu.get(),
 		menu,
 		std::move(buttons));
-	const auto addedHeight = kStripGapFromMenu + strip->heightForButtons();
+	const auto addedHeight = strip->heightForButtons();
 	const auto origin = menu->preparedOrigin();
 	const auto expandDown = (origin == Ui::PanelAnimation::Origin::TopLeft)
 		|| (origin == Ui::PanelAnimation::Origin::TopRight);
 	const auto applyGeometry = [=] {
 		const auto inner = menu->menu()->geometry();
-		const auto desiredHeight = inner.y() + inner.height() + addedHeight;
+		const auto desiredHeight = inner.y() + inner.height() + kStripGap + addedHeight;
 		if (menu->height() < desiredHeight) {
 			const auto add = desiredHeight - menu->height();
 			const auto updated = menu->geometry().marginsAdded({
@@ -276,11 +356,10 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 			menu->setFixedSize(updated.size());
 			menu->setGeometry(updated);
 		}
-		const auto stripWidth = strip->widthForButtons();
 		strip->setGeometry(
-			inner.x() + std::max(0, (inner.width() - stripWidth) / 2),
-			inner.y() + inner.height() + kStripGapFromMenu,
-			stripWidth,
+			inner.x(),
+			inner.y() + inner.height() + kStripGap,
+			inner.width(),
 			strip->heightForButtons());
 	};
 	applyGeometry();

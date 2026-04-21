@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "base/call_delayed.h"
 #include "core/application.h"
+#include "core/astrogram_channel_registry.h"
 #include "core/launcher.h"
 #include "core/update_checker.h"
 #include "data/data_changes.h"
@@ -96,11 +97,7 @@ constexpr auto kNoPluginsArgument = "-noplugins";
 constexpr auto kRecoveryDuckSize = 72;
 constexpr auto kMaxPluginLogBytes = qsizetype(25 * 1024 * 1024);
 constexpr auto kMaxPluginLogBackups = 5;
-constexpr auto kServerPluginTrustSuccessTtl = crl::time(5 * 60 * 1000);
-constexpr auto kServerPluginTrustRetryTtl = crl::time(15 * 1000);
-constexpr auto kServerPluginTrustRetryMaxTtl = crl::time(5 * 60 * 1000);
-constexpr auto kServerPluginTrustChangesRetryTtl = crl::time(5 * 1000);
-constexpr auto kServerPluginTrustChangesLongPollSeconds = 25;
+constexpr auto kRegistryPluginTrustSuccessTtl = crl::time(5 * 60 * 1000);
 
 [[nodiscard]] bool UseRussianPluginUi() {
 	return Lang::LanguageIdOrDefault(Lang::Id()).startsWith(u"ru"_q);
@@ -140,58 +137,6 @@ constexpr auto kServerPluginTrustChangesLongPollSeconds = 25;
 		}
 	}
 	return value;
-}
-
-[[nodiscard]] crl::time ServerPluginTrustRetryDelay(int retryCount) {
-	auto delay = kServerPluginTrustRetryTtl;
-	for (auto i = 1; (i < retryCount) && (delay < kServerPluginTrustRetryMaxTtl); ++i) {
-		delay = std::min(delay * 2, kServerPluginTrustRetryMaxTtl);
-	}
-	return delay;
-}
-
-[[nodiscard]] bool JsonTruthy(const QJsonValue &value) {
-	if (value.isBool()) {
-		return value.toBool();
-	} else if (value.isDouble()) {
-		return (value.toInt() != 0);
-	} else if (value.isString()) {
-		const auto lowered = value.toString().trimmed().toLower();
-		return (lowered == u"1"_q
-			|| lowered == u"true"_q
-			|| lowered == u"yes"_q
-			|| lowered == u"on"_q
-			|| lowered == u"enabled"_q
-			|| lowered == u"active"_q
-			|| lowered == u"verified"_q
-			|| lowered == u"trusted"_q
-			|| lowered == u"confirmed"_q);
-	}
-	return false;
-}
-
-[[nodiscard]] QString JsonStringFirstOf(
-		const QJsonObject &object,
-		std::initializer_list<QString> keys) {
-	for (const auto &key : keys) {
-		const auto value = object.value(key).toString().trimmed();
-		if (!value.isEmpty()) {
-			return value;
-		}
-	}
-	return QString();
-}
-
-[[nodiscard]] int64 JsonInt64FirstOf(
-		const QJsonObject &object,
-		std::initializer_list<QString> keys) {
-	for (const auto &key : keys) {
-		const auto value = object.value(key).toVariant().toLongLong();
-		if (value != 0) {
-			return value;
-		}
-	}
-	return 0;
 }
 
 [[nodiscard]] bool ShouldMirrorPluginEventToClient(
@@ -1151,39 +1096,61 @@ struct PluginSourceTrustSnapshot {
 	QString channelUsername;
 };
 
-constexpr auto kAstrogramServerBaseUrlFallback = "https://astrogram.su/api/astrogram";
-
-[[nodiscard]] QString NormalizeAstrogramServerBaseUrl(QString value) {
-	value = value.trimmed();
-	while (value.endsWith(u'/')) {
-		value.chop(1);
+[[nodiscard]] QString PluginSourceRegistryLabel(
+		const QString &channelTitle,
+		const QString &channelUsername,
+		int64 channelId) {
+	if (!channelTitle.trimmed().isEmpty()) {
+		return channelTitle.trimmed();
 	}
-	return value;
+	if (!channelUsername.trimmed().isEmpty()) {
+		return u'@' + channelUsername.trimmed();
+	}
+	if (channelId) {
+		return QString::number(channelId);
+	}
+	return QString::number(
+		Core::AstrogramChannelRegistry::details::kRegistryChannelFullId);
 }
 
-[[nodiscard]] QString AstrogramServerBaseUrl(Main::Session *session) {
-	if (session) {
-		for (const auto &key : {
-			u"astrogram_server_base_url"_q,
-			u"astrogram_badge_server_base_url"_q,
-			u"astrogram_server_url"_q,
-		}) {
-			const auto value = NormalizeAstrogramServerBaseUrl(
-				session->appConfig().get<QString>(key, QString()));
-			if (!value.isEmpty()) {
-				return value;
-			}
-		}
-	}
-	return QString::fromLatin1(kAstrogramServerBaseUrlFallback);
-}
-
-[[nodiscard]] QString AstrogramServerApiBaseUrl(Main::Session *session) {
-	auto base = AstrogramServerBaseUrl(session);
-	if (!base.endsWith(u"/v1"_q)) {
-		base += u"/v1"_q;
-	}
-	return base;
+[[nodiscard]] PluginSourceTrustSnapshot RegistryPluginSourceTrustSnapshot(
+		Main::Session *session,
+		const QString &sha256,
+		int64 sourceChannelIdHint = 0) {
+	using Registry = Core::AstrogramChannelRegistry::Registry;
+	const auto registry = Registry::Instance().pluginTrustSnapshot(
+		session,
+		sha256,
+		sourceChannelIdHint);
+	auto result = PluginSourceTrustSnapshot();
+	result.verified = registry.verified;
+	result.trustText = registry.loading
+		? u"loading"_q
+		: (registry.verified ? u"verified"_q : u"unverified"_q);
+	result.trustReason = !session
+		? u"no-active-session"_q
+		: registry.loading
+		? u"channel-feed-refreshing"_q
+		: (registry.reason == u"channel-feed-refresh-failed"_q)
+		? u"channel-feed-refresh-failed"_q
+		: (registry.reason == u"channel-feed-exact-sha256"_q)
+		? u"exact-sha256-match"_q
+		: (registry.reason == u"channel-feed-trusted-source"_q)
+		? u"trusted-source-channel"_q
+		: u"channel-feed-no-match"_q;
+	result.channelId = registry.channelId;
+	result.messageId = registry.messageId;
+	result.channelTitle = registry.channelTitle;
+	result.channelUsername = registry.channelUsername;
+	result.trustDetails = registry.verified
+		? PluginSourceRegistryLabel(
+			result.channelTitle,
+			result.channelUsername,
+			result.channelId)
+		: (result.trustReason == u"channel-feed-refresh-failed"_q)
+		? registry.details
+		: QString();
+	return result;
 }
 
 [[nodiscard]] bool SamePluginSourceTrustSnapshot(
@@ -1197,121 +1164,6 @@ constexpr auto kAstrogramServerBaseUrlFallback = "https://astrogram.su/api/astro
 		&& a.messageId == b.messageId
 		&& a.channelTitle == b.channelTitle
 		&& a.channelUsername == b.channelUsername;
-}
-
-[[nodiscard]] QUrl BuildPluginSourceTrustUrl(
-		Main::Session *session,
-		const QString &sha256,
-		const QString &pluginId) {
-	auto url = QUrl(AstrogramServerApiBaseUrl(session) + u"/plugins/"_q + sha256);
-	auto query = QUrlQuery();
-	if (!pluginId.trimmed().isEmpty()) {
-		query.addQueryItem(u"plugin_id"_q, pluginId.trimmed());
-	}
-	url.setQuery(query);
-	return url;
-}
-
-[[nodiscard]] QUrl BuildPluginSourceTrustChangesUrl(
-		Main::Session *session,
-		int sinceRevision) {
-	auto url = QUrl(AstrogramServerApiBaseUrl(session) + u"/changes"_q);
-	auto query = QUrlQuery();
-	query.addQueryItem(
-		u"since_revision"_q,
-		QString::number(std::max(sinceRevision, 0)));
-	query.addQueryItem(
-		u"timeout"_q,
-		QString::number(kServerPluginTrustChangesLongPollSeconds));
-	url.setQuery(query);
-	return url;
-}
-
-[[nodiscard]] std::optional<PluginSourceTrustSnapshot> ParsePluginSourceTrustResponse(
-		const QJsonObject &root) {
-	auto payload = root;
-	for (const auto &key : { u"data"_q, u"result"_q, u"payload"_q }) {
-		if (const auto value = root.value(key); value.isObject()) {
-			payload = value.toObject();
-			break;
-		}
-	}
-	const auto pluginRecord = payload.value(u"plugin_record"_q).toObject();
-	const auto trustedSource = payload.value(u"trusted_source"_q).toObject();
-	const auto status = JsonStringFirstOf(
-		payload,
-		{ u"status"_q, u"trust_status"_q, u"source_status"_q });
-	const auto verified = JsonTruthy(payload.value(u"verified"_q))
-		|| JsonTruthy(payload.value(u"trusted"_q))
-		|| (status == u"verified"_q);
-	const auto found = payload.contains(u"found"_q)
-		? JsonTruthy(payload.value(u"found"_q))
-		: !pluginRecord.isEmpty();
-
-	auto result = PluginSourceTrustSnapshot();
-	result.verified = verified;
-	result.trustText = JsonStringFirstOf(
-		payload,
-		{ u"badge"_q, u"badge_text"_q, u"sourceTrustText"_q });
-	result.trustReason = JsonStringFirstOf(
-		payload,
-		{ u"reason"_q, u"sourceTrustReason"_q });
-	result.trustDetails = JsonStringFirstOf(
-		payload,
-		{ u"details"_q, u"sourceTrustDetails"_q });
-
-	if (result.trustReason.isEmpty()) {
-		result.trustReason = verified
-			? u"exact-sha256-trusted-record"_q
-			: (status == u"known_record"_q)
-			? u"hash-found-in-untrusted-channel"_q
-			: found
-			? u"hash-found-in-untrusted-channel"_q
-			: u"hash-not-in-trusted-records"_q;
-	}
-	if (result.trustText.isEmpty()) {
-		result.trustText = verified ? u"verified"_q : u"unverified"_q;
-	}
-
-	result.channelId = JsonInt64FirstOf(
-		trustedSource,
-		{ u"channel_id"_q, u"channelId"_q });
-	if (!result.channelId) {
-		result.channelId = JsonInt64FirstOf(
-			payload,
-			{ u"channel_id"_q, u"channelId"_q });
-	}
-	if (!result.channelId) {
-		result.channelId = JsonInt64FirstOf(
-			pluginRecord,
-			{ u"channel_id"_q, u"channelId"_q });
-	}
-	result.messageId = JsonInt64FirstOf(
-		pluginRecord,
-		{ u"message_id"_q, u"messageId"_q, u"post_id"_q, u"postId"_q });
-	if (!result.messageId) {
-		result.messageId = JsonInt64FirstOf(
-			payload,
-			{ u"message_id"_q, u"messageId"_q, u"post_id"_q, u"postId"_q });
-	}
-	result.channelTitle = JsonStringFirstOf(
-		trustedSource,
-		{ u"title"_q, u"name"_q, u"channel_title"_q, u"channelTitle"_q });
-	result.channelUsername = JsonStringFirstOf(
-		trustedSource,
-		{ u"username"_q, u"channel_username"_q, u"channelUsername"_q });
-
-	if (result.trustDetails.isEmpty()) {
-		result.trustDetails = JsonStringFirstOf(
-			pluginRecord,
-			{ u"label"_q, u"title"_q, u"name"_q });
-	}
-	if (result.trustDetails.isEmpty()) {
-		result.trustDetails = JsonStringFirstOf(
-			trustedSource,
-			{ u"label"_q, u"title"_q, u"name"_q });
-	}
-	return result;
 }
 
 QString RuntimeSourceBadgeKind(const PluginState &state) {
@@ -1574,14 +1426,14 @@ void Manager::applyPluginSourceTrustState(
 	if (it == _pluginSourceTrustBySha.cend() || !it.value()) {
 		state.sourceTrustLoading = true;
 		state.sourceTrustText = u"loading"_q;
-		state.sourceTrustReason = u"server-refreshing"_q;
+		state.sourceTrustReason = u"channel-feed-refreshing"_q;
 		return;
 	}
 	const auto &entry = *it.value();
 	if (!entry.resolved) {
 		state.sourceTrustLoading = true;
 		state.sourceTrustText = u"loading"_q;
-		state.sourceTrustReason = u"server-refreshing"_q;
+		state.sourceTrustReason = u"channel-feed-refreshing"_q;
 		return;
 	}
 	state.sourceVerified = entry.snapshot.verified;
@@ -1611,156 +1463,34 @@ void Manager::requestPluginSourceTrustIfNeeded(
 		entry->lastPluginId = pluginId.trimmed();
 	}
 	requestPluginSourceTrustFeedIfNeeded();
-	if (entry->inFlight) {
-		return;
-	}
-	if (entry->nextRequestAt > crl::now()) {
-		if (!entry->refreshScheduled) {
-			entry->refreshScheduled = true;
-			const auto delay = std::max(entry->nextRequestAt - crl::now(), crl::time(0));
-			base::call_delayed(delay, this, [=] {
-				const auto it = _pluginSourceTrustBySha.constFind(sha256);
-				if (it == _pluginSourceTrustBySha.cend() || !it.value()) {
-					return;
-				}
-				it.value()->refreshScheduled = false;
-				requestPluginSourceTrustIfNeeded(sha256, pluginId);
-			});
-		}
-		return;
-	}
-	if (!_pluginSourceTrustManager) {
-		_pluginSourceTrustManager = std::make_unique<QNetworkAccessManager>();
-	}
-
-	entry->inFlight = true;
+	const auto previous = entry->snapshot;
+	const auto hadResolved = entry->resolved;
+	entry->inFlight = false;
 	entry->refreshScheduled = false;
-
-	const auto url = BuildPluginSourceTrustUrl(activeSession(), sha256, pluginId);
+	entry->retryCount = 0;
+	entry->nextRequestAt = crl::now() + kRegistryPluginTrustSuccessTtl;
+	entry->snapshot = RegistryPluginSourceTrustSnapshot(
+		activeSession(),
+		sha256,
+		entry->snapshot.channelId);
+	entry->resolved = (entry->snapshot.trustText != u"loading"_q);
+	const auto changed = !hadResolved
+		|| !SamePluginSourceTrustSnapshot(previous, entry->snapshot);
 	logEvent(
 		u"plugin-source-trust"_q,
-		u"request-start"_q,
+		u"request-finished"_q,
 		QJsonObject{
 			{ u"pluginId"_q, pluginId },
 			{ u"sha256"_q, sha256 },
-			{ u"url"_q, url.toString(QUrl::FullyEncoded) },
+			{ u"verified"_q, entry->snapshot.verified },
+			{ u"loading"_q, entry->snapshot.trustText == u"loading"_q },
+			{ u"reason"_q, entry->snapshot.trustReason },
+			{ u"channelId"_q, QString::number(entry->snapshot.channelId) },
+			{ u"messageId"_q, QString::number(entry->snapshot.messageId) },
 		});
-
-	QNetworkRequest request(url);
-	request.setAttribute(
-		QNetworkRequest::RedirectPolicyAttribute,
-		QNetworkRequest::NoLessSafeRedirectPolicy);
-	request.setRawHeader("Accept", "application/json");
-	request.setRawHeader("User-Agent", "AstrogramDesktop");
-	request.setRawHeader("Cache-Control", "no-cache");
-	auto *reply = _pluginSourceTrustManager->get(request);
-	QObject::connect(
-		reply,
-		&QNetworkReply::finished,
-		this,
-		[=] {
-			const auto it = _pluginSourceTrustBySha.find(sha256);
-			if (it == _pluginSourceTrustBySha.end() || !it.value()) {
-				reply->deleteLater();
-				return;
-			}
-			const auto entry = it.value();
-			entry->inFlight = false;
-
-			const auto previous = entry->snapshot;
-			const auto hadResolved = entry->resolved;
-			auto changed = false;
-			auto retryReason = QString();
-			auto nextRequestAt = crl::now() + kServerPluginTrustSuccessTtl;
-			const auto statusCode = reply->attribute(
-				QNetworkRequest::HttpStatusCodeAttribute).toInt();
-			const auto body = reply->readAll();
-
-			if (reply->error() == QNetworkReply::NoError) {
-				const auto parsed = QJsonDocument::fromJson(body);
-				if (parsed.isObject()) {
-					if (const auto trust = ParsePluginSourceTrustResponse(parsed.object())) {
-						entry->snapshot = *trust;
-						entry->resolved = true;
-						entry->retryCount = 0;
-						changed = !hadResolved || !SamePluginSourceTrustSnapshot(previous, entry->snapshot);
-						logEvent(
-							u"plugin-source-trust"_q,
-							u"request-finished"_q,
-							QJsonObject{
-								{ u"pluginId"_q, pluginId },
-								{ u"sha256"_q, sha256 },
-								{ u"http"_q, statusCode },
-								{ u"verified"_q, entry->snapshot.verified },
-								{ u"reason"_q, entry->snapshot.trustReason },
-								{ u"channelId"_q, QString::number(entry->snapshot.channelId) },
-								{ u"messageId"_q, QString::number(entry->snapshot.messageId) },
-							});
-					} else {
-						retryReason = u"invalid-response"_q;
-					}
-				} else {
-					retryReason = u"invalid-json"_q;
-				}
-			} else {
-				retryReason = reply->errorString();
-			}
-
-			if (!retryReason.isEmpty()) {
-				auto fallback = previous;
-				fallback.verified = false;
-				fallback.trustText = u"unverified"_q;
-				fallback.trustReason = u"server-request-failed"_q;
-				fallback.trustDetails = retryReason;
-				fallback.channelId = 0;
-				fallback.messageId = 0;
-				fallback.channelTitle.clear();
-				fallback.channelUsername.clear();
-				entry->snapshot = fallback;
-				entry->resolved = true;
-				entry->retryCount = std::min(entry->retryCount + 1, 16);
-				nextRequestAt = crl::now() + ServerPluginTrustRetryDelay(entry->retryCount);
-				changed = !hadResolved || !SamePluginSourceTrustSnapshot(previous, entry->snapshot);
-				logEvent(
-					u"plugin-source-trust"_q,
-					u"request-failed"_q,
-					QJsonObject{
-						{ u"pluginId"_q, pluginId },
-						{ u"sha256"_q, sha256 },
-						{ u"http"_q, statusCode },
-						{ u"reason"_q, retryReason },
-					});
-			}
-
-			entry->nextRequestAt = nextRequestAt;
-			if (!entry->refreshScheduled) {
-				entry->refreshScheduled = true;
-				const auto delay = std::max(entry->nextRequestAt - crl::now(), crl::time(0));
-				base::call_delayed(delay, this, [=] {
-					const auto refreshIt = _pluginSourceTrustBySha.constFind(sha256);
-					if (refreshIt == _pluginSourceTrustBySha.cend() || !refreshIt.value()) {
-						return;
-					}
-					refreshIt.value()->refreshScheduled = false;
-					requestPluginSourceTrustIfNeeded(sha256, pluginId);
-				});
-			}
-			if (changed) {
-				notifyStateChanged(u"plugin-source-trust-refresh"_q, pluginId, false, false);
-			}
-			reply->deleteLater();
-		});
-}
-
-void Manager::schedulePluginSourceTrustFeedRequest(crl::time delay) {
-	if (_pluginSourceTrustFeedScheduled) {
-		return;
+	if (changed) {
+		notifyStateChanged(u"plugin-source-trust-refresh"_q, pluginId, false, false);
 	}
-	_pluginSourceTrustFeedScheduled = true;
-	base::call_delayed(std::max(delay, crl::time(0)), this, [=] {
-		_pluginSourceTrustFeedScheduled = false;
-		requestPluginSourceTrustFeedIfNeeded();
-	});
 }
 
 void Manager::invalidatePluginSourceTrustEntry(
@@ -1774,7 +1504,7 @@ void Manager::invalidatePluginSourceTrustEntry(
 	if (!entry->lastPluginId.trimmed().isEmpty()) {
 		logEvent(
 			u"plugin-source-trust"_q,
-			u"server-change"_q,
+			u"channel-feed-change"_q,
 			QJsonObject{
 				{ u"pluginId"_q, entry->lastPluginId },
 				{ u"sha256"_q, sha256 },
@@ -1786,7 +1516,7 @@ void Manager::invalidatePluginSourceTrustEntry(
 	entry->retryCount = 0;
 	entry->refreshScheduled = false;
 	notifyStateChanged(
-		u"plugin-source-trust-server-change"_q,
+		u"plugin-source-trust-feed-change"_q,
 		entry->lastPluginId,
 		false,
 		false);
@@ -1794,111 +1524,11 @@ void Manager::invalidatePluginSourceTrustEntry(
 }
 
 void Manager::requestPluginSourceTrustFeedIfNeeded() {
-	if (_pluginSourceTrustFeedInFlight || _pluginSourceTrustBySha.isEmpty()) {
+	const auto session = activeSession();
+	if (!session || _pluginSourceTrustBySha.isEmpty()) {
 		return;
 	}
-	if (!_pluginSourceTrustManager) {
-		_pluginSourceTrustManager = std::make_unique<QNetworkAccessManager>();
-	}
-	_pluginSourceTrustFeedInFlight = true;
-	const auto url = BuildPluginSourceTrustChangesUrl(
-		activeSession(),
-		_pluginSourceTrustRevision);
-	logEvent(
-		u"plugin-source-trust"_q,
-		u"changes-feed-start"_q,
-		QJsonObject{
-			{ u"revision"_q, _pluginSourceTrustRevision },
-			{ u"trackedEntries"_q, int(_pluginSourceTrustBySha.size()) },
-			{ u"url"_q, url.toString(QUrl::FullyEncoded) },
-		});
-
-	QNetworkRequest request(url);
-	request.setAttribute(
-		QNetworkRequest::RedirectPolicyAttribute,
-		QNetworkRequest::NoLessSafeRedirectPolicy);
-	request.setRawHeader("Accept", "application/json");
-	request.setRawHeader("User-Agent", "AstrogramDesktop");
-	request.setRawHeader("Cache-Control", "no-cache");
-	auto *reply = _pluginSourceTrustManager->get(request);
-	QObject::connect(
-		reply,
-		&QNetworkReply::finished,
-		this,
-		[=] {
-			_pluginSourceTrustFeedInFlight = false;
-
-			auto delay = crl::time(0);
-			auto reason = QString(u"success-refresh"_q);
-			auto success = false;
-			auto changedEntries = 0;
-			const auto statusCode = reply->attribute(
-				QNetworkRequest::HttpStatusCodeAttribute).toInt();
-			const auto body = reply->readAll();
-
-			if (reply->error() == QNetworkReply::NoError) {
-				const auto parsed = QJsonDocument::fromJson(body);
-				if (parsed.isObject()) {
-					const auto root = parsed.object();
-					_pluginSourceTrustRevision = std::max(
-						_pluginSourceTrustRevision,
-						root.value(u"revision"_q).toInt(_pluginSourceTrustRevision));
-					const auto changes = root.value(u"changes"_q).toObject();
-					auto shasToRefresh = QSet<QString>();
-					const auto pluginChanges = changes.value(u"plugin_records"_q).toArray();
-					for (const auto &change : pluginChanges) {
-						if (!change.isObject()) {
-							continue;
-						}
-						const auto sha = NormalizeSha256Hash(
-							JsonStringFirstOf(
-								change.toObject(),
-								{ u"sha256"_q }));
-						if (!sha.isEmpty() && _pluginSourceTrustBySha.contains(sha)) {
-							shasToRefresh.insert(sha);
-						}
-					}
-					if (!changes.value(u"trusted_sources"_q).toArray().isEmpty()) {
-						for (auto i = _pluginSourceTrustBySha.cbegin();
-							i != _pluginSourceTrustBySha.cend();
-							++i) {
-							shasToRefresh.insert(i.key());
-						}
-					}
-					for (const auto &sha : shasToRefresh) {
-						++changedEntries;
-						invalidatePluginSourceTrustEntry(sha, u"server-change"_q);
-					}
-					success = true;
-					logEvent(
-						u"plugin-source-trust"_q,
-						u"changes-feed-finished"_q,
-						QJsonObject{
-							{ u"http"_q, statusCode },
-							{ u"revision"_q, _pluginSourceTrustRevision },
-							{ u"changed"_q, root.value(u"changed"_q).toBool() },
-							{ u"refreshedEntries"_q, changedEntries },
-						});
-				}
-			}
-			if (!success) {
-				delay = kServerPluginTrustChangesRetryTtl;
-				reason = reply->error() == QNetworkReply::NoError
-					? u"invalid-response"_q
-					: reply->errorString();
-				logEvent(
-					u"plugin-source-trust"_q,
-					u"changes-feed-failed"_q,
-					QJsonObject{
-						{ u"http"_q, statusCode },
-						{ u"reason"_q, reason },
-						{ u"body"_q, CompactClientLogText(QString::fromUtf8(body)) },
-					});
-			}
-
-			schedulePluginSourceTrustFeedRequest(delay);
-			reply->deleteLater();
-		});
+	Core::AstrogramChannelRegistry::Registry::Instance().ensureLoaded(session);
 }
 
 void Manager::loadRecoveryState() {
@@ -2338,6 +1968,10 @@ rpl::producer<ManagerStateChange> Manager::stateChanges() const {
 	return _stateChanges.events();
 }
 
+bool Manager::uiTransientPluginsActive() const {
+	return _uiTransientPluginsActive;
+}
+
 bool Manager::safeModeEnabled() const {
 	if (CommandLineSafeModeRequested()) {
 		return true;
@@ -2713,7 +2347,7 @@ QByteArray Manager::processRuntimeApiRequest(
 				{ u"unverifiedSources"_q, unverifiedSourceCount },
 			} },
 			{ u"trustedSources"_q, QJsonObject{
-				{ u"serverBacked"_q, true },
+				{ u"channelRegistryBacked"_q, true },
 				{ u"cacheEntries"_q, int(_pluginSourceTrustBySha.size()) },
 			} },
 		});
@@ -6764,6 +6398,7 @@ void Manager::updateMessageObserverSubscriptions() {
 
 void Manager::handleActiveSessionChanged(Main::Session *session) {
 	_activeSession = session;
+	_pluginSourceTrustLifetime.destroy();
 	logEvent(
 		u"session"_q,
 		u"active-changed"_q,
@@ -6819,6 +6454,26 @@ void Manager::handleActiveSessionChanged(Main::Session *session) {
 				u"Session callback плагина завершился с ошибкой."_q));
 			finishRecoveryOperation();
 		}
+	}
+	if (session) {
+		Core::AstrogramChannelRegistry::Registry::Instance().updates(session)
+		| rpl::on_next([=] {
+			for (auto i = _pluginSourceTrustBySha.cbegin();
+				i != _pluginSourceTrustBySha.cend();
+				++i) {
+				invalidatePluginSourceTrustEntry(
+					i.key(),
+					u"channel-feed-change"_q);
+			}
+		}, _pluginSourceTrustLifetime);
+	}
+	for (auto i = _pluginSourceTrustBySha.cbegin();
+		i != _pluginSourceTrustBySha.cend();
+		++i) {
+		if (!i.value()) {
+			continue;
+		}
+		invalidatePluginSourceTrustEntry(i.key(), u"session-change"_q);
 	}
 	updateMessageObserverSubscriptions();
 }

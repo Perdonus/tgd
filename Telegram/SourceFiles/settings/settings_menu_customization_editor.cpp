@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "settings/settings_common.h"
 #include "history/view/history_view_context_menu.h"
+#include "base/flat_set.h"
 #include "menu/menu_customization.h"
 #include "core/application.h"
 #include "core/launcher.h"
@@ -248,6 +249,7 @@ struct EntryDescriptor {
 	QColor color;
 };
 
+
 struct SideMenuLayoutStats {
 	int visibleActions = 0;
 	int hiddenActions = 0;
@@ -349,6 +351,7 @@ struct ContextLayoutStats {
 		surface);
 	return ComputeContextLayoutStats(surfaceLayout.menu, surfaceLayout.strip);
 }
+
 
 [[nodiscard]] EntryDescriptor DescribeEntry(
 		const Menu::Customization::SideMenuEntry &entry,
@@ -1096,7 +1099,7 @@ protected:
 				selectedMeta.subtitle
 					+ u" · "_q
 					+ (selectedHidden
-						? RuEn("restore-tray", "restore tray")
+						? RuEn("скрыто снизу", "hidden below")
 						: RuEn("live preview", "live preview")),
 				Qt::ElideRight,
 				focusRect.width() - 62);
@@ -1499,8 +1502,8 @@ protected:
 				emptyRect.adjusted(18, 34, -18, -12),
 				Qt::AlignLeft | Qt::AlignTop,
 				RuEn(
-					"Ниже остаётся restore-tray: можно вернуть любой скрытый пункт одним нажатием или сразу восстановить всё меню.",
-					"The restore tray stays below: you can bring back any hidden item with one click or restore the whole menu at once."));
+					"Ниже остаются скрытые пункты: можно вернуть любой из них одним нажатием или сразу восстановить всё меню.",
+					"Hidden items stay below: you can bring back any of them with one click or restore the whole menu at once."));
 		} else {
 			for (const auto index : visible) {
 				if (index == _draggingRow) {
@@ -1542,8 +1545,8 @@ protected:
 				QRect(0, hiddenSectionTop(), width(), 18),
 				Qt::AlignLeft | Qt::AlignVCenter,
 				RuEn(
-					"Скрытые элементы (%1): restore-tray",
-					"Hidden items (%1): restore tray").arg(hiddenCount));
+					"Скрытые пункты (%1)",
+					"Hidden items (%1)").arg(hiddenCount));
 			for (const auto &chip : chips) {
 				const auto hovered = chip.restoreAll
 					? _hoveredRestoreAll
@@ -1762,8 +1765,9 @@ private:
 		const auto usableWidth = std::max(availableWidth, 120);
 		const auto fm = QFontMetrics(st::normalFont->f);
 		auto pushChip = [&](int index, QString label, QColor color, bool restoreAll) {
+			label = fm.elidedText(label, Qt::ElideRight, 170);
 			auto chipWidth = std::min(
-				std::max(96, fm.horizontalAdvance(label) + 28),
+				std::max(82, fm.horizontalAdvance(label) + 24),
 				usableWidth);
 			auto x = 0;
 			auto y = hiddenSectionTop() + 24;
@@ -2142,9 +2146,1205 @@ private:
 	int _dragGrabOffsetY = 0;
 };
 
+[[nodiscard]] std::vector<Menu::Customization::PeerMenuEntry>
+DefaultThreeDotsMenuLayout() {
+	using namespace Menu::Customization;
+	return {
+		{ QString::fromLatin1(PeerMenuItemId::NewWindow), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ToggleMute), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::TogglePin), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ToggleUnreadMark), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ToggleArchive), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::SeparatorPrimary), true, true },
+		{ QString::fromLatin1(PeerMenuItemId::CreateTopic), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::SeparatorSecondary), true, true },
+		{ QString::fromLatin1(PeerMenuItemId::Info), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ViewAsTopics), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ManageChat), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::NewMembers), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ViewStatistics), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::StoryArchive), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::SupportInfo), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::BoostChat), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::VideoChat), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::CreatePoll), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::CreateTodoList), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ThemeEdit), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ViewDiscussion), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::DirectMessages), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ExportChat), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::Translate), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ToggleFolder), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::DeletedMessages), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::BlockUser), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::SeparatorDanger), true, true },
+		{ QString::fromLatin1(PeerMenuItemId::Report), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::ClearHistory), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::DeleteChat), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::LeaveChat), true, false },
+		{ QString::fromLatin1(PeerMenuItemId::JoinChat), true, false },
+	};
+}
+
+[[nodiscard]] const style::icon *ThreeDotsActionIcon(const QString &id) {
+	namespace Id = Menu::Customization::PeerMenuItemId;
+	if (id == QString::fromLatin1(Id::NewWindow)) {
+		return &st::menuIconNewWindow;
+	} else if (id == QString::fromLatin1(Id::ToggleMute)) {
+		return &st::menuIconMute;
+	} else if (id == QString::fromLatin1(Id::TogglePin)) {
+		return &st::menuIconPin;
+	} else if (id == QString::fromLatin1(Id::ToggleUnreadMark)) {
+		return &st::menuIconMarkUnread;
+	} else if (id == QString::fromLatin1(Id::ToggleArchive)) {
+		return &st::menuIconArchive;
+	} else if (id == QString::fromLatin1(Id::Info)) {
+		return &st::menuIconInfo;
+	} else if (id == QString::fromLatin1(Id::ViewAsMessages)) {
+		return &st::menuIconAsMessages;
+	} else if (id == QString::fromLatin1(Id::ViewAsTopics)) {
+		return &st::menuIconAsTopics;
+	} else if (id == QString::fromLatin1(Id::SearchTopics)) {
+		return &st::menuIconSearch;
+	} else if (id == QString::fromLatin1(Id::ManageChat)
+		|| id == QString::fromLatin1(Id::ManageTopic)) {
+		return &st::menuIconManage;
+	} else if (id == QString::fromLatin1(Id::SupportInfo)) {
+		return &st::menuIconInfo;
+	} else if (id == QString::fromLatin1(Id::StoryArchive)) {
+		return &st::menuIconStoriesArchiveSection;
+	} else if (id == QString::fromLatin1(Id::BoostChat)) {
+		return &st::menuIconBoosts;
+	} else if (id == QString::fromLatin1(Id::VideoChat)) {
+		return &st::menuIconVideoChat;
+	} else if (id == QString::fromLatin1(Id::CreatePoll)) {
+		return &st::menuIconCreatePoll;
+	} else if (id == QString::fromLatin1(Id::CreateTodoList)) {
+		return &st::menuIconCreateTodoList;
+	} else if (id == QString::fromLatin1(Id::ThemeEdit)) {
+		return &st::menuIconChangeColors;
+	} else if (id == QString::fromLatin1(Id::ViewDiscussion)
+		|| id == QString::fromLatin1(Id::CreateTopic)) {
+		return &st::menuIconDiscussion;
+	} else if (id == QString::fromLatin1(Id::DirectMessages)) {
+		return &st::menuIconChatDiscuss;
+	} else if (id == QString::fromLatin1(Id::ExportChat)) {
+		return &st::menuIconExport;
+	} else if (id == QString::fromLatin1(Id::Translate)) {
+		return &st::menuIconTranslate;
+	} else if (id == QString::fromLatin1(Id::DeletedMessages)) {
+		return &st::menuIconArchive;
+	} else if (id == QString::fromLatin1(Id::Report)) {
+		return &st::menuIconReport;
+	} else if (id == QString::fromLatin1(Id::NewContact)
+		|| id == QString::fromLatin1(Id::BotToGroup)
+		|| id == QString::fromLatin1(Id::NewMembers)
+		|| id == QString::fromLatin1(Id::JoinChat)) {
+		return &st::menuIconInvite;
+	} else if (id == QString::fromLatin1(Id::ShareContact)) {
+		return &st::menuIconShare;
+	} else if (id == QString::fromLatin1(Id::EditContact)) {
+		return &st::menuIconEdit;
+	} else if (id == QString::fromLatin1(Id::DeleteContact)
+		|| id == QString::fromLatin1(Id::DeleteTopic)
+		|| id == QString::fromLatin1(Id::DeleteChat)) {
+		return &st::menuIconDeleteAttention;
+	} else if (id == QString::fromLatin1(Id::TopicLink)) {
+		return &st::menuIconCopy;
+	} else if (id == QString::fromLatin1(Id::ToggleTopicClosed)
+		|| id == QString::fromLatin1(Id::BlockUser)) {
+		return &st::menuIconBlock;
+	} else if (id == QString::fromLatin1(Id::SendGift)) {
+		return &st::menuIconGiftPremium;
+	} else if (id == QString::fromLatin1(Id::ViewStatistics)) {
+		return &st::menuIconStats;
+	} else if (id == QString::fromLatin1(Id::ToggleFolder)
+		|| id == QString::fromLatin1(Id::SetPersonalChannel)) {
+		return &st::menuIconAddToFolder;
+	} else if (id == QString::fromLatin1(Id::ClearHistory)) {
+		return &st::menuIconClear;
+	} else if (id == QString::fromLatin1(Id::LeaveChat)) {
+		return &st::menuIconLeaveAttention;
+	} else if (id == QString::fromLatin1(Id::HidePromotion)) {
+		return &st::menuIconRemove;
+	}
+	return nullptr;
+}
+
+[[nodiscard]] QString HumanizePeerMenuId(const QString &id) {
+	auto result = id;
+	result.replace(u'_', u' ');
+	result.replace(u'.', u' ');
+	if (!result.isEmpty()) {
+		result[0] = result[0].toUpper();
+	}
+	return result;
+}
+
+[[nodiscard]] EntryDescriptor DescribeThreeDotsEntry(
+		const Menu::Customization::PeerMenuEntry &entry) {
+	namespace Id = Menu::Customization::PeerMenuItemId;
+	if (entry.separator) {
+		if (entry.id == QString::fromLatin1(Id::SeparatorPrimary)) {
+			return {
+				.title = RuEn("Основной разделитель", "Primary divider"),
+				.subtitle = RuEn(
+					"Отделяет быстрые действия от остального меню.",
+					"Separates quick actions from the rest of the menu."),
+				.glyph = u"="_q,
+				.icon = nullptr,
+				.color = QColor(0x76, 0x86, 0x9B),
+			};
+		} else if (entry.id == QString::fromLatin1(Id::SeparatorSecondary)) {
+			return {
+				.title = RuEn("Второй разделитель", "Secondary divider"),
+				.subtitle = RuEn(
+					"Отделяет дополнительные действия внутри меню.",
+					"Separates secondary actions inside the menu."),
+				.glyph = u"="_q,
+				.icon = nullptr,
+				.color = QColor(0x4A, 0xB8, 0xD8),
+			};
+		} else if (entry.id == QString::fromLatin1(Id::SeparatorDanger)) {
+			return {
+				.title = RuEn("Опасный разделитель", "Danger divider"),
+				.subtitle = RuEn(
+					"Отделяет потенциально опасные действия.",
+					"Separates potentially destructive actions."),
+				.glyph = u"="_q,
+				.icon = nullptr,
+				.color = QColor(0xE3, 0x68, 0x62),
+			};
+		}
+		return {
+			.title = RuEn("Пользовательский разделитель", "Custom divider"),
+			.subtitle = RuEn(
+				"Свободный разделитель, который можно переставлять и удалять.",
+				"Manual divider that can be moved or removed."),
+			.glyph = u"="_q,
+			.icon = nullptr,
+			.color = QColor(0x35, 0xC3, 0x8F),
+		};
+	}
+
+	const auto make = [&](const char *ruTitle,
+			const char *enTitle,
+			const char *ruSubtitle,
+			const char *enSubtitle,
+			const char *glyph,
+			QColor color) {
+		return EntryDescriptor{
+			.title = RuEn(ruTitle, enTitle),
+			.subtitle = RuEn(ruSubtitle, enSubtitle),
+			.glyph = QString::fromLatin1(glyph),
+			.icon = ThreeDotsActionIcon(entry.id),
+			.color = color,
+		};
+	};
+
+	if (entry.id == QString::fromLatin1(Id::NewWindow)) {
+		return make("Новое окно", "New window", "Открывает чат в отдельном окне.", "Opens the chat in a separate window.", "N", QColor(0x4F, 0x8D, 0xFF));
+	} else if (entry.id == QString::fromLatin1(Id::ToggleMute)) {
+		return make("Уведомления", "Notifications", "Быстрое управление звуком и уведомлениями.", "Quick mute and notification controls.", "M", QColor(0x6C, 0x7A, 0xF9));
+	} else if (entry.id == QString::fromLatin1(Id::TogglePin)) {
+		return make("Закрепление", "Pin", "Закрепить или открепить чат.", "Pins or unpins the chat.", "P", QColor(0xF0, 0xA5, 0x2A));
+	} else if (entry.id == QString::fromLatin1(Id::ToggleUnreadMark)) {
+		return make("Метка непрочитанного", "Unread mark", "Переключает прочитано / непрочитано.", "Toggles read or unread state.", "U", QColor(0x2D, 0xC8, 0xB3));
+	} else if (entry.id == QString::fromLatin1(Id::ToggleArchive)) {
+		return make("Архив", "Archive", "Быстро отправляет чат в архив и обратно.", "Moves the chat to or from the archive.", "A", QColor(0x58, 0xC8, 0x66));
+	} else if (entry.id == QString::fromLatin1(Id::CreateTopic)) {
+		return make("Создать тему", "Create topic", "Создаёт новую тему форума.", "Creates a new forum topic.", "T", QColor(0x31, 0xB0, 0xE7));
+	} else if (entry.id == QString::fromLatin1(Id::Info)) {
+		return make("О чате", "About chat", "Открывает профиль чата, канала или пользователя.", "Opens the profile for the current chat, channel, or user.", "I", QColor(0x4F, 0x8D, 0xFF));
+	} else if (entry.id == QString::fromLatin1(Id::ViewAsMessages)) {
+		return make("Как сообщения", "View as messages", "Переключает форум в обычный список сообщений.", "Switches the forum to the messages view.", "M", QColor(0x5A, 0xAE, 0xF5));
+	} else if (entry.id == QString::fromLatin1(Id::ViewAsTopics)) {
+		return make("Как темы", "View as topics", "Переключает чат в режим тем.", "Switches the chat into the topics view.", "T", QColor(0x5A, 0xAE, 0xF5));
+	} else if (entry.id == QString::fromLatin1(Id::SearchTopics)) {
+		return make("Поиск по темам", "Search topics", "Открывает поиск внутри тем форума.", "Opens search inside forum topics.", "S", QColor(0x2D, 0xC8, 0xB3));
+	} else if (entry.id == QString::fromLatin1(Id::ManageChat)) {
+		return make("Управление чатом", "Manage chat", "Открывает настройки и управление чатом.", "Opens chat management and settings.", "M", QColor(0xF0, 0x9A, 0x36));
+	} else if (entry.id == QString::fromLatin1(Id::SupportInfo)) {
+		return make("Support info", "Support info", "Служебное действие для support-аккаунтов.", "Support-only info action.", "S", QColor(0x8B, 0x7A, 0xF6));
+	} else if (entry.id == QString::fromLatin1(Id::StoryArchive)) {
+		return make("Архив историй", "Stories archive", "Открывает архив историй канала.", "Opens the channel stories archive.", "S", QColor(0xE8, 0x7B, 0xB4));
+	} else if (entry.id == QString::fromLatin1(Id::BoostChat)) {
+		return make("Бусты", "Boosts", "Переход к экрану бустов.", "Opens the boosts screen.", "B", QColor(0xF2, 0xA4, 0x29));
+	} else if (entry.id == QString::fromLatin1(Id::VideoChat)) {
+		return make("Видеочат", "Video chat", "Запуск или управление групповым звонком.", "Starts or manages the group call.", "V", QColor(0x4F, 0x8D, 0xFF));
+	} else if (entry.id == QString::fromLatin1(Id::CreatePoll)) {
+		return make("Создать опрос", "Create poll", "Открывает создание нового опроса.", "Opens the poll creation flow.", "P", QColor(0x58, 0xC8, 0x66));
+	} else if (entry.id == QString::fromLatin1(Id::CreateTodoList)) {
+		return make("Создать To-Do", "Create to-do", "Открывает создание нового списка задач.", "Opens the to-do list creation flow.", "T", QColor(0x35, 0xC3, 0x8F));
+	} else if (entry.id == QString::fromLatin1(Id::ThemeEdit)) {
+		return make("Тема чата", "Chat theme", "Переход к оформлению чата.", "Opens chat theme settings.", "T", QColor(0x6C, 0x7A, 0xF9));
+	} else if (entry.id == QString::fromLatin1(Id::ViewDiscussion)) {
+		return make("Обсуждение", "Discussion", "Переход к связанному обсуждению канала.", "Opens the linked discussion chat.", "D", QColor(0x31, 0xB0, 0xE7));
+	} else if (entry.id == QString::fromLatin1(Id::DirectMessages)) {
+		return make("Личные сообщения", "Direct messages", "Открывает monoforum / direct messages.", "Opens the direct messages monoforum.", "D", QColor(0x35, 0xC3, 0x8F));
+	} else if (entry.id == QString::fromLatin1(Id::ExportChat)) {
+		return make("Экспорт чата", "Export chat", "Экспортирует историю чата или темы.", "Exports the chat or topic history.", "E", QColor(0x4A, 0xC6, 0x7A));
+	} else if (entry.id == QString::fromLatin1(Id::Translate)) {
+		return make("Перевести чат", "Translate chat", "Включает перевод текущего чата.", "Turns on chat translation.", "T", QColor(0x2D, 0xC8, 0xB3));
+	} else if (entry.id == QString::fromLatin1(Id::DeletedMessages)) {
+		return make("Удалённые сообщения", "Deleted messages", "Открывает журнал удалённых сообщений.", "Opens the deleted messages journal.", "D", QColor(0xF0, 0x9A, 0x36));
+	} else if (entry.id == QString::fromLatin1(Id::Report)) {
+		return make("Пожаловаться", "Report", "Отправляет жалобу на чат или канал.", "Reports the current chat or channel.", "R", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::ClearHistory)) {
+		return make("Очистить историю", "Clear history", "Удаляет историю сообщений.", "Clears the message history.", "C", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::DeleteChat)) {
+		return make("Удалить чат", "Delete chat", "Удаляет диалог или очищает его с выходом.", "Deletes the chat or clears it and exits.", "D", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::LeaveChat)) {
+		return make("Покинуть чат", "Leave chat", "Выходит из группы или канала.", "Leaves the group or channel.", "L", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::JoinChat)) {
+		return make("Вступить", "Join chat", "Вступает в канал или группу.", "Joins the current channel or group.", "J", QColor(0x4A, 0xC6, 0x7A));
+	} else if (entry.id == QString::fromLatin1(Id::NewContact)) {
+		return make("Добавить в контакты", "Add contact", "Создаёт новый контакт.", "Adds the peer to contacts.", "C", QColor(0x4A, 0xC6, 0x7A));
+	} else if (entry.id == QString::fromLatin1(Id::ShareContact)) {
+		return make("Поделиться контактом", "Share contact", "Открывает отправку контакта.", "Shares the contact in another chat.", "S", QColor(0x35, 0xC3, 0x8F));
+	} else if (entry.id == QString::fromLatin1(Id::EditContact)) {
+		return make("Изменить контакт", "Edit contact", "Редактирует карточку контакта.", "Edits the saved contact.", "E", QColor(0xF0, 0x9A, 0x36));
+	} else if (entry.id == QString::fromLatin1(Id::BotToGroup)) {
+		return make("Добавить бота", "Add bot", "Добавляет бота в группу или канал.", "Adds the bot to another chat.", "B", QColor(0x6C, 0x7A, 0xF9));
+	} else if (entry.id == QString::fromLatin1(Id::NewMembers)) {
+		return make("Добавить участников", "Add members", "Открывает приглашение новых участников.", "Invites new members.", "U", QColor(0x4A, 0xC6, 0x7A));
+	} else if (entry.id == QString::fromLatin1(Id::DeleteContact)) {
+		return make("Удалить контакт", "Delete contact", "Удаляет пользователя из контактов.", "Removes the user from contacts.", "D", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::DeleteTopic)) {
+		return make("Удалить тему", "Delete topic", "Удаляет текущую тему.", "Deletes the current topic.", "D", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::TopicLink)) {
+		return make("Ссылка на тему", "Topic link", "Копирует ссылку на тему.", "Copies the topic link.", "L", QColor(0x31, 0xB0, 0xE7));
+	} else if (entry.id == QString::fromLatin1(Id::ManageTopic)) {
+		return make("Изменить тему", "Manage topic", "Открывает редактирование темы.", "Opens topic editing.", "T", QColor(0xF0, 0x9A, 0x36));
+	} else if (entry.id == QString::fromLatin1(Id::ToggleTopicClosed)) {
+		return make("Закрыть тему", "Toggle topic", "Открывает или закрывает тему.", "Closes or reopens the topic.", "T", QColor(0xF0, 0x9A, 0x36));
+	} else if (entry.id == QString::fromLatin1(Id::SendGift)) {
+		return make("Подарок", "Send gift", "Открывает отправку подарка.", "Opens the gift flow.", "G", QColor(0xE8, 0x7B, 0xB4));
+	} else if (entry.id == QString::fromLatin1(Id::ViewStatistics)) {
+		return make("Статистика", "Statistics", "Переход к статистике и бустам.", "Opens statistics and boosts.", "S", QColor(0x31, 0xB0, 0xE7));
+	} else if (entry.id == QString::fromLatin1(Id::ToggleFolder)) {
+		return make("Папки", "Folders", "Открывает добавление чата в папки.", "Opens the add-to-folder menu.", "F", QColor(0x35, 0xC3, 0x8F));
+	} else if (entry.id == QString::fromLatin1(Id::BlockUser)) {
+		return make("Блокировка", "Block user", "Блокирует или разблокирует пользователя.", "Blocks or unblocks the user.", "B", QColor(0xE3, 0x68, 0x62));
+	} else if (entry.id == QString::fromLatin1(Id::HidePromotion)) {
+		return make("Скрыть промо", "Hide promotion", "Убирает текущий промо-блок.", "Hides the current promo block.", "H", QColor(0x8A, 0x93, 0xA3));
+	} else if (entry.id == QString::fromLatin1(Id::SetPersonalChannel)) {
+		return make("Личный канал", "Personal channel", "Привязывает личный канал.", "Sets the personal channel.", "C", QColor(0x6C, 0x7A, 0xF9));
+	} else if (entry.id == QString::fromLatin1(Id::Ttl)) {
+		return make("Автоудаление", "Auto-delete", "Настраивает TTL сообщений.", "Configures message auto-delete.", "T", QColor(0xF0, 0x9A, 0x36));
+	}
+
+	return {
+		.title = HumanizePeerMenuId(entry.id),
+		.subtitle = RuEn(
+			"Сохранён в раскладке backend three_dots и будет оставлен как есть.",
+			"Persisted in the three_dots backend layout and kept as-is."),
+		.glyph = entry.id.left(1).toUpper(),
+		.icon = ThreeDotsActionIcon(entry.id),
+		.color = QColor(0x99, 0xA1, 0xAD),
+	};
+}
+
+class ThreeDotsMenuEditorState final {
+public:
+	ThreeDotsMenuEditorState()
+	: _entries(Menu::Customization::LoadThreeDotMenuLayout(
+		DefaultThreeDotsMenuLayout())) {
+		normalizeSelectedEntry();
+	}
+
+	[[nodiscard]] const std::vector<Menu::Customization::PeerMenuEntry> &entries() const {
+		return _entries;
+	}
+
+	[[nodiscard]] int selectedEntryIndex() const {
+		if (_selectedEntryId.isEmpty()) {
+			return -1;
+		}
+		for (auto i = 0; i != int(_entries.size()); ++i) {
+			if (_entries[i].id == _selectedEntryId) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	void setSelectedEntryIndex(int index) {
+		const auto updated = hasIndex(index) ? _entries[index].id : QString();
+		if (_selectedEntryId == updated) {
+			return;
+		}
+		_selectedEntryId = updated;
+		_changes.fire({});
+	}
+
+	[[nodiscard]] QString layoutPath() const {
+		return Menu::Customization::SideMenuLayoutPath();
+	}
+
+	[[nodiscard]] rpl::producer<> changes() const {
+		return _changes.events();
+	}
+
+	[[nodiscard]] bool resetToDefaults() {
+		return applyEntries(DefaultThreeDotsMenuLayout());
+	}
+
+	[[nodiscard]] bool toggleVisible(int index) {
+		if (!hasIndex(index)) {
+			return false;
+		}
+		auto updated = _entries;
+		updated[index].visible = !updated[index].visible;
+		return applyEntries(updated);
+	}
+
+	[[nodiscard]] bool restoreEntry(int index) {
+		if (!hasIndex(index)) {
+			return false;
+		} else if (_entries[index].visible) {
+			setSelectedEntryIndex(index);
+			return true;
+		}
+		auto updated = _entries;
+		updated[index].visible = true;
+		_selectedEntryId = updated[index].id;
+		return applyEntries(updated);
+	}
+
+	[[nodiscard]] bool moveVisibleEntry(int fromVisible, int toVisible) {
+		auto visibleIndexes = std::vector<int>();
+		auto visibleEntries = std::vector<Menu::Customization::PeerMenuEntry>();
+		for (auto i = 0; i != int(_entries.size()); ++i) {
+			if (!_entries[i].visible) {
+				continue;
+			}
+			visibleIndexes.push_back(i);
+			visibleEntries.push_back(_entries[i]);
+		}
+		if ((fromVisible < 0) || (fromVisible >= int(visibleEntries.size()))) {
+			return false;
+		}
+		const auto maxTarget = std::max(int(visibleEntries.size()) - 1, 0);
+		const auto insertAt = std::clamp(toVisible, 0, maxTarget);
+		if (fromVisible == insertAt) {
+			return true;
+		}
+		auto reordered = visibleEntries;
+		const auto moved = reordered[fromVisible];
+		reordered.erase(reordered.begin() + fromVisible);
+		reordered.insert(reordered.begin() + insertAt, moved);
+		auto updated = _entries;
+		for (auto i = 0; i != int(visibleIndexes.size()); ++i) {
+			updated[visibleIndexes[i]] = reordered[i];
+		}
+		return applyEntries(updated);
+	}
+
+	[[nodiscard]] int addCustomSeparatorAfter(int index) {
+		auto updated = _entries;
+		const auto insertAt = std::clamp(index + 1, 0, int(updated.size()));
+		updated.insert(
+			updated.begin() + insertAt,
+			Menu::Customization::PeerMenuEntry{
+				NewCustomSeparatorId(),
+				true,
+				true,
+			});
+		_selectedEntryId = updated[insertAt].id;
+		return applyEntries(updated) ? insertAt : -1;
+	}
+
+	[[nodiscard]] bool removeCustomSeparator(int index) {
+		if (!hasIndex(index) || !isCustomSeparator(_entries[index])) {
+			return false;
+		}
+		auto updated = _entries;
+		updated.erase(updated.begin() + index);
+		return applyEntries(updated);
+	}
+
+	[[nodiscard]] bool restoreAllHidden() {
+		auto updated = _entries;
+		auto changed = false;
+		for (auto &entry : updated) {
+			if (!entry.visible) {
+				entry.visible = true;
+				changed = true;
+			}
+		}
+		return changed ? applyEntries(updated) : true;
+	}
+
+private:
+	[[nodiscard]] bool applyEntries(
+			const std::vector<Menu::Customization::PeerMenuEntry> &updated) {
+		if (!Menu::Customization::SaveThreeDotMenuLayout(updated)) {
+			return false;
+		}
+		_entries = updated;
+		normalizeSelectedEntry();
+		_changes.fire({});
+		return true;
+	}
+
+	void normalizeSelectedEntry() {
+		if (selectedEntryIndex() >= 0) {
+			return;
+		}
+		for (const auto &entry : _entries) {
+			if (!entry.visible) {
+				continue;
+			}
+			_selectedEntryId = entry.id;
+			return;
+		}
+		_selectedEntryId = _entries.empty() ? QString() : _entries.front().id;
+	}
+
+	[[nodiscard]] bool hasIndex(int index) const {
+		return (index >= 0) && (index < int(_entries.size()));
+	}
+
+	[[nodiscard]] static bool isCustomSeparator(
+			const Menu::Customization::PeerMenuEntry &entry) {
+		return entry.separator && IsCustomSeparatorId(entry.id);
+	}
+
+	std::vector<Menu::Customization::PeerMenuEntry> _entries;
+	QString _selectedEntryId;
+	mutable rpl::event_stream<> _changes;
+};
+
+class ThreeDotsMenuEntryList final : public Ui::RpWidget {
+public:
+	ThreeDotsMenuEntryList(
+		QWidget *parent,
+		std::shared_ptr<ThreeDotsMenuEditorState> state)
+	: RpWidget(parent)
+	, _state(std::move(state)) {
+		setMouseTracking(true);
+		const auto refreshFromState = [=] {
+			const auto selected = _state->selectedEntryIndex();
+			if ((selected >= 0)
+				&& (selected < int(_state->entries().size()))
+				&& _state->entries()[selected].visible) {
+				_selected = selected;
+			}
+			clampSelection();
+			update();
+			updateGeometry();
+		};
+		refreshFromState();
+		_state->changes() | rpl::on_next([=] {
+			refreshFromState();
+		}, lifetime());
+	}
+
+	[[nodiscard]] int selectedIndex() const {
+		return _selected;
+	}
+
+	void setSelectedIndex(int index) {
+		_selected = index;
+		clampSelection();
+		update();
+	}
+
+protected:
+	int resizeGetHeight(int newWidth) override {
+		const auto visibleCount = std::max(int(visibleEntryIndexes().size()), 1);
+		const auto base = 18 + (visibleCount * (kRowHeight + kRowGap));
+		return base + hiddenSectionHeight(newWidth);
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		Q_UNUSED(e);
+
+		auto p = Painter(this);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto visible = visibleEntryIndexes();
+		if (visible.empty()) {
+			const auto emptyRect = QRect(0, 8, width(), kRowHeight + 8);
+			p.setPen(QPen(ThemedRowBorder(false, false)));
+			p.setBrush(st::boxBg);
+			p.drawRoundedRect(emptyRect, kRowRadius, kRowRadius);
+			p.setPen(st::windowFg);
+			p.setFont(st::semiboldTextStyle.font->f);
+			p.drawText(
+				emptyRect.adjusted(18, 12, -18, -18),
+				Qt::AlignLeft | Qt::AlignTop,
+				RuEn(
+					"Все пункты меню на 3 точки сейчас скрыты",
+					"All three-dots actions are hidden right now"));
+			p.setPen(st::windowSubTextFg);
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				emptyRect.adjusted(18, 34, -18, -12),
+				Qt::AlignLeft | Qt::AlignTop,
+				RuEn(
+					"Ниже можно вернуть любой скрытый пункт одним нажатием или сразу восстановить всё меню.",
+					"You can restore any hidden action below with one click or bring back the whole menu at once."));
+		} else {
+			for (const auto index : visible) {
+				if (index == _draggingRow) {
+					continue;
+				}
+				paintRow(
+					p,
+					index,
+					rowRect(index),
+					(index == _hoveredRow),
+					(index == _selected),
+					false);
+			}
+		}
+
+		if (_draggingRow >= 0) {
+			p.setPen(QPen(st::windowBgActive->c, 3));
+			const auto y = insertionLineY();
+			p.drawLine(QPoint(8, y), QPoint(width() - 8, y));
+			paintRow(
+				p,
+				_draggingRow,
+				floatingRowRect(),
+				false,
+				true,
+				true);
+		}
+
+		const auto chips = hiddenChips(width());
+		if (!chips.empty()) {
+			const auto hiddenCount = std::count_if(
+				_state->entries().begin(),
+				_state->entries().end(),
+				[](const auto &entry) { return !entry.visible; });
+			p.setPen(st::windowSubTextFg);
+			p.setFont(st::defaultTextStyle.font->f);
+			p.drawText(
+				QRect(0, hiddenSectionTop(), width(), 18),
+				Qt::AlignLeft | Qt::AlignVCenter,
+				RuEn(
+					"Скрытые пункты (%1)",
+					"Hidden actions (%1)").arg(hiddenCount));
+			for (const auto &chip : chips) {
+				const auto hovered = chip.restoreAll
+					? _hoveredRestoreAll
+					: (chip.index == _hoveredHiddenEntry);
+				const auto fillColor = chip.restoreAll
+					? ThemedButtonFill(hovered, true)
+					: anim::with_alpha(
+						ThemedDescriptorAccent(chip.color, hovered),
+						hovered ? 0.22 : 0.12);
+				p.setPen(Qt::NoPen);
+				p.setBrush(fillColor);
+				p.drawRoundedRect(chip.rect, 14, 14);
+				p.setPen(chip.restoreAll
+					? ThemedButtonText(true)
+					: (hovered ? st::windowFgActive->c : st::windowFg->c));
+				p.setFont(st::normalFont->f);
+				p.drawText(
+					chip.rect.adjusted(12, 0, -12, 0),
+					Qt::AlignLeft | Qt::AlignVCenter,
+					chip.label);
+			}
+		}
+	}
+
+	void mouseMoveEvent(QMouseEvent *e) override {
+		const auto point = e->pos();
+		if (_draggingRow >= 0) {
+			_dragCurrentY = point.y();
+			updateDragTarget(point.y());
+			_hoveredRow = -1;
+			_hoveredKind = ActionKind::None;
+			_hoveredOnHandle = false;
+			_hoveredHiddenEntry = -1;
+			_hoveredRestoreAll = false;
+			update();
+			return;
+		}
+		if ((_pressedRow >= 0)
+			&& _pressedOnHandle
+			&& !_pressedOnButton
+			&& ((point - _pressPoint).manhattanLength() >= 8)) {
+			startDrag(point);
+			return;
+		}
+		updateHover(point);
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto point = e->pos();
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
+
+		for (const auto &chip : hiddenChips(width())) {
+			if (!chip.rect.contains(point)) {
+				continue;
+			}
+			if (chip.restoreAll) {
+				_state->restoreAllHidden();
+				clampSelection();
+			} else if (_state->restoreEntry(chip.index)) {
+				_selected = chip.index;
+				clampSelection();
+			}
+			updateHover(point);
+			return;
+		}
+
+		for (const auto index : visibleEntryIndexes()) {
+			const auto row = rowRect(index);
+			if (!row.contains(point)) {
+				continue;
+			}
+			_selected = index;
+			_state->setSelectedEntryIndex(_selected);
+			_pressPoint = point;
+			const auto visibleRow = visibleRowForEntry(index);
+			_dragGrabOffsetY = point.y() - baseRowRect(visibleRow).top();
+			_pressedOnHandle = dragHandleRect(row).contains(point);
+			for (const auto &button : actionButtonsForRow(index)) {
+				if (!button.enabled || !button.rect.contains(point)) {
+					continue;
+				}
+				_pressedOnButton = true;
+				handleAction(index, button.kind);
+				updateHover(point);
+				return;
+			}
+			_pressedRow = index;
+			updateHover(point);
+			update();
+			return;
+		}
+		updateHover(point);
+	}
+
+	void mouseReleaseEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		if (_draggingRow >= 0) {
+			finishDrag();
+			return;
+		}
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
+		updateHover(e->pos());
+	}
+
+	void leaveEventHook(QEvent *e) override {
+		Q_UNUSED(e);
+		if (_draggingRow >= 0) {
+			return;
+		}
+		_hoveredRow = -1;
+		_hoveredKind = ActionKind::None;
+		_hoveredOnHandle = false;
+		_hoveredHiddenEntry = -1;
+		_hoveredRestoreAll = false;
+		unsetCursor();
+		update();
+	}
+
+private:
+	enum class ActionKind {
+		None,
+		ToggleVisible,
+		DeleteCustomSeparator,
+	};
+
+	struct ActionButton {
+		QRect rect;
+		QString label;
+		ActionKind kind = ActionKind::None;
+		bool enabled = true;
+	};
+
+	struct HiddenChip {
+		QRect rect;
+		int index = -1;
+		QString label;
+		QColor color;
+		bool restoreAll = false;
+	};
+
+	[[nodiscard]] std::vector<int> visibleEntryIndexes() const {
+		auto result = std::vector<int>();
+		for (auto i = 0; i != int(_state->entries().size()); ++i) {
+			if (_state->entries()[i].visible) {
+				result.push_back(i);
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]] QRect baseRowRect(int visibleRow) const {
+		return QRect(
+			0,
+			8 + visibleRow * (kRowHeight + kRowGap),
+			width(),
+			kRowHeight);
+	}
+
+	[[nodiscard]] int visibleRowForEntry(int index) const {
+		const auto visible = visibleEntryIndexes();
+		const auto i = std::find(visible.begin(), visible.end(), index);
+		return (i == visible.end()) ? -1 : int(i - visible.begin());
+	}
+
+	[[nodiscard]] QRect rowRectByVisibleRow(int visibleRow) const {
+		auto result = baseRowRect(visibleRow);
+		if ((_draggingVisibleRow < 0)
+			|| (_dragTargetIndex < 0)
+			|| (visibleRow == _draggingVisibleRow)) {
+			return result;
+		}
+		const auto delta = kRowHeight + kRowGap;
+		if (_draggingVisibleRow < _dragTargetIndex) {
+			if ((visibleRow > _draggingVisibleRow) && (visibleRow <= _dragTargetIndex)) {
+				result.translate(0, -delta);
+			}
+		} else if (_draggingVisibleRow > _dragTargetIndex) {
+			if ((visibleRow >= _dragTargetIndex) && (visibleRow < _draggingVisibleRow)) {
+				result.translate(0, delta);
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]] QRect rowRect(int index) const {
+		const auto visibleRow = visibleRowForEntry(index);
+		return (visibleRow >= 0) ? rowRectByVisibleRow(visibleRow) : QRect();
+	}
+
+	[[nodiscard]] QRect floatingRowRect() const {
+		auto result = baseRowRect(_draggingVisibleRow);
+		result.moveTop(_dragCurrentY - _dragGrabOffsetY);
+		return result;
+	}
+
+	[[nodiscard]] QRect dragHandleRect(const QRect &row) const {
+		return QRect(row.left() + 10, row.top() + 14, 18, row.height() - 28);
+	}
+
+	[[nodiscard]] int hiddenSectionTop() const {
+		const auto visibleCount = std::max(int(visibleEntryIndexes().size()), 1);
+		return 18 + (visibleCount * (kRowHeight + kRowGap)) + 4;
+	}
+
+	[[nodiscard]] std::vector<HiddenChip> hiddenChips(int availableWidth) const {
+		auto result = std::vector<HiddenChip>();
+		const auto usableWidth = std::max(availableWidth, 120);
+		const auto fm = QFontMetrics(st::normalFont->f);
+		auto pushChip = [&](int index, QString label, QColor color, bool restoreAll) {
+			label = fm.elidedText(label, Qt::ElideRight, 170);
+			auto chipWidth = std::min(
+				std::max(82, fm.horizontalAdvance(label) + 24),
+				usableWidth);
+			auto x = 0;
+			auto y = hiddenSectionTop() + 24;
+			if (!result.empty()) {
+				const auto &last = result.back();
+				x = last.rect.right() + 9;
+				y = last.rect.top();
+				if (x + chipWidth > usableWidth) {
+					x = 0;
+					y += 36;
+				}
+			}
+			result.push_back(HiddenChip{
+				.rect = QRect(x, y, chipWidth, 28),
+				.index = index,
+				.label = std::move(label),
+				.color = color,
+				.restoreAll = restoreAll,
+			});
+		};
+		auto hiddenIndexes = std::vector<int>();
+		for (auto i = 0; i != int(_state->entries().size()); ++i) {
+			if (!_state->entries()[i].visible) {
+				hiddenIndexes.push_back(i);
+			}
+		}
+		if (hiddenIndexes.empty()) {
+			return result;
+		}
+		pushChip(
+			-1,
+			RuEn("Вернуть всё", "Restore all"),
+			st::windowBgActive->c,
+			true);
+		for (const auto index : hiddenIndexes) {
+			const auto meta = DescribeThreeDotsEntry(_state->entries()[index]);
+			pushChip(index, meta.title, meta.color, false);
+		}
+		return result;
+	}
+
+	[[nodiscard]] int hiddenSectionHeight(int availableWidth) const {
+		const auto chips = hiddenChips(availableWidth);
+		if (chips.empty()) {
+			return 0;
+		}
+		auto bottom = hiddenSectionTop() + 18;
+		for (const auto &chip : chips) {
+			bottom = std::max(bottom, chip.rect.bottom());
+		}
+		return (bottom - hiddenSectionTop()) + 16;
+	}
+
+	[[nodiscard]] std::vector<ActionButton> actionButtonsForRow(int index) const {
+		const auto &entries = _state->entries();
+		if ((index < 0) || (index >= int(entries.size())) || !entries[index].visible) {
+			return {};
+		}
+		const auto row = rowRect(index);
+		const auto &entry = entries[index];
+		const auto fm = QFontMetrics(st::normalFont->f);
+		const auto height = 28;
+		auto right = row.right() - kRowPadding;
+		auto result = std::vector<ActionButton>();
+		const auto push = [&](QString label, ActionKind kind, bool enabled) {
+			const auto buttonWidth = std::max(44, fm.horizontalAdvance(label) + 22);
+			right -= buttonWidth;
+			result.push_back(ActionButton{
+				.rect = QRect(right, row.top() + 18, buttonWidth, height),
+				.label = std::move(label),
+				.kind = kind,
+				.enabled = enabled,
+			});
+			right -= 8;
+		};
+
+		if (entry.separator && IsCustomSeparatorId(entry.id)) {
+			push(RuEn("Удалить", "Delete"), ActionKind::DeleteCustomSeparator, true);
+		}
+		push(RuEn("Скрыть", "Hide"), ActionKind::ToggleVisible, true);
+		std::reverse(result.begin(), result.end());
+		return result;
+	}
+
+	void paintActionButton(QPainter &p, const ActionButton &button) const {
+		const auto hovered = (_hoveredRow >= 0)
+			&& (button.kind == _hoveredKind)
+			&& button.rect.intersects(rowRect(_hoveredRow));
+		const auto active = button.enabled;
+		const auto destructive = (button.kind == ActionKind::DeleteCustomSeparator);
+		p.setPen(Qt::NoPen);
+		p.setBrush(destructive
+			? ThemedDestructiveButtonFill(hovered, active)
+			: ThemedButtonFill(hovered, active));
+		p.drawRoundedRect(button.rect, 14, 14);
+		p.setPen(destructive
+			? ThemedDestructiveButtonText(active)
+			: ThemedButtonText(active));
+		p.setFont(st::normalFont->f);
+		p.drawText(button.rect, Qt::AlignCenter, button.label);
+	}
+
+	void paintDragHandle(Painter &p, const QRect &row, bool active) const {
+		const auto handle = dragHandleRect(row);
+		p.setPen(Qt::NoPen);
+		p.setBrush(active
+			? st::windowBgActive->c
+			: anim::with_alpha(st::windowSubTextFg->c, 0.65));
+		for (auto column = 0; column != 2; ++column) {
+			for (auto line = 0; line != 3; ++line) {
+				p.drawEllipse(
+					QRect(
+						handle.left() + (column * 6),
+						handle.top() + 2 + (line * 8),
+						3,
+						3));
+			}
+		}
+	}
+
+	void paintRow(
+			Painter &p,
+			int index,
+			const QRect &row,
+			bool hovered,
+			bool selected,
+			bool floating) const {
+		const auto &entry = _state->entries()[index];
+		const auto meta = DescribeThreeDotsEntry(entry);
+		const auto accent = ThemedDescriptorAccent(
+			meta.color,
+			hovered || selected || floating);
+		p.setPen(QPen(ThemedRowBorder(hovered, selected)));
+		p.setBrush(ThemedRowFill(hovered, selected, floating));
+		p.drawRoundedRect(row, kRowRadius, kRowRadius);
+
+		paintDragHandle(p, row, hovered || selected || floating);
+		p.setBrush(accent);
+		p.drawEllipse(QRect(row.left() + 36, row.top() + 14, 36, 36));
+		if (meta.icon) {
+			meta.icon->paintInCenter(
+				p,
+				QRect(row.left() + 36, row.top() + 14, 36, 36));
+		} else {
+			p.setPen(Qt::white);
+			p.setFont(st::semiboldFont->f);
+			p.drawText(
+				QRect(row.left() + 36, row.top() + 14, 36, 36),
+				Qt::AlignCenter,
+				meta.glyph.left(1));
+		}
+
+		p.setPen(st::windowFg);
+		p.setFont(st::semiboldTextStyle.font->f);
+		p.drawText(
+			QRect(row.left() + 84, row.top() + 12, row.width() - 242, 20),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			meta.title);
+
+		p.setPen(st::windowSubTextFg);
+		p.setFont(st::defaultTextStyle.font->f);
+		const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
+			meta.subtitle,
+			Qt::ElideRight,
+			row.width() - 242);
+		p.drawText(
+			QRect(row.left() + 84, row.top() + 34, row.width() - 242, 18),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			subtitle);
+
+		if (!floating) {
+			for (const auto &button : actionButtonsForRow(index)) {
+				paintActionButton(p, button);
+			}
+		}
+	}
+
+	[[nodiscard]] int insertionLineY() const {
+		if ((_draggingVisibleRow < 0) || (_dragTargetIndex < 0)) {
+			return 0;
+		}
+		const auto visible = visibleEntryIndexes();
+		auto slot = 0;
+		for (auto visibleRow = 0; visibleRow != int(visible.size()); ++visibleRow) {
+			if (visibleRow == _draggingVisibleRow) {
+				continue;
+			}
+			if (slot == _dragTargetIndex) {
+				return rowRectByVisibleRow(visibleRow).top() - (kRowGap / 2);
+			}
+			++slot;
+		}
+		for (auto visibleRow = int(visible.size()) - 1; visibleRow >= 0; --visibleRow) {
+			if (visibleRow == _draggingVisibleRow) {
+				continue;
+			}
+			return rowRectByVisibleRow(visibleRow).bottom() + (kRowGap / 2) + 1;
+		}
+		return baseRowRect(0).center().y();
+	}
+
+	void updateDragTarget(int y) {
+		if (_draggingVisibleRow < 0) {
+			return;
+		}
+		const auto visible = visibleEntryIndexes();
+		auto slot = 0;
+		for (auto visibleRow = 0; visibleRow != int(visible.size()); ++visibleRow) {
+			if (visibleRow == _draggingVisibleRow) {
+				continue;
+			}
+			if (y < rowRectByVisibleRow(visibleRow).center().y()) {
+				_dragTargetIndex = slot;
+				return;
+			}
+			++slot;
+		}
+		_dragTargetIndex = slot;
+	}
+
+	void startDrag(QPoint point) {
+		if (_pressedRow < 0) {
+			return;
+		}
+		_draggingRow = _pressedRow;
+		_draggingVisibleRow = visibleRowForEntry(_pressedRow);
+		if (_draggingVisibleRow < 0) {
+			return;
+		}
+		_dragTargetIndex = _draggingVisibleRow;
+		_dragCurrentY = point.y();
+		_dragGrabOffsetY = point.y() - baseRowRect(_draggingVisibleRow).top();
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		grabMouse();
+		setCursor(Qt::ClosedHandCursor);
+		updateDragTarget(point.y());
+		update();
+	}
+
+	void finishDrag() {
+		if (_draggingVisibleRow < 0) {
+			return;
+		}
+		const auto maxTarget = std::max(int(visibleEntryIndexes().size()) - 1, 0);
+		const auto target = std::clamp(_dragTargetIndex, 0, maxTarget);
+		_state->moveVisibleEntry(_draggingVisibleRow, target);
+		_selected = _state->selectedEntryIndex();
+		_draggingRow = -1;
+		_draggingVisibleRow = -1;
+		_dragTargetIndex = -1;
+		_dragCurrentY = 0;
+		_dragGrabOffsetY = 0;
+		releaseMouse();
+		_pressedRow = -1;
+		_pressedOnButton = false;
+		_pressedOnHandle = false;
+		_hoveredRow = -1;
+		_hoveredKind = ActionKind::None;
+		_hoveredOnHandle = false;
+		_hoveredHiddenEntry = -1;
+		_hoveredRestoreAll = false;
+		clampSelection();
+		unsetCursor();
+		update();
+	}
+
+	void updateHover(QPoint point) {
+		auto newHiddenEntry = -1;
+		auto newRestoreAll = false;
+		for (const auto &chip : hiddenChips(width())) {
+			if (!chip.rect.contains(point)) {
+				continue;
+			}
+			newRestoreAll = chip.restoreAll;
+			newHiddenEntry = chip.restoreAll ? -1 : chip.index;
+			break;
+		}
+
+		auto newRow = -1;
+		auto newKind = ActionKind::None;
+		auto newOnHandle = false;
+		if (!newRestoreAll && (newHiddenEntry < 0)) {
+			for (const auto index : visibleEntryIndexes()) {
+				const auto row = rowRect(index);
+				if (!row.contains(point)) {
+					continue;
+				}
+				newRow = index;
+				newOnHandle = dragHandleRect(row).contains(point);
+				for (const auto &button : actionButtonsForRow(index)) {
+					if (button.enabled && button.rect.contains(point)) {
+						newKind = button.kind;
+						break;
+					}
+				}
+				break;
+			}
+		}
+
+		if ((newRow == _hoveredRow)
+			&& (newKind == _hoveredKind)
+			&& (newOnHandle == _hoveredOnHandle)
+			&& (newHiddenEntry == _hoveredHiddenEntry)
+			&& (newRestoreAll == _hoveredRestoreAll)) {
+			return;
+		}
+		_hoveredRow = newRow;
+		_hoveredKind = newKind;
+		_hoveredOnHandle = newOnHandle;
+		_hoveredHiddenEntry = newHiddenEntry;
+		_hoveredRestoreAll = newRestoreAll;
+		if (_hoveredRestoreAll
+			|| (_hoveredHiddenEntry >= 0)
+			|| ((_hoveredRow >= 0) && (_hoveredKind != ActionKind::None))) {
+			setCursor(Qt::PointingHandCursor);
+		} else if (_hoveredOnHandle) {
+			setCursor(Qt::OpenHandCursor);
+		} else {
+			unsetCursor();
+		}
+		update();
+	}
+
+	void handleAction(int index, ActionKind kind) {
+		auto changed = false;
+		switch (kind) {
+		case ActionKind::ToggleVisible:
+			changed = _state->toggleVisible(index);
+			break;
+		case ActionKind::DeleteCustomSeparator:
+			changed = _state->removeCustomSeparator(index);
+			break;
+		case ActionKind::None:
+			break;
+		}
+		if (changed) {
+			_selected = _state->selectedEntryIndex();
+			clampSelection();
+		} else {
+			update();
+		}
+	}
+
+	void clampSelection() {
+		const auto visible = visibleEntryIndexes();
+		if (visible.empty()) {
+			_selected = -1;
+			_state->setSelectedEntryIndex(-1);
+			return;
+		}
+		if ((_selected < 0)
+			|| (_selected >= int(_state->entries().size()))
+			|| !_state->entries()[_selected].visible) {
+			_selected = visible.front();
+		}
+		_state->setSelectedEntryIndex(_selected);
+	}
+
+	const std::shared_ptr<ThreeDotsMenuEditorState> _state;
+	int _selected = -1;
+	int _hoveredRow = -1;
+	ActionKind _hoveredKind = ActionKind::None;
+	bool _hoveredOnHandle = false;
+	int _hoveredHiddenEntry = -1;
+	bool _hoveredRestoreAll = false;
+	int _pressedRow = -1;
+	bool _pressedOnButton = false;
+	bool _pressedOnHandle = false;
+	QPoint _pressPoint;
+	int _draggingRow = -1;
+	int _draggingVisibleRow = -1;
+	int _dragTargetIndex = -1;
+	int _dragCurrentY = 0;
+	int _dragGrabOffsetY = 0;
+};
+
 enum class ContextEditorLane {
 	Menu,
 	Strip,
+};
+
+[[nodiscard]] ContextEditorLane OtherContextLane(ContextEditorLane lane) {
+	return (lane == ContextEditorLane::Strip)
+		? ContextEditorLane::Menu
+		: ContextEditorLane::Strip;
+}
+
+struct TagChip {
+	QString text;
+	QColor fill;
+	QColor fg;
+};
+
+struct PaintedTagChip {
+	TagChip chip;
+	QRect rect;
 };
 
 struct ContextActionDescriptor {
@@ -2154,6 +3354,115 @@ struct ContextActionDescriptor {
 	const style::icon *icon = nullptr;
 	QColor color;
 };
+
+[[nodiscard]] TagChip MakeTagChip(
+		QString text,
+		const QColor &seed,
+		bool emphasized = false) {
+	const auto fill = anim::with_alpha(
+		ThemedDescriptorAccent(seed, emphasized),
+		emphasized ? 0.22 : 0.14);
+	const auto fg = emphasized
+		? st::windowFgActive->c
+		: BlendThemeColor(seed, st::windowFg->c, 0.42);
+	return TagChip{
+		.text = std::move(text),
+		.fill = fill,
+		.fg = fg,
+	};
+}
+
+[[nodiscard]] std::vector<TagChip> ContextEntryTags(
+		HistoryView::ContextMenuSurface surface,
+		ContextEditorLane lane,
+		const QString &id) {
+	auto result = std::vector<TagChip>();
+	result.push_back((lane == ContextEditorLane::Strip)
+		? MakeTagChip(
+			RuEn("Подменю", "Submenu"),
+			QColor(0x35, 0xC3, 0x8F),
+			true)
+		: MakeTagChip(
+			RuEn("Основное", "Main"),
+			QColor(0x4F, 0x8D, 0xFF),
+			true));
+	result.push_back((surface == HistoryView::ContextMenuSurface::Selection)
+		? MakeTagChip(
+			RuEn("Только при выделении", "Selection only"),
+			QColor(0x73, 0x62, 0xE8))
+		: MakeTagChip(
+			RuEn("Обычное", "Regular"),
+			QColor(0x22, 0x9D, 0x68)));
+
+	namespace Id = Menu::Customization::ContextMenuItemId;
+	if ((id == QString::fromLatin1(Id::MessageSendNow))
+		|| (id == QString::fromLatin1(Id::SelectionSendNow))
+		|| (id == QString::fromLatin1(Id::MessageReschedule))) {
+		result.push_back(MakeTagChip(
+			RuEn("Отложенные", "Scheduled"),
+			QColor(0xF0, 0x9A, 0x36)));
+	} else if ((id == QString::fromLatin1(Id::LinkCopy))
+		|| (id == QString::fromLatin1(Id::MessageCopyPostLink))) {
+		result.push_back(MakeTagChip(
+			RuEn("Ссылка", "Link"),
+			QColor(0x31, 0xB0, 0xE7)));
+	} else if (id == QString::fromLatin1(Id::SelectionDownloadFiles)) {
+		result.push_back(MakeTagChip(
+			RuEn("Файлы", "Files"),
+			QColor(0xF1, 0xA4, 0x2B)));
+	} else if ((id == QString::fromLatin1(Id::MessageTodoAdd))
+		|| (id == QString::fromLatin1(Id::MessageTodoEdit))) {
+		result.push_back(MakeTagChip(
+			RuEn("To-Do", "To-do"),
+			QColor(0x4A, 0xC6, 0x7A)));
+	} else if (id == QString::fromLatin1(Id::MessageViewReplies)) {
+		result.push_back(MakeTagChip(
+			RuEn("Ответы", "Replies"),
+			QColor(0x58, 0xC8, 0x66)));
+	} else if (IsCustomSeparatorId(id)) {
+		result.push_back(MakeTagChip(
+			RuEn("Разделитель", "Divider"),
+			QColor(0x8A, 0x93, 0xA3)));
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<PaintedTagChip> LayoutTagChips(
+		const std::vector<TagChip> &tags,
+		int right,
+		int top,
+		int minimumLeft) {
+	auto result = std::vector<PaintedTagChip>();
+	const auto metrics = QFontMetrics(st::normalFont->f);
+	auto currentRight = right;
+	for (const auto &tag : tags) {
+		const auto width = std::max(64, metrics.horizontalAdvance(tag.text) + 18);
+		const auto left = currentRight - width;
+		if (left < minimumLeft) {
+			break;
+		}
+		result.push_back(PaintedTagChip{
+			.chip = tag,
+			.rect = QRect(left, top, width, 20),
+		});
+		currentRight = left - 6;
+	}
+	std::reverse(result.begin(), result.end());
+	return result;
+}
+
+void PaintTagChips(
+		Painter &p,
+		const std::vector<PaintedTagChip> &chips) {
+	p.setFont(st::normalFont->f);
+	for (const auto &tag : chips) {
+		p.setPen(Qt::NoPen);
+		p.setBrush(tag.chip.fill);
+		p.drawRoundedRect(tag.rect, 10, 10);
+		p.setPen(tag.chip.fg);
+		p.drawText(tag.rect, Qt::AlignCenter, tag.chip.text);
+	}
+}
 
 [[nodiscard]] const style::icon *ContextActionIcon(const QString &id) {
 	namespace Id = Menu::Customization::ContextMenuItemId;
@@ -2215,17 +3524,17 @@ struct ContextActionDescriptor {
 		HistoryView::ContextMenuSurface surface) {
 	return (surface == HistoryView::ContextMenuSurface::Selection)
 		? RuEn(
-			"Контекстное меню при выделении",
-			"Selection context menu")
+			"Только при выделении",
+			"Selection only")
 		: RuEn(
-			"Обычное контекстное меню",
-			"Message context menu");
+			"Обычные сообщения",
+			"Regular messages");
 }
 
 [[nodiscard]] QString ContextLaneTitle(ContextEditorLane lane) {
 	return (lane == ContextEditorLane::Strip)
-		? RuEn("Нижняя полоска иконок", "Bottom icon strip")
-		: RuEn("Основной список действий", "Main action list");
+		? RuEn("Подменю", "Submenu")
+		: RuEn("Основное", "Main");
 }
 
 [[nodiscard]] const std::vector<HistoryView::ContextMenuLayoutEntry> &ContextEntries(
@@ -2521,6 +3830,7 @@ class ContextMenuEditorState final {
 public:
 	ContextMenuEditorState()
 	: _layout(HistoryView::LoadContextMenuCustomizationLayout()) {
+		normalizeDuplicates(_layout);
 	}
 
 	[[nodiscard]] const HistoryView::ContextMenuCustomizationLayout &layout() const {
@@ -2543,6 +3853,7 @@ public:
 
 	[[nodiscard]] bool reloadFromDisk() {
 		_layout = HistoryView::LoadContextMenuCustomizationLayout();
+		normalizeDuplicates(_layout);
 		_changes.fire({});
 		return true;
 	}
@@ -2600,6 +3911,50 @@ public:
 			return false;
 		}
 		entries[index].visible = turnOn;
+		if (turnOn) {
+			hideCounterpart(updated, surface, lane, entries[index].id);
+		}
+		return applyLayout(updated);
+	}
+
+	[[nodiscard]] bool canMoveToLane(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			int index) const {
+		if (!hasIndex(surface, lane, index)) {
+			return false;
+		}
+		const auto &source = entries(surface, lane);
+		if (IsCustomSeparatorId(source[index].id)) {
+			return false;
+		}
+		const auto &target = entries(surface, OtherContextLane(lane));
+		return findIndexById(target, source[index].id) >= 0;
+	}
+
+	[[nodiscard]] bool switchLane(
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane fromLane,
+			int index) {
+		if (!canMoveToLane(surface, fromLane, index)) {
+			return false;
+		}
+		auto updated = _layout;
+		auto &source = ContextEntries(updated, surface, fromLane);
+		const auto toLane = OtherContextLane(fromLane);
+		auto &target = ContextEntries(updated, surface, toLane);
+		const auto targetIndex = findIndexById(target, source[index].id);
+		if (targetIndex < 0) {
+			return false;
+		}
+		if ((toLane == ContextEditorLane::Strip)
+			&& !target[targetIndex].visible
+			&& (VisibleEntryCount(target) >= kContextStripPreviewLimit)) {
+			return false;
+		}
+		source[index].visible = false;
+		target[targetIndex].visible = true;
+		hideCounterpart(updated, surface, toLane, target[targetIndex].id);
 		return applyLayout(updated);
 	}
 
@@ -2655,10 +4010,13 @@ public:
 private:
 	[[nodiscard]] bool applyLayout(
 			const HistoryView::ContextMenuCustomizationLayout &updated) {
-		if (!HistoryView::SaveContextMenuCustomizationLayout(updated)) {
+		auto normalized = updated;
+		normalizeDuplicates(normalized);
+		if (!HistoryView::SaveContextMenuCustomizationLayout(normalized)) {
 			return false;
 		}
 		_layout = HistoryView::LoadContextMenuCustomizationLayout();
+		normalizeDuplicates(_layout);
 		_changes.fire({});
 		return true;
 	}
@@ -2669,6 +4027,74 @@ private:
 			int index) const {
 		const auto &list = entries(surface, lane);
 		return (index >= 0) && (index < int(list.size()));
+	}
+
+	[[nodiscard]] static int findIndexById(
+			const std::vector<HistoryView::ContextMenuLayoutEntry> &entries,
+			const QString &id) {
+		for (auto i = 0; i != int(entries.size()); ++i) {
+			if (entries[i].id == id) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	static void hideCounterpart(
+			HistoryView::ContextMenuCustomizationLayout &layout,
+			HistoryView::ContextMenuSurface surface,
+			ContextEditorLane lane,
+			const QString &id) {
+		auto &other = ContextEntries(layout, surface, OtherContextLane(lane));
+		const auto index = findIndexById(other, id);
+		if (index >= 0) {
+			other[index].visible = false;
+		}
+	}
+
+	static void normalizeDuplicates(
+			HistoryView::ContextMenuCustomizationLayout &layout) {
+		const auto normalizeEntries = [](
+				std::vector<HistoryView::ContextMenuLayoutEntry> &entries) {
+			auto seen = base::flat_set<QString>();
+			for (auto &entry : entries) {
+				if (!entry.participatesInUnifiedLayout()) {
+					continue;
+				}
+				const auto key = entry.duplicateKey();
+				if (seen.contains(key)) {
+					entry.visible = false;
+					continue;
+				}
+				seen.emplace(key);
+			}
+		};
+		for (const auto surface : {
+				HistoryView::ContextMenuSurface::Message,
+				HistoryView::ContextMenuSurface::Selection,
+		}) {
+			auto &menu = ContextEntries(layout, surface, ContextEditorLane::Menu);
+			auto &strip = ContextEntries(layout, surface, ContextEditorLane::Strip);
+			normalizeEntries(strip);
+			auto stripKeys = base::flat_set<QString>();
+			for (const auto &entry : strip) {
+				if (entry.participatesInUnifiedLayout()) {
+					stripKeys.emplace(entry.duplicateKey());
+				}
+			}
+			auto seenMenu = base::flat_set<QString>();
+			for (auto &menuEntry : menu) {
+				if (!menuEntry.participatesInUnifiedLayout()) {
+					continue;
+				}
+				const auto key = menuEntry.duplicateKey();
+				if (stripKeys.contains(key) || seenMenu.contains(key)) {
+					menuEntry.visible = false;
+					continue;
+				}
+				seenMenu.emplace(key);
+			}
+		}
 	}
 
 	HistoryView::ContextMenuCustomizationLayout _layout;
@@ -2824,7 +4250,7 @@ protected:
 			QColor(0xF2, 0xF8, 0xFF),
 			QColor(0xE9, 0xF2, 0xFF),
 			QColor(0x4C, 0x7E, 0xE6),
-			RuEn("Bottom strips", "Bottom strips"),
+			RuEn("Подменю", "Submenu"),
 			RuEn(
 				"msg %1/%2 · sel %3/%4",
 				"msg %1/%2 · sel %3/%4")
@@ -2837,8 +4263,8 @@ protected:
 					"Кнопка «без автора» уже заведена в runtime layout",
 					"The no-author action is already wired into the runtime layout")
 				: RuEn(
-					"Нижняя полоска готова принимать иконки и reorder",
-					"The bottom strip is ready for icons and reordering"));
+					"Иконки можно двигать и возвращать снизу",
+					"Icons can be reordered and restored from below"));
 	}
 
 private:
@@ -3102,8 +4528,8 @@ protected:
 				Qt::AlignLeft | Qt::AlignTop,
 				(_lane == ContextEditorLane::Strip)
 					? RuEn(
-						"Ниже остаются маленькие таблетки скрытых иконок: нажми, чтобы вернуть действие обратно в нижнюю полоску.",
-						"Small pills for hidden icons stay below: tap one to bring it back into the bottom strip.")
+						"Ниже остаются маленькие таблетки скрытых иконок: нажми, чтобы вернуть действие обратно в подменю.",
+						"Small pills for hidden icons stay below: tap one to bring the action back into the submenu.")
 					: RuEn(
 						"Ниже остаются маленькие таблетки скрытых действий: нажми, чтобы вернуть нужный пункт обратно в меню.",
 						"Small pills for hidden actions stay below: tap one to bring the action back into the menu."));
@@ -3223,8 +4649,8 @@ protected:
 				}
 				if (!changed && _lane == ContextEditorLane::Strip) {
 					_controller->window().showToast(RuEn(
-						"В нижней полоске можно держать максимум 4 иконки.",
-						"The bottom strip can show at most 4 icons."));
+						"В подменю можно держать максимум 4 иконки.",
+						"The submenu can show at most 4 icons."));
 				}
 				clampSelection();
 			} else if (_state->toggleVisible(_surface, _lane, chip.index)) {
@@ -3232,8 +4658,8 @@ protected:
 				clampSelection();
 			} else if (_lane == ContextEditorLane::Strip) {
 				_controller->window().showToast(RuEn(
-					"В нижней полоске можно держать максимум 4 иконки.",
-					"The bottom strip can show at most 4 icons."));
+					"В подменю можно держать максимум 4 иконки.",
+					"The submenu can show at most 4 icons."));
 			}
 			updateHover(point);
 			return;
@@ -3299,6 +4725,7 @@ private:
 		None,
 		ToggleVisible,
 		DeleteCustomSeparator,
+		SwitchLane,
 	};
 
 	struct ActionButton {
@@ -3385,8 +4812,9 @@ private:
 		const auto usableWidth = std::max(availableWidth, 120);
 		const auto fm = QFontMetrics(st::normalFont->f);
 		auto pushChip = [&](int index, QString label, QColor color, bool restoreAll) {
+			label = fm.elidedText(label, Qt::ElideRight, 170);
 			const auto chipWidth = std::min(
-				std::max(92, fm.horizontalAdvance(label) + 28),
+				std::max(76, fm.horizontalAdvance(label) + 22),
 				usableWidth);
 			auto x = 0;
 			auto y = hiddenSectionTop() + 24;
@@ -3458,6 +4886,14 @@ private:
 			right -= 8;
 		};
 
+		if (_state->canMoveToLane(_surface, _lane, index)) {
+			push(
+				(_lane == ContextEditorLane::Strip)
+					? RuEn("В основное", "To main")
+					: RuEn("В подменю", "To submenu"),
+				ActionKind::SwitchLane,
+				true);
+		}
 		push(
 			entries[index].visible
 				? RuEn("Скрыть", "Hide")
@@ -3502,6 +4938,17 @@ private:
 			bool floating) const {
 		const auto &entry = _state->entries(_surface, _lane)[index];
 		const auto meta = DescribeContextAction(entry.id);
+		const auto buttons = floating
+			? std::vector<ActionButton>()
+			: actionButtonsForRow(index);
+		const auto tags = LayoutTagChips(
+			ContextEntryTags(_surface, _lane, entry.id),
+			buttons.empty() ? (row.right() - kRowPadding) : (buttons.front().rect.left() - 8),
+			row.top() + 11,
+			row.left() + 176);
+		const auto contentRight = tags.empty()
+			? (buttons.empty() ? (row.right() - 18) : (buttons.front().rect.left() - 10))
+			: (tags.front().rect.left() - 10);
 		const auto accent = ThemedDescriptorAccent(
 			meta.color,
 			hovered || selected || floating);
@@ -3535,31 +4982,32 @@ private:
 
 		p.setPen(st::windowFg);
 		p.setFont(st::semiboldTextStyle.font->f);
+		const auto titleWidth = std::max(88, contentRight - (row.left() + 84));
 		p.drawText(
-			QRect(row.left() + 84, row.top() + 12, row.width() - 242, 20),
+			QRect(row.left() + 84, row.top() + 12, titleWidth, 20),
 			Qt::AlignLeft | Qt::AlignVCenter,
-			meta.title);
+			QFontMetrics(st::semiboldTextStyle.font->f).elidedText(
+				meta.title,
+				Qt::ElideRight,
+				titleWidth));
+		PaintTagChips(p, tags);
 
 		const auto stateText = entry.visible
-			? (_lane == ContextEditorLane::Strip
-				? RuEn("Показывается в нижней полоске", "Shown in the bottom strip")
-				: RuEn("Показывается в контекстном меню", "Shown in the context menu"))
-			: (_lane == ContextEditorLane::Strip
-				? RuEn("Скрыто из нижней полоски", "Hidden from the bottom strip")
-				: RuEn("Скрыто из контекстного меню", "Hidden from the context menu"));
+			? meta.subtitle
+			: RuEn("Скрыто", "Hidden");
 		const auto subtitle = QFontMetrics(st::defaultTextStyle.font->f).elidedText(
-			stateText + u" · "_q + meta.subtitle,
+			stateText,
 			Qt::ElideRight,
-			row.width() - 242);
+			titleWidth);
 		p.setPen(st::windowSubTextFg);
 		p.setFont(st::defaultTextStyle.font->f);
 		p.drawText(
-			QRect(row.left() + 84, row.top() + 34, row.width() - 242, 18),
+			QRect(row.left() + 84, row.top() + 34, titleWidth, 18),
 			Qt::AlignLeft | Qt::AlignVCenter,
 			subtitle);
 
 		if (!floating) {
-			for (const auto &button : actionButtonsForRow(index)) {
+			for (const auto &button : buttons) {
 				paintActionButton(p, button);
 			}
 		}
@@ -3732,6 +5180,9 @@ private:
 		case ActionKind::DeleteCustomSeparator:
 			changed = _state->removeCustomSeparator(_surface, _lane, index);
 			break;
+		case ActionKind::SwitchLane:
+			changed = _state->switchLane(_surface, _lane, index);
+			break;
 		case ActionKind::None:
 			break;
 		}
@@ -3739,11 +5190,13 @@ private:
 			_selected = index;
 			clampSelection();
 		} else {
-			if (kind == ActionKind::ToggleVisible
-				&& _lane == ContextEditorLane::Strip) {
+			if (((kind == ActionKind::ToggleVisible)
+				&& (_lane == ContextEditorLane::Strip))
+				|| ((kind == ActionKind::SwitchLane)
+					&& (_lane == ContextEditorLane::Menu))) {
 				_controller->window().showToast(RuEn(
-					"В нижней полоске можно держать максимум 4 иконки.",
-					"The bottom strip can show at most 4 icons."));
+					"В подменю можно держать максимум 4 иконки.",
+					"The submenu can show at most 4 icons."));
 			} else {
 				update();
 			}
@@ -3810,6 +5263,47 @@ void AddPreviewToggle(
 	}
 }
 
+void AddEditorSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title) {
+	Ui::AddDivider(container);
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		rpl::single(title),
+		QMargins(
+			st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+			0,
+			0,
+			0));
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
+}
+
+void AddEditorLaneHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title) {
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		rpl::single(title),
+		QMargins(
+			st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+			0,
+			0,
+			0));
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+}
+
+void AddEditorInlineCaption(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		const QString &description) {
+	AddEditorLaneHeader(container, title);
+	if (!description.isEmpty()) {
+		Ui::AddDividerText(container, rpl::single(description));
+	}
+}
+
 } // namespace
 
 void AddMenuCustomizationEditor(
@@ -3820,23 +5314,9 @@ void AddMenuCustomizationEditor(
 		false);
 	const auto contextState = std::make_shared<ContextMenuEditorState>();
 
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	container->add(
-		object_ptr<Ui::FlatLabel>(
-			container,
-			rpl::single(RuEn(
-				"Настройка меню и панелей",
-				"Menus and panels")),
-			st::boxLabel),
-		st::defaultBoxDividerLabelPadding);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
-
-	Ui::AddSubsectionTitle(
+	AddEditorSectionHeader(
 		container,
-		rpl::single(RuEn(
-			"Боковая панель",
-			"Side panel")));
+		RuEn("Боковая панель", "Side panel"));
 	const auto list = container->add(
 		object_ptr<SideMenuEntryList>(container, state),
 		style::margins(6, 0, 6, 0),
@@ -3903,19 +5383,16 @@ void AddMenuCustomizationEditor(
 			"All hidden items were restored."));
 	});
 
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddSubsectionTitle(
+	AddEditorLaneHeader(
 		container,
-		rpl::single(RuEn(
-			"Поведение боковой панели",
-			"Side panel behaviour")));
+		RuEn("Поведение", "Behaviour"));
 
 	AddPreviewToggle(
 		controller,
 		container,
 		RuEn(
-			"Показывать нижний footer-текст",
-			"Show the footer text"),
+			"Показывать Astrogram Desktop и версию внизу меню",
+			"Show Astrogram Desktop and version at the bottom"),
 		QString(),
 		state->showFooterText(),
 		[=](bool value) {
@@ -3926,8 +5403,8 @@ void AddMenuCustomizationEditor(
 		controller,
 		container,
 		RuEn(
-			"Профильный блок внизу бокового меню",
-			"Move the profile block to the bottom"),
+			"Профиль и список аккаунтов внизу бокового меню",
+			"Move the profile block and account list to the bottom"),
 		QString(),
 		state->profileAtBottom(),
 		[=](bool value) {
@@ -3955,57 +5432,68 @@ void AddMenuCustomizationEditor(
 			"The side panel presentation was reset to defaults."));
 	});
 
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	Ui::AddSubsectionTitle(
+	AddEditorSectionHeader(
 		container,
-		rpl::single(RuEn(
-			"Контекстное меню",
-			"Context menu")));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+		RuEn("Контекстное меню", "Context menu"));
+	Ui::AddDividerText(container, rpl::single(RuEn(
+		"Теги справа показывают, где кнопка видна: в основном меню, в подменю или только при выделении.",
+		"The tags on the right show where the action appears: in the main menu, in the submenu or only for selections.")));
 
-	const auto addContextEditor = [&](HistoryView::ContextMenuSurface surface,
-			ContextEditorLane lane) {
-		Ui::AddSubsectionTitle(
+	const auto addContextSurfaceEditor = [&](HistoryView::ContextMenuSurface surface) {
+		AddEditorInlineCaption(
 			container,
-			rpl::single(ContextSurfaceTitle(surface) + u" · "_q + ContextLaneTitle(lane)));
-		const auto list = container->add(
+			ContextSurfaceTitle(surface) + u" · "_q + ContextLaneTitle(ContextEditorLane::Menu),
+			QString());
+		const auto menuList = container->add(
 			object_ptr<ContextMenuEntryList>(
 				container,
 				controller,
 				contextState,
 				surface,
-				lane),
+				ContextEditorLane::Menu),
 			style::margins(6, 0, 6, 0),
 			style::al_top);
-		if (lane == ContextEditorLane::Menu) {
-			AddButtonWithIcon(
+		Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+		AddButtonWithIcon(
+			container,
+			rpl::single(RuEn(
+				"Добавить разделитель в основное меню",
+				"Add divider to the main menu")),
+			st::settingsButton,
+			{ &st::menuIconAdd }
+		)->addClickHandler([=] {
+			const auto inserted = contextState->addCustomSeparatorAfter(
+				surface,
+				ContextEditorLane::Menu,
+				menuList->selectedIndex());
+			if (inserted < 0) {
+				controller->window().showToast(RuEn(
+					"Не удалось добавить разделитель.",
+					"Could not add the divider."));
+				return;
+			}
+			menuList->setSelectedIndex(inserted);
+		});
+		Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+		AddEditorInlineCaption(
+			container,
+			ContextSurfaceTitle(surface) + u" · "_q + ContextLaneTitle(ContextEditorLane::Strip),
+			QString());
+		container->add(
+			object_ptr<ContextMenuEntryList>(
 				container,
-				rpl::single(RuEn(
-					"Добавить разделитель",
-					"Add divider")),
-				st::settingsButton,
-				{ &st::menuIconAdd }
-			)->addClickHandler([=] {
-				const auto inserted = contextState->addCustomSeparatorAfter(
-					surface,
-					lane,
-					list->selectedIndex());
-				if (inserted < 0) {
-					controller->window().showToast(RuEn(
-						"Не удалось добавить разделитель.",
-						"Could not add the divider."));
-					return;
-				}
-				list->setSelectedIndex(inserted);
-			});
-		}
+				controller,
+				contextState,
+				surface,
+				ContextEditorLane::Strip),
+			style::margins(6, 0, 6, 0),
+			style::al_top);
 		Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	};
 
-	addContextEditor(HistoryView::ContextMenuSurface::Message, ContextEditorLane::Menu);
-	addContextEditor(HistoryView::ContextMenuSurface::Message, ContextEditorLane::Strip);
-	addContextEditor(HistoryView::ContextMenuSurface::Selection, ContextEditorLane::Menu);
-	addContextEditor(HistoryView::ContextMenuSurface::Selection, ContextEditorLane::Strip);
+	addContextSurfaceEditor(HistoryView::ContextMenuSurface::Message);
+	Ui::AddDivider(container);
+	addContextSurfaceEditor(HistoryView::ContextMenuSurface::Selection);
 
 	AddButtonWithIcon(
 		container,
@@ -4026,6 +5514,74 @@ void AddMenuCustomizationEditor(
 			"Context menu layout reset to defaults."));
 	});
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+}
+
+void AddThreeDotsMenuCustomizationEditor(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	const auto state = std::make_shared<ThreeDotsMenuEditorState>();
+	const auto showSaveError = [=] {
+		controller->window().showToast(RuEn(
+			"Не удалось сохранить layout меню на 3 точки.",
+			"Could not save the three-dots menu layout."));
+	};
+	AddEditorSectionHeader(
+		container,
+		RuEn("Меню на 3 точки", "Three-dots menu"));
+
+	const auto list = container->add(
+		object_ptr<ThreeDotsMenuEntryList>(container, state),
+		style::margins(6, 0, 6, 0),
+		style::al_top);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+
+	AddButtonWithIcon(
+		container,
+		rpl::single(RuEn(
+			"Добавить разделитель",
+			"Add divider")),
+		st::settingsButton,
+		{ &st::menuIconAdd }
+	)->addClickHandler([=] {
+		const auto entriesCount = int(state->entries().size());
+		const auto baseIndex = (list->selectedIndex() >= 0)
+			? list->selectedIndex()
+			: (entriesCount - 1);
+		const auto inserted = state->addCustomSeparatorAfter(baseIndex);
+		if (inserted < 0) {
+			showSaveError();
+			return;
+		}
+		list->setSelectedIndex(inserted);
+	});
+
+	AddButtonWithIcon(
+		container,
+		rpl::single(RuEn(
+			"Вернуть все скрытые пункты",
+			"Restore all hidden items")),
+		st::settingsButton,
+		{ &st::menuIconRestore }
+	)->addClickHandler([=] {
+		if (!state->restoreAllHidden()) {
+			showSaveError();
+		}
+	});
+
+	AddButtonWithIcon(
+		container,
+		rpl::single(RuEn(
+			"Сбросить меню на 3 точки к дефолту",
+			"Reset the three-dots menu to defaults")),
+		st::settingsButton,
+		{ &st::menuIconRestore }
+	)->addClickHandler([=] {
+		if (!state->resetToDefaults()) {
+			showSaveError();
+			return;
+		}
+		list->setSelectedIndex(0);
+	});
 }
 
 } // namespace Settings

@@ -140,6 +140,7 @@ public:
 
 	std::vector<PluginState> plugins() const;
 	[[nodiscard]] rpl::producer<ManagerStateChange> stateChanges() const;
+	[[nodiscard]] bool uiTransientPluginsActive() const;
 	bool safeModeEnabled() const;
 	bool setSafeModeEnabled(bool enabled);
 	bool runtimeApiEnabled() const;
@@ -387,7 +388,6 @@ private:
 		const QString &sha256,
 		const QString &pluginId);
 	void requestPluginSourceTrustFeedIfNeeded();
-	void schedulePluginSourceTrustFeedRequest(crl::time delay);
 	void invalidatePluginSourceTrustEntry(
 		const QString &sha256,
 		const QString &reason);
@@ -464,11 +464,7 @@ private:
 	QString _safeModePath;
 	QString _recoveryPath;
 	struct PluginSourceTrustEntry;
-	std::unique_ptr<QNetworkAccessManager> _pluginSourceTrustManager;
 	QHash<QString, std::shared_ptr<PluginSourceTrustEntry>> _pluginSourceTrustBySha;
-	bool _pluginSourceTrustFeedInFlight = false;
-	bool _pluginSourceTrustFeedScheduled = false;
-	int _pluginSourceTrustRevision = 0;
 	bool _runtimeApiEnabled = false;
 	int _runtimeApiPort = 37080;
 	std::unique_ptr<QTcpServer> _runtimeApiServer;
@@ -519,6 +515,7 @@ private:
 	std::vector<SessionHandlerEntry> _sessionHandlers;
 	QString _registeringPluginId;
 	rpl::lifetime _sessionLifetime;
+	rpl::lifetime _pluginSourceTrustLifetime;
 	rpl::lifetime _messageObserverLifetime;
 	Main::Session *_activeSession = nullptr;
 };

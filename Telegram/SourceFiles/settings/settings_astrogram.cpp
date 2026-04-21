@@ -129,33 +129,6 @@ constexpr auto kSecretChannelClickWindowMs = 1500;
 		QString::number(AppVersion));
 }
 
-[[nodiscard]] QString AstrogramCurrentBuildText() {
-	return RuEn(
-		"Текущая сборка: %1",
-		"Current build: %1").arg(Core::FormatVersionWithBuild(AppVersion));
-}
-
-[[nodiscard]] QString AstrogramUpdateChannelText() {
-	if (cAlphaVersion()) {
-		return RuEn("Alpha", "Alpha");
-	}
-	return cInstallBetaVersion()
-		? RuEn("Dev (beta)", "Dev (beta)")
-		: RuEn("Stable", "Stable");
-}
-
-[[nodiscard]] QString AstrogramLastUpdateCheckText() {
-	if (const auto value = cLastUpdateCheck(); value > 0) {
-		const auto date = QDateTime::fromSecsSinceEpoch(value).toLocalTime();
-		return RuEn(
-			"Последняя проверка: %1",
-			"Last checked: %1").arg(date.toString(Qt::DefaultLocaleShortDate));
-	}
-	return RuEn(
-		"Проверка обновлений ещё не запускалась.",
-		"Update check has not run yet.");
-}
-
 [[nodiscard]] QString AstrogramUpdateProgressText(int ready, int total) {
 	if (total <= 0) {
 		return RuEn(
@@ -203,18 +176,6 @@ constexpr auto kSecretChannelClickWindowMs = 1500;
 		: RuEn(
 			"Автообновления Astrogram выключены.",
 			"Astrogram auto-updates are disabled.");
-}
-
-[[nodiscard]] QString AstrogramUpdateDetails(
-		const Core::UpdateReleaseInfo &info) {
-	if (!info.title.isEmpty()) {
-		return info.title;
-	}
-	return AstrogramCurrentBuildText()
-		+ u'\n'
-		+ RuEn("Канал: %1", "Channel: %1").arg(AstrogramUpdateChannelText())
-		+ u'\n'
-		+ AstrogramLastUpdateCheckText();
 }
 
 [[nodiscard]] QString AstrogramUpdateChangelogText(
@@ -731,34 +692,6 @@ void SyncScheduledEditPersistence(
 		: trimmed;
 }
 
-[[nodiscard]] QString MarkPreviewSummary(
-		bool showIcon,
-		bool showText,
-		const QString &icon,
-		const QString &text,
-		const QString &fallbackIcon,
-		const QString &fallbackText) {
-	const auto resolvedIcon = icon.trimmed().isEmpty()
-		? fallbackIcon
-		: icon.trimmed();
-	const auto resolvedText = text.trimmed().isEmpty()
-		? fallbackText
-		: text.trimmed();
-	auto preview = QString();
-	if (showIcon && !resolvedIcon.isEmpty()) {
-		preview += resolvedIcon;
-	}
-	if (showText && !resolvedText.isEmpty()) {
-		if (!preview.isEmpty()) {
-			preview += u' ';
-		}
-		preview += resolvedText;
-	}
-	return preview.isEmpty()
-		? RuEn("Превью скрыто", "Preview hidden")
-		: RuEn("Превью: %1", "Preview: %1").arg(preview);
-}
-
 void AddSectionButton(
 			not_null<Window::SessionController*> controller,
 			not_null<Ui::VerticalLayout*> container,
@@ -875,8 +808,8 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 		container->add(object_ptr<Ui::FlatLabel>(
 			container,
 			rpl::single(RuEn(
-				"Все языковые модели показаны сразу. Неустановленные можно скачать справа, а после установки повторная загрузка скрывается.",
-				"All language models are shown at once. Not-installed models can be downloaded on the right, and re-download is hidden after installation.")),
+				"Все языки показаны сразу. Значок справа скачивает или устанавливает модель.",
+				"All languages are shown at once. The icon on the right downloads or installs the model.")),
 			st::boxDividerLabel),
 			st::boxRowPadding);
 		container->add(
@@ -1138,19 +1071,36 @@ void AddLinksSection(
 			QDesktopServices::openUrl(QUrl(u"https://docs.astrogram.su"_q));
 		},
 		{ &st::menuIconIpAddress });
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 }
 
-void AddSectionGroupTitle(
+[[nodiscard]] style::margins SectionTitlePadding() {
+	return QMargins(
+		st::boxRowPadding.left() - st::defaultSubsectionTitlePadding.left(),
+		0,
+		0,
+		0);
+}
+
+[[nodiscard]] not_null<Ui::FlatLabel*> AddSectionTitle(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text) {
-	container->add(
-		object_ptr<Ui::FlatLabel>(
-			container,
-			rpl::single(text),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
+	const auto label = Ui::AddSubsectionTitle(
+		container,
+		rpl::single(text),
+		SectionTitlePadding());
+	label->setTextColorOverride(st::windowActiveTextFg->c);
+	return label;
+}
+
+void AddSectionHeader(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &text,
+		bool includeDivider = true) {
+	if (includeDivider) {
+		Ui::AddDivider(container);
+	}
+	AddSectionTitle(container, text);
 }
 
 void AddSectionGroup(
@@ -1158,10 +1108,10 @@ void AddSectionGroup(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &title,
 		std::initializer_list<std::tuple<QString, Type, IconDescriptor>> entries) {
-	AddSectionGroupTitle(container, title);
+	AddSectionTitle(container, title);
 	auto card = container->add(
 		object_ptr<Ui::VerticalLayout>(container),
-		style::margins(6, 8, 6, 0),
+		style::margins(6, 0, 6, 0),
 		style::al_top);
 	card->resizeToWidth(container->width());
 	Ui::AddDivider(card);
@@ -1174,7 +1124,7 @@ void AddSectionGroup(
 
 [[nodiscard]] not_null<Ui::VerticalLayout*> AddSettingsCard(
 		not_null<Ui::VerticalLayout*> container,
-		int topMargin = 8) {
+		int topMargin = 0) {
 	auto card = container->add(
 		object_ptr<Ui::VerticalLayout>(container),
 		style::margins(6, topMargin, 6, 0),
@@ -1196,16 +1146,12 @@ void AddAstrogramUpdateSection(
 		return;
 	}
 
-	AddSectionGroupTitle(container, RuEn(
+	AddSectionHeader(container, RuEn(
 		"Обновления Astrogram",
-		"Astrogram updates"));
+		"Astrogram updates"), false);
 	const auto card = AddSettingsCard(container);
 	const auto checker = card->lifetime().make_state<Core::UpdateChecker>();
 	const auto statusText = card->lifetime().make_state<rpl::variable<QString>>(
-		QString());
-	const auto detailsText = card->lifetime().make_state<rpl::variable<QString>>(
-		QString());
-	const auto hookText = card->lifetime().make_state<rpl::variable<QString>>(
 		QString());
 	const auto changelogText = card->lifetime().make_state<rpl::variable<QString>>(
 		QString());
@@ -1226,26 +1172,11 @@ void AddAstrogramUpdateSection(
 				checker->stop();
 			}
 		});
-	Ui::AddSkip(card, st::settingsCheckboxesSkip / 4);
 
 	card->add(
 		object_ptr<Ui::FlatLabel>(
 			card,
 			statusText->value(),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
-	const auto detailsLabel = card->add(
-		object_ptr<Ui::FlatLabel>(
-			card,
-			detailsText->value(),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
-	const auto hookLabel = card->add(
-		object_ptr<Ui::FlatLabel>(
-			card,
-			hookText->value(),
 			st::defaultFlatLabel),
 		style::margins(14, 0, 14, 0),
 		style::al_top);
@@ -1256,7 +1187,6 @@ void AddAstrogramUpdateSection(
 			st::defaultFlatLabel),
 		style::margins(14, 0, 14, 0),
 		style::al_top);
-	Ui::AddSkip(card, st::settingsCheckboxesSkip / 4);
 
 	AddActionButton(
 		card,
@@ -1305,11 +1235,7 @@ void AddAstrogramUpdateSection(
 			? Core::CurrentUpdateFeedPageUrl()
 			: info.url;
 		statusText->force_assign(AstrogramUpdateHeadline(*checker, info));
-		detailsText->force_assign(AstrogramUpdateDetails(info));
-		hookText->force_assign(Core::DescribeDevUpdateHooksState());
 		changelogText->force_assign(AstrogramUpdateChangelogText(info));
-		detailsLabel->setVisible(detailsText->current().isEmpty() == false);
-		hookLabel->setVisible(hookText->current().isEmpty() == false);
 		changelogLabel->setVisible(changelogText->current().isEmpty() == false);
 		openRelease->setVisible(releaseUrl->isEmpty() == false);
 		installUpdate->setVisible(
@@ -1331,9 +1257,7 @@ void SetupAstrogramHome(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	AddAstrogramHeader(controller, container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddAstrogramUpdateSection(controller, container);
-	Ui::AddSkip(container);
 	const auto sectionsCard = AddSettingsCard(container);
 	AddSectionButton(
 		controller,
@@ -1366,10 +1290,7 @@ void SetupAstrogramHome(
 		Experimental::Id(),
 		{ &st::menuIconExperimental });
 	FinishSettingsCard(sectionsCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Ссылки", "Links"));
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddSectionHeader(container, RuEn("Ссылки", "Links"));
 	AddLinksSection(controller, container);
 }
 
@@ -1377,9 +1298,7 @@ void SetupAstrogramCore(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Аккаунт и возможности", "Account & features"));
+	AddSectionHeader(container, RuEn("Возможности", "Features"));
 	const auto accountCard = AddSettingsCard(container);
 	AddToggle(
 		accountCard,
@@ -1392,8 +1311,7 @@ void SetupAstrogramCore(
 		RuEn("Скрывать рекламу и спонсорские блоки", "Hide ads and sponsored"),
 		[&](bool toggled) { settings.setDisableAds(toggled); });
 	FinishSettingsCard(accountCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Пересылка и ограничения", "Forwarding & limits"));
+	AddSectionHeader(container, RuEn("Пересылка и лимиты", "Forwarding & limits"));
 	const auto forwardingCard = AddSettingsCard(container);
 	AddToggle(
 		forwardingCard,
@@ -1479,19 +1397,8 @@ void SetupAstrogramCore(
 				RefreshLocalForwardingLimits(controller, false, false, true);
 			});
 	});
-	Ui::AddSkip(forwardingCard, st::settingsCheckboxesSkip / 4);
-	forwardingCard->add(
-		object_ptr<Ui::FlatLabel>(
-			forwardingCard,
-			rpl::single(RuEn(
-				"Пересылка снимает только клиентский лимит выделения. GIF и стикерные override работают локально: Astrogram удерживает расширенный хвост на этом устройстве, но серверные лимиты Telegram и синхронизация всё равно могут быть ниже.",
-				"Forwarding removes only the client-side selection cap. GIF and sticker overrides are local: Astrogram keeps an extended tail on this device, but Telegram server limits and sync may still stay lower.")),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
 	FinishSettingsCard(forwardingCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Боковое меню", "Side menu"));
+	AddSectionHeader(container, RuEn("Боковое меню", "Side menu"));
 	const auto sideMenuCard = AddSettingsCard(container);
 	AddToggle(
 		sideMenuCard,
@@ -1499,16 +1406,14 @@ void SetupAstrogramCore(
 		RuEn("Показывать аккаунты в боковом меню", "Show accounts in side menu"),
 		[&](bool toggled) { settings.setMainMenuAccountsShown(toggled); });
 	FinishSettingsCard(sideMenuCard);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 }
 
 void SetupAstrogramPrivacy(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Режим призрака", "Ghost mode"));
+	AddSectionHeader(container, RuEn("Режим призрака", "Ghost mode"));
 	const auto ghostCard = AddSettingsCard(container);
 	AddToggle(
 		ghostCard,
@@ -1531,8 +1436,7 @@ void SetupAstrogramPrivacy(
 		RuEn("Не отправлять набор текста и ход загрузки", "Don't send typing/upload progress"),
 		[&](bool toggled) { settings.setGhostHideTypingProgress(toggled); });
 	FinishSettingsCard(ghostCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("История и защита", "History & protection"));
+	AddSectionHeader(container, RuEn("Защита от удаления", "Delete protection"));
 	const auto historyCard = AddSettingsCard(container);
 	AddToggle(
 		historyCard,
@@ -1555,10 +1459,9 @@ void SetupAstrogramPrivacy(
 		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); },
 		{ &st::menuIconShowInFolder });
 	FinishSettingsCard(historyCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Отметки изменений и удаления", "Edited & deleted tags"));
+	AddSectionHeader(container, RuEn("Отметки изменений и удаления", "Edited & deleted tags"));
 	const auto editedTagCard = AddSettingsCard(container);
-	AddSectionGroupTitle(
+	AddSectionTitle(
 		editedTagCard,
 		RuEn("Изменённое сообщение", "Edited message"));
 	AddToggle(
@@ -1611,29 +1514,6 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
-	editedTagCard->add(
-		object_ptr<Ui::FlatLabel>(
-			editedTagCard,
-			rpl::combine(
-				settings.editedMarkShowIconValue(),
-				settings.editedMarkShowTextValue(),
-				settings.editedMarkIconValue(),
-				settings.editedMarkTextValue()) | rpl::map([](
-						bool showIcon,
-						bool showText,
-						const QString &icon,
-						const QString &text) {
-					return MarkPreviewSummary(
-						showIcon,
-						showText,
-						icon,
-						text,
-						DefaultEditedMarkIcon(),
-						DefaultEditedMarkText());
-				}),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
 	AddActionButton(
 		editedTagCard,
 		RuEn("Сбросить отметку изменения", "Reset edited tag"),
@@ -1647,9 +1527,9 @@ void SetupAstrogramPrivacy(
 		},
 		{ &st::menuIconRestore });
 	FinishSettingsCard(editedTagCard);
-	Ui::AddSkip(container);
+	Ui::AddDivider(container);
 	const auto deletedTagCard = AddSettingsCard(container);
-	AddSectionGroupTitle(
+	AddSectionTitle(
 		deletedTagCard,
 		RuEn("Удалённое сообщение", "Deleted message"));
 	AddToggle(
@@ -1702,29 +1582,6 @@ void SetupAstrogramPrivacy(
 				Core::App().saveSettings();
 			});
 	});
-	deletedTagCard->add(
-		object_ptr<Ui::FlatLabel>(
-			deletedTagCard,
-			rpl::combine(
-				settings.deletedMarkShowIconValue(),
-				settings.deletedMarkShowTextValue(),
-				settings.deletedMarkIconValue(),
-				settings.deletedMarkTextValue()) | rpl::map([](
-						bool showIcon,
-						bool showText,
-						const QString &icon,
-						const QString &text) {
-					return MarkPreviewSummary(
-						showIcon,
-						showText,
-						icon,
-						text,
-						DefaultDeletedMarkIcon(),
-						DefaultDeletedMarkText());
-				}),
-			st::defaultFlatLabel),
-		style::margins(14, 0, 14, 0),
-		style::al_top);
 	AddActionButton(
 		deletedTagCard,
 		RuEn("Сбросить отметку удаления", "Reset deleted tag"),
@@ -1738,16 +1595,14 @@ void SetupAstrogramPrivacy(
 		},
 		{ &st::menuIconRestore });
 	FinishSettingsCard(deletedTagCard);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 }
 
 void SetupAstrogramInterface(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Окно и навигация", "Window & navigation"));
+	AddSectionHeader(container, RuEn("Окно и навигация", "Window & navigation"));
 	const auto windowCard = AddSettingsCard(container);
 	AddToggle(
 		windowCard,
@@ -1775,8 +1630,7 @@ void SetupAstrogramInterface(
 		RuEn("Показывать секунды во времени", "Show message seconds"),
 		[&](bool toggled) { settings.setShowMessageSeconds(toggled); });
 	FinishSettingsCard(windowCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Перевод и речь", "Translation & speech"));
+	AddSectionHeader(container, RuEn("Перевод и речь", "Translation & speech"));
 	const auto speechCard = AddSettingsCard(container);
 	AddToggle(
 		speechCard,
@@ -1830,8 +1684,7 @@ void SetupAstrogramInterface(
 		ShowSpeechModelDownloadBox(controller);
 	});
 	FinishSettingsCard(speechCard);
-	Ui::AddSkip(container);
-	AddSectionGroupTitle(container, RuEn("Текст и ввод", "Text & input"));
+	AddSectionHeader(container, RuEn("Текст и ввод", "Text & input"));
 	const auto inputCard = AddSettingsCard(container);
 	AddToggle(
 		inputCard,
@@ -1874,14 +1727,12 @@ void SetupAstrogramInterface(
 		RuEn("Автозагрузка словарей", "Auto download dictionaries"),
 		[&](bool toggled) { settings.setAutoDownloadDictionaries(toggled); });
 	FinishSettingsCard(inputCard);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 }
 
 void SetupAstrogramAntiRecall(not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
-	Ui::AddDivider(container);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Журнал защиты от удаления", "Anti-recall log"));
+	AddSectionHeader(container, RuEn("Журнал защиты от удаления", "Anti-recall log"));
 	const auto card = AddSettingsCard(container);
 	AddToggle(
 		card,
@@ -1904,14 +1755,12 @@ void SetupAstrogramAntiRecall(not_null<Ui::VerticalLayout*> container) {
 		[] { File::ShowInFolder(u"./tdata/astro_recall_log.jsonl"_q); },
 		{ &st::menuIconShowInFolder });
 	FinishSettingsCard(card);
-	Ui::AddSkip(container, st::settingsCheckboxesSkip);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 }
 
 void SetupAstrogramLinks(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
-	Ui::AddDivider(container);
-	Ui::AddSkip(container);
 	AddLinksSection(controller, container);
 }
 

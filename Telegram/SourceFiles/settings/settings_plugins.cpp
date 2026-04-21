@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
+#include "core/astrogram_channel_registry.h"
 #include "core/file_utilities.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_thread.h"
@@ -257,174 +258,47 @@ QString PluginSourceBadgeText(const ::Plugins::PluginState &state) {
 			u"Неподтверждённый источник"_q);
 }
 
-QString PluginSourceChannelLabel(const ::Plugins::PluginState &state) {
-	const auto title = state.sourceChannelTitle.trimmed();
-	const auto username = state.sourceChannelUsername.trimmed();
-	if (!title.isEmpty() && !username.isEmpty()) {
-		return title + u" · @"_q + username;
+QString PluginSourceBadgeDetailText(const ::Plugins::PluginState &state) {
+	const auto channelLabel = !state.sourceChannelTitle.trimmed().isEmpty()
+		? state.sourceChannelTitle.trimmed()
+		: !state.sourceChannelUsername.trimmed().isEmpty()
+		? u'@' + state.sourceChannelUsername.trimmed()
+		: QString::number(
+			Core::AstrogramChannelRegistry::details::kRegistryChannelFullId);
+	if (state.sourceTrustLoading
+		|| state.sourceTrustReason == u"channel-feed-refreshing"_q) {
+		return PluginUiText(
+			u"Checking records in %1."_q,
+			u"Проверяем записи в %1."_q).arg(channelLabel);
 	}
-	if (!title.isEmpty()) {
-		return title;
+	if (state.sourceTrustReason == u"channel-feed-refresh-failed"_q) {
+		return PluginUiText(
+			u"Could not refresh %1 yet. The client will retry automatically."_q,
+			u"Пока не удалось обновить %1. Клиент попробует снова автоматически."_q
+		).arg(channelLabel);
 	}
-	if (!username.isEmpty()) {
-		return u"@"_q + username;
-	}
-	return PluginUiText(
-		u"Channel %1"_q,
-		u"Канал %1"_q).arg(QString::number(state.sourceChannelId));
-}
-
-QString PluginSourceOriginText(const ::Plugins::PluginState &state) {
-	if (!state.sourceChannelId || (state.sourceMessageId <= 0)) {
-		return QString();
-	}
-	return PluginUiText(
-		u"Source channel: %1 · post %2"_q,
-		u"Канал-источник: %1 · пост %2"_q)
-			.arg(PluginSourceChannelLabel(state))
-			.arg(QString::number(state.sourceMessageId));
-}
-
-QString PluginSourceOriginKey(const ::Plugins::PluginState &state) {
-	if (!state.sourceChannelId || (state.sourceMessageId <= 0)) {
-		return QString();
-	}
-	return QString::number(state.sourceChannelId)
-		+ u":"_q
-		+ QString::number(state.sourceMessageId);
-}
-
-QString PluginSourceHashText(const ::Plugins::PluginState &state) {
-	return state.sha256.isEmpty()
-		? QString()
-		: (PluginUiText(
-			u"Exact SHA-256: "_q,
-			u"Точный SHA-256: "_q) + state.sha256);
-}
-
-QString PluginSourceReasonCode(const ::Plugins::PluginState &state) {
-	if (!state.sourceTrustReason.trimmed().isEmpty()) {
-		return state.sourceTrustReason.trimmed();
-	}
-	return state.sourceVerified
-		? QString()
-		: state.sourceTrustDetails.trimmed();
-}
-
-QString PluginSourceRecordLabelText(const ::Plugins::PluginState &state) {
-	if (!state.sourceVerified) {
-		return QString();
-	}
-	const auto label = state.sourceTrustDetails.trimmed();
-	if (label.isEmpty() || (label == PluginSourceOriginKey(state))) {
-		return QString();
-	}
-	return PluginUiText(
-		u"Trusted record label: %1"_q,
-		u"Метка доверенной записи: %1"_q).arg(label);
-}
-
-QString PluginSourceExactMatchText(PluginSourceBadgeMode mode) {
-	return (mode == PluginSourceBadgeMode::Card)
-		? PluginUiText(
-			u"Exact SHA-256 matches a trusted Astrogram source record."_q,
-			u"Точный SHA-256 совпал с доверенной записью источника Astrogram."_q)
-		: PluginUiText(
-			u"This exact plugin binary matches a trusted Astrogram source record by SHA-256."_q,
-			u"Точный бинарник этого плагина совпал с доверенной записью источника Astrogram по SHA-256."_q);
-}
-
-QString PluginSourceBadgeDetailText(
-		const ::Plugins::PluginState &state,
-		PluginSourceBadgeMode mode) {
-	const auto addLine = [](QString base, const QString &line) {
-		if (line.trimmed().isEmpty()) {
-			return base;
-		}
-		return base.isEmpty()
-			? line.trimmed()
-			: (base + u"\n"_q + line.trimmed());
-	};
 	if (state.sourceVerified) {
-		auto result = PluginSourceExactMatchText(mode);
-		if (const auto label = PluginSourceRecordLabelText(state); !label.isEmpty()) {
-			result = addLine(result, label);
-		}
-		if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
-			result = addLine(result, origin);
-		}
-		return result;
-	}
-	if (state.sourceTrustLoading) {
-		return PluginUiText(
-			u"Astrogram is requesting trusted source data from the server."_q,
-			u"Astrogram запрашивает данные доверенного источника с сервера."_q);
-	}
-	const auto reason = PluginSourceReasonCode(state);
-	if (mode == PluginSourceBadgeMode::Card) {
-		return QString();
-	}
-	if (reason == u"sha256-unavailable"_q) {
-		return PluginUiText(
-			u"Could not compute the plugin SHA-256 hash."_q,
-			u"Не удалось вычислить SHA-256 хеш плагина."_q);
-	}
-	if (reason == u"no-active-session"_q || reason == u"server-refreshing"_q) {
-		return PluginUiText(
-			u"Astrogram is waiting for the server to return trusted source data."_q,
-			u"Astrogram ждёт ответ сервера с данными доверенного источника."_q);
-	}
-	if (reason == u"no-trusted-records"_q) {
-		return QString();
-	}
-	if (reason == u"server-request-failed"_q) {
-		return PluginUiText(
-			u"Could not update trusted source data from the server yet."_q,
-			u"Пока не удалось обновить данные доверенного источника с сервера."_q);
-	}
-	if (reason == u"no-valid-trusted-records"_q) {
-		return (mode == PluginSourceBadgeMode::Card)
+		return state.sourceMessageId
 			? PluginUiText(
-				u"Trusted source records exist, but they are malformed."_q,
-				u"Доверенные записи источников существуют, но они повреждены."_q)
+				u"Matched in %1, post #%2."_q,
+				u"Совпадение найдено в %1, пост #%2."_q)
+					.arg(channelLabel)
+					.arg(state.sourceMessageId)
 			: PluginUiText(
-				u"Trusted source records were loaded, but none of them contain a valid exact SHA-256 entry."_q,
-				u"Доверенные записи источников загрузились, но ни одна из них не содержит корректный exact SHA-256."_q);
+				u"Matched in %1."_q,
+				u"Совпадение найдено в %1."_q).arg(channelLabel);
 	}
-	if (reason == u"hash-found-in-untrusted-channel"_q) {
-		auto result = (mode == PluginSourceBadgeMode::Card)
-			? PluginUiText(
-				u"Matching hash exists, but only outside the trusted source channel list."_q,
-				u"Совпадающий хеш найден, но только вне списка доверенных каналов-источников."_q)
-			: PluginUiText(
-				u"A matching SHA-256 record exists, but it points to a channel that is not in the trusted source allowlist."_q,
-				u"Совпадающая запись SHA-256 существует, но указывает на канал вне списка доверенных источников."_q);
-		if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
-			result = addLine(result, origin);
-		}
-		return result;
-	}
-	if (reason == u"matching-record-missing-origin"_q) {
-		return mode == PluginSourceBadgeMode::Card
-			? PluginUiText(
-				u"Matching hash record exists, but its source metadata is incomplete."_q,
-				u"Совпадающая запись хеша есть, но у неё неполные метаданные источника."_q)
-			: PluginUiText(
-					u"A matching SHA-256 record exists, but it does not contain a valid trusted channel and post id."_q,
-					u"Совпадающая запись SHA-256 существует, но в ней нет корректных идентификаторов доверенного канала и поста."_q);
-	}
-	if (mode == PluginSourceBadgeMode::Card) {
+	if (state.sourceTrustReason == u"channel-feed-no-match"_q) {
 		return PluginUiText(
-			u"This exact SHA-256 was not found in trusted Astrogram source records."_q,
-			u"Точный SHA-256 не найден в доверенных записях источников Astrogram."_q);
+			u"No matching record was found in %1."_q,
+			u"В %1 не найдено подтверждающей записи."_q).arg(channelLabel);
 	}
-	auto result = PluginUiText(
-		u"This exact plugin binary SHA-256 was not found in trusted Astrogram source records."_q,
-		u"Точный SHA-256 этого бинарника не найден в доверенных записях источников Astrogram."_q);
-	if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
-		result = addLine(result, origin);
+	if (state.sourceTrustReason == u"sha256-unavailable"_q) {
+		return PluginUiText(
+			u"Could not calculate the package hash yet."_q,
+			u"Пока не удалось вычислить хэш пакета."_q);
 	}
-	return result;
+	return QString();
 }
 
 void DrawPluginSourceBadgeGlyph(
@@ -483,6 +357,7 @@ void AddPluginSourceBadge(
 		not_null<Ui::VerticalLayout*> container,
 		const ::Plugins::PluginState &state,
 		PluginSourceBadgeMode mode = PluginSourceBadgeMode::Card) {
+	Q_UNUSED(mode);
 	const auto badge = container->add(
 		object_ptr<Ui::RpWidget>(container),
 		style::margins(
@@ -523,7 +398,8 @@ void AddPluginSourceBadge(
 			st::semiboldFont->width(text)
 				+ (horizontalPadding * 2)
 				+ iconWidth);
-		const auto rect = QRectF(0, 0, pillWidth, badge->height() - 1)
+		const auto pillLeft = std::max((badge->width() - pillWidth) / 2, 0);
+		const auto rect = QRectF(pillLeft, 0, pillWidth, badge->height() - 1)
 			.adjusted(0.5, 0.5, -0.5, -0.5);
 		p.setPen(QPen(border, 1.));
 		p.setBrush(fill);
@@ -532,7 +408,7 @@ void AddPluginSourceBadge(
 		DrawPluginSourceBadgeGlyph(
 			p,
 			QRectF(
-				horizontalPadding,
+				pillLeft + horizontalPadding,
 				(badge->height() - 14.) / 2.,
 				14.,
 				14.),
@@ -541,20 +417,28 @@ void AddPluginSourceBadge(
 			state.sourceVerified);
 		p.drawText(
 			QRect(
-				horizontalPadding + iconWidth,
+				pillLeft + horizontalPadding + iconWidth,
 				0,
 				std::max(1, pillWidth - (horizontalPadding * 2) - iconWidth),
 				badge->height()),
 			Qt::AlignLeft | Qt::AlignVCenter,
 			text);
 	}, badge->lifetime());
-
-	if (const auto details = PluginSourceBadgeDetailText(state, mode);
-			!details.trimmed().isEmpty()) {
-		AddPluginDescriptionText(container, details);
-	}
 	if (mode == PluginSourceBadgeMode::Details) {
-		AddPluginMetaText(container, PluginSourceHashText(state));
+		if (const auto detail = PluginSourceBadgeDetailText(state);
+			!detail.isEmpty()) {
+			container->add(
+				object_ptr<Ui::FlatLabel>(
+					container,
+					rpl::single(TextWithEntities{ detail }),
+					st::defaultFlatLabel),
+				style::margins(
+					kPluginCardContentInsetLeft,
+					6,
+					kPluginCardContentInsetRight,
+					0),
+				style::al_top);
+		}
 	}
 }
 
@@ -1319,7 +1203,8 @@ void AddPluginCardActionRow(
 	settings->setClickedCallback([=] {
 		controller->showSettings(PluginDetailsId(state.info.id));
 	});
-	if (!state.path.trimmed().isEmpty()) {
+	if (const auto path = state.path.trimmed();
+		!path.isEmpty() && QFileInfo(path).isFile()) {
 		share = Ui::CreateChild<Ui::IconButton>(raw, st::infoTopBarForward);
 		share->setClickedCallback([=] {
 			SharePluginPackage(controller, state);
@@ -1988,7 +1873,11 @@ private:
 	void rebuild() {
 		const auto state = LookupPluginState(_pluginId);
 		if (!state) {
-			if (_lastKnownState && !_missingStateRetryScheduled) {
+			if (_lastKnownState
+				&& Core::App().plugins().uiTransientPluginsActive()) {
+				if (_missingStateRetryScheduled) {
+					return;
+				}
 				_missingStateRetryScheduled = true;
 				QTimer::singleShot(150, this, [=] {
 					_missingStateRetryScheduled = false;
@@ -1998,8 +1887,6 @@ private:
 			}
 			_lastKnownState.reset();
 			_content->clear();
-			Ui::AddDivider(_content);
-			Ui::AddSkip(_content);
 			_title = PluginUiText(u"Plugin"_q, u"Плагин"_q);
 			Ui::AddDividerText(
 				_content,
@@ -2012,9 +1899,8 @@ private:
 
 		_lastKnownState = *state;
 		_content->clear();
-		Ui::AddDivider(_content);
-		Ui::AddSkip(_content);
 		_title = FormatPluginTitle(*state);
+		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
 		const auto refreshDetails = [=] {
 			stateChanged();
@@ -2177,8 +2063,6 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 }
 
 void Plugins::setupContent() {
-	Ui::AddDivider(_content);
-	Ui::AddSkip(_content);
 	rebuildList();
 	Ui::ResizeFitChild(this, _content);
 }
@@ -2219,25 +2103,49 @@ void Plugins::rebuildList() {
 			plugins.push_back(state);
 		}
 	}
+	const auto transientSnapshotActive = Core::App().plugins().uiTransientPluginsActive();
 	const auto stableNow = !plugins.empty()
 		&& std::all_of(
 			plugins.begin(),
 			plugins.end(),
 			&IsStablePluginCardState);
-	if (stableNow) {
+	const auto samePluginList = [&] {
+		if (plugins.size() != _lastStablePlugins.size()) {
+			return false;
+		}
+		for (auto i = 0, count = int(plugins.size()); i != count; ++i) {
+			if (plugins[i].info.id.trimmed() != _lastStablePlugins[i].info.id.trimmed()) {
+				return false;
+			}
+		}
+		return true;
+	};
+	const auto transientStructureChanged = transientSnapshotActive
+		&& !_lastStablePlugins.empty()
+		&& !samePluginList();
+	if (stableNow && !transientStructureChanged) {
 		_lastStablePlugins = plugins;
 	}
-	const auto &renderPlugins = (stableNow || _lastStablePlugins.empty())
-		? plugins
-		: _lastStablePlugins;
+	const auto useStableSnapshot = !_lastStablePlugins.empty()
+		&& (transientStructureChanged
+			|| (!plugins.empty() && !stableNow)
+			|| (transientSnapshotActive
+				&& plugins.empty()
+				&& (_lastRenderedPluginCount > 0)));
+	const auto &renderPlugins = useStableSnapshot
+		? _lastStablePlugins
+		: plugins;
 	Logs::writeClient(QString::fromLatin1(
-		"[plugins-ui] rebuild list: safeMode=%1 pluginCount=%2 visibleCount=%3 stable=%4 snapshot=%5")
+		"[plugins-ui] rebuild list: safeMode=%1 pluginCount=%2 visibleCount=%3 stable=%4 snapshot=%5 transient=%6")
 		.arg(Core::App().plugins().safeModeEnabled() ? u"true"_q : u"false"_q)
 		.arg(allPlugins.size())
 		.arg(plugins.size())
 		.arg(stableNow ? u"true"_q : u"false"_q)
-		.arg(_lastStablePlugins.empty() ? u"false"_q : u"true"_q));
-	if (renderPlugins.empty() && (_lastRenderedPluginCount > 0)) {
+		.arg(_lastStablePlugins.empty() ? u"false"_q : u"true"_q)
+		.arg(transientSnapshotActive ? u"true"_q : u"false"_q));
+	if (renderPlugins.empty()
+		&& transientSnapshotActive
+		&& (_lastRenderedPluginCount > 0)) {
 		Logs::writeClient(
 			u"[plugins-ui] transient empty plugin list observed, keeping previous cards"_q);
 		_listRefreshPending = true;
@@ -2309,6 +2217,7 @@ void Plugins::rebuildList() {
 		if (!summary.isEmpty()) {
 			AddPluginDescriptionText(card, summary);
 		}
+		AddPluginSourceBadge(card, state);
 		AddPluginCardActionRow(
 			card,
 			_controller,

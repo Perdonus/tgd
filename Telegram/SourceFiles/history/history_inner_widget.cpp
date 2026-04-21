@@ -26,9 +26,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_context_icon_strip.h"
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_reaction_preview.h"
 #include "history/view/history_view_quick_action.h"
+#include "history/view/history_view_schedule_box.h"
 #include "history/view/history_view_emoji_interactions.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
@@ -67,6 +69,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/emoji_interactions.h"
 #include "history/history_widget.h"
 #include "history/view/history_view_translate_tracker.h"
+#include "base/flat_set.h"
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_common_adapters.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -78,11 +81,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_item_download_files.h"
 #include "menu/menu_item_rate_transcribe.h"
 #include "menu/menu_item_rate_transcribe_session.h"
+#include "menu/menu_send.h"
 #include "menu/menu_sponsored.h"
 #include "menu/menu_customization.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "apiwrap.h"
+#include "api/api_common.h"
+#include "api/api_sending.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_suggest_post.h"
 #include "api/api_toggling_media.h"
@@ -106,15 +112,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_histories.h"
 #include "data/data_changes.h"
 #include "data/data_todo_list.h"
+#include "ayu/data/messages_storage.h"
 #include "dialogs/ui/dialogs_video_userpic.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 
 #include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
 #include <limits>
+#include <QtWidgets/QAction>
 #include <QtWidgets/QApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QMimeData>
+#include <QtCore/QUrl>
 
 namespace {
 
@@ -146,18 +156,319 @@ namespace {
 }
 
 [[nodiscard]] bool ContextMenuActionVisible(
+		const HistoryView::ContextMenuSurfaceLayout &layout,
+		const QString &id,
+		bool fallback = true) {
+	auto visible = fallback;
+	auto found = false;
+	const auto apply = [&](const std::vector<HistoryView::ContextMenuLayoutEntry> &entries) {
+		const auto i = ranges::find(
+			entries,
+			id,
+			&HistoryView::ContextMenuLayoutEntry::id);
+		if (i != entries.end()) {
+			visible = found ? (visible || i->visible) : i->visible;
+			found = true;
+		}
+	};
+	apply(layout.menu);
+	apply(layout.strip);
+	return found ? visible : fallback;
+}
+
+constexpr auto kContextMenuActionIdProperty[] = "_astro_context_action_id";
+
+[[nodiscard]] bool IsContextMenuCustomSeparatorId(const QString &id) {
+	return id.startsWith(u"custom_separator_"_q);
+}
+
+enum class ContextActionSection {
+	Identity,
+	Copy,
+	Forward,
+	Manage,
+};
+
+[[nodiscard]] ContextActionSection ContextActionSectionFor(const QString &id) {
+	namespace Id = Menu::Customization::ContextMenuItemId;
+	if ((id == QString::fromLatin1(Id::SelectionCopy))
+		|| (id == QString::fromLatin1(Id::SelectionTranslate))
+		|| (id == QString::fromLatin1(Id::SelectionSearch))
+		|| (id == QString::fromLatin1(Id::MessageCopyText))
+		|| (id == QString::fromLatin1(Id::MessageTranslate))
+		|| (id == QString::fromLatin1(Id::LinkCopy))
+		|| (id == QString::fromLatin1(Id::MessageCopyPostLink))) {
+		return ContextActionSection::Copy;
+	} else if ((id == QString::fromLatin1(Id::SelectionForward))
+		|| (id == QString::fromLatin1(Id::SelectionForwardWithoutAuthor))
+		|| (id == QString::fromLatin1(Id::SelectionForwardSaved))
+		|| (id == QString::fromLatin1(Id::SelectionSendNow))
+		|| (id == QString::fromLatin1(Id::MessageForward))
+		|| (id == QString::fromLatin1(Id::MessageForwardWithoutAuthor))
+		|| (id == QString::fromLatin1(Id::MessageForwardSaved))
+		|| (id == QString::fromLatin1(Id::MessageSendNow))
+		|| (id == QString::fromLatin1(Id::MessageReschedule))) {
+		return ContextActionSection::Forward;
+	} else if ((id == QString::fromLatin1(Id::SelectionDelete))
+		|| (id == QString::fromLatin1(Id::SelectionDownloadFiles))
+		|| (id == QString::fromLatin1(Id::SelectionClear))
+		|| (id == QString::fromLatin1(Id::MessageDelete))
+		|| (id == QString::fromLatin1(Id::MessageReport))
+		|| (id == QString::fromLatin1(Id::MessageSelect))) {
+		return ContextActionSection::Manage;
+	}
+	return ContextActionSection::Identity;
+}
+
+[[nodiscard]] QString ContextMenuActionId(QAction *action) {
+	return action
+		? action->property(kContextMenuActionIdProperty).toString().trimmed()
+		: QString();
+}
+
+void NormalizeRuntimeContextMenuSeparators(
+		not_null<Ui::PopupMenu*> menu) {
+	auto seenVisibleAction = false;
+	QAction *pendingSeparator = nullptr;
+	for (const auto action : menu->actions()) {
+		if (!action || !action->isVisible()) {
+			continue;
+		}
+		if (action->isSeparator()) {
+			if (!seenVisibleAction || pendingSeparator) {
+				action->setVisible(false);
+			} else {
+				pendingSeparator = action;
+			}
+			continue;
+		}
+		pendingSeparator = nullptr;
+		seenVisibleAction = true;
+	}
+	if (pendingSeparator) {
+		pendingSeparator->setVisible(false);
+	}
+}
+
+void ApplyRuntimeContextMenuLayout(
+		not_null<Ui::PopupMenu*> menu,
+		const HistoryView::ContextMenuSurfaceLayout &layout,
+		const HistoryView::ContextMenuResolvedLayout &resolved) {
+	struct OrderedEntry {
+		QAction *action = nullptr;
+		bool separator = false;
+	};
+
+	auto stripIds = base::flat_set<QString>();
+	for (const auto &id : HistoryView::ResolveContextIconStripActionIds(
+			layout,
+			resolved)) {
+		if (!id.isEmpty()) {
+			stripIds.emplace(id);
+		}
+	}
+	auto tracked = base::flat_map<QString, std::vector<QAction*>>();
+	auto visibleActions = std::vector<QAction*>();
+	auto separatorPool = std::vector<QAction*>();
+	auto used = base::flat_set<QAction*>();
+	const auto customSeparators = ranges::any_of(
+		layout.menu,
+		[](const HistoryView::ContextMenuLayoutEntry &entry) {
+			return entry.visible && IsContextMenuCustomSeparatorId(entry.id);
+		});
+	for (const auto action : menu->actions()) {
+		if (!action) {
+			continue;
+		} else if (action->isSeparator()) {
+			action->setVisible(false);
+			separatorPool.push_back(action);
+			continue;
+		}
+		const auto id = ContextMenuActionId(action);
+		if (!id.isEmpty()) {
+			const auto visibleInMenu = ContextMenuActionVisible(
+				layout,
+				id,
+				action->isVisible()) && !stripIds.contains(id);
+			action->setVisible(visibleInMenu);
+			if (visibleInMenu) {
+				tracked[id].push_back(action);
+			}
+		}
+		if (action->isVisible()) {
+			visibleActions.push_back(action);
+		}
+	}
+	auto ordered = std::vector<OrderedEntry>();
+	auto pendingSeparator = false;
+	const auto appendSeparator = [&] {
+		if (!ordered.empty() && !ordered.back().separator) {
+			ordered.push_back({ .separator = true });
+		}
+	};
+	const auto appendAction = [&](QAction *action) {
+		if (!action || !action->isVisible() || used.contains(action)) {
+			return false;
+		}
+		if (pendingSeparator && !ordered.empty()) {
+			appendSeparator();
+		}
+		pendingSeparator = false;
+		ordered.push_back({ .action = action });
+		used.emplace(action);
+		return true;
+	};
+	for (const auto &entry : layout.menu) {
+		if (!entry.visible || stripIds.contains(entry.id)) {
+			continue;
+		} else if (IsContextMenuCustomSeparatorId(entry.id)) {
+			pendingSeparator = !ordered.empty();
+			continue;
+		}
+		const auto i = tracked.find(entry.id);
+		if (i == tracked.end()) {
+			continue;
+		}
+		for (const auto action : i->second) {
+			if (appendAction(action)) {
+				break;
+			}
+		}
+	}
+	for (const auto action : visibleActions) {
+		appendAction(action);
+	}
+	if (!customSeparators) {
+		auto sectioned = std::vector<OrderedEntry>();
+		auto hasLastSection = false;
+		auto lastSection = ContextActionSection::Identity;
+		for (const auto &entry : ordered) {
+			if (!entry.action) {
+				continue;
+			}
+			const auto section = ContextActionSectionFor(
+				ContextMenuActionId(entry.action));
+			if (hasLastSection
+				&& (section != lastSection)
+				&& !sectioned.empty()
+				&& !sectioned.back().separator) {
+				sectioned.push_back({ .separator = true });
+			}
+			sectioned.push_back(entry);
+			hasLastSection = true;
+			lastSection = section;
+		}
+		ordered = std::move(sectioned);
+	}
+	auto orderedActions = std::vector<QAction*>();
+	orderedActions.reserve(ordered.size());
+	const auto takeSeparator = [&] {
+		if (!separatorPool.empty()) {
+			const auto action = separatorPool.back();
+			separatorPool.pop_back();
+			return action;
+		}
+		auto action = new QAction(menu.get());
+		action->setSeparator(true);
+		return action;
+	};
+	for (const auto &entry : ordered) {
+		if (entry.separator) {
+			const auto action = takeSeparator();
+			action->setVisible(true);
+			orderedActions.push_back(action);
+		} else if (entry.action) {
+			orderedActions.push_back(entry.action);
+		}
+	}
+	QAction *anchor = nullptr;
+	for (auto i = orderedActions.rbegin(); i != orderedActions.rend(); ++i) {
+		const auto action = *i;
+		if (!action) {
+			continue;
+		}
+		menu->QWidget::removeAction(action);
+		if (anchor) {
+			menu->QWidget::insertAction(anchor, action);
+		} else {
+			menu->QWidget::addAction(action);
+		}
+		anchor = action;
+	}
+	for (const auto action : separatorPool) {
+		action->setVisible(false);
+	}
+	NormalizeRuntimeContextMenuSeparators(menu);
+}
+
+[[nodiscard]] bool HasVisibleRuntimeContextMenuActions(
+		not_null<Ui::PopupMenu*> menu) {
+	for (const auto action : menu->actions()) {
+		if (action && action->isVisible() && !action->isSeparator()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool HasVisibleRuntimeContextMenuStripActions(
+		const HistoryView::ContextMenuSurfaceLayout &layout,
+		const HistoryView::ContextMenuResolvedLayout &resolved) {
+	return !HistoryView::ResolveContextIconStripActionIds(
+		layout,
+		resolved).empty();
+}
+
+void EnsureRuntimeContextMenuStripBridge(
+		not_null<Ui::PopupMenu*> menu,
+		const HistoryView::ContextMenuSurfaceLayout &layout,
+		const HistoryView::ContextMenuResolvedLayout &resolved) {
+	if (HasVisibleRuntimeContextMenuActions(menu)) {
+		return;
+	}
+	const auto stripIds = HistoryView::ResolveContextIconStripActionIds(
+		layout,
+		resolved);
+	if (stripIds.empty()) {
+		return;
+	}
+	for (const auto &id : stripIds) {
+		for (const auto action : menu->actions()) {
+			if (!action
+				|| action->isSeparator()
+				|| (ContextMenuActionId(action) != id)) {
+				continue;
+			}
+			action->setVisible(true);
+			return;
+		}
+	}
+}
+
+[[nodiscard]] bool ContextMenuActionVisible(
 		const HistoryView::ContextMenuCustomizationLayout &layout,
 		HistoryView::ContextMenuSurface surface,
 		const char *id,
 		bool fallback = true) {
-	const auto &entries = HistoryView::LookupContextMenuSurfaceLayout(
+	const auto actionId = QString::fromLatin1(id);
+	const auto &surfaceLayout = HistoryView::LookupContextMenuSurfaceLayout(
 		layout,
-		surface).menu;
-	const auto i = ranges::find(
-		entries,
-		QString::fromLatin1(id),
-		&HistoryView::ContextMenuLayoutEntry::id);
-	return (i != entries.end()) ? i->visible : fallback;
+		surface);
+	auto visible = fallback;
+	auto found = false;
+	const auto apply = [&](const std::vector<HistoryView::ContextMenuLayoutEntry> &entries) {
+		const auto i = ranges::find(
+			entries,
+			actionId,
+			&HistoryView::ContextMenuLayoutEntry::id);
+		if (i != entries.end()) {
+			visible = found ? (visible || i->visible) : i->visible;
+			found = true;
+		}
+	};
+	apply(surfaceLayout.menu);
+	apply(surfaceLayout.strip);
+	return found ? visible : fallback;
 }
 
 void CopyIdsAndTime(
@@ -2491,6 +2802,84 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		return;
 	}
 	const auto contextMenuLayout = HistoryView::LoadContextMenuCustomizationLayout();
+	const auto contextMenuSurface = (isUponSelected > 0)
+		? HistoryView::ContextMenuSurface::Selection
+		: HistoryView::ContextMenuSurface::Message;
+	auto resolvedContextLayout = HistoryView::ContextMenuResolvedLayout();
+	resolvedContextLayout.surface = contextMenuSurface;
+	const auto trackContextAction = [&](
+			QAction *action,
+			const char *id,
+			const QString &text,
+			std::shared_ptr<Fn<void()>> trigger,
+			const style::icon *icon = nullptr,
+			bool stripEligible = false) {
+		if (!action || !id || !*id) {
+			return action;
+		}
+		const auto actionId = QString::fromLatin1(id);
+		HistoryView::MarkContextMenuAction(action, actionId);
+		resolvedContextLayout.actions.push_back({
+			.id = actionId,
+			.text = text,
+			.icon = icon,
+			.trigger = std::move(trigger),
+			.stripEligible = stripEligible,
+		});
+		return action;
+	};
+	const auto trackExistingContextAction = [&](
+			QAction *action,
+			const char *id,
+			const style::icon *icon = nullptr,
+			bool stripEligible = false) {
+		if (!action) {
+			return action;
+		}
+		auto weak = QPointer<QAction>(action);
+		auto trigger = std::make_shared<Fn<void()>>([weak] {
+			if (weak) {
+				weak->trigger();
+			}
+		});
+		return trackContextAction(
+			action,
+			id,
+			action->text(),
+			std::move(trigger),
+			icon,
+			stripEligible);
+	};
+	const auto trackNewContextActions = [&](
+			int previousCount,
+			const char *id,
+			const style::icon *icon = nullptr,
+			bool stripEligible = false) {
+		const auto actions = _menu->actions();
+		for (auto i = previousCount, count = int(actions.size()); i != count; ++i) {
+			if (const auto action = actions[i]; action && !action->isSeparator()) {
+				trackExistingContextAction(action, id, icon, stripEligible);
+			}
+		}
+	};
+	const auto addTrackedContextAction = [&](
+			const char *id,
+			const QString &text,
+			Fn<void()> callback,
+			const style::icon *icon = nullptr,
+			bool stripEligible = false) {
+		auto trigger = std::make_shared<Fn<void()>>(std::move(callback));
+		const auto action = _menu->addAction(text, [trigger] {
+			(*trigger)();
+		}, icon);
+		return trackContextAction(
+			action,
+			id,
+			text,
+			std::move(trigger),
+			icon,
+			stripEligible);
+	};
 	const auto allowMessageCopyIdsTime = ContextMenuActionVisible(
 		contextMenuLayout,
 		HistoryView::ContextMenuSurface::Message,
@@ -2508,16 +2897,212 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			return;
 		}
 		const auto itemId = item->fullId();
-		_menu->addAction(
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::MessageCopyIdsTime,
 			AstrogramUiText("Copy IDs and time", "Скопировать ID и время"),
 			[=] {
 				if (const auto current = session->data().message(itemId)) {
 					CopyIdsAndTime(_controller, current);
 				}
 			},
-			&st::menuIconCopy);
+			&st::menuIconCopy,
+			true);
 	};
 	const auto controller = _controller;
+	const auto forwardSavedIds = [&](MessageIdsList ids) {
+		if (ids.empty()) {
+			return;
+		}
+		const auto items = session->data().idsToItems(ids);
+		if (items.size() != ids.size()
+			|| items.empty()
+			|| !ranges::all_of(items, &HistoryItem::allowsForward)) {
+			return;
+		}
+		const auto api = &session->api();
+		const auto self = api->session().user()->asUser();
+		const auto history = items.front()->history()->peer->owner().history(self);
+		auto action = Api::SendAction(history);
+		action.clearDraft = false;
+		action.generateLocal = false;
+		auto resolved = history->resolveForwardDraft(Data::ForwardDraft{
+			.ids = std::move(ids),
+		});
+		api->forwardMessages(std::move(resolved), action, [] {
+			Ui::Toast::Show(AstrogramUiText(
+				"Forwarded to Saved Messages.",
+				"Переслано в Избранное."));
+		});
+	};
+	const auto addSelectionForwardSavedAction = [&](MessageIdsList ids) {
+		if (ids.empty()) {
+			return;
+		}
+		const auto items = session->data().idsToItems(ids);
+		if (items.size() != ids.size()
+			|| items.empty()
+			|| !ranges::all_of(items, &HistoryItem::allowsForward)) {
+			return;
+		}
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::SelectionForwardSaved,
+			AstrogramUiText(
+				"Forward to Saved Messages",
+				"Переслать в Избранное"),
+			[=] {
+				forwardSavedIds(ids);
+			},
+			&st::menuIconFave,
+			true);
+	};
+	const auto addSelectionSendNowAction = [&](MessageIdsList ids) {
+		if (ids.empty()) {
+			return;
+		}
+		const auto items = session->data().idsToItems(ids);
+		if (items.size() != ids.size()
+			|| items.empty()
+			|| !ranges::all_of(items, &HistoryItem::allowsSendNow)) {
+			return;
+		}
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::SelectionSendNow,
+			tr::lng_context_send_now_selected(tr::now),
+			[=] {
+				auto sendIds = ids;
+				if (sendIds.empty()) {
+					return;
+				}
+				if (const auto firstItem = session->data().message(sendIds.front())) {
+					Window::ShowSendNowMessagesBox(
+						_controller,
+						firstItem->history(),
+						std::move(sendIds));
+				}
+			},
+			&st::menuIconSend,
+			true);
+	};
+	const auto addMessageForwardSavedAction = [&](
+			HistoryItem *item,
+			bool asGroup) {
+		if (!item) {
+			return;
+		}
+		const auto itemId = item->fullId();
+		const auto ids = asGroup
+			? session->data().itemOrItsGroup(item)
+			: MessageIdsList{ 1, itemId };
+		const auto items = session->data().idsToItems(ids);
+		if (ids.empty()
+			|| items.size() != ids.size()
+			|| !ranges::all_of(items, &HistoryItem::allowsForward)) {
+			return;
+		}
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::MessageForwardSaved,
+			AstrogramUiText(
+				"Forward to Saved Messages",
+				"Переслать в Избранное"),
+			[=] {
+				if (const auto current = session->data().message(itemId)) {
+					forwardSavedIds(
+						(asGroup
+							? session->data().itemOrItsGroup(current)
+							: MessageIdsList{ 1, itemId }));
+				}
+			},
+			&st::menuIconFave,
+			true);
+	};
+	const auto addMessageSendNowAction = [&](
+			HistoryItem *item,
+			bool asGroup) {
+		if (!item) {
+			return;
+		}
+		const auto itemId = item->fullId();
+		const auto ids = asGroup
+			? session->data().itemOrItsGroup(item)
+			: MessageIdsList{ 1, itemId };
+		const auto items = session->data().idsToItems(ids);
+		if (ids.empty()
+			|| items.size() != ids.size()
+			|| !ranges::all_of(items, &HistoryItem::allowsSendNow)) {
+			return;
+		}
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::MessageSendNow,
+			tr::lng_context_send_now_msg(tr::now),
+			[=] {
+				if (const auto current = session->data().message(itemId)) {
+					auto sendIds = asGroup
+						? session->data().itemOrItsGroup(current)
+						: MessageIdsList{ 1, itemId };
+					if (!sendIds.empty()) {
+						Window::ShowSendNowMessagesBox(
+							_controller,
+							current->history(),
+							std::move(sendIds));
+					}
+				}
+			},
+			&st::menuIconSend,
+			true);
+	};
+	const auto addMessageRescheduleAction = [&](HistoryItem *item) {
+		if (!item
+			|| !item->allowsEdit(base::unixtime::now())
+			|| !item->allowsReschedule()) {
+			return;
+		}
+		const auto itemId = item->fullId();
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::MessageReschedule,
+			tr::lng_context_reschedule(tr::now),
+			[=] {
+				const auto current = session->data().message(itemId);
+				if (!current || !current->allowsReschedule()) {
+					return;
+				}
+				const auto callback = [=](Api::SendOptions options) {
+					if (const auto refreshed = session->data().message(itemId)) {
+						Api::RescheduleMessage(refreshed, options);
+					}
+				};
+				const auto peer = current->history()->peer;
+				const auto sendMenuType = !peer
+					? SendMenu::Type::Disabled
+					: peer->starsPerMessageChecked()
+					? SendMenu::Type::SilentOnly
+					: peer->isSelf()
+					? SendMenu::Type::Reminder
+					: HistoryView::CanScheduleUntilOnline(peer)
+					? SendMenu::Type::ScheduledToUser
+					: SendMenu::Type::Disabled;
+				const auto itemDate = current->date();
+				const auto date = (itemDate == Api::kScheduledUntilOnlineTimestamp)
+					? HistoryView::DefaultScheduleTime()
+					: itemDate + (current->isScheduled() ? 0 : crl::time(600));
+				const auto repeatPeriod = current->scheduleRepeatPeriod();
+				const auto box = _controller->show(
+					HistoryView::PrepareScheduleBox(
+						this,
+						not_null{ session },
+						{ .type = sendMenuType, .effectAllowed = false },
+						callback,
+						{ .scheduleRepeatPeriod = repeatPeriod },
+						date));
+				session->data().itemRemoved(
+				) | rpl::on_next([=](not_null<const HistoryItem*> removed) {
+					if (removed->fullId() == itemId) {
+						box->closeBox();
+					}
+				}, box->lifetime());
+			},
+			&st::menuIconReschedule,
+			true);
+	};
 	const auto addItemActions = [&](
 			HistoryItem *item,
 			HistoryItem *albumPartItem) {
@@ -2549,12 +3134,17 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					lt_count,
 					repliesCount)
 				: tr::lng_replies_view_thread(tr::now);
-			_menu->addAction(phrase, [=] {
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageViewReplies,
+				phrase,
+				[=] {
 				controller->showRepliesForMessage(
 					_history,
 					rootId,
 					highlightId);
-			}, &st::menuIconViewReplies);
+				},
+				&st::menuIconViewReplies,
+				true);
 		}
 		const auto t = base::unixtime::now();
 		const auto editItem = (albumPartItem && albumPartItem->allowsEdit(t))
@@ -2564,7 +3154,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			: nullptr;
 		if (editItem) {
 			const auto editItemId = editItem->fullId();
-			_menu->addAction(tr::lng_context_edit_msg(tr::now), [=] {
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageEdit,
+				tr::lng_context_edit_msg(tr::now),
+				[=] {
 				if (const auto item = session->data().message(editItemId)) {
 					auto it = _selected.find(item);
 					const auto selection = ((it != _selected.end())
@@ -2576,21 +3169,39 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					}
 					_widget->editMessage(item, selection);
 				}
-			}, &st::menuIconEdit);
+				},
+				&st::menuIconEdit,
+				true);
+		}
+		if (!item->isService() && AyuMessages::hasRevisions(item)) {
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageEditHistory,
+				AstrogramUiText("Edit history", "История правок"),
+				[=] {
+					if (const auto current = session->data().message(itemId)) {
+						HistoryView::ShowEditHistoryBox(_controller, current);
+					}
+				},
+				&st::menuIconEdit);
 		}
 		if (session->factchecks().canEdit(item)) {
 			const auto text = item->factcheckText();
 			const auto phrase = text.empty()
 				? tr::lng_context_add_factcheck(tr::now)
 				: tr::lng_context_edit_factcheck(tr::now);
-			_menu->addAction(phrase, [=] {
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageFactcheck,
+				phrase,
+				[=] {
 				const auto limit = session->factchecks().lengthLimit();
 				controller->show(Box(EditFactcheckBox, text, limit, [=](
 						TextWithEntities result) {
 					const auto show = controller->uiShow();
 					session->factchecks().save(itemId, text, result, show);
 				}, FactcheckFieldIniter(controller->uiShow())));
-			}, &st::menuIconFactcheck);
+				},
+				&st::menuIconFactcheck,
+				true);
 		}
 		const auto pinItem = (item->canPin() && item->isPinned())
 			? item
@@ -2598,10 +3209,18 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		if (pinItem->canPin()) {
 			const auto isPinned = pinItem->isPinned();
 			const auto pinItemId = pinItem->fullId();
-			_menu->addAction(isPinned ? tr::lng_context_unpin_msg(tr::now) : tr::lng_context_pin_msg(tr::now), crl::guard(controller, [=] {
-				Window::ToggleMessagePinned(controller, pinItemId, !isPinned);
-			}), isPinned ? &st::menuIconUnpin : &st::menuIconPin);
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessagePin,
+				isPinned
+					? tr::lng_context_unpin_msg(tr::now)
+					: tr::lng_context_pin_msg(tr::now),
+				crl::guard(controller, [=] {
+					Window::ToggleMessagePinned(controller, pinItemId, !isPinned);
+				}),
+				isPinned ? &st::menuIconUnpin : &st::menuIconPin,
+				true);
 		}
+		addMessageRescheduleAction(item);
 		if (!item->isService()
 			&& peerIsChannel(itemId.peer)
 			&& !_peer->isMegagroup()) {
@@ -2740,7 +3359,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			&& !item->isService()
 			&& !hasSelectRestriction()) {
 			const auto itemId = item->fullId();
-			_menu->addAction(tr::lng_context_select_msg(tr::now), [=] {
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageSelect,
+				tr::lng_context_select_msg(tr::now),
+				[=] {
 				if (const auto item = session->data().message(itemId)) {
 					if ([[maybe_unused]] const auto view = viewByItem(item)) {
 						if (asGroup) {
@@ -2755,7 +3377,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						_widget->updateTopBarSelection();
 					}
 				}
-			}, &st::menuIconSelect);
+				},
+				&st::menuIconSelect,
+				true);
 			const auto collectBetween = [=](
 					not_null<HistoryItem*> from,
 					not_null<HistoryItem*> to,
@@ -2857,7 +3481,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					Ui::Text::FixAmpersandInAction);
 			const auto replyToItem = selected.item ? selected.item : item;
 			const auto itemId = replyToItem->fullId();
-			_menu->addAction(std::move(text), [=] {
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageReply,
+				std::move(text),
+				[=] {
 				_widget->replyToMessage({
 					.messageId = itemId,
 					.quote = selected.highlight.quote,
@@ -2867,7 +3494,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				if (!selected.highlight.quote.empty()) {
 					_widget->clearSelected();
 				}
-			}, &st::menuIconReply);
+				},
+				&st::menuIconReply,
+				true);
 		}
 	};
 
@@ -2876,22 +3505,26 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			return;
 		}
 		const auto itemId = item->fullId();
-		_menu->addAction(
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::MessageTodoEdit,
 			tr::lng_context_edit_msg(tr::now),
 			crl::guard(this, [=] {
 				if (const auto item = session->data().message(itemId)) {
 					Window::PeerMenuEditTodoList(_controller, item);
 				}
 			}),
-			&st::menuIconEdit);
-		_menu->addAction(
+			&st::menuIconEdit,
+			true);
+		addTrackedContextAction(
+			Menu::Customization::ContextMenuItemId::MessageTodoAdd,
 			tr::lng_todo_add_title(tr::now),
 			crl::guard(this, [=] {
 				if (const auto item = session->data().message(itemId)) {
 					Window::PeerMenuAddTodoListTasks(_controller, item);
 				}
 			}),
-			&st::menuIconAdd);
+			&st::menuIconAdd,
+			true);
 	};
 	const auto lnkPhoto = link
 		? reinterpret_cast<PhotoData*>(
@@ -2910,23 +3543,45 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			const auto selectedText = getSelectedText();
 			if (!hasCopyRestrictionForSelected()
 				&& !selectedText.empty()) {
-				_menu->addAction(
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionCopy,
 					(isUponSelected > 1
 						? tr::lng_context_copy_selected_items(tr::now)
 						: tr::lng_context_copy_selected(tr::now)),
 					[=] { copySelectedText(); },
-					&st::menuIconCopy);
+					&st::menuIconCopy,
+					true);
 			}
 			if (item && !Ui::SkipTranslate(selectedText.rich)) {
 				const auto peer = item->history()->peer;
-				_menu->addAction(tr::lng_context_translate_selected({}), [=] {
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionTranslate,
+					tr::lng_context_translate_selected({}),
+					[=] {
 					_controller->show(Box(
 						Ui::TranslateBox,
 						peer,
 						MsgId(),
 						getSelectedText().rich,
 						hasCopyRestrictionForSelected()));
-				}, &st::menuIconTranslate);
+					},
+					&st::menuIconTranslate,
+					true);
+			}
+			if (!selectedText.rich.text.trimmed().isEmpty()) {
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionSearch,
+					AstrogramUiText("Search selected text", "Искать выделенный текст"),
+					[text = selectedText.rich.text.trimmed()] {
+						const auto query = QUrl::toPercentEncoding(text);
+						if (!query.isEmpty()) {
+							QDesktopServices::openUrl(QUrl(
+								u"https://www.google.com/search?q="_q
+								+ QString::fromLatin1(query)));
+						}
+					},
+					&st::menuIconSearch,
+					true);
 			}
 		}
 		addItemActions(item, item);
@@ -2941,60 +3596,100 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 		}
 		if (item && item->hasDirectLink() && isUponSelected != 2 && isUponSelected != -2) {
-			_menu->addAction(item->history()->peer->isMegagroup() ? tr::lng_context_copy_message_link(tr::now) : tr::lng_context_copy_post_link(tr::now), [=] {
-				HistoryView::CopyPostLink(controller, itemId, HistoryView::Context::History);
-			}, &st::menuIconLink);
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageCopyPostLink,
+				item->history()->peer->isMegagroup()
+					? tr::lng_context_copy_message_link(tr::now)
+					: tr::lng_context_copy_post_link(tr::now),
+				[=] {
+					HistoryView::CopyPostLink(
+						controller,
+						itemId,
+						HistoryView::Context::History);
+				},
+				&st::menuIconLink,
+				true);
 		}
 		if (isUponSelected > 1) {
 			if (selectedState.count > 0 && selectedState.canForwardCount == selectedState.count) {
-				_menu->addAction(tr::lng_context_forward_selected(tr::now), [=] {
-					_widget->forwardSelected();
-				}, &st::menuIconForward);
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionForward,
+					tr::lng_context_forward_selected(tr::now),
+					[=] { _widget->forwardSelected(); },
+					&st::menuIconForward,
+					true);
+				addSelectionForwardSavedAction(getSelectedItems());
 			}
 			if (allowSelectionForwardWithoutAuthor) {
 				const auto ids = getSelectedItems();
 				if (!ids.empty()) {
 					const auto items = session->data().idsToItems(ids);
 					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-							ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
-								_widget->clearSelected();
-							});
-						}, &st::menuIconForward);
+						addTrackedContextAction(
+							Menu::Customization::ContextMenuItemId::SelectionForwardWithoutAuthor,
+							Window::ForwardWithoutAuthorText(),
+							[=] {
+								ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
+									_widget->clearSelected();
+								});
+							},
+							&st::menuIconForward,
+							true);
 					}
 				}
 			}
+			addSelectionSendNowAction(getSelectedItems());
 			if (selectedState.count > 0 && selectedState.canDeleteCount == selectedState.count) {
-				_menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
-					_widget->confirmDeleteSelected();
-				}, &st::menuIconDelete);
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionDelete,
+					tr::lng_context_delete_selected(tr::now),
+					[=] { _widget->confirmDeleteSelected(); },
+					&st::menuIconDelete,
+					true);
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
+				const auto actionsBefore = int(_menu->actions().size());
 				Menu::AddDownloadFilesAction(_menu, controller, _selected, this);
+				trackNewContextActions(
+					actionsBefore,
+					Menu::Customization::ContextMenuItemId::SelectionDownloadFiles,
+					&st::menuIconDownload,
+					true);
 			}
-			_menu->addAction(tr::lng_context_clear_selection(tr::now), [=] {
-				_widget->clearSelected();
-			}, &st::menuIconSelect);
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::SelectionClear,
+				tr::lng_context_clear_selection(tr::now),
+				[=] { _widget->clearSelected(); },
+				&st::menuIconSelect,
+				true);
 		} else if (item) {
 			const auto itemId = item->fullId();
 			const auto blockSender = item->history()->peer->isRepliesChat();
 			if (isUponSelected != -2) {
 				if (item->allowsForward()) {
-					_menu->addAction(tr::lng_context_forward_msg(tr::now), [=] {
-						forwardItem(itemId);
-					}, &st::menuIconForward);
+					addTrackedContextAction(
+						Menu::Customization::ContextMenuItemId::MessageForward,
+						tr::lng_context_forward_msg(tr::now),
+						[=] { forwardItem(itemId); },
+						&st::menuIconForward,
+						true);
 				}
 				if (allowMessageForwardWithoutAuthor) {
 					const auto ids = session->data().itemOrItsGroup(item);
 					if (!ids.empty()) {
 						const auto items = session->data().idsToItems(ids);
 						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-								ShowForwardWithoutAuthorValidated(_controller, ids);
-							}, &st::menuIconForward);
+							addTrackedContextAction(
+								Menu::Customization::ContextMenuItemId::MessageForwardWithoutAuthor,
+								Window::ForwardWithoutAuthorText(),
+								[=] { ShowForwardWithoutAuthorValidated(_controller, ids); },
+								&st::menuIconForward,
+								true);
 						}
 					}
 				}
+				addMessageForwardSavedAction(item, asGroup);
+				addMessageSendNowAction(item, asGroup);
 				if (HistoryView::CanAddOfferToMessage(item)) {
 					_menu->addAction(tr::lng_context_add_offer(tr::now), [=] {
 						Api::AddOfferToMessage(_controller->uiShow(), itemId);
@@ -3010,19 +3705,35 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 								[=] { editCaptionUploadLayer(item); },
 								&st::menuIconEdit);
 						}
-						_menu->addAction(tr::lng_context_cancel_upload(tr::now), callback, &st::menuIconCancel);
+						addTrackedContextAction(
+							Menu::Customization::ContextMenuItemId::MessageDelete,
+							tr::lng_context_cancel_upload(tr::now),
+							callback,
+							&st::menuIconCancel,
+							true);
 					} else {
-						_menu->addAction(Ui::DeleteMessageContextAction(
+						const auto deleteTrigger = std::make_shared<Fn<void()>>(callback);
+						const auto action = _menu->addAction(Ui::DeleteMessageContextAction(
 							_menu->menu(),
 							callback,
 							item->ttlDestroyAt(),
 							[=] { _menu = nullptr; }));
+						trackContextAction(
+							action,
+							Menu::Customization::ContextMenuItemId::MessageDelete,
+							action ? action->text() : tr::lng_context_delete_msg(tr::now),
+							deleteTrigger,
+							&st::menuIconDelete,
+							true);
 					}
 				}
 				if (!blockSender && item->suggestReport()) {
-					_menu->addAction(tr::lng_context_report_msg(tr::now), [=] {
-						reportItem(itemId);
-					}, &st::menuIconReport);
+					addTrackedContextAction(
+						Menu::Customization::ContextMenuItemId::MessageReport,
+						tr::lng_context_report_msg(tr::now),
+						[=] { reportItem(itemId); },
+						&st::menuIconReport,
+						true);
 				}
 			}
 			addSelectMessageAction(item);
@@ -3074,23 +3785,45 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			addReplyAction(item);
 			const auto selectedText = getSelectedText();
 			if (!hasCopyRestrictionForSelected() && !selectedText.empty()) {
-				_menu->addAction(
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionCopy,
 					((isUponSelected > 1)
 						? tr::lng_context_copy_selected_items(tr::now)
 						: tr::lng_context_copy_selected(tr::now)),
 					[=] { copySelectedText(); },
-					&st::menuIconCopy);
+					&st::menuIconCopy,
+					true);
 			}
 			if (item && !Ui::SkipTranslate(selectedText.rich)) {
 				const auto peer = item->history()->peer;
-				_menu->addAction(tr::lng_context_translate_selected({}), [=] {
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionTranslate,
+					tr::lng_context_translate_selected({}),
+					[=] {
 					_controller->show(Box(
 						Ui::TranslateBox,
 						peer,
 						MsgId(),
 						selectedText.rich,
 						hasCopyRestrictionForSelected()));
-				}, &st::menuIconTranslate);
+					},
+					&st::menuIconTranslate,
+					true);
+			}
+			if (!selectedText.rich.text.trimmed().isEmpty()) {
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionSearch,
+					AstrogramUiText("Search selected text", "Искать выделенный текст"),
+					[text = selectedText.rich.text.trimmed()] {
+						const auto query = QUrl::toPercentEncoding(text);
+						if (!query.isEmpty()) {
+							QDesktopServices::openUrl(QUrl(
+								u"https://www.google.com/search?q="_q
+								+ QString::fromLatin1(query)));
+						}
+					},
+					&st::menuIconSearch,
+					true);
 			}
 			addItemActions(item, item);
 		} else {
@@ -3168,10 +3901,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					const auto hasRestriction = hasCopyRestriction(item);
 					if (!hasRestriction
 						&& (view->hasVisibleText() || mediaHasTextForCopy)) {
-						_menu->addAction(
+						addTrackedContextAction(
+							Menu::Customization::ContextMenuItemId::MessageCopyText,
 							tr::lng_context_copy_text(tr::now),
 							[=] { copyContextText(itemId); },
-							&st::menuIconCopy);
+							&st::menuIconCopy,
+							true);
 					}
 					if ((!item->translation() || !_history->translatedTo())
 						&& (view->hasVisibleText() || mediaHasTextForCopy)) {
@@ -3184,30 +3919,47 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							: item->originalText();
 						if (!translate.text.isEmpty()
 							&& !Ui::SkipTranslate(translate)) {
-							_menu->addAction(tr::lng_context_translate(tr::now), [=] {
+							addTrackedContextAction(
+								Menu::Customization::ContextMenuItemId::MessageTranslate,
+								tr::lng_context_translate(tr::now),
+								[=] {
 								_controller->show(Box(
 									Ui::TranslateBox,
 									peer,
 									mediaHasTextForCopy ? MsgId() : itemId,
 									translate,
 									hasRestriction));
-							}, &st::menuIconTranslate);
+								},
+								&st::menuIconTranslate,
+								true);
 						}
 					}
 				}
 			}
 		}
 		if (!actionText.isEmpty()) {
-			_menu->addAction(
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::LinkCopy,
 				actionText,
 				[text = link->copyToClipboardText()] {
 					QGuiApplication::clipboard()->setText(text);
 				},
-				&st::menuIconCopy);
+				&st::menuIconCopy,
+				true);
 		} else if (item && item->hasDirectLink() && isUponSelected != 2 && isUponSelected != -2) {
-			_menu->addAction(item->history()->peer->isMegagroup() ? tr::lng_context_copy_message_link(tr::now) : tr::lng_context_copy_post_link(tr::now), [=] {
-				HistoryView::CopyPostLink(controller, itemId, HistoryView::Context::History);
-			}, &st::menuIconLink);
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::MessageCopyPostLink,
+				item->history()->peer->isMegagroup()
+					? tr::lng_context_copy_message_link(tr::now)
+					: tr::lng_context_copy_post_link(tr::now),
+				[=] {
+					HistoryView::CopyPostLink(
+						controller,
+						itemId,
+						HistoryView::Context::History);
+				},
+				&st::menuIconLink,
+				true);
 		}
 		if (sponsored) {
 			const auto hasAbout = ranges::any_of(
@@ -3239,52 +3991,82 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 		if (isUponSelected > 1) {
 			if (selectedState.count > 0 && selectedState.count == selectedState.canForwardCount) {
-				_menu->addAction(tr::lng_context_forward_selected(tr::now), [=] {
-					_widget->forwardSelected();
-				}, &st::menuIconForward);
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionForward,
+					tr::lng_context_forward_selected(tr::now),
+					[=] { _widget->forwardSelected(); },
+					&st::menuIconForward,
+					true);
+				addSelectionForwardSavedAction(getSelectedItems());
 			}
 			if (allowSelectionForwardWithoutAuthor) {
 				const auto ids = getSelectedItems();
 				if (!ids.empty()) {
 					const auto items = session->data().idsToItems(ids);
 					if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-						_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-							ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
-								_widget->clearSelected();
-							});
-						}, &st::menuIconForward);
+						addTrackedContextAction(
+							Menu::Customization::ContextMenuItemId::SelectionForwardWithoutAuthor,
+							Window::ForwardWithoutAuthorText(),
+							[=] {
+								ShowForwardWithoutAuthorValidated(_controller, ids, [=] {
+									_widget->clearSelected();
+								});
+							},
+							&st::menuIconForward,
+							true);
 					}
 				}
 			}
+			addSelectionSendNowAction(getSelectedItems());
 			if (selectedState.count > 0 && selectedState.count == selectedState.canDeleteCount) {
-				_menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
-					_widget->confirmDeleteSelected();
-				}, &st::menuIconDelete);
+				addTrackedContextAction(
+					Menu::Customization::ContextMenuItemId::SelectionDelete,
+					tr::lng_context_delete_selected(tr::now),
+					[=] { _widget->confirmDeleteSelected(); },
+					&st::menuIconDelete,
+					true);
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
+				const auto actionsBefore = int(_menu->actions().size());
 				Menu::AddDownloadFilesAction(_menu, controller, _selected, this);
+				trackNewContextActions(
+					actionsBefore,
+					Menu::Customization::ContextMenuItemId::SelectionDownloadFiles,
+					&st::menuIconDownload,
+					true);
 			}
-			_menu->addAction(tr::lng_context_clear_selection(tr::now), [=] {
-				_widget->clearSelected();
-			}, &st::menuIconSelect);
+			addTrackedContextAction(
+				Menu::Customization::ContextMenuItemId::SelectionClear,
+				tr::lng_context_clear_selection(tr::now),
+				[=] { _widget->clearSelected(); },
+				&st::menuIconSelect,
+				true);
 		} else if (item && ((isUponSelected != -2 && (canForward || canDelete)) || item->isRegular())) {
 			if (isUponSelected != -2) {
 				if (canForward) {
-					_menu->addAction(tr::lng_context_forward_msg(tr::now), [=] {
-						forwardAsGroup(itemId);
-					}, &st::menuIconForward);
+					addTrackedContextAction(
+						Menu::Customization::ContextMenuItemId::MessageForward,
+						tr::lng_context_forward_msg(tr::now),
+						[=] { forwardAsGroup(itemId); },
+						&st::menuIconForward,
+						true);
 				}
 				if (allowMessageForwardWithoutAuthor) {
 					const auto ids = session->data().itemOrItsGroup(item);
 					if (!ids.empty()) {
 						const auto items = session->data().idsToItems(ids);
 						if (items.size() == ids.size() && CanShareWithoutAuthor(items)) {
-							_menu->addAction(Window::ForwardWithoutAuthorText(), [=] {
-								forwardAsGroupWithoutAuthor(itemId);
-							}, &st::menuIconForward);
+							addTrackedContextAction(
+								Menu::Customization::ContextMenuItemId::MessageForwardWithoutAuthor,
+								Window::ForwardWithoutAuthorText(),
+								[=] { forwardAsGroupWithoutAuthor(itemId); },
+								&st::menuIconForward,
+								true);
 						}
 					}
 				}
+				addMessageForwardSavedAction(item, true);
+				addMessageSendNowAction(item, true);
 				if (HistoryView::CanAddOfferToMessage(item)) {
 					_menu->addAction(tr::lng_context_add_offer(tr::now), [=] {
 						Api::AddOfferToMessage(_controller->uiShow(), itemId);
@@ -3302,21 +4084,37 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 								[=] { editCaptionUploadLayer(item); },
 								&st::menuIconEdit);
 						}
-						_menu->addAction(tr::lng_context_cancel_upload(tr::now), callback, &st::menuIconCancel);
-					} else {
-						_menu->addAction(Ui::DeleteMessageContextAction(
-							_menu->menu(),
+						addTrackedContextAction(
+							Menu::Customization::ContextMenuItemId::MessageDelete,
+							tr::lng_context_cancel_upload(tr::now),
 							callback,
-							item->ttlDestroyAt(),
-							[=] { _menu = nullptr; }));
+							&st::menuIconCancel,
+							true);
+						} else {
+							const auto deleteTrigger = std::make_shared<Fn<void()>>(callback);
+							const auto action = _menu->addAction(Ui::DeleteMessageContextAction(
+								_menu->menu(),
+								callback,
+								item->ttlDestroyAt(),
+								[=] { _menu = nullptr; }));
+							trackContextAction(
+								action,
+								Menu::Customization::ContextMenuItemId::MessageDelete,
+								action ? action->text() : tr::lng_context_delete_msg(tr::now),
+								deleteTrigger,
+								&st::menuIconDelete,
+								true);
+						}
+					}
+					if (!canBlockSender && canReport) {
+						addTrackedContextAction(
+							Menu::Customization::ContextMenuItemId::MessageReport,
+							tr::lng_context_report_msg(tr::now),
+							[=] { reportAsGroup(itemId); },
+							&st::menuIconReport,
+							true);
 					}
 				}
-				if (!canBlockSender && canReport) {
-					_menu->addAction(tr::lng_context_report_msg(tr::now), [=] {
-						reportAsGroup(itemId);
-					}, &st::menuIconReport);
-				}
-			}
 			addSelectMessageAction(partItemOrLeader);
 			if (isUponSelected != -2 && canBlockSender) {
 				_menu->addAction(tr::lng_profile_block_user(tr::now), [=] {
@@ -3363,7 +4161,26 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			Menu::RateTranscribeCallbackFactory(rateTranscriptionItem)));
 	}
 
-	if (_menu->empty()) {
+	const auto &runtimeContextLayout = HistoryView::LookupContextMenuSurfaceLayout(
+		contextMenuLayout,
+		contextMenuSurface);
+	ApplyRuntimeContextMenuLayout(
+		_menu,
+		runtimeContextLayout,
+		resolvedContextLayout);
+	const auto hasRuntimeStripActions = HasVisibleRuntimeContextMenuStripActions(
+		runtimeContextLayout,
+		resolvedContextLayout);
+	if (hasRuntimeStripActions && !HasVisibleRuntimeContextMenuActions(_menu)) {
+		EnsureRuntimeContextMenuStripBridge(
+			_menu,
+			runtimeContextLayout,
+			resolvedContextLayout);
+	}
+
+	if (_menu->empty()
+		|| (!HasVisibleRuntimeContextMenuActions(_menu)
+			&& !hasRuntimeStripActions)) {
 		_menu = nullptr;
 		return;
 	}
@@ -3385,6 +4202,19 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		_menu = nullptr;
 		return;
 	} else if (attached == AttachSelectorResult::Attached) {
+		// Wait for the strip attachment result below.
+	}
+	const auto stripAttached = HistoryView::AttachContextIconStripToMenu(
+		_menu.get(),
+		desiredPosition,
+		runtimeContextLayout,
+		resolvedContextLayout);
+	if (stripAttached == HistoryView::AttachContextIconStripResult::Failed) {
+		_menu = nullptr;
+		return;
+	}
+	if (attached == AttachSelectorResult::Attached
+		|| stripAttached == HistoryView::AttachContextIconStripResult::Attached) {
 		_menu->popupPrepared();
 	} else {
 		_menu->popup(desiredPosition);

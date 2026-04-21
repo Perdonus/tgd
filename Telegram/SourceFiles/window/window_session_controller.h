@@ -611,6 +611,7 @@ public:
 	}
 
 	[[nodiscard]] int filtersWidth() const;
+	void setFiltersMenuLeft(int left);
 	[[nodiscard]] bool enoughSpaceForFilters() const;
 	[[nodiscard]] rpl::producer<bool> enoughSpaceForFiltersValue() const;
 	[[nodiscard]] rpl::producer<FilterId> activeChatsFilter() const;

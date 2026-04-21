@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_top_bar.h"
 #include "info/info_memento.h"
 #include "info/info_wrap_widget.h"
+#include "settings/settings_common_session.h"
 #include "settings/settings_menu_customization_editor.h"
 #include "ui/rp_widget.h"
 #include "ui/focus_persister.h"
@@ -29,19 +30,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 
+namespace Settings {
+[[nodiscard]] bool UsesExperimentalShellGeometry(Type type);
+} // namespace Settings
+
 namespace Info {
 namespace {
 
-[[nodiscard]] bool IsSettingsLayerContent(not_null<WrapWidget*> content) {
-	return content->controller()->section().type() == Section::Type::Settings;
+[[nodiscard]] bool UsesExperimentalShellGeometry(
+		not_null<WrapWidget*> content) {
+	const auto section = content->controller()->section();
+	return (section.type() == Section::Type::Settings)
+		&& ::Settings::UsesExperimentalShellGeometry(section.settingsType());
 }
 
 [[nodiscard]] int LayerDesiredWidth(
 		int parentWidth,
-		bool settingsContent) {
+		bool useExperimentalShellGeometry) {
 	const auto limit = std::max(0, parentWidth - 2 * st::infoMinimalLayerMargin);
 	auto desired = st::infoDesiredWidth;
-	if (settingsContent && ::Settings::LoadShellModePreferences().wideSettingsPane) {
+	if (useExperimentalShellGeometry
+		&& ::Settings::LoadShellModePreferences().wideSettingsPane) {
 		desired = std::max(desired, 520);
 	}
 	return std::min(limit, desired);
@@ -217,7 +226,7 @@ void LayerWidget::parentResized() {
 	} else {
 		const auto newWidth = LayerDesiredWidth(
 			parentWidth,
-			IsSettingsLayerContent(_contentWrap));
+			UsesExperimentalShellGeometry(_contentWrap));
 		resizeToWidth(newWidth);
 	}
 }
@@ -306,9 +315,13 @@ QRect LayerWidget::countGeometry(int newWidth) {
 	const auto &parentSize = parentWidget()->size();
 	const auto windowWidth = parentSize.width();
 	const auto windowHeight = parentSize.height();
-	const auto shellModes = ::Settings::LoadShellModePreferences();
-	const auto leftEdgeSettings = shellModes.leftEdgeSettings
-		&& IsSettingsLayerContent(_contentWrap);
+	const auto useExperimentalShellGeometry = UsesExperimentalShellGeometry(
+		_contentWrap);
+	const auto shellModes = useExperimentalShellGeometry
+		? ::Settings::LoadShellModePreferences()
+		: ::Settings::ShellModePreferences();
+	const auto leftEdgeSettings = useExperimentalShellGeometry
+		&& shellModes.leftEdgeSettings;
 	const auto newLeft = leftEdgeSettings
 		? st::infoMinimalLayerMargin
 		: (windowWidth - newWidth) / 2;

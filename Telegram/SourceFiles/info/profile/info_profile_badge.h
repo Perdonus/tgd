@@ -22,6 +22,11 @@ namespace Main {
 class Session;
 } // namespace Main
 
+class PeerData;
+class QColor;
+class QImage;
+class QSize;
+
 namespace Ui {
 class RpWidget;
 class AbstractButton;
@@ -51,6 +56,7 @@ public:
 	struct Content {
 		BadgeType badge = BadgeType::None;
 		EmojiStatusId emojiStatusId;
+		bool astrogramMini = false;
 
 		friend inline bool operator==(Content, Content) = default;
 	};
@@ -58,12 +64,14 @@ public:
 		not_null<QWidget*> parent,
 		const style::InfoPeerBadge &st,
 		not_null<Main::Session*> session,
+		not_null<PeerData*> peer,
 		rpl::producer<Content> content,
 		EmojiStatusPanel *emojiStatusPanel,
 		Fn<bool()> animationPaused,
 		int customStatusLoopsLimit = 0,
 		base::flags<BadgeType> allowed
-			= base::flags<BadgeType>::from_raw(-1));
+			= base::flags<BadgeType>::from_raw(-1),
+		bool useAstrogramMini = false);
 
 	~Badge();
 
@@ -84,8 +92,10 @@ private:
 	const style::InfoPeerBadge &_st;
 	const style::InfoPeerBadge *_overrideSt = nullptr;
 	const not_null<Main::Session*> _session;
+	const not_null<PeerData*> _peer;
 	EmojiStatusPanel *_emojiStatusPanel = nullptr;
 	const int _customStatusLoopsLimit = 0;
+	const bool _useAstrogramMini = false;
 	std::unique_ptr<Ui::Text::CustomEmoji> _emojiStatus;
 	base::flags<BadgeType> _allowed;
 	Content _content;
@@ -103,5 +113,10 @@ private:
 	not_null<PeerData*> peer);
 [[nodiscard]] rpl::producer<Badge::Content> BotVerifyBadgeForPeer(
 	not_null<PeerData*> peer);
+[[nodiscard]] QImage AstrogramMiniBadgeImage(const QColor &color);
+[[nodiscard]] QSize AstrogramMiniBadgeSize(const QSize &bounds);
+[[nodiscard]] bool IsAstrogramMiniBadgeContent(
+	not_null<PeerData*> peer,
+	const Badge::Content &content);
 
 } // namespace Info::Profile

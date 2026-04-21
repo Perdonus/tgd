@@ -141,6 +141,58 @@ void ClearBotStartToken(PeerData *peer) {
 	}
 }
 
+enum class ShellLayoutRuntimeBlock {
+	Folders,
+	Dialogs,
+	Chat,
+	Info,
+};
+
+[[nodiscard]] bool UseEmbeddedFiltersShellLayout() {
+	return Settings::LoadAstrogramShellLayoutOrder().indexOf(
+		QStringLiteral("folders")) > 0;
+}
+
+[[nodiscard]] std::vector<ShellLayoutRuntimeBlock> DefaultShellLayoutRuntimeOrder() {
+	return {
+		ShellLayoutRuntimeBlock::Dialogs,
+		ShellLayoutRuntimeBlock::Chat,
+		ShellLayoutRuntimeBlock::Info,
+	};
+}
+
+[[nodiscard]] std::vector<ShellLayoutRuntimeBlock> LoadShellLayoutRuntimeOrder() {
+	const auto saved = Settings::LoadAstrogramShellLayoutOrder();
+	auto result = std::vector<ShellLayoutRuntimeBlock>();
+	result.reserve(3);
+	for (const auto &id : saved) {
+		if (id == QStringLiteral("dialogs")) {
+			if (!ranges::contains(result, ShellLayoutRuntimeBlock::Dialogs)) {
+				result.push_back(ShellLayoutRuntimeBlock::Dialogs);
+			}
+		} else if (id == QStringLiteral("chat")) {
+			if (!ranges::contains(result, ShellLayoutRuntimeBlock::Chat)) {
+				result.push_back(ShellLayoutRuntimeBlock::Chat);
+			}
+		} else if (id == QStringLiteral("info")) {
+			if (!ranges::contains(result, ShellLayoutRuntimeBlock::Info)) {
+				result.push_back(ShellLayoutRuntimeBlock::Info);
+			}
+		}
+	}
+	for (const auto block : DefaultShellLayoutRuntimeOrder()) {
+		if (!ranges::contains(result, block)) {
+			result.push_back(block);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] bool IsDefaultShellLayoutRuntimeOrder(
+		const std::vector<ShellLayoutRuntimeBlock> &order) {
+	return order == DefaultShellLayoutRuntimeOrder();
+}
+
 [[nodiscard]] QString AstrogramUpdateNoticeKey(
 		const Core::UpdateReleaseInfo &info) {
 	if (!info.available || (info.version <= 0)) {
@@ -3249,10 +3301,108 @@ void MainWidget::updateControlsGeometry() {
 		if (_hider) _hider->setGeometry(0, 0, dialogsWidth, height());
 	} else {
 		auto thirdSectionWidth = _thirdSection ? _thirdColumnWidth : 0;
+		const auto embedFilters = UseEmbeddedFiltersShellLayout()
+			&& (_controller->filtersWidth() > 0);
+		const auto filtersWidth = embedFilters ? _controller->filtersWidth() : 0;
+		const auto shellOrder = LoadShellLayoutRuntimeOrder();
+		struct ColumnGeometry {
+			ShellLayoutRuntimeBlock block = ShellLayoutRuntimeBlock::Chat;
+			int width = 0;
+			int left = 0;
+		};
+		auto columns = std::vector<ColumnGeometry>();
+		const auto chatColumnWidth = std::max(
+			width() - dialogsWidth - thirdSectionWidth - filtersWidth,
+			0);
+		columns.reserve(embedFilters ? 4 : 3);
+		if (embedFilters) {
+			const auto savedShellOrder = Settings::LoadAstrogramShellLayoutOrder();
+			for (const auto &id : savedShellOrder) {
+				if (id == QStringLiteral("folders")) {
+					columns.push_back({
+						ShellLayoutRuntimeBlock::Folders,
+						filtersWidth,
+						0,
+					});
+				} else if (id == QStringLiteral("dialogs")) {
+					if (_dialogs && (dialogsWidth > 0)) {
+						columns.push_back({
+							ShellLayoutRuntimeBlock::Dialogs,
+							dialogsWidth,
+							0,
+						});
+					}
+				} else if (id == QStringLiteral("chat")) {
+					columns.push_back({
+						ShellLayoutRuntimeBlock::Chat,
+						chatColumnWidth,
+						0,
+					});
+				} else if (id == QStringLiteral("info")) {
+					if (_thirdSection && (thirdSectionWidth > 0)) {
+						columns.push_back({
+							ShellLayoutRuntimeBlock::Info,
+							thirdSectionWidth,
+							0,
+						});
+					}
+				}
+			}
+		} else for (const auto block : shellOrder) {
+			switch (block) {
+			case ShellLayoutRuntimeBlock::Folders:
+				break;
+			case ShellLayoutRuntimeBlock::Dialogs:
+				if (_dialogs && (dialogsWidth > 0)) {
+					columns.push_back({ block, dialogsWidth, 0 });
+				}
+				break;
+			case ShellLayoutRuntimeBlock::Chat:
+				columns.push_back({
+					block,
+					chatColumnWidth,
+					0,
+				});
+				break;
+			case ShellLayoutRuntimeBlock::Info:
+				if (_thirdSection && (thirdSectionWidth > 0)) {
+					columns.push_back({ block, thirdSectionWidth, 0 });
+				}
+				break;
+			}
+		}
+		auto separators = std::vector<int>();
+		separators.reserve(columns.size());
+		auto x = 0;
+		auto dialogsLeft = 0;
+		auto chatLeft = 0;
+		auto chatWidth = chatColumnWidth;
+		auto infoLeft = 0;
+		for (auto i = 0; i != columns.size(); ++i) {
+			columns[i].left = x;
+			switch (columns[i].block) {
+			case ShellLayoutRuntimeBlock::Folders:
+				break;
+			case ShellLayoutRuntimeBlock::Dialogs:
+				dialogsLeft = x;
+				break;
+			case ShellLayoutRuntimeBlock::Chat:
+				chatLeft = x;
+				chatWidth = columns[i].width;
+				break;
+			case ShellLayoutRuntimeBlock::Info:
+				infoLeft = x;
+				break;
+			}
+			x += columns[i].width;
+			if ((i + 1) != columns.size()) {
+				separators.push_back(x);
+			}
+		}
 		if (_thirdSection) {
-			auto thirdSectionTop = getThirdSectionTop();
+			const auto thirdSectionTop = getThirdSectionTop();
 			_thirdSection->setGeometry(
-				width() - thirdSectionWidth,
+				infoLeft,
 				thirdSectionTop,
 				thirdSectionWidth,
 				height() - thirdSectionTop);
@@ -3260,51 +3410,67 @@ void MainWidget::updateControlsGeometry() {
 		const auto shadowTop = _controller->window().verticalShadowTop();
 		const auto shadowHeight = height() - shadowTop;
 		if (_dialogs) {
-			accumulate_min(
-				dialogsWidth,
-				width() - st::columnMinimalWidthMain);
-			_dialogs->setGeometryToLeft(0, 0, dialogsWidth, height());
+			_dialogs->setGeometryWithTopMoved(
+				QRect(dialogsLeft, 0, dialogsWidth, height()),
+				0);
+		}
+		auto sideShadowLeft = 0;
+		auto sideShadowWidth = 0;
+		auto thirdShadowLeft = 0;
+		auto thirdShadowWidth = 0;
+		if (embedFilters) {
+			if (chatLeft > 0) {
+				sideShadowLeft = chatLeft;
+				sideShadowWidth = st::lineWidth;
+			}
+			if (_thirdSection && (thirdSectionWidth > 0) && (infoLeft > 0)) {
+				thirdShadowLeft = infoLeft;
+				thirdShadowWidth = st::lineWidth;
+			}
+		} else {
+			sideShadowLeft = separators.empty() ? 0 : separators.front();
+			sideShadowWidth = separators.empty() ? 0 : st::lineWidth;
+			thirdShadowLeft = (separators.size() > 1) ? separators[1] : 0;
+			thirdShadowWidth = (separators.size() > 1) ? st::lineWidth : 0;
 		}
 		if (_sideShadow) {
 			_sideShadow->setGeometryToLeft(
-				dialogsWidth,
+				sideShadowLeft,
 				shadowTop,
-				st::lineWidth,
+				sideShadowWidth,
 				shadowHeight);
 		}
 		if (_thirdShadow) {
 			_thirdShadow->setGeometryToLeft(
-				width() - thirdSectionWidth - st::lineWidth,
+				thirdShadowLeft,
 				shadowTop,
-				st::lineWidth,
+				thirdShadowWidth,
 				shadowHeight);
 		}
-		const auto mainSectionWidth = width()
-			- dialogsWidth
-			- thirdSectionWidth;
+		const auto mainSectionWidth = chatWidth;
 		if (_callTopBar) {
 			_callTopBar->resizeToWidth(mainSectionWidth);
-			_callTopBar->moveToLeft(dialogsWidth, 0);
+			_callTopBar->moveToLeft(chatLeft, 0);
 		}
 		if (_exportTopBar) {
 			_exportTopBar->resizeToWidth(mainSectionWidth);
-			_exportTopBar->moveToLeft(dialogsWidth, _callTopBarHeight);
+			_exportTopBar->moveToLeft(chatLeft, _callTopBarHeight);
 		}
 		if (_player) {
 			_player->resizeToWidth(mainSectionWidth);
 			_player->moveToLeft(
-				dialogsWidth,
+				chatLeft,
 				_callTopBarHeight + _exportTopBarHeight);
 		}
 		_history->setGeometryWithTopMoved(QRect(
-			dialogsWidth,
+			chatLeft,
 			mainSectionTop,
 			mainSectionWidth,
 			height() - mainSectionTop
 		), _contentScrollAddToY);
 		if (_hider) {
 			_hider->setGeometryToLeft(
-				dialogsWidth,
+				chatLeft,
 				0,
 				mainSectionWidth,
 				height());
@@ -3340,6 +3506,19 @@ void MainWidget::destroyThirdSection() {
 }
 
 void MainWidget::refreshResizeAreas() {
+	const auto customShellOrder = (UseEmbeddedFiltersShellLayout()
+			&& (_controller->filtersWidth() > 0))
+		|| !IsDefaultShellLayoutRuntimeOrder(
+			LoadShellLayoutRuntimeOrder());
+	if (customShellOrder) {
+		if (_firstColumnResizeArea) {
+			_firstColumnResizeArea.destroy();
+		}
+		if (_thirdColumnResizeArea) {
+			_thirdColumnResizeArea.destroy();
+		}
+		return;
+	}
 	if (!isOneColumn() && _dialogs) {
 		ensureFirstColumnResizeAreaCreated();
 		_firstColumnResizeArea->setGeometryToLeft(

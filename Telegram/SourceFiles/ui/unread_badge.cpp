@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_session.h"
 #include "data/stickers/data_custom_emoji.h"
+#include "info/profile/info_profile_badge.h"
 #include "main/main_session.h"
 #include "lang/lang_keys.h"
 #include "ui/painter.h"
@@ -20,10 +21,69 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/unread_badge_paint.h"
 #include "styles/style_dialogs.h"
 
+#include <unordered_map>
+
 namespace Ui {
 namespace {
 
 constexpr auto kPlayStatusLimit = 2;
+
+struct PeerBadgeRuntimeState {
+	PeerData *peer = nullptr;
+	Info::Profile::Badge::Content content;
+	Fn<void()> repaint;
+	rpl::lifetime lifetime;
+};
+
+[[nodiscard]] auto &PeerBadgeRuntimeStates() {
+	static auto states
+		= std::unordered_map<const PeerBadge*, PeerBadgeRuntimeState>();
+	return states;
+}
+
+void ResetPeerBadgeRuntimeState(const PeerBadge *badge) {
+	auto &states = PeerBadgeRuntimeStates();
+	if (const auto i = states.find(badge); i != end(states)) {
+		i->second.lifetime.destroy();
+		states.erase(i);
+	}
+}
+
+void EnsurePeerBadgeRuntimeState(
+		const PeerBadge *badge,
+		not_null<PeerData*> peer,
+		Fn<void()> repaint) {
+	auto &state = PeerBadgeRuntimeStates()[badge];
+	state.repaint = std::move(repaint);
+	if (state.peer == peer.get()) {
+		return;
+	}
+	state.lifetime.destroy();
+	state.peer = peer;
+	state.content = {};
+	Info::Profile::BadgeContentForPeer(
+		peer
+	) | rpl::on_next([badge, peer](Info::Profile::Badge::Content content) {
+		const auto i = PeerBadgeRuntimeStates().find(badge);
+		if (i == end(PeerBadgeRuntimeStates()) || (i->second.peer != peer)) {
+			return;
+		}
+		if (i->second.content == content) {
+			return;
+		}
+		i->second.content = content;
+		if (i->second.repaint) {
+			i->second.repaint();
+		}
+	}, state.lifetime);
+}
+
+[[nodiscard]] const PeerBadgeRuntimeState *FindPeerBadgeRuntimeState(
+		const PeerBadge *badge) {
+	const auto &states = PeerBadgeRuntimeStates();
+	const auto i = states.find(badge);
+	return (i != end(states)) ? &i->second : nullptr;
+}
 
 } // namespace
 
@@ -144,15 +204,44 @@ void DrawTextBadge(
 
 PeerBadge::PeerBadge() = default;
 
-PeerBadge::~PeerBadge() = default;
+PeerBadge::~PeerBadge() {
+	ResetPeerBadgeRuntimeState(this);
+}
 
 int PeerBadge::drawGetWidth(Painter &p, Descriptor &&descriptor) {
 	Expects(descriptor.customEmojiRepaint != nullptr);
 
 	const auto peer = descriptor.peer;
+	EnsurePeerBadgeRuntimeState(this, peer, descriptor.customEmojiRepaint);
 	if ((descriptor.scam && (peer->isScam() || peer->isFake()))
 		|| (descriptor.direct && peer->isMonoforum())) {
 		return drawTextBadge(p, descriptor);
+	}
+	if (const auto state = FindPeerBadgeRuntimeState(this)
+		; state && Info::Profile::IsAstrogramMiniBadgeContent(peer, state->content)) {
+		_emojiStatus = nullptr;
+		const auto rectForName = descriptor.rectForName;
+		const auto bounds = QSize(
+			descriptor.premium
+				? std::max(descriptor.premium->width(), rectForName.height())
+				: rectForName.height(),
+			descriptor.premium
+				? std::max(descriptor.premium->height(), rectForName.height())
+				: rectForName.height());
+		const auto size = Info::Profile::AstrogramMiniBadgeSize(bounds);
+		const auto iconx = rectForName.x()
+			+ qMin(
+				descriptor.nameWidth,
+				std::max(rectForName.width() - size.width(), 0));
+		const auto icony = rectForName.y()
+			+ (rectForName.height() - size.height()) / 2;
+		p.drawImage(
+			QRect(iconx, icony, size.width(), size.height()),
+			Info::Profile::AstrogramMiniBadgeImage(
+				descriptor.premiumFg
+					? (*descriptor.premiumFg)->c
+					: st::windowActiveTextFg->c));
+		return size.width();
 	}
 	const auto verifyCheck = descriptor.verified && peer->isVerified();
 	const auto premiumMark = descriptor.premium
@@ -295,6 +384,7 @@ int PeerBadge::drawPremiumStar(Painter &p, const Descriptor &descriptor) {
 
 void PeerBadge::unload() {
 	_emojiStatus = nullptr;
+	ResetPeerBadgeRuntimeState(this);
 }
 
 bool PeerBadge::ready(const BotVerifyDetails *details) const {

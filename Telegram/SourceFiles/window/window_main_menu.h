@@ -75,6 +75,8 @@ private:
 	void moveBadge();
 	void setupUserpicButton();
 	void setupAccounts();
+	void setupAccounts(
+		not_null<Ui::SlideWrap<Ui::VerticalLayout>*> wrap);
 	void setupAccountsToggle();
 	void setupSetEmojiStatus();
 	void setupArchive();
@@ -88,8 +90,11 @@ private:
 	void setupCustomizationWatcher();
 	void watchCustomizationPath(const QString &path);
 	void syncAccountsVisibility(bool shown, bool animated);
+	void scheduleAccountsScrollSync(int delay = 0);
+	void syncAccountsScrollPosition();
 	[[nodiscard]] bool profileBlockAtBottom() const;
 	[[nodiscard]] int profileBlockTop() const;
+	[[nodiscard]] bool footerVisible() const;
 	[[nodiscard]] int desiredMenuWidth() const;
 	[[nodiscard]] int desiredImmersiveShift(int menuWidth) const;
 	void animateImmersiveShiftTo(int target);
@@ -99,6 +104,7 @@ private:
 	void toggleAccounts();
 	void chooseEmojiStatus();
 	void setupSwipe();
+	[[nodiscard]] bool accountsShown() const;
 
 	[[nodiscard]] base::EventFilterResult redirectToInnerChecked(
 		not_null<QEvent*> e);
@@ -121,12 +127,15 @@ private:
 	not_null<Ui::SlideWrap<Ui::PlainShadow>*> _shadow;
 	not_null<Ui::VerticalLayout*> _menu;
 	not_null<Ui::VerticalLayout*> _menuActions;
+	not_null<Ui::SlideWrap<Ui::PlainShadow>*> _shadowBottom;
+	not_null<Ui::SlideWrap<Ui::VerticalLayout>*> _accountsBottom;
 	not_null<Ui::RpWidget*> _footer;
 	not_null<Ui::FlatLabel*> _telegram;
 	not_null<Ui::FlatLabel*> _version;
 	QPointer<Ui::SettingsButton> _nightThemeToggle;
 	rpl::event_stream<bool> _nightThemeSwitches;
 	base::Timer _nightThemeSwitch;
+	base::Timer _accountsScrollTimer;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 
 	Ui::Controls::SwipeBackResult _swipeBackData;

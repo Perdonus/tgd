@@ -10,12 +10,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_context_menu.h"
 
 class QPoint;
+class QAction;
 
 namespace Ui {
 class PopupMenu;
 } // namespace Ui
 
 namespace HistoryView {
+
+void MarkContextMenuAction(QAction *action, const QString &id);
+[[nodiscard]] std::vector<QString> ResolveContextIconStripActionIds(
+	const ContextMenuSurfaceLayout &layout,
+	const ContextMenuResolvedLayout &resolved);
 
 enum class AttachContextIconStripResult {
 	Skipped,

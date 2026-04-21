@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h" // Ui::show().
 #include "chat_helpers/ttl_media_layer_widget.h"
 #include "core/application.h"
+#include "core/astrogram_channel_registry.h"
 #include "core/core_settings.h"
 #include "core/mime_type.h"
 #include "data/data_document.h"
@@ -187,74 +188,6 @@ QString PluginSourceBadgeText(const Plugins::PackagePreviewState &preview) {
 			u"Неподтверждённый источник"_q);
 }
 
-QString PluginSourceChannelLabel(const Plugins::PackagePreviewState &preview) {
-	const auto title = preview.sourceChannelTitle.trimmed();
-	const auto username = preview.sourceChannelUsername.trimmed();
-	if (!title.isEmpty() && !username.isEmpty()) {
-		return title + u" · @"_q + username;
-	}
-	if (!title.isEmpty()) {
-		return title;
-	}
-	if (!username.isEmpty()) {
-		return u"@"_q + username;
-	}
-	return preview.sourceChannelId
-		? QString::number(preview.sourceChannelId)
-		: QString();
-}
-
-QString PluginSourceBadgeDetails(const Plugins::PackagePreviewState &preview) {
-	const auto addOrigin = [&](QString text) {
-		if (!preview.sourceChannelId || (preview.sourceMessageId <= 0)) {
-			return text;
-		}
-		return text + u"\n"_q + PluginUiText(
-			u"Source: %1 · post %2."_q,
-			u"Источник: %1 · пост %2."_q).arg(
-				PluginSourceChannelLabel(preview),
-				QString::number(preview.sourceMessageId));
-	};
-	if (preview.sourceTrustLoading) {
-		return PluginUiText(
-			u"Astrogram is requesting trusted source data from the server."_q,
-			u"Astrogram запрашивает данные доверенного источника с сервера."_q);
-	}
-	if (preview.sourceVerified) {
-		return addOrigin(PluginUiText(
-			u"This exact plugin binary matches a trusted source record."_q,
-			u"Точный бинарник этого плагина совпал с доверенной записью источника."_q));
-	}
-	if (preview.sourceTrustReason == u"hash-found-in-untrusted-channel"_q) {
-		return addOrigin(PluginUiText(
-			u"A matching binary hash was found, but only in a channel outside the trusted source list."_q,
-			u"Совпадающий хеш бинарника найден, но только в канале вне списка доверенных источников."_q));
-	}
-	if (preview.sourceTrustReason == u"matching-record-missing-origin"_q) {
-		return PluginUiText(
-			u"A matching binary hash exists, but its trusted source metadata is incomplete."_q,
-			u"Совпадающий хеш бинарника существует, но у него неполные метаданные доверенного источника."_q);
-	}
-	if (preview.sourceTrustReason == u"no-active-session"_q) {
-		return PluginUiText(
-			u"Source verification requires an active Telegram session."_q,
-			u"Для проверки источника нужен активный сеанс Telegram."_q);
-	}
-	if (preview.sourceTrustReason == u"sha256-unavailable"_q) {
-		return PluginUiText(
-			u"Could not calculate the plugin SHA-256 for verification."_q,
-			u"Не удалось вычислить SHA-256 плагина для проверки."_q);
-	}
-	if (preview.sourceTrustReason == u"server-request-failed"_q) {
-		return PluginUiText(
-			u"Could not update trusted source data from the server yet."_q,
-			u"Пока не удалось обновить данные доверенного источника с сервера."_q);
-	}
-	return PluginUiText(
-		u"This exact plugin binary was not found in the trusted source records."_q,
-		u"Точный бинарник этого плагина не найден в доверенных записях источников."_q);
-}
-
 void DrawPluginSourceBadgeGlyph(
 		Painter &p,
 		QRectF rect,
@@ -317,12 +250,12 @@ QString PluginInstalledVersionNotice(
 	const auto incoming = preview.info.version.trimmed();
 	if (!installed.isEmpty() && !incoming.isEmpty() && installed == incoming) {
 		return PluginUiText(
-			u"This plugin is already installed. Reinstalling will replace the current file."_q,
-			u"Этот плагин уже установлен. Переустановка заменит текущий файл."_q);
+			u"This version is already installed."_q,
+			u"Эта версия уже установлена."_q);
 	}
 	return PluginUiText(
-		u"Another version of this plugin is already installed."_q,
-		u"Уже установлена другая версия этого плагина."_q);
+		u"The installed version will be replaced."_q,
+		u"Текущая версия будет заменена."_q);
 }
 
 [[nodiscard]] bool UseRussianPluginUi() {
@@ -355,10 +288,8 @@ QString PluginInstalledVersionNotice(
 
 [[nodiscard]] TextWithEntities PluginAuthorText(const QString &author) {
 	const auto trimmed = author.trimmed();
-	auto result = TextWithEntities{
-		PluginUiText(u"Author: "_q, u"Автор: "_q) + trimmed
-	};
-	const auto offset = result.text.size() - trimmed.size();
+	auto result = TextWithEntities{ trimmed };
+	const auto offset = 0;
 	if (const auto handle = NormalizedTelegramHandle(trimmed); !handle.isEmpty()) {
 		result.entities.push_back({
 			EntityType::CustomUrl,
@@ -542,14 +473,7 @@ public:
 		paintRequest() | rpl::on_next([=] {
 			const auto previewState = _preview->current();
 			const auto loading = previewState.sourceTrustLoading;
-			const auto text = loading
-				? (PluginUiText(
-					u"Updating source data"_q,
-					u"Обновление данных"_q)
-					+ QString(
-						std::max(1, _loadingFrame),
-						QChar::fromLatin1('.')))
-				: PluginSourceBadgeText(previewState);
+			const auto text = PluginSourceBadgeText(previewState);
 			const auto fill = loading
 				? QColor(0xf2, 0xc9, 0x4c, 44)
 				: previewState.sourceVerified
@@ -576,7 +500,8 @@ public:
 				st::semiboldFont->width(text)
 					+ (horizontalPadding * 2)
 					+ iconWidth);
-			const auto rect = QRectF(0, 0, pillWidth, height() - 1)
+			const auto pillLeft = std::max((width() - pillWidth) / 2, 0);
+			const auto rect = QRectF(pillLeft, 0, pillWidth, height() - 1)
 				.adjusted(0.5, 0.5, -0.5, -0.5);
 			p.setPen(QPen(border, 1.));
 			p.setBrush(fill);
@@ -585,7 +510,7 @@ public:
 			DrawPluginSourceBadgeGlyph(
 				p,
 				QRectF(
-					horizontalPadding,
+					pillLeft + horizontalPadding,
 					(height() - 14.) / 2.,
 					14.,
 					14.),
@@ -595,7 +520,7 @@ public:
 				_loadingFrame);
 			p.drawText(
 				QRect(
-					horizontalPadding + iconWidth,
+					pillLeft + horizontalPadding + iconWidth,
 					0,
 					std::max(1, pillWidth - (horizontalPadding * 2) - iconWidth),
 					height()),
@@ -667,18 +592,10 @@ void ShowPluginPackageBox(
 			box,
 			previewState),
 			style::margins(
-				st::boxPadding.left(),
+				0,
 				st::boxPadding.bottom() / 2,
-				st::boxPadding.right(),
+				0,
 				0),
-			style::al_top);
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			previewState->value() | rpl::map([](const auto &current) {
-				return PluginSourceBadgeDetails(current);
-			}),
-			st::defaultFlatLabel),
-			style::margins(st::boxPadding.left(), 0, st::boxPadding.right(), 0),
 			style::al_top);
 		if (const auto versionNotice = PluginInstalledVersionNotice(previewState->current());
 			!versionNotice.isEmpty()) {
@@ -745,8 +662,8 @@ void ShowPluginPackageBox(
 			const auto updated = Core::App().plugins().inspectPackage(current.sourcePath);
 			previewState->force_assign(updated);
 			if (!updated.sourceTrustLoading
-				&& updated.sourceTrustReason != u"server-request-failed"_q
-				&& updated.sourceTrustReason != u"server-refreshing"_q) {
+				&& updated.sourceTrustReason != u"channel-feed-refresh-failed"_q
+				&& updated.sourceTrustReason != u"channel-feed-refreshing"_q) {
 				refreshTimer->stop();
 			}
 		};
@@ -762,14 +679,14 @@ void ShowPluginPackageBox(
 			refreshPreviewState();
 			if (!refreshTimer->isActive()
 				&& (previewState->current().sourceTrustLoading
-					|| previewState->current().sourceTrustReason == u"server-refreshing"_q
-					|| previewState->current().sourceTrustReason == u"server-request-failed"_q)) {
+					|| previewState->current().sourceTrustReason == u"channel-feed-refreshing"_q
+					|| previewState->current().sourceTrustReason == u"channel-feed-refresh-failed"_q)) {
 				refreshTimer->start();
 			}
 		}, box->lifetime());
 		if (previewState->current().sourceTrustLoading
-			|| previewState->current().sourceTrustReason == u"server-request-failed"_q
-			|| previewState->current().sourceTrustReason == u"server-refreshing"_q) {
+			|| previewState->current().sourceTrustReason == u"channel-feed-refresh-failed"_q
+			|| previewState->current().sourceTrustReason == u"channel-feed-refreshing"_q) {
 			refreshTimer->start();
 		}
 	}));

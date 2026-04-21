@@ -271,6 +271,7 @@ TopBar::TopBar(
 	this,
 	st::infoBotVerifyBadge,
 	&_peer->session(),
+	_peer,
 	BotVerifyBadgeForPeer(_peer),
 	nullptr,
 	Fn<bool()>([=, controller = descriptor.controller] {
@@ -285,13 +286,18 @@ TopBar::TopBar(
 	this,
 	st::infoPeerBadge,
 	&_peer->session(),
+	_peer,
 	_badgeContent.value(),
 	nullptr,
-	_gifPausedChecker))
+	_gifPausedChecker,
+	0,
+	base::flags<BadgeType>::from_raw(-1),
+	true))
 , _verified(std::make_unique<Badge>(
 	this,
 	st::infoPeerBadge,
 	&_peer->session(),
+	_peer,
 	VerifiedContentForPeer(_peer),
 	nullptr,
 	_gifPausedChecker))

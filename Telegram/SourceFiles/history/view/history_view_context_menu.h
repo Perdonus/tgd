@@ -51,14 +51,64 @@ enum class ContextMenuSurface : char {
 	Selection,
 };
 
+enum class ContextMenuLane : char {
+	Menu,
+	Strip,
+};
+
 struct ContextMenuLayoutEntry {
 	QString id;
 	bool visible = true;
+	// Keep old layout files compatible: custom separators are still identified
+	// by their persisted custom_separator_* ids even before runtime normalization.
+	bool separator = id.startsWith(QStringLiteral("custom_separator_"));
+
+	[[nodiscard]] QString normalizedId() const {
+		return id.trimmed();
+	}
+	[[nodiscard]] QString duplicateKey() const {
+		return separator ? QString() : normalizedId();
+	}
+	[[nodiscard]] bool participatesInUnifiedLayout() const {
+		return visible && !duplicateKey().isEmpty();
+	}
+	[[nodiscard]] bool conflictsWith(const ContextMenuLayoutEntry &other) const {
+		const auto key = duplicateKey();
+		return !key.isEmpty() && (key == other.duplicateKey());
+	}
 };
 
 struct ContextMenuSurfaceLayout {
 	std::vector<ContextMenuLayoutEntry> menu;
 	std::vector<ContextMenuLayoutEntry> strip;
+
+	[[nodiscard]] bool hasVisibleUnifiedDuplicate(
+			const QString &id,
+			ContextMenuLane lane) const {
+		const auto normalized = id.trimmed();
+		if (normalized.isEmpty()) {
+			return false;
+		}
+		const auto &entries = (lane == ContextMenuLane::Strip) ? strip : menu;
+		for (const auto &entry : entries) {
+			if (entry.participatesInUnifiedLayout()
+				&& (entry.normalizedId() == normalized)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	[[nodiscard]] bool hasCrossLaneUnifiedDuplicates() const {
+		for (const auto &entry : menu) {
+			if (!entry.participatesInUnifiedLayout()) {
+				continue;
+			}
+			if (hasVisibleUnifiedDuplicate(entry.id, ContextMenuLane::Strip)) {
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 struct ContextMenuCustomizationLayout {
@@ -149,6 +199,9 @@ void MaybeAddWhenEditedForwardedAction(
 	not_null<Ui::PopupMenu*> menu,
 	not_null<HistoryItem*> item,
 	not_null<Window::SessionController*> controller);
+void ShowEditHistoryBox(
+	not_null<Window::SessionController*> controller,
+	not_null<HistoryItem*> item);
 void ShowWhoReactedMenu(
 	not_null<base::unique_qptr<Ui::PopupMenu>*> menu,
 	QPoint position,

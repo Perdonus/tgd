@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "history/view/history_view_list_widget.h"
+#include "history/view/history_view_context_icon_strip.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -124,6 +125,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
+#include <QtWidgets/QAction>
 
 #include <memory>
 
@@ -277,6 +279,9 @@ public:
 		Fn<void()> callback,
 		const style::icon *icon = nullptr,
 		bool stripEligible = false) {
+		const auto actionId = (id && *id)
+			? QString::fromLatin1(id)
+			: QString();
 		const auto shared = std::make_shared<Fn<void()>>(std::move(callback));
 		pushPending(
 			id,
@@ -284,10 +289,11 @@ public:
 			icon,
 			shared,
 			stripEligible,
-			[text, icon, shared](not_null<Ui::PopupMenu*> menu) {
-				menu->addAction(text, [shared] {
+			[actionId, text, icon, shared](not_null<Ui::PopupMenu*> menu) {
+				const auto action = menu->addAction(text, [shared] {
 					(*shared)();
 				}, icon);
+				MarkContextMenuAction(action, actionId);
 			});
 	}
 
@@ -308,19 +314,41 @@ public:
 	}
 
 	void finalize(const ContextMenuSurfaceLayout &layout) {
-		publishResolved();
+		const auto resolvedLayout = buildResolvedLayout();
+		publishResolved(resolvedLayout);
+		const auto stripActionIds = ResolveContextIconStripActionIds(
+			layout,
+			resolvedLayout);
+		const auto stripIds = [&] {
+			auto result = base::flat_set<QString>();
+			for (const auto &id : stripActionIds) {
+				result.emplace(id);
+			}
+			return result;
+		}();
+		const auto useAutomaticSectionSeparators = !ranges::any_of(
+			layout.menu,
+			[](const ContextMenuLayoutEntry &entry) {
+				return entry.visible && IsContextMenuCustomSeparatorId(entry.id);
+			});
 		auto handled = base::flat_set<QString>();
 		auto hasLastSection = false;
 		auto lastSection = ContextActionSection::Identity;
 		auto pendingCustomSeparator = false;
 		auto appendAction = [&](const PendingAction &action) {
+			if (!action.id.isEmpty() && stripIds.contains(action.id)) {
+				return;
+			}
 			if (pendingCustomSeparator && !_menu->empty()) {
 				_menu->addSeparator(&st::expandedMenuSeparator);
 				pendingCustomSeparator = false;
 				hasLastSection = false;
 			}
 			const auto section = ContextActionSectionFor(action.id);
-			if (hasLastSection && (section != lastSection) && !_menu->empty()) {
+			if (useAutomaticSectionSeparators
+				&& hasLastSection
+				&& (section != lastSection)
+				&& !_menu->empty()) {
 				_menu->addSeparator(&st::expandedMenuSeparator);
 			}
 			action.append(_menu);
@@ -330,6 +358,9 @@ public:
 		auto appendById = [&](const QString &id) {
 			if (id.isEmpty() || handled.contains(id)) {
 				return false;
+			} else if (stripIds.contains(id)) {
+				handled.emplace(id);
+				return true;
 			}
 			for (const auto &action : _pending) {
 				if (action.id != id || !action.append) {
@@ -360,6 +391,9 @@ public:
 		for (const auto &action : _pending) {
 			if (!action.id.isEmpty() && handled.contains(action.id)) {
 				continue;
+			} else if (!action.id.isEmpty() && stripIds.contains(action.id)) {
+				handled.emplace(action.id);
+				continue;
 			}
 			if (!action.append) {
 				continue;
@@ -368,6 +402,16 @@ public:
 				handled.emplace(action.id);
 			}
 			appendAction(action);
+		}
+		if (_menu->empty() && !stripActionIds.empty()) {
+			for (const auto &id : stripActionIds) {
+				for (const auto &action : _pending) {
+					if ((action.id == id) && action.append) {
+						action.append(_menu);
+						return;
+					}
+				}
+			}
 		}
 	}
 
@@ -398,17 +442,14 @@ private:
 		});
 	}
 
-	void publishResolved() {
-		if (!_resolved) {
-			return;
-		}
-		_resolved->surface = _surface;
-		_resolved->actions.clear();
+	[[nodiscard]] ContextMenuResolvedLayout buildResolvedLayout() const {
+		auto result = ContextMenuResolvedLayout();
+		result.surface = _surface;
 		for (const auto &action : _pending) {
 			if (action.id.isEmpty()) {
 				continue;
 			}
-			_resolved->actions.push_back(ContextMenuResolvedAction{
+			result.actions.push_back(ContextMenuResolvedAction{
 				.id = action.id,
 				.text = action.text,
 				.icon = action.icon,
@@ -416,6 +457,14 @@ private:
 				.stripEligible = action.stripEligible,
 			});
 		}
+		return result;
+	}
+
+	void publishResolved(const ContextMenuResolvedLayout &resolved) {
+		if (!_resolved) {
+			return;
+		}
+		*_resolved = resolved;
 	}
 
 	const not_null<Ui::PopupMenu*> _menu;
@@ -455,7 +504,7 @@ private:
 	return lines.join(u"\n"_q).trimmed();
 }
 
-void ShowEditHistoryBox(
+void ShowEditHistoryBoxImpl(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item) {
 	const auto revisions = AyuMessages::getEditedMessages(item, 50);
@@ -1848,6 +1897,12 @@ void ShowWhoReadInfo(
 
 } // namespace
 
+void ShowEditHistoryBox(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item) {
+	ShowEditHistoryBoxImpl(controller, item);
+}
+
 ContextMenuCustomizationLayout DefaultContextMenuCustomizationLayout() {
 	auto result = ContextMenuCustomizationLayout();
 	result.version = kContextLayoutVersion;
@@ -1942,11 +1997,51 @@ void NormalizeStripEntries(std::vector<ContextMenuLayoutEntry> &entries) {
 	}
 }
 
+void NormalizeUnifiedEntries(std::vector<ContextMenuLayoutEntry> &entries) {
+	auto seen = base::flat_set<QString>();
+	for (auto &entry : entries) {
+		if (!entry.participatesInUnifiedLayout()) {
+			continue;
+		}
+		const auto key = entry.duplicateKey();
+		if (seen.contains(key)) {
+			entry.visible = false;
+			continue;
+		}
+		seen.emplace(key);
+	}
+}
+
+void NormalizeUnifiedSurfaceLayout(ContextMenuSurfaceLayout &layout) {
+	NormalizeUnifiedEntries(layout.strip);
+
+	auto stripKeys = base::flat_set<QString>();
+	for (const auto &entry : layout.strip) {
+		if (entry.participatesInUnifiedLayout()) {
+			stripKeys.emplace(entry.duplicateKey());
+		}
+	}
+	auto seenMenu = base::flat_set<QString>();
+	for (auto &entry : layout.menu) {
+		if (!entry.participatesInUnifiedLayout()) {
+			continue;
+		}
+		const auto key = entry.duplicateKey();
+		if (stripKeys.contains(key) || seenMenu.contains(key)) {
+			entry.visible = false;
+			continue;
+		}
+		seenMenu.emplace(key);
+	}
+}
+
 void NormalizeContextMenuCustomizationLayout(
 		ContextMenuCustomizationLayout &layout) {
 	layout.version = kContextLayoutVersion;
 	NormalizeStripEntries(layout.message.strip);
 	NormalizeStripEntries(layout.selection.strip);
+	NormalizeUnifiedSurfaceLayout(layout.message);
+	NormalizeUnifiedSurfaceLayout(layout.selection);
 }
 
 [[nodiscard]] std::vector<ContextMenuLayoutEntry> ParseLayoutEntries(

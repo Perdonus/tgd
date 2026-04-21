@@ -67,6 +67,7 @@ settings.local.json
 /site/node_modules/
 /site/package-lock.json
 /site/docs/.vitepress/dist/
+/docs.md
 
 # Cursor IDE local settings (but keep .cursor/rules/)
 .cursor/*

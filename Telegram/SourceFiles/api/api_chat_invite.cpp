@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_file_origin.h"
 #include "data/data_forum.h"
+#include "data/data_peer.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
@@ -481,9 +482,30 @@ ConfirmInviteBox::ConfirmInviteBox(
 	this,
 	st::infoPeerBadge,
 	_session,
-	rpl::single(Info::Profile::Badge::Content{ BadgeForInvite(invite) }),
+	invitePeekChannel
+		? static_cast<PeerData*>(invitePeekChannel)
+		: static_cast<PeerData*>(_session->user()),
+	[=]() -> rpl::producer<Info::Profile::Badge::Content> {
+		using Content = Info::Profile::Badge::Content;
+		using Type = Info::Profile::BadgeType;
+		const auto fallback = Content{ BadgeForInvite(invite) };
+		if (invitePeekChannel) {
+			return rpl::combine(
+				Info::Profile::BadgeContentForPeer(invitePeekChannel),
+				rpl::single(fallback)
+			) | rpl::map([](Content content, Content fallbackContent) {
+				return (content.badge != Type::None)
+					? content
+					: fallbackContent;
+			});
+		}
+		return rpl::single(fallback);
+	}(),
 	nullptr,
-	[=] { return false; }))
+	[=] { return false; },
+	0,
+	base::flags<Info::Profile::BadgeType>::from_raw(-1),
+	(invitePeekChannel != nullptr)))
 , _status(this, st::confirmInviteStatus)
 , _about(this, st::confirmInviteAbout)
 , _aboutRequests(this, st::confirmInviteStatus)

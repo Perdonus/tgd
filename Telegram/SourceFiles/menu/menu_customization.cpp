@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QHash>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -22,11 +23,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Menu::Customization {
 namespace {
 
-constexpr auto kLayoutVersion = 2;
+constexpr auto kLayoutVersion = 3;
 constexpr auto kSideMenuSection = "side_menu";
 constexpr auto kPeerMenuSection = "peer_menu";
 constexpr auto kShowFooterTextKey = "show_footer_text";
 constexpr auto kProfileBlockPositionKey = "profile_block_position";
+
+enum class LayoutScope {
+	SideMenu,
+	PeerMenu,
+};
 
 [[nodiscard]] SideMenuEntry MakeItem(const char *id, bool visible = true) {
 	return {
@@ -66,6 +72,30 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 		|| id.startsWith(u"custom_separator_"_q);
 }
 
+[[nodiscard]] bool IsLegacySeparatorObject(const QJsonObject &object) {
+	return object.value(QStringLiteral("type")).toString()
+			== QStringLiteral("separator")
+		|| object.value(QStringLiteral("kind")).toString()
+			== QStringLiteral("separator")
+		|| object.value(QStringLiteral("role")).toString()
+			== QStringLiteral("separator")
+		|| object.value(QStringLiteral("divider")).toBool(false);
+}
+
+[[nodiscard]] bool ParseVisible(const QJsonObject &object) {
+	if (object.contains(QStringLiteral("visible"))) {
+		return object.value(QStringLiteral("visible")).toBool(true);
+	} else if (object.contains(QStringLiteral("hidden"))) {
+		return !object.value(QStringLiteral("hidden")).toBool(false);
+	}
+	return true;
+}
+
+[[nodiscard]] bool IsSuppressedEntryId(LayoutScope scope, const QString &id) {
+	return (scope == LayoutScope::SideMenu)
+		&& (id == QString::fromLatin1(SideMenuItemId::ShowLogs));
+}
+
 [[nodiscard]] std::vector<SideMenuEntry> ParseEntries(const QJsonArray &array) {
 	auto result = std::vector<SideMenuEntry>();
 	result.reserve(array.size());
@@ -79,12 +109,10 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 			continue;
 		}
 		const auto separator = object.value(QStringLiteral("separator")).toBool(
-			(object.value(QStringLiteral("type")).toString()
-				== QStringLiteral("separator"))
-			|| IsKnownSeparatorId(id));
+			IsLegacySeparatorObject(object) || IsKnownSeparatorId(id));
 		result.push_back({
 			.id = id,
-			.visible = object.value(QStringLiteral("visible")).toBool(true),
+			.visible = ParseVisible(object),
 			.separator = separator,
 		});
 	}
@@ -149,46 +177,144 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 [[nodiscard]] std::vector<SideMenuEntry> ParseSectionEntries(
 		const QJsonObject &root,
 		const QString &sectionName) {
-	return ParseEntries(
-		root.value(sectionName).toObject().value(QStringLiteral("entries")).toArray());
+	const auto value = root.value(sectionName);
+	return value.isArray()
+		? ParseEntries(value.toArray())
+		: ParseEntries(
+			value.toObject().value(QStringLiteral("entries")).toArray());
 }
 
 [[nodiscard]] std::vector<SideMenuEntry> ParsePeerEntries(
 		const QJsonObject &root,
 		const QString &surfaceId) {
-	return ParseEntries(root.value(kPeerMenuSection).toObject().value(
-		surfaceId).toObject().value(QStringLiteral("entries")).toArray());
+	const auto peerMenu = root.value(kPeerMenuSection).toObject();
+	const auto value = peerMenu.value(surfaceId);
+	return value.isArray()
+		? ParseEntries(value.toArray())
+		: ParseEntries(
+			value.toObject().value(QStringLiteral("entries")).toArray());
+}
+
+[[nodiscard]] std::vector<SideMenuEntry> ParsePeerEntries(
+		const QJsonObject &root,
+		std::initializer_list<QString> surfaceIds,
+		QString *resolvedSurfaceId = nullptr) {
+	for (const auto &surfaceId : surfaceIds) {
+		const auto entries = ParsePeerEntries(root, surfaceId);
+		if (!entries.empty()) {
+			if (resolvedSurfaceId) {
+				*resolvedSurfaceId = surfaceId;
+			}
+			return entries;
+		}
+	}
+	if (resolvedSurfaceId) {
+		*resolvedSurfaceId = QString();
+	}
+	return {};
+}
+
+[[nodiscard]] std::vector<SideMenuEntry> CanonicalizeEntries(
+		const std::vector<SideMenuEntry> &entries,
+		LayoutScope scope,
+		bool *changed = nullptr) {
+	auto result = std::vector<SideMenuEntry>();
+	result.reserve(entries.size());
+	auto seen = QHash<QString, int>();
+	auto localChanged = false;
+
+	for (const auto &raw : entries) {
+		const auto id = raw.id.trimmed();
+		const auto separator = raw.separator || IsKnownSeparatorId(id);
+		if (id.isEmpty()) {
+			localChanged = true;
+			continue;
+		} else if (IsSuppressedEntryId(scope, id)) {
+			localChanged = true;
+			continue;
+		}
+		if ((id != raw.id) || (separator != raw.separator)) {
+			localChanged = true;
+		}
+
+		if (const auto i = seen.constFind(id); i != seen.cend()) {
+			auto &existing = result[i.value()];
+			if (separator && !existing.separator) {
+				existing.separator = true;
+				localChanged = true;
+			}
+			if (raw.visible && !existing.visible) {
+				existing.visible = true;
+				localChanged = true;
+			}
+			localChanged = true;
+			continue;
+		}
+
+		seen.insert(id, result.size());
+		result.push_back({
+			.id = id,
+			.visible = raw.visible,
+			.separator = separator,
+		});
+	}
+
+	if (changed) {
+		*changed = localChanged;
+	}
+	return result;
+}
+
+void NormalizeSeparatorPlacement(
+		std::vector<SideMenuEntry> &entries,
+		bool *changed = nullptr) {
+	auto futureVisibleAction = std::vector<bool>(entries.size(), false);
+	auto hasFutureVisibleAction = false;
+	for (auto i = int(entries.size()); i != 0;) {
+		--i;
+		futureVisibleAction[i] = hasFutureVisibleAction;
+		const auto &entry = entries[i];
+		if (entry.visible && !entry.separator) {
+			hasFutureVisibleAction = true;
+		}
+	}
+
+	auto localChanged = false;
+	auto hasVisibleActionBefore = false;
+	auto pendingVisibleSeparator = false;
+	for (auto i = 0; i != int(entries.size()); ++i) {
+		auto &entry = entries[i];
+		if (!entry.visible) {
+			continue;
+		}
+		if (entry.separator) {
+			if (!hasVisibleActionBefore
+				|| !futureVisibleAction[i]
+				|| pendingVisibleSeparator) {
+				entry.visible = false;
+				localChanged = true;
+			} else {
+				pendingVisibleSeparator = true;
+			}
+			continue;
+		}
+		hasVisibleActionBefore = true;
+		pendingVisibleSeparator = false;
+	}
+
+	if (changed) {
+		*changed = localChanged;
+	}
 }
 
 [[nodiscard]] std::vector<SideMenuEntry> NormalizeEntries(
 		const std::vector<SideMenuEntry> &parsed,
 		const std::vector<SideMenuEntry> &defaults,
+		LayoutScope scope,
 		bool *normalized = nullptr) {
 	auto changed = false;
-	const auto knownIds = DefaultNonSeparatorIds(defaults);
-	auto seenKnown = QSet<QString>();
-	auto result = std::vector<SideMenuEntry>();
-	result.reserve(parsed.size() + defaults.size());
-
-	for (const auto &entry : parsed) {
-		if (entry.id.isEmpty()) {
-			changed = true;
-			continue;
-		} else if (entry.id == QString::fromLatin1(SideMenuItemId::ShowLogs)) {
-			changed = true;
-			continue;
-		} else if (entry.separator) {
-			result.push_back(entry);
-			continue;
-		} else if (knownIds.contains(entry.id)) {
-			if (seenKnown.contains(entry.id)) {
-				changed = true;
-				continue;
-			}
-			seenKnown.insert(entry.id);
-		}
-		result.push_back(entry);
-	}
+	auto result = CanonicalizeEntries(parsed, scope, &changed);
+	auto seenKnown = DefaultNonSeparatorIds(result);
 
 	for (const auto &entry : defaults) {
 		if (entry.separator || seenKnown.contains(entry.id)) {
@@ -199,15 +325,35 @@ constexpr auto kProfileBlockPositionKey = "profile_block_position";
 		changed = true;
 	}
 
+	auto separatorsChanged = false;
+	NormalizeSeparatorPlacement(result, &separatorsChanged);
+	changed = changed || separatorsChanged;
+
 	if (normalized) {
 		*normalized = changed;
 	}
 	return result;
 }
 
+[[nodiscard]] std::vector<SideMenuEntry> NormalizeEntriesForSave(
+		const std::vector<SideMenuEntry> &entries,
+		LayoutScope scope) {
+	auto result = CanonicalizeEntries(entries, scope);
+	NormalizeSeparatorPlacement(result);
+	return result;
+}
+
 [[nodiscard]] bool IsKnownProfileBlockPosition(const QString &value) {
 	return (value == QString::fromLatin1(SideMenuProfileBlockPositionId::Top))
 		|| (value == QString::fromLatin1(SideMenuProfileBlockPositionId::Bottom));
+}
+
+[[nodiscard]] QString ThreeDotSurfaceId() {
+	return QString::fromLatin1(PeerMenuSurfaceId::ThreeDots);
+}
+
+[[nodiscard]] QString LegacyThreeDotSurfaceId() {
+	return QString::fromLatin1(PeerMenuSurfaceId::Context);
 }
 
 } // namespace
@@ -263,7 +409,11 @@ std::vector<SideMenuEntry> LoadSideMenuLayout(
 	}
 
 	auto normalizedByEntries = false;
-	const auto result = NormalizeEntries(parsed, defaults, &normalizedByEntries);
+	const auto result = NormalizeEntries(
+		parsed,
+		defaults,
+		LayoutScope::SideMenu,
+		&normalizedByEntries);
 	normalized = normalized || normalizedByEntries;
 
 	if (changed) {
@@ -276,8 +426,11 @@ std::vector<SideMenuEntry> LoadSideMenuLayout(
 }
 
 bool SaveSideMenuLayout(const std::vector<SideMenuEntry> &entries) {
+	const auto normalized = NormalizeEntriesForSave(
+		entries,
+		LayoutScope::SideMenu);
 	auto array = QJsonArray();
-	for (const auto &entry : entries) {
+	for (const auto &entry : normalized) {
 		if (entry.id.trimmed().isEmpty()) {
 			continue;
 		}
@@ -377,7 +530,11 @@ std::vector<PeerMenuEntry> LoadPeerMenuLayout(
 	}
 
 	auto normalizedByEntries = false;
-	const auto result = NormalizeEntries(parsed, defaults, &normalizedByEntries);
+	const auto result = NormalizeEntries(
+		parsed,
+		defaults,
+		LayoutScope::PeerMenu,
+		&normalizedByEntries);
 	normalized = normalized || normalizedByEntries;
 
 	if (changed) {
@@ -392,8 +549,11 @@ std::vector<PeerMenuEntry> LoadPeerMenuLayout(
 bool SavePeerMenuLayout(
 		const QString &surfaceId,
 		const std::vector<PeerMenuEntry> &entries) {
+	const auto normalized = NormalizeEntriesForSave(
+		entries,
+		LayoutScope::PeerMenu);
 	auto array = QJsonArray();
-	for (const auto &entry : entries) {
+	for (const auto &entry : normalized) {
 		if (entry.id.trimmed().isEmpty()) {
 			continue;
 		}
@@ -402,9 +562,9 @@ bool SavePeerMenuLayout(
 
 	auto root = ReadLayoutObject();
 	auto peerMenu = root.value(QString::fromLatin1(kPeerMenuSection)).toObject();
-	peerMenu.insert(surfaceId, QJsonObject{
-		{ QStringLiteral("entries"), array },
-	});
+	auto surface = peerMenu.value(surfaceId).toObject();
+	surface.insert(QStringLiteral("entries"), array);
+	peerMenu.insert(surfaceId, surface);
 	root.insert(QString::fromLatin1(kPeerMenuSection), peerMenu);
 	return WriteLayoutObject(std::move(root));
 }
@@ -413,6 +573,57 @@ bool ResetPeerMenuLayout(
 		const QString &surfaceId,
 		const std::vector<PeerMenuEntry> &defaults) {
 	return SavePeerMenuLayout(surfaceId, defaults);
+}
+
+std::vector<PeerMenuEntry> LoadThreeDotMenuLayout(
+		const std::vector<PeerMenuEntry> &defaults,
+		bool *changed) {
+	auto normalized = false;
+	auto parsed = std::vector<PeerMenuEntry>();
+	auto parsedOk = false;
+	const auto root = ReadLayoutObject(&parsedOk);
+	QString resolvedSurfaceId;
+	if (parsedOk) {
+		parsed = ParsePeerEntries(
+			root,
+			{ ThreeDotSurfaceId(), LegacyThreeDotSurfaceId() },
+			&resolvedSurfaceId);
+	} else {
+		normalized = true;
+	}
+
+	if (parsed.empty()) {
+		normalized = true;
+		parsed = defaults;
+	}
+
+	auto normalizedByEntries = false;
+	const auto result = NormalizeEntries(
+		parsed,
+		defaults,
+		LayoutScope::PeerMenu,
+		&normalizedByEntries);
+	normalized = normalized || normalizedByEntries;
+	if (!resolvedSurfaceId.isEmpty()
+		&& (resolvedSurfaceId != ThreeDotSurfaceId())) {
+		normalized = true;
+	}
+
+	if (changed) {
+		*changed = normalized;
+	}
+	if (normalized) {
+		SaveThreeDotMenuLayout(result);
+	}
+	return result;
+}
+
+bool SaveThreeDotMenuLayout(const std::vector<PeerMenuEntry> &entries) {
+	return SavePeerMenuLayout(ThreeDotSurfaceId(), entries);
+}
+
+bool ResetThreeDotMenuLayout(const std::vector<PeerMenuEntry> &defaults) {
+	return SaveThreeDotMenuLayout(defaults);
 }
 
 } // namespace Menu::Customization
