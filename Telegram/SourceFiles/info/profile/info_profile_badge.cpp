@@ -80,6 +80,7 @@ constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
 constexpr auto kServerBadgeRetryMaxTtl = crl::time(5 * 60 * 1000);
 constexpr auto kServerBadgeChangesRetryTtl = crl::time(5 * 1000);
 constexpr auto kServerBadgeChangesLongPollSeconds = 25;
+constexpr auto kAstrogramServerBaseUrlFallback = "https://astrogram.su/api/astrogram";
 
 [[nodiscard]] crl::time ServerBadgeRetryDelay(int retryCount) {
 	auto delay = kServerBadgeRetryTtl;
@@ -94,6 +95,37 @@ constexpr auto kServerBadgeChangesLongPollSeconds = 25;
 	result.replace(u'\n', u' ');
 	result.replace(u'\r', u' ');
 	return result;
+}
+
+[[nodiscard]] QString NormalizeAstrogramServerBaseUrl(QString value) {
+	value = value.trimmed();
+	while (value.endsWith(u'/')) {
+		value.chop(1);
+	}
+	return value;
+}
+
+[[nodiscard]] QString AstrogramServerBaseUrl(not_null<Main::Session*> session) {
+	for (const auto &key : {
+		u"astrogram_server_base_url"_q,
+		u"astrogram_badge_server_base_url"_q,
+		u"astrogram_server_url"_q,
+	}) {
+		const auto value = NormalizeAstrogramServerBaseUrl(
+			session->appConfig().get<QString>(key, QString()));
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+	return QString::fromLatin1(kAstrogramServerBaseUrlFallback);
+}
+
+[[nodiscard]] QString AstrogramServerApiBaseUrl(not_null<Main::Session*> session) {
+	auto base = AstrogramServerBaseUrl(session);
+	if (!base.endsWith(u"/v1"_q)) {
+		base += u"/v1"_q;
+	}
+	return base;
 }
 
 [[nodiscard]] QString PeerTypeForLog(PeerId peerId) {
@@ -123,13 +155,88 @@ constexpr auto kServerBadgeChangesLongPollSeconds = 25;
 		: QString();
 }
 
+[[nodiscard]] QString JsonStringOrEmpty(const QJsonValue &value) {
+	return value.isString() ? value.toString().trimmed() : QString();
+}
+
+[[nodiscard]] QString ServerPeerTypeFromChange(const QJsonObject &object) {
+	for (const auto &key : {
+		u"peer_type"_q,
+		u"peerType"_q,
+		u"type"_q,
+	}) {
+		if (const auto value = JsonStringOrEmpty(object.value(key)); !value.isEmpty()) {
+			return value.toLower();
+		}
+	}
+	if (const auto peer = object.value(u"peer"_q); peer.isObject()) {
+		if (const auto value = JsonStringOrEmpty(
+				peer.toObject().value(u"type"_q)); !value.isEmpty()) {
+			return value.toLower();
+		}
+	}
+	if (const auto value = object.value(u"value"_q); value.isObject()) {
+		return ServerPeerTypeFromChange(value.toObject());
+	}
+	return QString();
+}
+
+[[nodiscard]] uint64 NumericPeerIdFromServerString(
+		QString value,
+		QString peerType) {
+	value = value.trimmed();
+	peerType = peerType.trimmed().toLower();
+	if (value.isEmpty()) {
+		return 0;
+	}
+	const auto parseUnsigned = [&](QString raw) -> uint64 {
+		raw = raw.trimmed();
+		auto ok = false;
+		const auto parsed = raw.toULongLong(&ok);
+		return ok ? parsed : 0;
+	};
+	const auto separator = value.indexOf(u':');
+	if (separator > 0) {
+		peerType = value.mid(0, separator).trimmed().toLower();
+		value = value.mid(separator + 1).trimmed();
+	}
+	if ((peerType == u"channel"_q) || value.startsWith(u"-100"_q)) {
+		if (value.startsWith(u"-100"_q)) {
+			value.remove(0, 4);
+		}
+		if (const auto parsed = parseUnsigned(value)) {
+			return uint64(peerFromChannel(ChannelId(parsed)).value);
+		}
+		return 0;
+	} else if (peerType == u"user"_q) {
+		if (const auto parsed = parseUnsigned(value)) {
+			return uint64(peerFromUser(UserId(parsed)).value);
+		}
+		return 0;
+	} else if (peerType == u"chat"_q) {
+		if (const auto parsed = parseUnsigned(value)) {
+			return uint64(peerFromChat(ChatId(parsed)).value);
+		}
+		return 0;
+	}
+	return parseUnsigned(value);
+}
+
 [[nodiscard]] uint64 PeerIdFromServerChange(const QJsonObject &object) {
+	const auto peerType = ServerPeerTypeFromChange(object);
 	for (const auto &key : {
 		u"peer_id"_q,
 		u"peerId"_q,
 		u"id"_q,
 	}) {
-		if (const auto parsed = JsonToUint64(object.value(key)); parsed != 0) {
+		const auto value = object.value(key);
+		if (value.isString()) {
+			if (const auto parsed = NumericPeerIdFromServerString(
+					value.toString(),
+					peerType); parsed != 0) {
+				return parsed;
+			}
+		} else if (const auto parsed = JsonToUint64(value); parsed != 0) {
 			return parsed;
 		}
 	}
@@ -349,6 +456,10 @@ public:
 		}
 		Expects(i != end(_entries));
 		const auto entry = i->second.get();
+		entry->apiBaseUrl = AstrogramServerApiBaseUrl(&peer->session());
+		if (_changesApiBaseUrl.isEmpty()) {
+			_changesApiBaseUrl = entry->apiBaseUrl;
+		}
 		requestIfNeeded(peer->id, entry);
 		requestChangesFeedIfNeeded();
 		return rpl::single(entry->emojiStatusId) | rpl::then(
@@ -365,13 +476,26 @@ private:
 		rpl::event_stream<> updated;
 		std::unique_ptr<base::Timer> retryTimer;
 		int retryCount = 0;
+		QString apiBaseUrl;
 	};
 
-	[[nodiscard]] static QUrl BuildRequestUrl(PeerId peerId) {
-		auto url = QUrl(
-			u"https://sosiskibot.ru/api/astrogram/v1/peers/"_q
-			+ QString::number(qulonglong(peerId.value))
-			+ u"/badge"_q);
+	[[nodiscard]] static QString PeerPathForServer(PeerId peerId) {
+		if (const auto bareId = PeerBareId(peerId); bareId != 0) {
+			if (peerId.is<UserId>()) {
+				return u"/users/"_q + QString::number(qulonglong(bareId)) + u"/badge"_q;
+			} else if (peerId.is<ChannelId>()) {
+				return u"/channels/-100"_q + QString::number(qulonglong(bareId)) + u"/badge"_q;
+			} else if (peerId.is<ChatId>()) {
+				return u"/peers/chat:"_q + QString::number(qulonglong(bareId)) + u"/badge"_q;
+			}
+		}
+		return u"/peers/"_q + QString::number(qulonglong(peerId.value)) + u"/badge"_q;
+	}
+
+	[[nodiscard]] static QUrl BuildRequestUrl(
+			const QString &apiBaseUrl,
+			PeerId peerId) {
+		auto url = QUrl(apiBaseUrl + PeerPathForServer(peerId));
 		auto query = QUrlQuery();
 		if (const auto peerRef = PeerRefForServer(peerId); !peerRef.isEmpty()) {
 			query.addQueryItem(u"peer_ref"_q, peerRef);
@@ -404,8 +528,10 @@ private:
 		return url;
 	}
 
-	[[nodiscard]] static QUrl BuildChangesUrl(int sinceRevision) {
-		auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/v1/changes"_q);
+	[[nodiscard]] static QUrl BuildChangesUrl(
+			const QString &apiBaseUrl,
+			int sinceRevision) {
+		auto url = QUrl(apiBaseUrl + u"/changes"_q);
 		auto query = QUrlQuery();
 		query.addQueryItem(
 			u"since_revision"_q,
@@ -444,7 +570,11 @@ private:
 		}
 		_changesInFlight = true;
 
-		const auto url = BuildChangesUrl(_changesRevision);
+		if (_changesApiBaseUrl.isEmpty()) {
+			_changesApiBaseUrl = QString::fromLatin1(kAstrogramServerBaseUrlFallback)
+				+ u"/v1"_q;
+		}
+		const auto url = BuildChangesUrl(_changesApiBaseUrl, _changesRevision);
 		QNetworkRequest request(url);
 		request.setAttribute(
 			QNetworkRequest::RedirectPolicyAttribute,
@@ -561,7 +691,14 @@ private:
 		}
 		entry->inFlight = true;
 		const auto peerKey = uint64(peerId.value);
-		const auto url = BuildRequestUrl(peerId);
+		if (entry->apiBaseUrl.isEmpty()) {
+			entry->apiBaseUrl = QString::fromLatin1(kAstrogramServerBaseUrlFallback)
+				+ u"/v1"_q;
+		}
+		if (_changesApiBaseUrl.isEmpty()) {
+			_changesApiBaseUrl = entry->apiBaseUrl;
+		}
+		const auto url = BuildRequestUrl(entry->apiBaseUrl, peerId);
 		Logs::writeClient(QString::fromLatin1(
 			"[badge] request started: peer=%1 bare=%2 type=%3 ref=%4 url=%5")
 			.arg(QString::number(qulonglong(peerId.value)))
@@ -653,6 +790,7 @@ private:
 	bool _changesInFlight = false;
 	int _changesRevision = 0;
 	std::unique_ptr<base::Timer> _changesRetryTimer;
+	QString _changesApiBaseUrl;
 	QNetworkAccessManager _manager;
 };
 

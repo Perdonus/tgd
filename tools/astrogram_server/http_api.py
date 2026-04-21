@@ -93,7 +93,7 @@ class AstrogramRequestHandler(BaseHTTPRequestHandler):
         peer_match = PEER_BADGE_RE.match(path)
         if peer_match:
             peer_id = peer_match.group("peer_id")
-            badge = self.server.storage.get_peer_badge(peer_id)
+            badge = self._resolve_peer_badge(peer_id, query)
             self._write_badge_response(peer_id, badge)
             return
 
@@ -198,6 +198,90 @@ class AstrogramRequestHandler(BaseHTTPRequestHandler):
                 "badge": badge,
             },
         )
+
+    def _resolve_peer_badge(
+        self,
+        peer_id: str,
+        query: dict[str, list[str]],
+    ) -> dict[str, Any] | None:
+        storage = self.server.storage
+        if badge := storage.get_peer_badge(peer_id):
+            return badge
+
+        peer_ref = self._string_query_value(query, "peer_ref")
+        if peer_ref and (badge := storage.get_peer_badge(peer_ref)):
+            return badge
+
+        peer_type = self._resolve_peer_type(peer_id, peer_ref, query)
+        if peer_type == "user":
+            user_id = (
+                self._string_query_value(query, "user_id")
+                or self._string_query_value(query, "bare_id")
+                or self._string_query_value(query, "peer_bare_id")
+                or self._extract_peer_ref_value(peer_ref, "user")
+                or peer_id
+            )
+            return storage.get_user_badge(user_id)
+        if peer_type == "channel":
+            channel_id = (
+                self._normalize_channel_id(self._string_query_value(query, "channel_id"))
+                or self._normalize_channel_id(self._string_query_value(query, "bare_id"))
+                or self._normalize_channel_id(self._string_query_value(query, "peer_bare_id"))
+                or self._normalize_channel_id(self._extract_peer_ref_value(peer_ref, "channel"))
+                or self._normalize_channel_id(peer_id)
+            )
+            return storage.get_channel_badge(channel_id) if channel_id else None
+        if peer_type == "chat":
+            chat_id = (
+                self._string_query_value(query, "chat_id")
+                or self._string_query_value(query, "bare_id")
+                or self._string_query_value(query, "peer_bare_id")
+                or self._extract_peer_ref_value(peer_ref, "chat")
+            )
+            if chat_id:
+                return storage.get_peer_badge(f"chat:{chat_id}")
+        return None
+
+    @staticmethod
+    def _string_query_value(query: dict[str, list[str]], name: str) -> str:
+        return query.get(name, [""])[0].strip()
+
+    @staticmethod
+    def _extract_peer_ref_value(peer_ref: str, expected_type: str) -> str:
+        if not peer_ref:
+            return ""
+        prefix = f"{expected_type}:"
+        if not peer_ref.startswith(prefix):
+            return ""
+        return peer_ref[len(prefix) :].strip()
+
+    @classmethod
+    def _resolve_peer_type(
+        cls,
+        peer_id: str,
+        peer_ref: str,
+        query: dict[str, list[str]],
+    ) -> str:
+        raw = cls._string_query_value(query, "peer_type").lower()
+        if raw in {"user", "channel", "chat"}:
+            return raw
+        for expected in ("user", "channel", "chat"):
+            if cls._extract_peer_ref_value(peer_ref, expected):
+                return expected
+        if peer_id.startswith("-100"):
+            return "channel"
+        return ""
+
+    @staticmethod
+    def _normalize_channel_id(value: str) -> str:
+        value = (value or "").strip()
+        if not value:
+            return ""
+        if value.startswith("-100"):
+            return value
+        if value.startswith("channel:"):
+            value = value.split(":", 1)[1].strip()
+        return f"-100{value.lstrip('+')}"
 
     @staticmethod
     def _int_query_value(query: dict[str, list[str]], name: str, default: int) -> int:

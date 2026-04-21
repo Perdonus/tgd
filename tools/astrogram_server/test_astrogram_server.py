@@ -103,6 +103,36 @@ class AstrogramServerTest(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_http_peer_badge_resolves_typed_lookup_from_query(self) -> None:
+        test_user_id = "6603471853"
+        self.storage.set_user_badge(
+            test_user_id,
+            "server",
+            label="Astrogram",
+            actor="test",
+            title="Tomnaya Povesa",
+        )
+
+        server, thread = start_http_in_thread(self.storage, host="127.0.0.1", port=0)
+        try:
+            port = int(server.server_address[1])
+            with self.http.open(
+                "http://127.0.0.1:"
+                f"{port}/v1/peers/987654321/badge"
+                "?peer_type=user&user_id=6603471853&peer_ref=user:6603471853",
+                timeout=5,
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+            self.assertTrue(payload["found"])
+            self.assertEqual(payload["badge"]["peer_type"], "user")
+            self.assertEqual(payload["badge"]["peer_id"], test_user_id)
+            self.assertEqual(payload["badge"]["label"], "Astrogram")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_bot_responds_only_to_admin_and_enriches_channel_metadata(self) -> None:
         bot = FakeBadgeBot(self.storage)
         bot.chat_payloads[TEST_CHANNEL_ID] = {

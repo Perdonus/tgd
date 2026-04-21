@@ -1151,6 +1151,41 @@ struct PluginSourceTrustSnapshot {
 	QString channelUsername;
 };
 
+constexpr auto kAstrogramServerBaseUrlFallback = "https://astrogram.su/api/astrogram";
+
+[[nodiscard]] QString NormalizeAstrogramServerBaseUrl(QString value) {
+	value = value.trimmed();
+	while (value.endsWith(u'/')) {
+		value.chop(1);
+	}
+	return value;
+}
+
+[[nodiscard]] QString AstrogramServerBaseUrl(Main::Session *session) {
+	if (session) {
+		for (const auto &key : {
+			u"astrogram_server_base_url"_q,
+			u"astrogram_badge_server_base_url"_q,
+			u"astrogram_server_url"_q,
+		}) {
+			const auto value = NormalizeAstrogramServerBaseUrl(
+				session->appConfig().get<QString>(key, QString()));
+			if (!value.isEmpty()) {
+				return value;
+			}
+		}
+	}
+	return QString::fromLatin1(kAstrogramServerBaseUrlFallback);
+}
+
+[[nodiscard]] QString AstrogramServerApiBaseUrl(Main::Session *session) {
+	auto base = AstrogramServerBaseUrl(session);
+	if (!base.endsWith(u"/v1"_q)) {
+		base += u"/v1"_q;
+	}
+	return base;
+}
+
 [[nodiscard]] bool SamePluginSourceTrustSnapshot(
 		const PluginSourceTrustSnapshot &a,
 		const PluginSourceTrustSnapshot &b) {
@@ -1165,9 +1200,10 @@ struct PluginSourceTrustSnapshot {
 }
 
 [[nodiscard]] QUrl BuildPluginSourceTrustUrl(
+		Main::Session *session,
 		const QString &sha256,
 		const QString &pluginId) {
-	auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/v1/plugins/"_q + sha256);
+	auto url = QUrl(AstrogramServerApiBaseUrl(session) + u"/plugins/"_q + sha256);
 	auto query = QUrlQuery();
 	if (!pluginId.trimmed().isEmpty()) {
 		query.addQueryItem(u"plugin_id"_q, pluginId.trimmed());
@@ -1176,8 +1212,10 @@ struct PluginSourceTrustSnapshot {
 	return url;
 }
 
-[[nodiscard]] QUrl BuildPluginSourceTrustChangesUrl(int sinceRevision) {
-	auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/v1/changes"_q);
+[[nodiscard]] QUrl BuildPluginSourceTrustChangesUrl(
+		Main::Session *session,
+		int sinceRevision) {
+	auto url = QUrl(AstrogramServerApiBaseUrl(session) + u"/changes"_q);
 	auto query = QUrlQuery();
 	query.addQueryItem(
 		u"since_revision"_q,
@@ -1598,7 +1636,7 @@ void Manager::requestPluginSourceTrustIfNeeded(
 	entry->inFlight = true;
 	entry->refreshScheduled = false;
 
-	const auto url = BuildPluginSourceTrustUrl(sha256, pluginId);
+	const auto url = BuildPluginSourceTrustUrl(activeSession(), sha256, pluginId);
 	logEvent(
 		u"plugin-source-trust"_q,
 		u"request-start"_q,
@@ -1763,7 +1801,9 @@ void Manager::requestPluginSourceTrustFeedIfNeeded() {
 		_pluginSourceTrustManager = std::make_unique<QNetworkAccessManager>();
 	}
 	_pluginSourceTrustFeedInFlight = true;
-	const auto url = BuildPluginSourceTrustChangesUrl(_pluginSourceTrustRevision);
+	const auto url = BuildPluginSourceTrustChangesUrl(
+		activeSession(),
+		_pluginSourceTrustRevision);
 	logEvent(
 		u"plugin-source-trust"_q,
 		u"changes-feed-start"_q,
