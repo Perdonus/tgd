@@ -5309,9 +5309,11 @@ void AddEditorInlineCaption(
 void AddMenuCustomizationEditor(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container) {
+	const auto includeShowLogs = !Core::App().plugins().actionsFor(
+		u"astro.show_logs"_q).empty();
 	const auto state = std::make_shared<SideMenuEditorState>(
 		controller->session().supportMode(),
-		false);
+		includeShowLogs);
 	const auto contextState = std::make_shared<ContextMenuEditorState>();
 
 	AddEditorSectionHeader(

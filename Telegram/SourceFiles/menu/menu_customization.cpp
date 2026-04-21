@@ -92,8 +92,9 @@ enum class LayoutScope {
 }
 
 [[nodiscard]] bool IsSuppressedEntryId(LayoutScope scope, const QString &id) {
-	return (scope == LayoutScope::SideMenu)
-		&& (id == QString::fromLatin1(SideMenuItemId::ShowLogs));
+	Q_UNUSED(scope);
+	Q_UNUSED(id);
+	return false;
 }
 
 [[nodiscard]] std::vector<SideMenuEntry> ParseEntries(const QJsonArray &array) {
@@ -383,6 +384,9 @@ std::vector<SideMenuEntry> DefaultSideMenuLayout(
 	result.push_back(MakeSeparator(SideMenuItemId::SeparatorSystem));
 	result.push_back(MakeItem(SideMenuItemId::Settings));
 	result.push_back(MakeItem(SideMenuItemId::Plugins));
+	if (includeShowLogs) {
+		result.push_back(MakeItem(SideMenuItemId::ShowLogs));
+	}
 	result.push_back(MakeItem(SideMenuItemId::GhostMode));
 	result.push_back(MakeItem(SideMenuItemId::NightMode));
 	return result;

@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <rpl/lifetime.h>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QLibrary;
@@ -342,6 +343,12 @@ private:
 		QString pluginId = QString(),
 		bool structural = false,
 		bool failed = false);
+	void emitStateChangedNow(
+		QString reason,
+		QString pluginId,
+		bool structural,
+		bool failed);
+	void flushDeferredStateChange();
 	void logLoadFailure(const QString &path, const QString &reason) const;
 	void logOperationStart(
 		const QString &kind,
@@ -474,6 +481,7 @@ private:
 	QHash<QString, int> _pluginIndexById;
 	std::vector<PluginState> _uiTransientPlugins;
 	bool _uiTransientPluginsActive = false;
+	int _uiTransientPluginsDepth = 0;
 	QSet<QString> _disabled;
 	QHash<QString, QJsonObject> _storedSettings;
 	QSet<QString> _disabledByRecovery;
@@ -484,6 +492,7 @@ private:
 	quint64 _nextTraceOperationId = 1;
 	rpl::event_stream<ManagerStateChange> _stateChanges;
 	quint64 _nextStateChangeSequence = 1;
+	std::optional<ManagerStateChange> _deferredStateChange;
 
 	QHash<QString, CommandId> _commandIdByName;
 	QHash<CommandId, CommandEntry> _commands;

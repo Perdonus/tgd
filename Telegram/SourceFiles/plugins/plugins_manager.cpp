@@ -1947,18 +1947,33 @@ std::vector<PluginState> Manager::visiblePluginStatesFromRecords() const {
 }
 
 void Manager::beginUiTransientPluginSnapshot() {
+	if (_uiTransientPluginsDepth++ > 0) {
+		_uiTransientPluginsActive = true;
+		return;
+	}
+	_deferredStateChange.reset();
 	_uiTransientPlugins = visiblePluginStatesFromRecords();
-	_uiTransientPluginsActive = !_uiTransientPlugins.empty();
+	_uiTransientPluginsActive = true;
 }
 
 void Manager::finishUiTransientPluginSnapshot() {
+	if (_uiTransientPluginsDepth <= 0) {
+		_uiTransientPlugins = visiblePluginStatesFromRecords();
+		_uiTransientPluginsActive = false;
+		flushDeferredStateChange();
+		return;
+	}
+	--_uiTransientPluginsDepth;
+	if (_uiTransientPluginsDepth > 0) {
+		return;
+	}
 	_uiTransientPlugins = visiblePluginStatesFromRecords();
 	_uiTransientPluginsActive = false;
+	flushDeferredStateChange();
 }
 
 std::vector<PluginState> Manager::plugins() const {
-	if (_uiTransientPluginsActive
-		&& !_uiTransientPlugins.empty()) {
+	if (_uiTransientPluginsActive) {
 		return _uiTransientPlugins;
 	}
 	return visiblePluginStatesFromRecords();
@@ -3365,11 +3380,12 @@ bool Manager::triggerAction(ActionId id) {
 			});
 		return false;
 	}
+	const auto entry = *it;
 	const auto previousPluginId = _registeringPluginId;
 	try {
-		if (it->handlerWithContext) {
-			startRecoveryOperation(u"action"_q, { it->pluginId }, it->title);
-			_registeringPluginId = it->pluginId;
+		if (entry.handlerWithContext) {
+			startRecoveryOperation(u"action"_q, { entry.pluginId }, entry.title);
+			_registeringPluginId = entry.pluginId;
 			auto context = ActionContext();
 			context.window = activeWindow();
 			if (!context.window) {
@@ -3386,13 +3402,13 @@ bool Manager::triggerAction(ActionId id) {
 				u"invoke-context"_q,
 				QJsonObject{
 					{ u"id"_q, QString::number(id) },
-					{ u"pluginId"_q, it->pluginId },
-					{ u"title"_q, it->title },
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"title"_q, entry.title },
 					{ u"hasWindow"_q, context.window != nullptr },
 					{ u"hasSession"_q, context.session != nullptr },
 				});
 			InvokePluginCallbackOrThrow([&] {
-				it->handlerWithContext(context);
+				entry.handlerWithContext(context);
 			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
@@ -3400,26 +3416,26 @@ bool Manager::triggerAction(ActionId id) {
 				u"success"_q,
 				QJsonObject{
 					{ u"id"_q, QString::number(id) },
-					{ u"pluginId"_q, it->pluginId },
-					{ u"title"_q, it->title },
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"title"_q, entry.title },
 				});
 			finishRecoveryOperation();
-			notifyStateChanged(u"action"_q, it->pluginId, false, false);
+			notifyStateChanged(u"action"_q, entry.pluginId, false, false);
 			return true;
 		}
-		if (it->handler) {
-			startRecoveryOperation(u"action"_q, { it->pluginId }, it->title);
-			_registeringPluginId = it->pluginId;
+		if (entry.handler) {
+			startRecoveryOperation(u"action"_q, { entry.pluginId }, entry.title);
+			_registeringPluginId = entry.pluginId;
 			logEvent(
 				u"action"_q,
 				u"invoke"_q,
 				QJsonObject{
 					{ u"id"_q, QString::number(id) },
-					{ u"pluginId"_q, it->pluginId },
-					{ u"title"_q, it->title },
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"title"_q, entry.title },
 				});
 			InvokePluginCallbackOrThrow([&] {
-				it->handler();
+				entry.handler();
 			});
 			_registeringPluginId = previousPluginId;
 			logEvent(
@@ -3427,11 +3443,11 @@ bool Manager::triggerAction(ActionId id) {
 				u"success"_q,
 				QJsonObject{
 					{ u"id"_q, QString::number(id) },
-					{ u"pluginId"_q, it->pluginId },
-					{ u"title"_q, it->title },
+					{ u"pluginId"_q, entry.pluginId },
+					{ u"title"_q, entry.title },
 				});
 			finishRecoveryOperation();
-			notifyStateChanged(u"action"_q, it->pluginId, false, false);
+			notifyStateChanged(u"action"_q, entry.pluginId, false, false);
 			return true;
 		}
 	} catch (...) {
@@ -3441,11 +3457,11 @@ bool Manager::triggerAction(ActionId id) {
 			u"failed"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
-				{ u"title"_q, it->title },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"title"_q, entry.title },
 				{ u"reason"_q, CurrentExceptionText() },
 			});
-		disablePlugin(it->pluginId, u"Action failed: "_q + CurrentExceptionText());
+		disablePlugin(entry.pluginId, u"Action failed: "_q + CurrentExceptionText());
 		showToast(PluginUiText(
 			u"Plugin action failed and was disabled."_q,
 			u"Действие плагина завершилось с ошибкой и было выключено."_q));
@@ -3465,6 +3481,7 @@ bool Manager::openPanel(PanelId id) {
 			});
 		return false;
 	}
+	const auto entry = *it;
 	const auto window = activeWindow()
 		? activeWindow()
 		: Core::App().activePrimaryWindow();
@@ -3474,36 +3491,36 @@ bool Manager::openPanel(PanelId id) {
 			u"no-active-window"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
-				{ u"title"_q, it->descriptor.title },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"title"_q, entry.descriptor.title },
 			});
 		showToast(u"No active window to show panel."_q);
 		return false;
 	}
-	if (!it->handler) {
+	if (!entry.handler) {
 		logEvent(
 			u"panel"_q,
 			u"missing-handler"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
+				{ u"pluginId"_q, entry.pluginId },
 			});
 		return false;
 	}
 	const auto previousPluginId = _registeringPluginId;
 	try {
-		startRecoveryOperation(u"panel"_q, { it->pluginId }, it->descriptor.title);
-		_registeringPluginId = it->pluginId;
+		startRecoveryOperation(u"panel"_q, { entry.pluginId }, entry.descriptor.title);
+		_registeringPluginId = entry.pluginId;
 		logEvent(
 			u"panel"_q,
 			u"invoke"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
-				{ u"descriptor"_q, panelDescriptorToJson(it->descriptor) },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"descriptor"_q, panelDescriptorToJson(entry.descriptor) },
 			});
 		InvokePluginCallbackOrThrow([&] {
-			it->handler(window);
+			entry.handler(window);
 		});
 		_registeringPluginId = previousPluginId;
 		logEvent(
@@ -3511,11 +3528,11 @@ bool Manager::openPanel(PanelId id) {
 			u"success"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
-				{ u"title"_q, it->descriptor.title },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"title"_q, entry.descriptor.title },
 			});
 		finishRecoveryOperation();
-		notifyStateChanged(u"panel"_q, it->pluginId, false, false);
+		notifyStateChanged(u"panel"_q, entry.pluginId, false, false);
 		return true;
 	} catch (...) {
 		_registeringPluginId = previousPluginId;
@@ -3524,11 +3541,11 @@ bool Manager::openPanel(PanelId id) {
 			u"failed"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
-				{ u"title"_q, it->descriptor.title },
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"title"_q, entry.descriptor.title },
 				{ u"reason"_q, CurrentExceptionText() },
 			});
-		disablePlugin(it->pluginId, u"Panel failed: "_q + CurrentExceptionText());
+		disablePlugin(entry.pluginId, u"Panel failed: "_q + CurrentExceptionText());
 		showToast(PluginUiText(
 			u"Plugin panel failed and was disabled."_q,
 			u"Панель плагина завершилась с ошибкой и была выключена."_q));
@@ -3558,6 +3575,8 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 			});
 		return false;
 	}
+	const auto pluginId = it->pluginId;
+	const auto handler = it->handler;
 	setting = NormalizeSettingDescriptor(std::move(setting));
 	auto *target = (SettingDescriptor*)nullptr;
 	for (auto &section : it->descriptor.sections) {
@@ -3577,7 +3596,7 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 			u"missing-setting"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
+				{ u"pluginId"_q, pluginId },
 				{ u"settingId"_q, setting.id },
 			});
 		return false;
@@ -3601,25 +3620,25 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 		break;
 	}
 	const auto snapshot = *target;
-	rememberSettingValue(it->pluginId, snapshot);
+	rememberSettingValue(pluginId, snapshot);
 	saveConfig();
 	const auto previousPluginId = _registeringPluginId;
 	try {
 		startRecoveryOperation(
 			u"settings"_q,
-			{ it->pluginId },
+			{ pluginId },
 			snapshot.title.isEmpty() ? snapshot.id : snapshot.title);
-		_registeringPluginId = it->pluginId;
+		_registeringPluginId = pluginId;
 		logEvent(
 			u"settings"_q,
 			u"invoke"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
+				{ u"pluginId"_q, pluginId },
 				{ u"setting"_q, settingDescriptorToJson(snapshot) },
 			});
 		InvokePluginCallbackOrThrow([&] {
-			it->handler(snapshot);
+			handler(snapshot);
 		});
 		_registeringPluginId = previousPluginId;
 		logEvent(
@@ -3627,15 +3646,32 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 			u"success"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
+				{ u"pluginId"_q, pluginId },
 				{ u"settingId"_q, snapshot.id },
 			});
 		finishRecoveryOperation();
-		notifyStateChanged(u"settings"_q, it->pluginId, false, false);
+		if (snapshot.type == SettingControl::TextInput) {
+			notifyStateChanged(u"settings"_q, pluginId, false, false);
+		}
 		return true;
 	} catch (...) {
-		*target = previous;
-		rememberSettingValue(it->pluginId, previous);
+		if (auto rollbackIt = _settingsPages.find(id);
+			rollbackIt != _settingsPages.end()) {
+			for (auto &section : rollbackIt->descriptor.sections) {
+				auto restored = false;
+				for (auto &candidate : section.settings) {
+					if (candidate.id == previous.id) {
+						candidate = previous;
+						restored = true;
+						break;
+					}
+				}
+				if (restored) {
+					break;
+				}
+			}
+		}
+		rememberSettingValue(pluginId, previous);
 		saveConfig();
 		_registeringPluginId = previousPluginId;
 		logEvent(
@@ -3643,12 +3679,12 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 			u"failed"_q,
 			QJsonObject{
 				{ u"id"_q, QString::number(id) },
-				{ u"pluginId"_q, it->pluginId },
+				{ u"pluginId"_q, pluginId },
 				{ u"setting"_q, settingDescriptorToJson(snapshot) },
 				{ u"reason"_q, CurrentExceptionText() },
 			});
 		disablePlugin(
-			it->pluginId,
+			pluginId,
 			u"Settings update failed: "_q + CurrentExceptionText());
 		showToast(PluginUiText(
 			u"Plugin settings failed and plugin was disabled."_q,
@@ -4511,10 +4547,60 @@ void Manager::onWindowCreated(
 			QJsonObject{
 				{ u"pluginId"_q, _registeringPluginId },
 			});
+		const auto pluginId = _windowHandlers.back().pluginId;
 		const auto replay = _windowHandlers.back().handler;
-		forEachWindow([&](Window::Controller *window) {
-			InvokePluginCallbackOrThrow([&] {
-				replay(window);
+		QTimer::singleShot(0, this, [=] {
+			if (!replay || (!pluginId.isEmpty() && !hasPlugin(pluginId))) {
+				return;
+			}
+			auto replayFailed = false;
+			forEachWindow([&](Window::Controller *window) {
+				if (replayFailed) {
+					return;
+				}
+				try {
+					startRecoveryOperation(u"window"_q, { pluginId });
+					const auto previousPluginId = _registeringPluginId;
+					_registeringPluginId = pluginId;
+					logEvent(
+						u"window"_q,
+						u"replay-callback"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+							{ u"hasWindow"_q, window != nullptr },
+						});
+					InvokePluginCallbackOrThrow([&] {
+						replay(window);
+					});
+					_registeringPluginId = previousPluginId;
+					logEvent(
+						u"window"_q,
+						u"replay-callback-success"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+						});
+					finishRecoveryOperation();
+				} catch (...) {
+					replayFailed = true;
+					_registeringPluginId.clear();
+					logEvent(
+						u"window"_q,
+						u"replay-callback-failed"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+							{ u"reason"_q, CurrentExceptionText() },
+						});
+					if (!pluginId.isEmpty()) {
+						disablePlugin(
+							pluginId,
+							u"Window callback replay failed: "_q
+								+ CurrentExceptionText());
+					}
+					showToast(PluginUiText(
+						u"Plugin window callback failed."_q,
+						u"Оконный callback плагина завершился с ошибкой."_q));
+					finishRecoveryOperation();
+				}
 			});
 		});
 	}
@@ -4545,10 +4631,60 @@ void Manager::onWindowWidgetCreated(
 			QJsonObject{
 				{ u"pluginId"_q, _registeringPluginId },
 			});
+		const auto pluginId = _windowWidgetHandlers.back().pluginId;
 		const auto replay = _windowWidgetHandlers.back().handler;
-		forEachWindowWidget([&](QWidget *widget) {
-			InvokePluginCallbackOrThrow([&] {
-				replay(widget);
+		QTimer::singleShot(0, this, [=] {
+			if (!replay || (!pluginId.isEmpty() && !hasPlugin(pluginId))) {
+				return;
+			}
+			auto replayFailed = false;
+			forEachWindowWidget([&](QWidget *widget) {
+				if (replayFailed) {
+					return;
+				}
+				try {
+					startRecoveryOperation(u"window"_q, { pluginId });
+					const auto previousPluginId = _registeringPluginId;
+					_registeringPluginId = pluginId;
+					logEvent(
+						u"window"_q,
+						u"replay-widget-callback"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+							{ u"hasWidget"_q, widget != nullptr },
+						});
+					InvokePluginCallbackOrThrow([&] {
+						replay(widget);
+					});
+					_registeringPluginId = previousPluginId;
+					logEvent(
+						u"window"_q,
+						u"replay-widget-callback-success"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+						});
+					finishRecoveryOperation();
+				} catch (...) {
+					replayFailed = true;
+					_registeringPluginId.clear();
+					logEvent(
+						u"window"_q,
+						u"replay-widget-callback-failed"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+							{ u"reason"_q, CurrentExceptionText() },
+						});
+					if (!pluginId.isEmpty()) {
+						disablePlugin(
+							pluginId,
+							u"Window widget callback replay failed: "_q
+								+ CurrentExceptionText());
+					}
+					showToast(PluginUiText(
+						u"Plugin window widget callback failed."_q,
+						u"Window widget callback плагина завершился с ошибкой."_q));
+					finishRecoveryOperation();
+				}
 			});
 		});
 	}
@@ -4635,10 +4771,61 @@ void Manager::onSessionActivated(
 			QJsonObject{
 				{ u"pluginId"_q, _registeringPluginId },
 			});
+		const auto pluginId = _sessionHandlers.back().pluginId;
 		const auto replay = _sessionHandlers.back().handler;
-		forEachSession([&](Main::Session *session) {
-			InvokePluginCallbackOrThrow([&] {
-				replay(session);
+		QTimer::singleShot(0, this, [=] {
+			if (!replay || (!pluginId.isEmpty() && !hasPlugin(pluginId))) {
+				return;
+			}
+			auto replayFailed = false;
+			forEachSession([&](Main::Session *session) {
+				if (replayFailed) {
+					return;
+				}
+				try {
+					startRecoveryOperation(u"session"_q, { pluginId });
+					const auto previousPluginId = _registeringPluginId;
+					_registeringPluginId = pluginId;
+					logEvent(
+						u"session"_q,
+						u"replay-callback"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+							{ u"hasSession"_q, session != nullptr },
+							{ u"sessionUniqueId"_q, session ? QString::number(session->uniqueId()) : QString() },
+						});
+					InvokePluginCallbackOrThrow([&] {
+						replay(session);
+					});
+					_registeringPluginId = previousPluginId;
+					logEvent(
+						u"session"_q,
+						u"replay-callback-success"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+						});
+					finishRecoveryOperation();
+				} catch (...) {
+					replayFailed = true;
+					_registeringPluginId.clear();
+					logEvent(
+						u"session"_q,
+						u"replay-callback-failed"_q,
+						QJsonObject{
+							{ u"pluginId"_q, pluginId },
+							{ u"reason"_q, CurrentExceptionText() },
+						});
+					if (!pluginId.isEmpty()) {
+						disablePlugin(
+							pluginId,
+							u"Session callback replay failed: "_q
+								+ CurrentExceptionText());
+					}
+					showToast(PluginUiText(
+						u"Plugin session callback failed."_q,
+						u"Session callback плагина завершился с ошибкой."_q));
+					finishRecoveryOperation();
+				}
 			});
 		});
 	}
@@ -4937,6 +5124,37 @@ void Manager::notifyStateChanged(
 		QString pluginId,
 		bool structural,
 		bool failed) {
+	if (_uiTransientPluginsActive) {
+		auto normalizedPluginId = pluginId.trimmed();
+		if (_deferredStateChange) {
+			if (_deferredStateChange->pluginId != normalizedPluginId) {
+				_deferredStateChange->pluginId.clear();
+			}
+			_deferredStateChange->reason = std::move(reason);
+			_deferredStateChange->structural |= structural;
+			_deferredStateChange->failed |= failed;
+			return;
+		}
+		auto change = ManagerStateChange();
+		change.reason = std::move(reason);
+		change.pluginId = std::move(normalizedPluginId);
+		change.structural = structural;
+		change.failed = failed;
+		_deferredStateChange = std::move(change);
+		return;
+	}
+	emitStateChangedNow(
+		std::move(reason),
+		std::move(pluginId),
+		structural,
+		failed);
+}
+
+void Manager::emitStateChangedNow(
+		QString reason,
+		QString pluginId,
+		bool structural,
+		bool failed) {
 	auto enabledCount = 0;
 	auto loadedCount = 0;
 	auto errorCount = 0;
@@ -4966,6 +5184,19 @@ void Manager::notifyStateChanged(
 			{ u"errors"_q, errorCount },
 		});
 	_stateChanges.fire_copy(change);
+}
+
+void Manager::flushDeferredStateChange() {
+	if (!_deferredStateChange) {
+		return;
+	}
+	auto change = std::move(*_deferredStateChange);
+	_deferredStateChange.reset();
+	emitStateChangedNow(
+		std::move(change.reason),
+		std::move(change.pluginId),
+		change.structural,
+		change.failed);
 }
 
 void Manager::logOperationStart(

@@ -155,6 +155,19 @@ using Match = qthelp::RegularExpressionMatch;
 			u"50 RUB • $0.55"_q));
 }
 
+[[nodiscard]] QString AstrogramSupportBenefitText(
+		not_null<Main::Session*> session) {
+	return RuEn(
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_benefit_ru"_q,
+			u"Поддержка помогает развивать Astrogram и быстрее выпускать новые функции."_q),
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_benefit_en"_q,
+			u"Support helps Astrogram ship improvements and new features faster."_q));
+}
+
 void AddAstrogramSupportBlock(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &title,
@@ -350,7 +363,7 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		AddAstrogramSupportBlock(
 			container,
 			RuEn("Что это", "What this is"),
-			AstrogramSupportBenefitText(),
+			AstrogramSupportBenefitText(session),
 			false);
 		AddAstrogramSupportBlock(
 			container,

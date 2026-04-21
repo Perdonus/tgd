@@ -954,7 +954,8 @@ void MainMenu::setupMenu() {
 	using Render = std::function<void()>;
 
 	const auto supportMode = _controller->session().supportMode();
-	const auto hasLogsAction = false;
+	const auto hasLogsAction = !Core::App().plugins().actionsFor(
+		u"astro.show_logs"_q).empty();
 	const auto addSeparator = [&] {
 		menu->add(
 			object_ptr<Ui::PlainShadow>(menu),
@@ -1159,6 +1160,22 @@ void MainMenu::setupMenu() {
 				rpl::single(RuEn("Плагины", "Plugins")),
 				{ &st::menuIconCustomize }
 			)->setClickedCallback([=] {
+				controller->showSettings(::Settings::Plugins::Id());
+			});
+		});
+	registerRenderer(
+		::Menu::Customization::SideMenuItemId::ShowLogs,
+		[=] {
+			addAction(
+				rpl::single(RuEn("Показать логи", "Show logs")),
+				{ &st::menuIconFaq }
+			)->setClickedCallback([=] {
+				const auto actions = Core::App().plugins().actionsFor(
+					u"astro.show_logs"_q);
+				if (!actions.empty()) {
+					Core::App().plugins().triggerAction(actions.front().id);
+					return;
+				}
 				controller->showSettings(::Settings::Plugins::Id());
 			});
 		});

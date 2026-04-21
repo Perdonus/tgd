@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/widgets/continuous_sliders.h"
+#include "ui/widgets/scroll_area.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/fields/password_input.h"
@@ -88,12 +89,15 @@ constexpr auto kPluginUiRebuildDebounceMs = 120;
 }
 
 constexpr auto kPluginCardRadius = 20.;
-constexpr auto kPluginCardVerticalMargin = 12;
-constexpr auto kPluginCardContentInsetLeft = 20;
-constexpr auto kPluginCardContentInsetRight = 16;
-constexpr auto kPluginCardDescriptionInsetLeft = 20;
-constexpr auto kPluginCardActionRowTopMargin = 12;
-constexpr auto kPluginCardActionRowBottomPadding = 8;
+constexpr auto kPluginCardVerticalMargin = 14;
+constexpr auto kPluginCardOuterMargin = 16;
+constexpr auto kPluginCardContentInsetLeft = 18;
+constexpr auto kPluginCardContentInsetRight = 12;
+constexpr auto kPluginCardDescriptionInsetLeft = 18;
+constexpr auto kPluginCardMetaBottomMargin = 8;
+constexpr auto kPluginCardDescriptionBottomMargin = 2;
+constexpr auto kPluginCardActionRowTopMargin = 14;
+constexpr auto kPluginCardActionRowBottomPadding = 10;
 constexpr auto kPluginCardActionGap = 8;
 
 [[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
@@ -190,13 +194,30 @@ void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
 void AddPluginMetaText(
 		not_null<Ui::VerticalLayout*> container,
 		const TextWithEntities &text) {
-	const auto label = container->add(
-		object_ptr<Ui::FlatLabel>(
-			container,
-			rpl::single(text),
-			st::defaultFlatLabel),
-		style::margins(kPluginCardContentInsetLeft, 0, kPluginCardContentInsetRight, 4),
+	const auto row = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		style::margins(
+			kPluginCardContentInsetLeft,
+			0,
+			kPluginCardContentInsetRight,
+			kPluginCardMetaBottomMargin),
 		style::al_top);
+	const auto raw = static_cast<Ui::RpWidget*>(row);
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		raw,
+		rpl::single(text),
+		st::defaultFlatLabel);
+	label->setTryMakeSimilarLines(true);
+	raw->widthValue() | rpl::on_next([=](int width) {
+		label->resizeToWidth(std::max(width, 0));
+		label->moveToLeft(0, 0, width);
+	}, raw->lifetime());
+	label->sizeValue() | rpl::on_next([=](const QSize &size) {
+		raw->resize(raw->width(), size.height());
+	}, raw->lifetime());
+	label->resizeToWidth(std::max(raw->width(), 0));
+	label->moveToLeft(0, 0, raw->width());
+	raw->resize(raw->width(), label->height());
 	WireExternalLinks(label);
 }
 
@@ -215,17 +236,31 @@ void AddPluginDescriptionText(
 	if (text.trimmed().isEmpty()) {
 		return;
 	}
-	const auto label = container->add(
-		object_ptr<Ui::FlatLabel>(
-			container,
-			rpl::single(TextWithEntities{ text.trimmed() }),
-			st::defaultFlatLabel),
+	const auto row = container->add(
+		object_ptr<Ui::RpWidget>(container),
 		style::margins(
 			kPluginCardDescriptionInsetLeft,
 			0,
 			kPluginCardContentInsetRight,
-			0),
+			kPluginCardDescriptionBottomMargin),
 		style::al_top);
+	const auto raw = static_cast<Ui::RpWidget*>(row);
+	const auto label = Ui::CreateChild<Ui::FlatLabel>(
+		raw,
+		rpl::single(TextWithEntities{ text.trimmed() }),
+		st::defaultFlatLabel);
+	label->setBreakEverywhere(true);
+	label->setTryMakeSimilarLines(true);
+	raw->widthValue() | rpl::on_next([=](int width) {
+		label->resizeToWidth(std::max(width, 0));
+		label->moveToLeft(0, 0, width);
+	}, raw->lifetime());
+	label->sizeValue() | rpl::on_next([=](const QSize &size) {
+		raw->resize(raw->width(), size.height());
+	}, raw->lifetime());
+	label->resizeToWidth(std::max(raw->width(), 0));
+	label->moveToLeft(0, 0, raw->width());
+	raw->resize(raw->width(), label->height());
 	WireExternalLinks(label);
 }
 
@@ -1135,15 +1170,15 @@ void OpenPluginsFolder() {
 		const ::Plugins::PluginState &state) {
 	const auto card = container->add(
 		object_ptr<Ui::RpWidget>(container),
-		style::margins(20, 0, 20, 0),
+		style::margins(kPluginCardOuterMargin, 0, kPluginCardOuterMargin, 0),
 		style::al_top);
 	const auto raw = static_cast<Ui::RpWidget*>(card);
 	const auto inner = Ui::CreateChild<Ui::VerticalLayout>(raw);
 	const auto margins = QMargins(
 		2,
-		8,
+		10,
 		2,
-		8);
+		10);
 
 	raw->widthValue() | rpl::on_next([=](int width) {
 		const auto innerWidth = std::max(0, width - margins.left() - margins.right());
@@ -1163,6 +1198,14 @@ void OpenPluginsFolder() {
 		const auto rect = QRectF(raw->rect()).adjusted(0.5, 0.5, -0.5, -0.5);
 		p.drawRoundedRect(rect, kPluginCardRadius, kPluginCardRadius);
 	}, raw->lifetime());
+	const auto initialInnerWidth = std::max(
+		0,
+		raw->width() - margins.left() - margins.right());
+	inner->resizeToWidth(initialInnerWidth);
+	inner->move(margins.left(), margins.top());
+	raw->resize(
+		raw->width(),
+		inner->height() + margins.top() + margins.bottom());
 
 	return inner;
 }
@@ -1237,6 +1280,22 @@ void AddPluginCardActionRow(
 			left += current->width() + gap;
 		}
 	}, raw->lifetime());
+	{
+		const auto gap = kPluginCardActionGap;
+		auto buttons = std::vector<Ui::IconButton*>{ settings };
+		if (share) {
+			buttons.push_back(share);
+		}
+		buttons.push_back(remove);
+		auto left = 0;
+		const auto top = std::max(
+			0,
+			raw->height() - buttonHeight - kPluginCardActionRowBottomPadding);
+		for (const auto current : buttons) {
+			current->move(left, top);
+			left += current->width() + gap;
+		}
+	}
 }
 
 void RevealPluginAuxFile(
@@ -1587,9 +1646,6 @@ void AddPluginsDiagnosticsSection(
 		u"Reload plugins now"_q,
 		u"Перезагрузить плагины сейчас"_q), [=] {
 		Core::App().plugins().reload();
-		if (onStateChanged) {
-			onStateChanged();
-		}
 	});
 	AddSettingsActionButton(container, PluginUiText(
 			u"Open client.log"_q,
@@ -1658,13 +1714,16 @@ void AddPluginSettingsContent(
 					rpl::single(setting.title),
 					st::settingsButtonNoIcon
 				))->toggleOn(rpl::single(setting.boolValue));
-				button->toggledChanges(
-				) | rpl::filter([=](bool value) {
-					return value != setting.boolValue;
-				}) | rpl::on_next([=](bool value) {
+				const auto currentValue = std::make_shared<bool>(setting.boolValue);
+				button->toggledChanges() | rpl::on_next([=](bool value) {
+					if (value == *currentValue) {
+						return;
+					}
 					auto updated = setting;
 					updated.boolValue = value;
-					if (Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+					if (Core::App().plugins().updateSetting(page.id, updated)) {
+						*currentValue = value;
+					} else if (onStateChanged) {
 						onStateChanged();
 					}
 				}, button->lifetime());
@@ -1688,6 +1747,7 @@ void AddPluginSettingsContent(
 					setting.intMinimum,
 					setting.intMaximum);
 				const auto step = std::max(1, setting.intStep);
+				const auto currentValue = std::make_shared<int>(setting.intValue);
 				const auto formatValue = [=](int value) {
 					return QString::number(value) + setting.valueSuffix;
 				};
@@ -1732,8 +1792,14 @@ void AddPluginSettingsContent(
 				slider->setChangeFinishedCallback([=](double raw) {
 					auto updated = setting;
 					updated.intValue = valueFromSlider(raw);
+					if (updated.intValue == *currentValue) {
+						valueLabel->setText(formatValue(updated.intValue));
+						return;
+					}
 					valueLabel->setText(formatValue(updated.intValue));
-					if (Core::App().plugins().updateSetting(page.id, updated) && onStateChanged) {
+					if (Core::App().plugins().updateSetting(page.id, updated)) {
+						*currentValue = updated.intValue;
+					} else if (onStateChanged) {
 						onStateChanged();
 					}
 				});
@@ -1800,7 +1866,7 @@ void AddPluginSettingsContent(
 					rpl::single(buttonTitle),
 					st::settingsButtonNoIcon));
 				button->setClickedCallback([=] {
-					if (Core::App().plugins().updateSetting(page.id, setting) && onStateChanged) {
+					if (!Core::App().plugins().updateSetting(page.id, setting) && onStateChanged) {
 						onStateChanged();
 					}
 				});
@@ -1823,24 +1889,72 @@ void AddPluginSettingsContent(
 	}
 }
 
+[[nodiscard]] QString PluginSettingsPageUiKey(
+		const ::Plugins::SettingsPageState &page) {
+	auto key = QString();
+	key.reserve(256);
+	key += page.title.trimmed();
+	key += u'\n';
+	key += page.description.trimmed();
+	for (const auto &section : page.sections) {
+		key += u"\n#"_q + section.id.trimmed();
+		key += u'\n';
+		key += section.title.trimmed();
+		key += u'\n';
+		key += section.description.trimmed();
+		for (const auto &setting : section.settings) {
+			key += u"\n-"_q + setting.id.trimmed();
+			key += u'|';
+			key += setting.title.trimmed();
+			key += u'|';
+			key += QString::number(int(setting.type));
+		}
+	}
+	return key;
+}
+
+[[nodiscard]] std::vector<::Plugins::SettingsPageState> DeduplicatePluginSettingsPages(
+		const std::vector<::Plugins::SettingsPageState> &pages) {
+	auto result = std::vector<::Plugins::SettingsPageState>();
+	auto seenKeys = QStringList();
+	result.reserve(pages.size());
+	seenKeys.reserve(int(pages.size()));
+	for (auto i = pages.crbegin(); i != pages.crend(); ++i) {
+		const auto key = PluginSettingsPageUiKey(*i);
+		if (seenKeys.contains(key)) {
+			continue;
+		}
+		seenKeys.push_back(key);
+		result.push_back(*i);
+	}
+	std::reverse(result.begin(), result.end());
+	return result;
+}
+
 class PluginDetailsSection final : public AbstractSection {
 public:
 	PluginDetailsSection(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller,
+		not_null<Ui::ScrollArea*> scroll,
 		QString pluginId,
 		Type type)
 	: AbstractSection(parent)
 	, _controller(controller)
+	, _scroll(scroll)
 	, _pluginId(std::move(pluginId))
 	, _type(std::move(type))
 	, _content(Ui::CreateChild<Ui::VerticalLayout>(this)) {
-		Core::App().plugins().stateChanges() | rpl::on_next([=](
-				const ::Plugins::ManagerStateChange &change) {
-			const auto normalizedChangePluginId = change.pluginId.trimmed();
-			if (!change.structural && normalizedChangePluginId != _pluginId) {
-				return;
-			}
+			Core::App().plugins().stateChanges() | rpl::on_next([=](
+					const ::Plugins::ManagerStateChange &change) {
+				const auto normalizedChangePluginId = change.pluginId.trimmed();
+				if (!change.structural && normalizedChangePluginId != _pluginId) {
+					return;
+				} else if (!change.structural
+					&& (normalizedChangePluginId == _pluginId)
+					&& (change.reason == u"settings"_q)) {
+					return;
+				}
 			Logs::writeClient(QString::fromLatin1(
 				"[plugins-ui] details refresh requested: plugin=%1 seq=%2 reason=%3 sourcePlugin=%4 structural=%5 failed=%6")
 				.arg(_pluginId)
@@ -1870,7 +1984,17 @@ public:
 	}
 
 private:
+	void restoreScrollTop(int top) {
+		QTimer::singleShot(0, this, [=] {
+			const auto target = std::clamp(top, 0, _scroll->scrollTopMax());
+			if (_scroll->scrollTop() != target) {
+				_scroll->scrollToY(target);
+			}
+		});
+	}
+
 	void rebuild() {
+		const auto preservedScrollTop = _scroll->scrollTop();
 		const auto state = LookupPluginState(_pluginId);
 		if (!state) {
 			if (_lastKnownState
@@ -1894,6 +2018,7 @@ private:
 					u"Plugin was not found."_q,
 					u"Плагин не найден."_q)));
 			Ui::ResizeFitChild(this, _content);
+			restoreScrollTop(preservedScrollTop);
 			return;
 		}
 
@@ -1902,13 +2027,11 @@ private:
 		_title = FormatPluginTitle(*state);
 		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
-		const auto refreshDetails = [=] {
-			stateChanged();
-		};
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto panels = Core::App().plugins().panelsFor(state->info.id);
-		const auto settingsPages = Core::App().plugins().settingsPagesFor(state->info.id);
+		const auto settingsPages = DeduplicatePluginSettingsPages(
+			Core::App().plugins().settingsPagesFor(state->info.id));
 
 		if (!actions.empty()) {
 			for (const auto &action : actions) {
@@ -1925,7 +2048,6 @@ private:
 							u"Could not run the plugin action."_q,
 							u"Не удалось выполнить действие плагина."_q));
 					}
-					refreshDetails();
 				});
 			}
 		}
@@ -1945,7 +2067,6 @@ private:
 							u"Could not open the plugin panel."_q,
 							u"Не удалось открыть панель плагина."_q));
 					}
-					refreshDetails();
 				});
 			}
 		}
@@ -1958,9 +2079,11 @@ private:
 		}
 
 		Ui::ResizeFitChild(this, _content);
+		restoreScrollTop(preservedScrollTop);
 	}
 
 	const not_null<Window::SessionController*> _controller;
+	const not_null<Ui::ScrollArea*> _scroll;
 	const QString _pluginId;
 	const Type _type;
 	not_null<Ui::VerticalLayout*> _content;
@@ -1984,13 +2107,13 @@ struct PluginDetailsFactory final
 		not_null<Ui::ScrollArea*> scroll,
 		rpl::producer<Container> containerValue
 	) const final override {
-		Q_UNUSED(scroll);
 		Q_UNUSED(containerValue);
 		const auto type = std::static_pointer_cast<AbstractSectionFactory>(
 			std::const_pointer_cast<PluginDetailsFactory>(shared_from_this()));
 		return object_ptr<PluginDetailsSection>(
 			parent,
 			controller,
+			scroll,
 			pluginId,
 			type);
 	}
@@ -2017,6 +2140,9 @@ Plugins::Plugins(
 , _list(_content->add(object_ptr<Ui::VerticalLayout>(_content))) {
 	Core::App().plugins().stateChanges() | rpl::on_next([=](
 			const ::Plugins::ManagerStateChange &change) {
+		if (!change.structural && (change.reason == u"settings"_q)) {
+			return;
+		}
 		Logs::writeClient(QString::fromLatin1(
 			"[plugins-ui] manager change observed: seq=%1 reason=%2 plugin=%3 structural=%4 failed=%5")
 			.arg(change.sequence)
@@ -2047,14 +2173,13 @@ void Plugins::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		.handler = [=] { ShowPluginRuntimeBox(_controller); },
 		.icon = &st::menuIconIpAddress,
 	});
-	addAction(Ui::Menu::MenuCallback::Args{
-		.text = PluginUiText(u"Reload Plugins"_q, u"Перезагрузить плагины"_q),
-		.handler = [=] {
-			Core::App().plugins().reload();
-			scheduleRebuildList(kPluginUiRebuildDebounceMs);
-		},
-		.icon = &st::menuIconSettings,
-	});
+		addAction(Ui::Menu::MenuCallback::Args{
+			.text = PluginUiText(u"Reload Plugins"_q, u"Перезагрузить плагины"_q),
+			.handler = [=] {
+				Core::App().plugins().reload();
+			},
+			.icon = &st::menuIconSettings,
+		});
 	addAction(Ui::Menu::MenuCallback::Args{
 		.text = PluginUiText(u"Open Plugins Folder"_q, u"Открыть папку плагинов"_q),
 		.handler = [=] { File::ShowInFolder(Core::App().plugins().pluginsPath()); },
@@ -2090,11 +2215,6 @@ void Plugins::refreshPending() {
 
 void Plugins::rebuildList() {
 	_listRefreshPending = false;
-	const auto scheduleRefresh = crl::guard(this, [=] {
-		Logs::writeClient(u"[plugins-ui] scheduled list refresh"_q);
-		_listRefreshPending = true;
-		scheduleRebuildList(kPluginUiRebuildDebounceMs);
-	});
 	const auto allPlugins = Core::App().plugins().plugins();
 	auto plugins = std::vector<::Plugins::PluginState>();
 	plugins.reserve(allPlugins.size());
@@ -2132,6 +2252,13 @@ void Plugins::rebuildList() {
 			|| (transientSnapshotActive
 				&& plugins.empty()
 				&& (_lastRenderedPluginCount > 0)));
+	if (useStableSnapshot && (_lastRenderedPluginCount > 0)) {
+		Logs::writeClient(
+			u"[plugins-ui] keep previous rendered cards during transient snapshot"_q);
+		_listRefreshPending = true;
+		scheduleRebuildList(150);
+		return;
+	}
 	const auto &renderPlugins = useStableSnapshot
 		? _lastStablePlugins
 		: plugins;
@@ -2200,17 +2327,16 @@ void Plugins::rebuildList() {
 		if (!state.error.isEmpty() && !state.disabledByRecovery) {
 			header->setToggleLocked(true);
 		}
-		header->toggledChanges(
-		) | rpl::filter([=](bool value) {
-			return (value != state.enabled);
-		}) | rpl::on_next([=](bool value) {
-			if (!Core::App().plugins().setEnabled(state.info.id, value)) {
-				_controller->window().showToast(PluginUiText(
-					u"Could not change state."_q,
-					u"Не удалось изменить состояние плагина."_q));
-			}
-			scheduleRefresh();
-		}, header->lifetime());
+			header->toggledChanges(
+			) | rpl::filter([=](bool value) {
+				return (value != state.enabled);
+			}) | rpl::on_next([=](bool value) {
+				if (!Core::App().plugins().setEnabled(state.info.id, value)) {
+					_controller->window().showToast(PluginUiText(
+						u"Could not change state."_q,
+						u"Не удалось изменить состояние плагина."_q));
+				}
+			}, header->lifetime());
 		if (!meta.text.isEmpty()) {
 			AddPluginMetaText(card, meta);
 		}
@@ -2218,11 +2344,11 @@ void Plugins::rebuildList() {
 			AddPluginDescriptionText(card, summary);
 		}
 		AddPluginSourceBadge(card, state);
-		AddPluginCardActionRow(
-			card,
-			_controller,
-			state,
-			scheduleRefresh);
+			AddPluginCardActionRow(
+				card,
+				_controller,
+				state,
+				nullptr);
 	}
 	_lastRenderedPluginCount = int(renderPlugins.size());
 
