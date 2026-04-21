@@ -32,20 +32,21 @@ Adds a side-menu action that opens a semi-transparent overlay with plugin logs.
 TGD_PLUGIN_PREVIEW(
 	"astro.show_logs",
 	"Show Logs",
-	"1.5",
+	"1.6",
 	"@etopizdesblin",
-	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions.",
+	"Shows plugin logs in a semi-transparent overlay with filtering, copy and clear actions. Open it from the side menu, from plugin settings, or with /logs if the menu entry is missing.",
 	"",
 	"GusTheDuck/24")
 
 namespace {
 
 constexpr auto kPluginId = "astro.show_logs";
-constexpr auto kPluginVersion = "1.5";
+constexpr auto kPluginVersion = "1.6";
 constexpr auto kPluginAuthor = "@etopizdesblin";
 constexpr auto kMaxLinesSettingId = "max_lines";
 constexpr auto kOpenOverlaySettingId = "open_overlay";
 constexpr auto kInfoSettingId = "log_info";
+constexpr auto kOpenLogsCommand = "logs";
 
 constexpr int kDefaultMaxLines = 300;
 constexpr int kMinMaxLines = 50;
@@ -377,10 +378,10 @@ public:
 
 		auto quickFilters = new QHBoxLayout();
 		quickFilters->setSpacing(8);
-		const auto addQuickFilter = [=](const QString &label, const QString &value) {
+		const auto addQuickFilter = [this, quickFilters](const QString &label, const QString &value) {
 			auto button = new QPushButton(label, this);
 			quickFilters->addWidget(button);
-			connect(button, &QPushButton::clicked, this, [=] {
+			connect(button, &QPushButton::clicked, this, [this, value] {
 				_filterEdit->setText(value);
 				_filter = value;
 				refreshNow();
@@ -527,6 +528,23 @@ public:
 	void onLoad() override {
 		refreshInfo();
 		_maxLines = readMaxLines();
+		_commandId = _host->registerCommand(
+			_info.id,
+			{
+				QString::fromLatin1(kOpenLogsCommand),
+				Tr(
+					_host,
+					"Open the Astrogram logs overlay.",
+					u8"Открыть overlay-окно с логами Astrogram."),
+				QStringLiteral("/%1").arg(QString::fromLatin1(kOpenLogsCommand))
+			},
+			[this](const Plugins::CommandContext &context) {
+				Q_UNUSED(context);
+				scheduleShowOverlay();
+				auto result = Plugins::CommandResult();
+				result.action = Plugins::CommandResult::Action::Handled;
+				return result;
+			});
 		_actionId = _host->registerActionWithContext(
 			_info.id,
 			Tr(_host, "Show Logs", u8"Показать логи"),
@@ -548,6 +566,10 @@ public:
 
 	void onUnload() override {
 		_overlayScheduled = false;
+		if (_commandId) {
+			_host->unregisterCommand(_commandId);
+			_commandId = 0;
+		}
 		if (_settingsPageId) {
 			_host->unregisterSettingsPage(_settingsPageId);
 			_settingsPageId = 0;
@@ -571,8 +593,8 @@ private:
 		_info.author = Latin1(kPluginAuthor);
 		_info.description = Tr(
 			_host,
-			"Opens a semi-transparent overlay with client.log, plugins.log and plugins.trace.jsonl, plus quick filters for errors/runtime/recovery.",
-			u8"Открывает полупрозрачное overlay-окно с client.log, plugins.log и plugins.trace.jsonl, плюс быстрые фильтры по ошибкам/runtime/recovery.");
+			"Opens a semi-transparent overlay with client.log, plugins.log and plugins.trace.jsonl. Use the side-menu action, the settings button, or /logs as a fallback.",
+			u8"Открывает полупрозрачное overlay-окно с client.log, plugins.log и plugins.trace.jsonl. Используй пункт в боковом меню, кнопку в настройках плагина или /logs как fallback.");
 		_info.website.clear();
 	}
 
@@ -595,8 +617,8 @@ private:
 		open.title = Tr(_host, "Open overlay", u8"Открыть overlay");
 		open.description = Tr(
 			_host,
-			"Shows the log overlay without leaving settings.",
-			u8"Показывает overlay-окно с логами прямо из настроек.");
+			"Shows the log overlay without leaving settings and still works if the side-menu entry is missing.",
+			u8"Показывает overlay-окно с логами прямо из настроек и остаётся рабочей точкой входа, даже если пункт в боковом меню пропал.");
 		open.type = Plugins::SettingControl::ActionButton;
 		open.buttonText = Tr(_host, "Show Logs", u8"Показать логи");
 
@@ -605,8 +627,8 @@ private:
 		info.title = Tr(_host, "Source", u8"Источник");
 		info.description = Tr(
 			_host,
-			"Reads tdata/client.log, tdata/plugins.log and tdata/plugins.trace.jsonl. Quick buttons switch to error/runtime/recovery slices.",
-			u8"Читает tdata/client.log, tdata/plugins.log и tdata/plugins.trace.jsonl. Быстрые кнопки переключают срезы error/runtime/recovery.");
+			"Reads client.log, tdata/plugins.log and tdata/plugins.trace.jsonl. Quick buttons switch to error/runtime/recovery slices, and /logs opens the overlay from chat if the menu path regresses.",
+			u8"Читает client.log, tdata/plugins.log и tdata/plugins.trace.jsonl. Быстрые кнопки переключают срезы error/runtime/recovery, а /logs открывает overlay прямо из чата, если путь через меню сломался.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -619,8 +641,8 @@ private:
 		page.title = Tr(_host, "Show Logs", u8"Показать логи");
 		page.description = Tr(
 			_host,
-			"Quick log overlay for plugin debugging.",
-			u8"Быстрый overlay для отладки плагинов.");
+			"Quick log overlay for plugin debugging and plugin-surface regression checks.",
+			u8"Быстрое overlay-окно для отладки плагинов и проверки регрессий плагинной поверхности.");
 		page.sections = { section };
 		return page;
 	}
@@ -736,6 +758,7 @@ private:
 
 	Plugins::Host *_host = nullptr;
 	Plugins::PluginInfo _info;
+	Plugins::CommandId _commandId = 0;
 	Plugins::ActionId _actionId = 0;
 	Plugins::SettingsPageId _settingsPageId = 0;
 	int _maxLines = kDefaultMaxLines;

@@ -139,6 +139,68 @@ constexpr auto kRegistryPluginTrustSuccessTtl = crl::time(5 * 60 * 1000);
 	return value;
 }
 
+[[nodiscard]] QString RegistryActionKey(
+		QString title,
+		QString description,
+		bool contextAware) {
+	title = title.trimmed();
+	description = description.trimmed();
+	return title
+		+ u'\n'
+		+ description
+		+ u'\n'
+		+ (contextAware ? u"1"_q : u"0"_q);
+}
+
+[[nodiscard]] QString RegistryPanelKey(
+		PanelDescriptor descriptor) {
+	descriptor.title = descriptor.title.trimmed();
+	descriptor.description = descriptor.description.trimmed();
+	return descriptor.title + u'\n' + descriptor.description;
+}
+
+[[nodiscard]] QString RegistrySettingsPageKey(
+		SettingsPageDescriptor descriptor) {
+	auto key = QString();
+	key.reserve(512);
+	key += descriptor.title.trimmed();
+	key += u'\n';
+	key += descriptor.description.trimmed();
+	for (const auto &section : descriptor.sections) {
+		key += u"\n#"_q;
+		key += section.id.trimmed();
+		key += u'\n';
+		key += section.title.trimmed();
+		key += u'\n';
+		key += section.description.trimmed();
+		for (const auto &setting : section.settings) {
+			key += u"\n-"_q;
+			key += setting.id.trimmed();
+			key += u'|';
+			key += setting.title.trimmed();
+			key += u'|';
+			key += setting.description.trimmed();
+			key += u'|';
+			key += setting.placeholderText.trimmed();
+			key += u'|';
+			key += setting.buttonText.trimmed();
+			key += u'|';
+			key += setting.valueSuffix.trimmed();
+			key += u'|';
+			key += QString::number(int(setting.type));
+			key += u'|';
+			key += QString::number(setting.intMinimum);
+			key += u'|';
+			key += QString::number(setting.intMaximum);
+			key += u'|';
+			key += QString::number(setting.intStep);
+			key += u'|';
+			key += setting.secret ? u"1"_q : u"0"_q;
+		}
+	}
+	return key;
+}
+
 [[nodiscard]] bool ShouldMirrorPluginEventToClient(
 		const QString &phase,
 		const QString &event) {
@@ -1946,6 +2008,67 @@ std::vector<PluginState> Manager::visiblePluginStatesFromRecords() const {
 	return result;
 }
 
+void Manager::captureUiTransientPluginRegistrations() {
+	_uiTransientCommandsByPlugin.clear();
+	_uiTransientActionsByPlugin.clear();
+	_uiTransientPanelsByPlugin.clear();
+	_uiTransientSettingsPagesByPlugin.clear();
+
+	for (const auto &plugin : _plugins) {
+		const auto pluginId = plugin.state.info.id.trimmed();
+		if (pluginId.isEmpty()) {
+			continue;
+		}
+
+		const auto commands = commandsFor(pluginId);
+		if (!commands.empty()) {
+			auto snapshot = QVector<CommandDescriptor>();
+			snapshot.reserve(int(commands.size()));
+			for (const auto &command : commands) {
+				snapshot.push_back(command);
+			}
+			_uiTransientCommandsByPlugin.insert(pluginId, std::move(snapshot));
+		}
+
+		const auto actions = actionsFor(pluginId);
+		if (!actions.empty()) {
+			auto snapshot = QVector<ActionState>();
+			snapshot.reserve(int(actions.size()));
+			for (const auto &action : actions) {
+				snapshot.push_back(action);
+			}
+			_uiTransientActionsByPlugin.insert(pluginId, std::move(snapshot));
+		}
+
+		const auto panels = panelsFor(pluginId);
+		if (!panels.empty()) {
+			auto snapshot = QVector<PanelState>();
+			snapshot.reserve(int(panels.size()));
+			for (const auto &panel : panels) {
+				snapshot.push_back(panel);
+			}
+			_uiTransientPanelsByPlugin.insert(pluginId, std::move(snapshot));
+		}
+
+		const auto settingsPages = settingsPagesFor(pluginId);
+		if (!settingsPages.empty()) {
+			auto snapshot = QVector<SettingsPageState>();
+			snapshot.reserve(int(settingsPages.size()));
+			for (const auto &page : settingsPages) {
+				snapshot.push_back(page);
+			}
+			_uiTransientSettingsPagesByPlugin.insert(pluginId, std::move(snapshot));
+		}
+	}
+}
+
+void Manager::clearUiTransientPluginRegistrations() {
+	_uiTransientCommandsByPlugin.clear();
+	_uiTransientActionsByPlugin.clear();
+	_uiTransientPanelsByPlugin.clear();
+	_uiTransientSettingsPagesByPlugin.clear();
+}
+
 void Manager::beginUiTransientPluginSnapshot() {
 	if (_uiTransientPluginsDepth++ > 0) {
 		_uiTransientPluginsActive = true;
@@ -1953,6 +2076,7 @@ void Manager::beginUiTransientPluginSnapshot() {
 	}
 	_deferredStateChange.reset();
 	_uiTransientPlugins = visiblePluginStatesFromRecords();
+	captureUiTransientPluginRegistrations();
 	_uiTransientPluginsActive = true;
 }
 
@@ -1960,6 +2084,7 @@ void Manager::finishUiTransientPluginSnapshot() {
 	if (_uiTransientPluginsDepth <= 0) {
 		_uiTransientPlugins = visiblePluginStatesFromRecords();
 		_uiTransientPluginsActive = false;
+		clearUiTransientPluginRegistrations();
 		flushDeferredStateChange();
 		return;
 	}
@@ -1969,6 +2094,7 @@ void Manager::finishUiTransientPluginSnapshot() {
 	}
 	_uiTransientPlugins = visiblePluginStatesFromRecords();
 	_uiTransientPluginsActive = false;
+	clearUiTransientPluginRegistrations();
 	flushDeferredStateChange();
 }
 
@@ -3296,8 +3422,20 @@ bool Manager::removePlugin(const QString &pluginId, QString *error) {
 
 std::vector<CommandDescriptor> Manager::commandsFor(
 		const QString &pluginId) const {
+	const auto normalizedId = pluginId.trimmed();
+	if (_uiTransientPluginsActive) {
+		const auto snapshot = _uiTransientCommandsByPlugin.constFind(normalizedId);
+		if (snapshot != _uiTransientCommandsByPlugin.cend()) {
+			auto result = std::vector<CommandDescriptor>();
+			result.reserve(snapshot->size());
+			for (const auto &descriptor : *snapshot) {
+				result.push_back(descriptor);
+			}
+			return result;
+		}
+	}
 	auto result = std::vector<CommandDescriptor>();
-	const auto it = _commandsByPlugin.find(pluginId);
+	const auto it = _commandsByPlugin.find(normalizedId);
 	if (it == _commandsByPlugin.end()) {
 		return result;
 	}
@@ -3311,8 +3449,20 @@ std::vector<CommandDescriptor> Manager::commandsFor(
 }
 
 std::vector<ActionState> Manager::actionsFor(const QString &pluginId) const {
+	const auto normalizedId = pluginId.trimmed();
+	if (_uiTransientPluginsActive) {
+		const auto snapshot = _uiTransientActionsByPlugin.constFind(normalizedId);
+		if (snapshot != _uiTransientActionsByPlugin.cend()) {
+			auto result = std::vector<ActionState>();
+			result.reserve(snapshot->size());
+			for (const auto &state : *snapshot) {
+				result.push_back(state);
+			}
+			return result;
+		}
+	}
 	auto result = std::vector<ActionState>();
-	const auto it = _actionsByPlugin.find(pluginId);
+	const auto it = _actionsByPlugin.find(normalizedId);
 	if (it == _actionsByPlugin.end()) {
 		return result;
 	}
@@ -3330,8 +3480,20 @@ std::vector<ActionState> Manager::actionsFor(const QString &pluginId) const {
 }
 
 std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
+	const auto normalizedId = pluginId.trimmed();
+	if (_uiTransientPluginsActive) {
+		const auto snapshot = _uiTransientPanelsByPlugin.constFind(normalizedId);
+		if (snapshot != _uiTransientPanelsByPlugin.cend()) {
+			auto result = std::vector<PanelState>();
+			result.reserve(snapshot->size());
+			for (const auto &state : *snapshot) {
+				result.push_back(state);
+			}
+			return result;
+		}
+	}
 	auto result = std::vector<PanelState>();
-	const auto it = _panelsByPlugin.find(pluginId);
+	const auto it = _panelsByPlugin.find(normalizedId);
 	if (it == _panelsByPlugin.end()) {
 		return result;
 	}
@@ -3350,8 +3512,20 @@ std::vector<PanelState> Manager::panelsFor(const QString &pluginId) const {
 
 std::vector<SettingsPageState> Manager::settingsPagesFor(
 		const QString &pluginId) const {
+	const auto normalizedId = pluginId.trimmed();
+	if (_uiTransientPluginsActive) {
+		const auto snapshot = _uiTransientSettingsPagesByPlugin.constFind(normalizedId);
+		if (snapshot != _uiTransientSettingsPagesByPlugin.cend()) {
+			auto result = std::vector<SettingsPageState>();
+			result.reserve(snapshot->size());
+			for (const auto &state : *snapshot) {
+				result.push_back(state);
+			}
+			return result;
+		}
+	}
 	auto result = std::vector<SettingsPageState>();
-	const auto it = _settingsPagesByPlugin.find(pluginId);
+	const auto it = _settingsPagesByPlugin.find(normalizedId);
 	if (it == _settingsPagesByPlugin.end()) {
 		return result;
 	}
@@ -3650,9 +3824,6 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 				{ u"settingId"_q, snapshot.id },
 			});
 		finishRecoveryOperation();
-		if (snapshot.type == SettingControl::TextInput) {
-			notifyStateChanged(u"settings"_q, pluginId, false, false);
-		}
 		return true;
 	} catch (...) {
 		if (auto rollbackIt = _settingsPages.find(id);
@@ -4067,7 +4238,7 @@ CommandId Manager::registerCommand(
 		return 0;
 	}
 	const auto key = commandKey(descriptor.command);
-	if (!IsValidCommandKey(key) || _commandIdByName.contains(key)) {
+	if (!IsValidCommandKey(key)) {
 		logEvent(
 			u"registry"_q,
 			u"register-command-invalid"_q,
@@ -4075,9 +4246,26 @@ CommandId Manager::registerCommand(
 				{ u"pluginId"_q, pluginId },
 				{ u"descriptor"_q, commandDescriptorToJson(descriptor) },
 				{ u"normalizedKey"_q, key },
-				{ u"duplicate"_q, _commandIdByName.contains(key) },
+				{ u"duplicate"_q, false },
 			});
 		return 0;
+	}
+	if (const auto existingId = _commandIdByName.value(key, 0); existingId != 0) {
+		const auto existing = _commands.find(existingId);
+		if (existing != _commands.end() && existing->pluginId == pluginId) {
+			unregisterCommand(existingId);
+		} else {
+			logEvent(
+				u"registry"_q,
+				u"register-command-invalid"_q,
+				QJsonObject{
+					{ u"pluginId"_q, pluginId },
+					{ u"descriptor"_q, commandDescriptorToJson(descriptor) },
+					{ u"normalizedKey"_q, key },
+					{ u"duplicate"_q, true },
+				});
+			return 0;
+		}
 	}
 	descriptor.command = '/' + key;
 	const auto id = _nextCommandId++;
@@ -4147,6 +4335,20 @@ ActionId Manager::registerAction(
 			});
 		return 0;
 	}
+	const auto actionKey = RegistryActionKey(title, description, false);
+	const auto existingIds = _actionsByPlugin.value(pluginId);
+	for (const auto existingId : existingIds) {
+		const auto existing = _actions.find(existingId);
+		if (existing == _actions.end()) {
+			continue;
+		}
+		if (RegistryActionKey(
+				existing->title,
+				existing->description,
+				existing->handlerWithContext != nullptr) == actionKey) {
+			unregisterAction(existingId);
+		}
+	}
 	const auto id = _nextActionId++;
 	_actions.insert(id, {
 		.id = id,
@@ -4213,6 +4415,20 @@ ActionId Manager::registerActionWithContext(
 				{ u"hasHandler"_q, handler != nullptr },
 			});
 		return 0;
+	}
+	const auto actionKey = RegistryActionKey(title, description, true);
+	const auto existingIds = _actionsByPlugin.value(pluginId);
+	for (const auto existingId : existingIds) {
+		const auto existing = _actions.find(existingId);
+		if (existing == _actions.end()) {
+			continue;
+		}
+		if (RegistryActionKey(
+				existing->title,
+				existing->description,
+				existing->handlerWithContext != nullptr) == actionKey) {
+			unregisterAction(existingId);
+		}
 	}
 	const auto id = _nextActionId++;
 	_actions.insert(id, {
@@ -4386,6 +4602,17 @@ PanelId Manager::registerPanel(
 			});
 		return 0;
 	}
+	const auto panelKey = RegistryPanelKey(descriptor);
+	const auto existingIds = _panelsByPlugin.value(pluginId);
+	for (const auto existingId : existingIds) {
+		const auto existing = _panels.find(existingId);
+		if (existing == _panels.end()) {
+			continue;
+		}
+		if (RegistryPanelKey(existing->descriptor) == panelKey) {
+			unregisterPanel(existingId);
+		}
+	}
 	const auto id = _nextPanelId++;
 	_panels.insert(id, {
 		.id = id,
@@ -4455,6 +4682,17 @@ SettingsPageId Manager::registerSettingsPage(
 		section.description = section.description.trimmed();
 		for (auto &setting : section.settings) {
 			setting = NormalizeSettingDescriptor(std::move(setting));
+		}
+	}
+	const auto settingsPageKey = RegistrySettingsPageKey(descriptor);
+	const auto existingIds = _settingsPagesByPlugin.value(pluginId);
+	for (const auto existingId : existingIds) {
+		const auto existing = _settingsPages.find(existingId);
+		if (existing == _settingsPages.end()) {
+			continue;
+		}
+		if (RegistrySettingsPageKey(existing->descriptor) == settingsPageKey) {
+			unregisterSettingsPage(existingId);
 		}
 	}
 	applyStoredSettings(pluginId, descriptor);
@@ -6470,6 +6708,12 @@ void Manager::disablePlugin(
 	unregisterPluginWindowHandlers(pluginId);
 	unregisterPluginWindowWidgetHandlers(pluginId);
 	unregisterPluginSessionHandlers(pluginId);
+	record->commandIds.clear();
+	record->actionIds.clear();
+	record->panelIds.clear();
+	record->settingsPageIds.clear();
+	record->outgoingInterceptorIds.clear();
+	record->messageObserverIds.clear();
 	if (record->instance) {
 		_registeringPluginId = pluginId;
 		try {

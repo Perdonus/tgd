@@ -90,14 +90,14 @@ constexpr auto kPluginUiRebuildDebounceMs = 120;
 
 constexpr auto kPluginCardRadius = 20.;
 constexpr auto kPluginCardVerticalMargin = 14;
-constexpr auto kPluginCardOuterMargin = 16;
+constexpr auto kPluginCardOuterMargin = 12;
 constexpr auto kPluginCardContentInsetLeft = 18;
 constexpr auto kPluginCardContentInsetRight = 12;
 constexpr auto kPluginCardDescriptionInsetLeft = 18;
-constexpr auto kPluginCardMetaBottomMargin = 8;
-constexpr auto kPluginCardDescriptionBottomMargin = 2;
-constexpr auto kPluginCardActionRowTopMargin = 14;
-constexpr auto kPluginCardActionRowBottomPadding = 10;
+constexpr auto kPluginCardMetaBottomMargin = 12;
+constexpr auto kPluginCardDescriptionBottomMargin = 6;
+constexpr auto kPluginCardActionRowTopMargin = 16;
+constexpr auto kPluginCardActionRowBottomPadding = 12;
 constexpr auto kPluginCardActionGap = 8;
 
 [[nodiscard]] bool IsTelegramHandleChar(QChar ch) {
@@ -180,6 +180,53 @@ constexpr auto kPluginCardActionGap = 8;
 	return result;
 }
 
+QString FormatPluginTitle(const ::Plugins::PluginState &state);
+
+[[nodiscard]] QString PluginListCardUiKey(
+		const ::Plugins::PluginState &state) {
+	auto key = QString();
+	key += state.info.id.trimmed();
+	key += u'\n';
+	key += FormatPluginTitle(state).trimmed();
+	key += u'\n';
+	key += state.info.version.trimmed();
+	key += u'\n';
+	key += state.info.author.trimmed();
+	key += u'\n';
+	key += state.info.description.trimmed();
+	key += u'\n';
+	key += (state.enabled ? u"1"_q : u"0"_q);
+	key += (state.loaded ? u"1"_q : u"0"_q);
+	key += (state.disabledByRecovery ? u"1"_q : u"0"_q);
+	key += (state.recoverySuspected ? u"1"_q : u"0"_q);
+	key += (state.sourceTrustLoading ? u"1"_q : u"0"_q);
+	key += (state.sourceVerified ? u"1"_q : u"0"_q);
+	key += u'\n';
+	key += state.error.trimmed();
+	key += u'\n';
+	key += state.sourceTrustReason.trimmed();
+	key += u'\n';
+	key += state.sourceChannelTitle.trimmed();
+	key += u'\n';
+	key += state.sourceChannelUsername.trimmed();
+	key += u'\n';
+	key += QString::number(state.sourceMessageId);
+	return key;
+}
+
+[[nodiscard]] QString VisiblePluginListUiKey(
+		const std::vector<::Plugins::PluginState> &states) {
+	auto key = QString();
+	for (const auto &state : states) {
+		if (ShouldHidePluginFromPrimaryUi(state)) {
+			continue;
+		}
+		key += u"\n---\n"_q;
+		key += PluginListCardUiKey(state);
+	}
+	return key;
+}
+
 void WireExternalLinks(not_null<Ui::FlatLabel*> label) {
 	label->setClickHandlerFilter([=](const auto &handler, auto) {
 		const auto entity = handler->getTextEntity();
@@ -211,6 +258,7 @@ void AddPluginMetaText(
 	raw->widthValue() | rpl::on_next([=](int width) {
 		label->resizeToWidth(std::max(width, 0));
 		label->moveToLeft(0, 0, width);
+		raw->resize(width, label->height());
 	}, raw->lifetime());
 	label->sizeValue() | rpl::on_next([=](const QSize &size) {
 		raw->resize(raw->width(), size.height());
@@ -254,6 +302,7 @@ void AddPluginDescriptionText(
 	raw->widthValue() | rpl::on_next([=](int width) {
 		label->resizeToWidth(std::max(width, 0));
 		label->moveToLeft(0, 0, width);
+		raw->resize(width, label->height());
 	}, raw->lifetime());
 	label->sizeValue() | rpl::on_next([=](const QSize &size) {
 		raw->resize(raw->width(), size.height());
@@ -1931,6 +1980,71 @@ void AddPluginSettingsContent(
 	return result;
 }
 
+[[nodiscard]] QString PluginActionsUiKey(
+		const std::vector<::Plugins::ActionState> &actions) {
+	auto key = QString();
+	for (const auto &action : actions) {
+		key += u"\n@"_q + QString::number(action.id);
+		key += u'|';
+		key += action.title.trimmed();
+		key += u'|';
+		key += action.description.trimmed();
+	}
+	return key;
+}
+
+[[nodiscard]] QString PluginPanelsUiKey(
+		const std::vector<::Plugins::PanelState> &panels) {
+	auto key = QString();
+	for (const auto &panel : panels) {
+		key += u"\n@"_q + QString::number(panel.id);
+		key += u'|';
+		key += panel.title.trimmed();
+		key += u'|';
+		key += panel.description.trimmed();
+	}
+	return key;
+}
+
+[[nodiscard]] QString PluginSettingsPagesUiKey(
+		const std::vector<::Plugins::SettingsPageState> &pages) {
+	auto key = QString();
+	for (const auto &page : pages) {
+		key += u"\n===\n"_q;
+		key += PluginSettingsPageUiKey(page);
+	}
+	return key;
+}
+
+[[nodiscard]] QString PluginDetailsUiKey(
+		const ::Plugins::PluginState &state,
+		const std::vector<::Plugins::ActionState> &actions,
+		const std::vector<::Plugins::PanelState> &panels,
+		const std::vector<::Plugins::SettingsPageState> &settingsPages) {
+	auto key = QString();
+	key += state.info.id.trimmed();
+	key += u'\n';
+	key += FormatPluginTitle(state).trimmed();
+	key += u'\n';
+	key += (state.sourceTrustLoading ? u"1"_q : u"0"_q);
+	key += (state.sourceVerified ? u"1"_q : u"0"_q);
+	key += u'\n';
+	key += state.sourceTrustReason.trimmed();
+	key += u'\n';
+	key += state.sourceChannelTitle.trimmed();
+	key += u'\n';
+	key += state.sourceChannelUsername.trimmed();
+	key += u'\n';
+	key += QString::number(state.sourceMessageId);
+	key += u"\n[A]\n"_q;
+	key += PluginActionsUiKey(actions);
+	key += u"\n[P]\n"_q;
+	key += PluginPanelsUiKey(panels);
+	key += u"\n[S]\n"_q;
+	key += PluginSettingsPagesUiKey(settingsPages);
+	return key;
+}
+
 class PluginDetailsSection final : public AbstractSection {
 public:
 	PluginDetailsSection(
@@ -1948,13 +2062,29 @@ public:
 			Core::App().plugins().stateChanges() | rpl::on_next([=](
 					const ::Plugins::ManagerStateChange &change) {
 				const auto normalizedChangePluginId = change.pluginId.trimmed();
-				if (!change.structural && normalizedChangePluginId != _pluginId) {
+				if (!normalizedChangePluginId.isEmpty()
+					&& normalizedChangePluginId != _pluginId) {
+					return;
+				} else if (!change.structural
+					&& normalizedChangePluginId.isEmpty()) {
 					return;
 				} else if (!change.structural
 					&& (normalizedChangePluginId == _pluginId)
 					&& (change.reason == u"settings"_q)) {
 					return;
 				}
+			if (!change.structural) {
+				if (const auto state = LookupPluginState(_pluginId)) {
+					const auto actions = Core::App().plugins().actionsFor(state->info.id);
+					const auto panels = Core::App().plugins().panelsFor(state->info.id);
+					const auto settingsPages = DeduplicatePluginSettingsPages(
+						Core::App().plugins().settingsPagesFor(state->info.id));
+					if (PluginDetailsUiKey(*state, actions, panels, settingsPages)
+						== _lastUiKey) {
+						return;
+					}
+				}
+			}
 			Logs::writeClient(QString::fromLatin1(
 				"[plugins-ui] details refresh requested: plugin=%1 seq=%2 reason=%3 sourcePlugin=%4 structural=%5 failed=%6")
 				.arg(_pluginId)
@@ -1963,14 +2093,7 @@ public:
 				.arg(normalizedChangePluginId.isEmpty() ? u"-"_q : normalizedChangePluginId)
 				.arg(change.structural ? u"true"_q : u"false"_q)
 				.arg(change.failed ? u"true"_q : u"false"_q));
-			if (_rebuildScheduled) {
-				return;
-			}
-			_rebuildScheduled = true;
-			QTimer::singleShot(kPluginUiRebuildDebounceMs, this, [=] {
-				_rebuildScheduled = false;
-				rebuild();
-			});
+			requestRebuild(kPluginUiRebuildDebounceMs);
 		}, _stateChangesLifetime);
 		rebuild();
 	}
@@ -1984,6 +2107,17 @@ public:
 	}
 
 private:
+	void requestRebuild(int delayMs = 0) {
+		if (_rebuildScheduled) {
+			return;
+		}
+		_rebuildScheduled = true;
+		QTimer::singleShot(delayMs, this, [=] {
+			_rebuildScheduled = false;
+			rebuild();
+		});
+	}
+
 	void restoreScrollTop(int top) {
 		QTimer::singleShot(0, this, [=] {
 			const auto target = std::clamp(top, 0, _scroll->scrollTopMax());
@@ -2022,16 +2156,28 @@ private:
 			return;
 		}
 
-		_lastKnownState = *state;
-		_content->clear();
-		_title = FormatPluginTitle(*state);
-		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
-		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
-
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
 		const auto panels = Core::App().plugins().panelsFor(state->info.id);
 		const auto settingsPages = DeduplicatePluginSettingsPages(
 			Core::App().plugins().settingsPagesFor(state->info.id));
+		const auto uiKey = PluginDetailsUiKey(
+			*state,
+			actions,
+			panels,
+			settingsPages);
+		if ((_lastUiKey == uiKey) && (_content->count() > 0)) {
+			restoreScrollTop(preservedScrollTop);
+			return;
+		}
+
+		_lastKnownState = *state;
+		_lastUiKey = uiKey;
+		_content->clear();
+		_title = FormatPluginTitle(*state);
+		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
+		const auto stateChanged = crl::guard(this, [=] {
+			requestRebuild();
+		});
 
 		if (!actions.empty()) {
 			for (const auto &action : actions) {
@@ -2092,6 +2238,7 @@ private:
 	bool _rebuildScheduled = false;
 	bool _missingStateRetryScheduled = false;
 	std::optional<::Plugins::PluginState> _lastKnownState;
+	QString _lastUiKey;
 };
 
 struct PluginDetailsFactory final
@@ -2140,8 +2287,15 @@ Plugins::Plugins(
 , _list(_content->add(object_ptr<Ui::VerticalLayout>(_content))) {
 	Core::App().plugins().stateChanges() | rpl::on_next([=](
 			const ::Plugins::ManagerStateChange &change) {
-		if (!change.structural && (change.reason == u"settings"_q)) {
-			return;
+		if (!change.structural) {
+			if (change.reason == u"settings"_q) {
+				return;
+			}
+			const auto currentUiKey = VisiblePluginListUiKey(
+				Core::App().plugins().plugins());
+			if (property("_plugin_list_ui_key").toString() == currentUiKey) {
+				return;
+			}
 		}
 		Logs::writeClient(QString::fromLatin1(
 			"[plugins-ui] manager change observed: seq=%1 reason=%2 plugin=%3 structural=%4 failed=%5")
@@ -2291,6 +2445,7 @@ void Plugins::rebuildList() {
 	}
 	if (renderPlugins.empty()) {
 		_lastRenderedPluginCount = 0;
+		setProperty("_plugin_list_ui_key", QString());
 		Ui::AddDividerText(
 			_list,
 			rpl::single(PluginUiText(
@@ -2351,6 +2506,7 @@ void Plugins::rebuildList() {
 				nullptr);
 	}
 	_lastRenderedPluginCount = int(renderPlugins.size());
+	setProperty("_plugin_list_ui_key", VisiblePluginListUiKey(renderPlugins));
 
 	Ui::ResizeFitChild(this, _content);
 }

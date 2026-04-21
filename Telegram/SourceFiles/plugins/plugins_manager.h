@@ -378,6 +378,8 @@ private:
 	QJsonObject registrationSummaryToJson(
 		const PluginRecord &record) const;
 	std::vector<PluginState> visiblePluginStatesFromRecords() const;
+	void captureUiTransientPluginRegistrations();
+	void clearUiTransientPluginRegistrations();
 	void beginUiTransientPluginSnapshot();
 	void finishUiTransientPluginSnapshot();
 	QString fileSha256(const QString &path) const;
@@ -482,6 +484,10 @@ private:
 	std::vector<PluginState> _uiTransientPlugins;
 	bool _uiTransientPluginsActive = false;
 	int _uiTransientPluginsDepth = 0;
+	QHash<QString, QVector<CommandDescriptor>> _uiTransientCommandsByPlugin;
+	QHash<QString, QVector<ActionState>> _uiTransientActionsByPlugin;
+	QHash<QString, QVector<PanelState>> _uiTransientPanelsByPlugin;
+	QHash<QString, QVector<SettingsPageState>> _uiTransientSettingsPagesByPlugin;
 	QSet<QString> _disabled;
 	QHash<QString, QJsonObject> _storedSettings;
 	QSet<QString> _disabledByRecovery;

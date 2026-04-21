@@ -10,7 +10,7 @@ Requirements
 Examples
 - ai_chat.cpp: intercepts `/ai`, opens a plugin chat dialog and talks to a user-configured endpoint.
 - font_tuner.cpp: tunes Astrogram fonts, loads a local font file and applies changes live.
-- show_logs.cpp: opens a translucent log overlay with filtering, copy and clear actions.
+- show_logs.cpp: opens a translucent log overlay with filtering, copy and clear actions; use the side-menu action, the plugin settings button, or `/logs` if the menu entry is missing.
 - transparent_telegram.cpp: adds a transparency slider for Telegram windows.
 
 Build (Linux)
@@ -45,4 +45,5 @@ Notes
 - The plugin API lives in `Telegram/SourceFiles/plugins/plugins_api.h`.
 - `Host::hostInfo()` and `Host::systemInfo()` expose app/runtime/system metadata.
 - Plugins must match the app ABI exactly: same API version, platform, pointer size, compiler ABI and Qt major/minor.
+- `show_logs.cpp` is a good regression canary for the plugin surface because it intentionally exposes three entry points: side menu, its plugin settings page, and `/logs`.
 - CI touch: keep this file unchanged functionally.
