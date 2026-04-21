@@ -216,25 +216,27 @@ object_ptr<RpWidget> MakePeerWithStatusValue(
 	};
 	const auto peer = show->session().data().peer(id);
 	const auto state = peerLabel->lifetime().make_state<State>();
-	state->content = EmojiStatusIdValue(
-		peer
-	) | rpl::map([=](EmojiStatusId emojiStatusId) {
-		if (!peer->session().premium()
-			|| (!peer->isSelf() && !emojiStatusId)) {
-			return Badge::Content();
+	state->content = rpl::combine(
+		BadgeContentForPeer(peer),
+		VerifiedContentForPeer(peer)
+	) | rpl::map([](Badge::Content content, Badge::Content verified) {
+		if (content.badge == BadgeType::None
+			&& verified.badge == BadgeType::Verified) {
+			content.badge = BadgeType::Verified;
 		}
-		return Badge::Content{
-			.badge = BadgeType::Premium,
-			.emojiStatusId = emojiStatusId,
-		};
+		return content;
 	});
 	const auto badge = peerLabel->lifetime().make_state<Badge>(
 		raw,
 		st::infoPeerBadge,
 		&peer->session(),
+		peer,
 		state->content.value(),
 		nullptr,
-		[=] { return show->paused(ChatHelpers::PauseReason::Layer); });
+		[=] { return show->paused(ChatHelpers::PauseReason::Layer); },
+		0,
+		base::flags<BadgeType>::from_raw(-1),
+		true);
 	state->content.value(
 	) | rpl::on_next([=](const Badge::Content &content) {
 		if (const auto widget = badge->widget()) {

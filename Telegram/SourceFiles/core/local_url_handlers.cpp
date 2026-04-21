@@ -135,26 +135,8 @@ using Match = qthelp::RegularExpressionMatch;
 	return u"@"_q + AstrogramSupportUsername(session);
 }
 
-[[nodiscard]] QString AstrogramSupportPriceFeatureLine(not_null<Main::Session*> session) {
-	return RuEn(
-		AstrogramSupportConfigValue(
-			session,
-			u"astrogram_support_price_feature_ru"_q,
-			u"50 ₽ • примерно $0.55 • 22 UAH • 265 KZT • 1.80 BYN"_q),
-		AstrogramSupportConfigValue(
-			session,
-			u"astrogram_support_price_feature_en"_q,
-			u"50 RUB • about $0.55 • 22 UAH • 265 KZT • 1.80 BYN"_q));
-}
-
 [[nodiscard]] QString AstrogramSupportSelfId(not_null<Main::Session*> session) {
 	return QString::number(qulonglong(peerToUser(session->userPeerId()).bare));
-}
-
-[[nodiscard]] QString AstrogramSupportContactText(not_null<Main::Session*> session) {
-	return RuEn(
-		AstrogramSupportHandle(session),
-		AstrogramSupportHandle(session));
 }
 
 [[nodiscard]] QString AstrogramSupportIdText(not_null<Main::Session*> session) {
@@ -162,7 +144,15 @@ using Match = qthelp::RegularExpressionMatch;
 }
 
 [[nodiscard]] QString AstrogramSupportPriceText(not_null<Main::Session*> session) {
-	return AstrogramSupportPriceFeatureLine(session);
+	return RuEn(
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_pill_ru"_q,
+			u"50 ₽ • $0.55"_q),
+		AstrogramSupportConfigValue(
+			session,
+			u"astrogram_support_price_pill_en"_q,
+			u"50 RUB • $0.55"_q));
 }
 
 void AddAstrogramSupportBlock(
@@ -359,8 +349,8 @@ void ShowAstrogramSupportBox(not_null<Window::SessionController*> controller) {
 		const auto container = box->verticalLayout();
 		AddAstrogramSupportBlock(
 			container,
-			RuEn("Контакт", "Contact"),
-			AstrogramSupportContactText(session),
+			RuEn("Что это", "What this is"),
+			AstrogramSupportBenefitText(),
 			false);
 		AddAstrogramSupportBlock(
 			container,

@@ -21,28 +21,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/userpic_button.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
-#include "ui/text/text_utilities.h"
-#include "ui/top_background_gradient.h"
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/shadow.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
-#include "styles/style_window.h"
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QSet>
-#include <QtGui/QFontMetrics>
 
 #include <algorithm>
 #include <memory>
-#include <optional>
 
 namespace Ui {
 namespace {
@@ -64,14 +58,6 @@ enum class Step {
 		: QString::fromUtf8(en);
 }
 
-[[nodiscard]] QImage AstrogramLogo() {
-	auto result = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
-	if (result.isNull()) {
-		result = QImage(u":/gui/art/logo_256_no_margin.png"_q);
-	}
-	return result;
-}
-
 [[nodiscard]] int OnboardingSidePadding() {
 	return 18;
 }
@@ -87,9 +73,10 @@ enum class Step {
 	if (available <= 0) {
 		return st::boxWideWidth;
 	}
-	return std::max(
+	return std::clamp(
+		available - (OnboardingSidePadding() * 4),
 		st::boxWideWidth,
-		available - (OnboardingSidePadding() * 2));
+		st::boxWideWidth + 96);
 }
 
 struct PeerCardTexts {
@@ -100,39 +87,6 @@ struct PeerCardTexts {
 struct PluginCardTexts {
 	QString title;
 	QString description;
-	QString sourceLabel;
-};
-
-enum class OnboardingBadgeTone {
-	Trusted,
-	Official,
-	Pending,
-	Warning,
-};
-
-struct BadgePalette {
-	QColor fill;
-	QColor border;
-	QColor fg;
-};
-
-struct SurfacePalette {
-	QColor top;
-	QColor bottom;
-	QColor border;
-	QColor accent;
-	QColor title;
-	QColor body;
-	QColor footer;
-};
-
-struct InfoCardDescriptor {
-	QString eyebrow;
-	QString title;
-	QString description;
-	QString footer;
-	const style::icon *icon = nullptr;
-	OnboardingBadgeTone tone = OnboardingBadgeTone::Trusted;
 };
 
 void AppendInlinePart(QString &base, QString part) {
@@ -153,82 +107,6 @@ void AppendInlinePart(QString &base, QString part) {
 		return base;
 	}
 	return base.isEmpty() ? line : (base + u"\n"_q + line);
-}
-
-[[nodiscard]] BadgePalette BadgeColors(OnboardingBadgeTone tone) {
-	switch (tone) {
-	case OnboardingBadgeTone::Trusted:
-		return {
-			.fill = QColor(0x2e, 0xa4, 0xff, 44),
-			.border = QColor(0x5c, 0xba, 0xff),
-			.fg = QColor(0x1d, 0x7f, 0xff),
-		};
-	case OnboardingBadgeTone::Official:
-		return {
-			.fill = QColor(0x27, 0xc9, 0x83, 46),
-			.border = QColor(0x46, 0xe0, 0x98),
-			.fg = QColor(0x1e, 0xa8, 0x6b),
-		};
-	case OnboardingBadgeTone::Pending:
-		return {
-			.fill = QColor(0xf2, 0xc9, 0x4c, 42),
-			.border = QColor(0xe6, 0xb8, 0x2f),
-			.fg = QColor(0xb7, 0x82, 0x00),
-		};
-	case OnboardingBadgeTone::Warning:
-		return {
-			.fill = QColor(0xeb, 0x57, 0x57, 34),
-			.border = QColor(0xeb, 0x57, 0x57),
-			.fg = QColor(0xcf, 0x45, 0x45),
-		};
-	}
-	Unexpected("Unknown onboarding badge tone.");
-}
-
-[[nodiscard]] SurfacePalette SurfaceColors(OnboardingBadgeTone tone) {
-	switch (tone) {
-	case OnboardingBadgeTone::Trusted:
-		return {
-			.top = QColor(0xec, 0xf6, 0xff),
-			.bottom = QColor(0xe2, 0xf1, 0xff),
-			.border = QColor(0x9f, 0xd1, 0xff),
-			.accent = QColor(0x2e, 0xa4, 0xff),
-			.title = QColor(0x1a, 0x2c, 0x3f),
-			.body = QColor(0x4c, 0x61, 0x75),
-			.footer = QColor(0x1d, 0x7f, 0xff),
-		};
-	case OnboardingBadgeTone::Official:
-		return {
-			.top = QColor(0xeb, 0xfb, 0xf1),
-			.bottom = QColor(0xe0, 0xf7, 0xe9),
-			.border = QColor(0x96, 0xe1, 0xbd),
-			.accent = QColor(0x27, 0xc9, 0x83),
-			.title = QColor(0x1f, 0x35, 0x2b),
-			.body = QColor(0x4f, 0x67, 0x5a),
-			.footer = QColor(0x1e, 0xa8, 0x6b),
-		};
-	case OnboardingBadgeTone::Pending:
-		return {
-			.top = QColor(0xff, 0xf8, 0xe3),
-			.bottom = QColor(0xff, 0xef, 0xc1),
-			.border = QColor(0xf0, 0xd1, 0x73),
-			.accent = QColor(0xe6, 0xb8, 0x2f),
-			.title = QColor(0x3c, 0x33, 0x18),
-			.body = QColor(0x6f, 0x60, 0x2e),
-			.footer = QColor(0xb7, 0x82, 0x00),
-		};
-	case OnboardingBadgeTone::Warning:
-		return {
-			.top = QColor(0xff, 0xee, 0xee),
-			.bottom = QColor(0xff, 0xe1, 0xe1),
-			.border = QColor(0xff, 0xba, 0xba),
-			.accent = QColor(0xeb, 0x57, 0x57),
-			.title = QColor(0x3d, 0x1f, 0x1f),
-			.body = QColor(0x7d, 0x4a, 0x4a),
-			.footer = QColor(0xcf, 0x45, 0x45),
-		};
-	}
-	Unexpected("Unknown onboarding surface tone.");
 }
 
 [[nodiscard]] QString AstrogramKnownChannelUsername(qint64 channelId) {
@@ -258,43 +136,6 @@ void AppendInlinePart(QString &base, QString part) {
 	return result;
 }
 
-[[nodiscard]] OnboardingBadgeTone ChannelCardBadgeTone(
-		PeerData *peer,
-		bool official) {
-	if (!peer) {
-		return OnboardingBadgeTone::Pending;
-	}
-	return official
-		? OnboardingBadgeTone::Official
-		: OnboardingBadgeTone::Trusted;
-}
-
-[[nodiscard]] QString ChannelCardDetailText(
-		PeerData *peer,
-		qint64 channelId,
-		bool official) {
-	auto result = ChannelMetaText(peer, channelId);
-	result = AppendLine(
-		result,
-		official
-			? RuEn(
-				"Название, аватар и аудитория подгружаются прямо из канала, поэтому карточка остаётся актуальной.",
-				"The title, avatar and audience are fetched from the channel itself, so the card stays current.")
-			: RuEn(
-				"Название, аватар и аудитория берутся прямо из доверенного канала.",
-				"The title, avatar and audience come directly from the trusted channel."));
-	return result;
-}
-
-[[nodiscard]] OnboardingBadgeTone PluginSourceBadgeTone(
-		const AstrogramOnboardingPlugin &plugin) {
-	if (plugin.invalidServerData) {
-		return OnboardingBadgeTone::Warning;
-	} else if (plugin.pendingServerData) {
-		return OnboardingBadgeTone::Pending;
-	}
-	return OnboardingBadgeTone::Trusted;
-}
 
 [[nodiscard]] bool IsAstrogramPluginPackage(DocumentData *document) {
 	if (!document) {
@@ -346,20 +187,6 @@ void AppendInlinePart(QString &base, QString part) {
 	return RuEn(
 		"Пакет плагина из поста #%1",
 		"Plugin package from post #%1").arg(postId);
-}
-
-[[nodiscard]] QString AstrogramPluginSourceLabel(
-		QString channelTitle,
-		qint64 postId) {
-	channelTitle = channelTitle.trimmed();
-	if (channelTitle.isEmpty()) {
-		channelTitle = RuEn(
-			"Astrogram Plugins",
-			"Astrogram Plugins");
-	}
-	return RuEn(
-		"Источник: %1 · пост #%2",
-		"Source: %1 · post #%2").arg(channelTitle).arg(postId);
 }
 
 [[nodiscard]] QString PeerAudienceText(not_null<PeerData*> peer) {
@@ -414,10 +241,7 @@ void AppendInlinePart(QString &base, QString part) {
 		: nullptr;
 	const auto media = item ? item->media() : nullptr;
 	const auto document = media ? media->document() : nullptr;
-	const auto effectiveChannelTitle = ComputePeerCardTexts(
-		peer,
-		std::move(fallbackChannelTitle),
-		QString()).title;
+	Q_UNUSED(fallbackChannelTitle);
 	return {
 		.title = AstrogramPluginTitle(
 			IsAstrogramPluginPackage(document) ? document : nullptr,
@@ -426,373 +250,7 @@ void AppendInlinePart(QString &base, QString part) {
 			item,
 			plugin.description,
 			plugin.postId),
-		.sourceLabel = (plugin.postId > 0)
-			? AstrogramPluginSourceLabel(
-				effectiveChannelTitle,
-				plugin.postId)
-			: plugin.sourceLabel.trimmed(),
 	};
-}
-
-void AddHeroCover(
-		not_null<Ui::VerticalLayout*> container,
-		const QString &title,
-		const QString &subtitle,
-		QColor gradientEdge,
-		QColor gradientCenter,
-		QColor gradientLeft,
-		QColor gradientRight) {
-	Q_UNUSED(gradientLeft);
-	Q_UNUSED(gradientRight);
-	const auto cover = container->add(object_ptr<Ui::RpWidget>(container));
-
-	const auto logoTop = st::cocoonLogoTop;
-	const auto logoSize = st::cocoonLogoSize;
-	const auto titleTop = logoTop + logoSize + st::cocoonTitleTop;
-	const auto subtitleTop = titleTop
-		+ st::cocoonTitleFont->height
-		+ st::cocoonSubtitleTop;
-
-	struct State {
-		QImage gradient;
-		QImage logo;
-		style::owned_color subtitleFg = style::owned_color{ QColor(0xe9, 0xf2, 0xf8) };
-		style::owned_color subtitleBoldFg = style::owned_color{ QColor(0xff, 0xff, 0xff) };
-		style::FlatLabel subtitleSt = st::cocoonSubtitle;
-	};
-	const auto state = cover->lifetime().make_state<State>();
-	state->subtitleSt.textFg = state->subtitleFg.color();
-	state->subtitleSt.palette.linkFg = state->subtitleBoldFg.color();
-
-	const auto ratio = style::DevicePixelRatio();
-	state->logo = AstrogramLogo().scaled(
-		QSize(logoSize, logoSize) * ratio,
-		Qt::IgnoreAspectRatio,
-		Qt::SmoothTransformation);
-	state->logo.setDevicePixelRatio(ratio);
-
-	const auto subtitleLabel = Ui::CreateChild<Ui::FlatLabel>(
-		cover,
-		rpl::single(tr::rich(subtitle)),
-		state->subtitleSt);
-	subtitleLabel->setTryMakeSimilarLines(true);
-
-	cover->widthValue() | rpl::on_next([=](int width) {
-		const auto available = width
-			- st::boxRowPadding.left()
-			- st::boxRowPadding.right();
-		subtitleLabel->resizeToWidth(available);
-		subtitleLabel->moveToLeft(st::boxRowPadding.left(), subtitleTop);
-		cover->resize(
-			width,
-			subtitleLabel->y() + subtitleLabel->height() + st::cocoonSubtitleBottom);
-	}, cover->lifetime());
-
-	cover->paintRequest() | rpl::on_next([=] {
-		auto p = Painter(cover);
-		const auto width = cover->width();
-		const auto ratio = style::DevicePixelRatio();
-		if (state->gradient.size() != cover->size() * ratio) {
-			state->gradient = Ui::CreateTopBgGradient(
-				cover->size(),
-				gradientCenter,
-				gradientEdge);
-
-			auto font = st::cocoonTitleFont->f;
-			font.setWeight(QFont::Bold);
-			const auto metrics = QFontMetrics(font);
-			const auto textw = metrics.horizontalAdvance(title);
-			const auto left = (width - textw) / 2;
-
-			auto q = QPainter(&state->gradient);
-			auto hq = PainterHighQualityEnabler(q);
-			q.setPen(QColor(0xff, 0xff, 0xff));
-			q.setFont(font);
-			q.setBrush(Qt::NoBrush);
-			q.drawText(left, titleTop + metrics.ascent(), title);
-		}
-		p.drawImage(0, 0, state->gradient);
-
-		const auto logoRect = QRect(
-			(width - logoSize) / 2,
-			logoTop,
-			logoSize,
-			logoSize);
-		p.drawImage(logoRect, state->logo);
-	}, cover->lifetime());
-}
-
-not_null<Ui::RpWidget*> AddInfoCard(
-		not_null<Ui::VerticalLayout*> container,
-		InfoCardDescriptor descriptor,
-		style::margins margins = style::margins(
-			OnboardingSidePadding(),
-			0,
-			OnboardingSidePadding(),
-			0)) {
-	const auto card = container->add(
-		object_ptr<Ui::RpWidget>(container),
-		margins,
-		style::al_top);
-	const auto palette = SurfaceColors(descriptor.tone);
-
-	struct State {
-		Ui::Text::String eyebrow;
-		Ui::Text::String title;
-		Ui::Text::String description;
-		Ui::Text::String footer;
-		int height = 0;
-	};
-	const auto state = card->lifetime().make_state<State>();
-	state->eyebrow.setText(st::defaultTextStyle, descriptor.eyebrow.trimmed());
-	state->title.setText(st::semiboldTextStyle, descriptor.title.trimmed());
-	state->description.setText(st::defaultTextStyle, descriptor.description.trimmed());
-	state->footer.setText(st::semiboldTextStyle, descriptor.footer.trimmed());
-
-	const auto relayout = [=](int width) {
-		const auto cardWidth = std::max(width, 200);
-		const auto contentLeft = descriptor.icon ? 72 : 18;
-		const auto contentWidth = std::max(80, cardWidth - contentLeft - 18);
-		auto top = 18;
-		if (!descriptor.eyebrow.trimmed().isEmpty()) {
-			top += state->eyebrow.countHeight(contentWidth);
-			top += 5;
-		}
-		top += state->title.countHeight(contentWidth);
-		if (!descriptor.description.trimmed().isEmpty()) {
-			top += 8;
-			top += state->description.countHeight(contentWidth);
-		}
-		if (!descriptor.footer.trimmed().isEmpty()) {
-			top += 10;
-			top += state->footer.countHeight(contentWidth);
-		}
-		top += 18;
-		state->height = std::max(top, descriptor.icon ? 78 : top);
-		card->resize(width, state->height);
-		card->update();
-	};
-	card->widthValue() | rpl::on_next(relayout, card->lifetime());
-	relayout(std::max(card->width(), container->width() - 24));
-
-	card->paintRequest() | rpl::on_next([=] {
-		auto p = Painter(card);
-		auto hq = PainterHighQualityEnabler(p);
-		const auto width = card->width();
-		const auto height = card->height();
-		const auto outer = QRectF(0.5, 0.5, width - 1., height - 1.);
-		p.setPen(QPen(palette.border, 1.));
-		p.setBrush(palette.top);
-		p.drawRoundedRect(outer, 18., 18.);
-		if (descriptor.icon) {
-			const auto bubble = QRect(18, 18, 42, 42);
-			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(palette.accent.red(), palette.accent.green(), palette.accent.blue(), 26));
-			p.drawRoundedRect(QRectF(bubble), 12., 12.);
-			descriptor.icon->paintInCenter(p, bubble.adjusted(9, 9, -9, -9));
-		}
-
-		const auto contentLeft = descriptor.icon ? 72 : 18;
-		const auto contentWidth = std::max(80, width - contentLeft - 18);
-		auto top = 18;
-		if (!descriptor.eyebrow.trimmed().isEmpty()) {
-			p.setPen(palette.accent);
-			state->eyebrow.drawLeft(p, contentLeft, top, contentWidth, width);
-			top += state->eyebrow.countHeight(contentWidth);
-			top += 5;
-		}
-		p.setPen(palette.title);
-		state->title.drawLeft(p, contentLeft, top, contentWidth, width);
-		top += state->title.countHeight(contentWidth);
-		if (!descriptor.description.trimmed().isEmpty()) {
-			top += 8;
-			p.setPen(palette.body);
-			state->description.drawLeft(p, contentLeft, top, contentWidth, width);
-			top += state->description.countHeight(contentWidth);
-		}
-		if (!descriptor.footer.trimmed().isEmpty()) {
-			top += 10;
-			p.setPen(palette.footer);
-			state->footer.drawLeft(p, contentLeft, top, contentWidth, width);
-		}
-	}, card->lifetime());
-
-	return card;
-}
-
-not_null<Ui::AbstractButton*> AddChannelCard(
-		not_null<Ui::VerticalLayout*> container,
-		PeerData *peer,
-		qint64 channelId,
-		QString fallbackTitle,
-		QString subtitle,
-		bool official,
-		std::function<void()> callback,
-		style::margins margins = style::margins(
-			OnboardingSidePadding(),
-			0,
-			OnboardingSidePadding(),
-			0)) {
-	const auto card = container->add(
-		object_ptr<Ui::AbstractButton>::fromRaw(
-			Ui::CreateSimpleSettingsButton(
-				container,
-				st::defaultRippleAnimation,
-				st::defaultSettingsButton.textBgOver)),
-		margins,
-		style::al_top);
-	card->setClickedCallback(std::move(callback));
-
-	const auto tone = official
-		? OnboardingBadgeTone::Official
-		: ChannelCardBadgeTone(peer, false);
-	const auto palette = SurfaceColors(tone);
-	const auto badgePalette = BadgeColors(tone);
-	const auto userpicSt = card->lifetime().make_state<style::UserpicButton>(
-		st::defaultUserpicButton);
-	userpicSt->photoSize = 58;
-	userpicSt->size = QSize(userpicSt->photoSize, userpicSt->photoSize);
-
-	struct State {
-		Ui::Text::String title;
-		Ui::Text::String meta;
-		Ui::Text::String subtitle;
-		Ui::Text::String footer;
-		QImage fallbackLogo;
-		int height = 0;
-	};
-	const auto state = card->lifetime().make_state<State>();
-	const auto ratio = style::DevicePixelRatio();
-	state->fallbackLogo = AstrogramLogo().scaled(
-		QSize(34, 34) * ratio,
-		Qt::IgnoreAspectRatio,
-		Qt::SmoothTransformation);
-	state->fallbackLogo.setDevicePixelRatio(ratio);
-
-	if (peer) {
-		using Button = Ui::UserpicButton;
-		const auto userpic = Ui::CreateChild<Button>(card, peer, *userpicSt);
-		userpic->move(18, 20);
-		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
-		peer->loadUserpic();
-		if (const auto channel = peer->asChannel();
-			channel && !channel->membersCountKnown()) {
-			peer->session().api().requestFullPeer(channel);
-		}
-	}
-
-	const auto refresh = [=](int width) {
-		const auto cardWidth = std::max(width, 240);
-		auto meta = QString();
-		AppendInlinePart(meta, ChannelHandleText(peer, channelId));
-		if (peer) {
-			AppendInlinePart(meta, PeerAudienceText(peer));
-		}
-		if (meta.isEmpty()) {
-			meta = ChannelMetaText(peer, channelId);
-		}
-		state->title.setText(
-			st::semiboldTextStyle,
-			ComputePeerCardTexts(peer, fallbackTitle, QString()).title);
-		state->meta.setText(st::defaultTextStyle, meta);
-		state->subtitle.setText(
-			st::defaultTextStyle,
-			subtitle.trimmed().isEmpty()
-				? ChannelCardDetailText(peer, channelId, official)
-				: subtitle.trimmed());
-		state->footer.setText(
-			st::semiboldTextStyle,
-			RuEn("Нажми, чтобы открыть канал", "Click to open the channel"));
-		const auto contentLeft = 90;
-		const auto contentWidth = std::max(90, cardWidth - contentLeft - 18);
-		auto top = 18;
-		top += state->title.countHeight(contentWidth);
-		top += 6;
-		top += state->meta.countHeight(contentWidth);
-		top += 8;
-		top += state->subtitle.countHeight(contentWidth);
-		top += 10;
-		top += state->footer.countHeight(contentWidth);
-		top += 18;
-		state->height = std::max(top, 96);
-		card->resize(width, state->height);
-		card->update();
-	};
-	if (peer) {
-		peer->session().changes().peerUpdates(
-			peer,
-			Data::PeerUpdate::Flag::Name
-				| Data::PeerUpdate::Flag::Username
-				| Data::PeerUpdate::Flag::Photo
-				| Data::PeerUpdate::Flag::Members
-				| Data::PeerUpdate::Flag::FullInfo
-		) | rpl::on_next([=](const Data::PeerUpdate &) {
-			refresh(card->width());
-		}, card->lifetime());
-	}
-	card->widthValue() | rpl::on_next(refresh, card->lifetime());
-	refresh(std::max(card->width(), container->width() - 24));
-
-	card->paintRequest() | rpl::on_next([=] {
-		auto p = Painter(card);
-		auto hq = PainterHighQualityEnabler(p);
-		const auto width = card->width();
-		const auto height = card->height();
-		const auto outer = QRectF(0.5, 0.5, width - 1., height - 1.);
-		p.setPen(QPen(palette.border, 1.));
-		p.setBrush(palette.top);
-		p.drawRoundedRect(outer, 18., 18.);
-		if (!peer) {
-			const auto userpicRect = QRect(18, 20, 58, 58);
-			p.setPen(Qt::NoPen);
-			p.setBrush(QColor(badgePalette.fill.red(), badgePalette.fill.green(), badgePalette.fill.blue(), 28));
-			p.drawRoundedRect(QRectF(userpicRect), 16., 16.);
-			p.drawImage(
-				QRect(userpicRect.x() + 12, userpicRect.y() + 12, 34, 34),
-				state->fallbackLogo);
-		}
-		const auto contentLeft = 90;
-		const auto contentWidth = std::max(90, width - contentLeft - 18);
-		auto top = 18;
-		p.setPen(palette.title);
-		state->title.drawLeft(p, contentLeft, top, contentWidth, width);
-		top += state->title.countHeight(contentWidth);
-		top += 6;
-		p.setPen(badgePalette.fg);
-		state->meta.drawLeft(p, contentLeft, top, contentWidth, width);
-		top += state->meta.countHeight(contentWidth);
-		top += 8;
-		p.setPen(palette.body);
-		state->subtitle.drawLeft(p, contentLeft, top, contentWidth, width);
-		top += state->subtitle.countHeight(contentWidth);
-		top += 10;
-		p.setPen(palette.footer);
-		state->footer.drawLeft(p, contentLeft, top, contentWidth, width);
-	}, card->lifetime());
-
-	return card;
-}
-
-not_null<Ui::RoundButton*> AddPrimaryButton(
-		not_null<Ui::VerticalLayout*> container,
-		const QString &text,
-		std::function<void()> callback) {
-	auto button = object_ptr<Ui::RoundButton>(
-		container,
-		rpl::single(text),
-		st::defaultActiveButton);
-	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
-	const auto raw = container->add(
-		std::move(button),
-		style::margins(
-			OnboardingSidePadding(),
-			0,
-			OnboardingSidePadding(),
-			0));
-	raw->resizeToWidth(container->width()
-		- (OnboardingSidePadding() * 2));
-	raw->setClickedCallback(std::move(callback));
-	return raw;
 }
 
 not_null<Ui::LinkButton*> AddLinkAction(
@@ -1053,25 +511,6 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 						0),
 					style::al_top);
 			};
-			const auto addBlock = [&](const QString &title, const QString &text) {
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
-				Ui::AddDivider(container);
-				Ui::AddSubsectionTitle(container, rpl::single(title));
-				if (text.trimmed().isEmpty()) {
-					return;
-				}
-				container->add(
-					object_ptr<Ui::FlatLabel>(
-						container,
-						rpl::single(text),
-						st::boxLabel),
-					style::margins(
-						OnboardingSidePadding(),
-						0,
-						OnboardingSidePadding(),
-						0),
-					style::al_top);
-			};
 			const auto goToStep = [&](Step step) {
 				state->step = step;
 				(*rebuild)();
@@ -1121,28 +560,28 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				(*rebuild)();
 			};
 
-			switch (state->step) {
-			case Step::Welcome: {
-				addTitle(
-					RuEn(
-						"Добро пожаловать в Astrogram Desktop",
-						"Welcome to Astrogram Desktop"),
-					RuEn(
-						"Быстро подготовим клиент к первому запуску.",
-						"We'll quickly prepare the client for the first launch."));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				setFooterButtons(
-					RuEn("Продолжить", "Continue"),
-					[=] { goToStep(Step::Presets); },
+				switch (state->step) {
+				case Step::Welcome: {
+					addTitle(
+						RuEn(
+							"Добро пожаловать в Astrogram Desktop",
+							"Welcome to Astrogram Desktop"),
+						RuEn(
+							"Быстро подготовим клиент к старту.",
+							"We'll quickly prepare the client for launch."));
+					Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+					setFooterButtons(
+						RuEn("Продолжить", "Continue"),
+						[=] { goToStep(Step::Presets); },
 					RuEn("Пропустить", "Skip"),
 					skip);
 			} break;
-			case Step::Presets: {
-				addTitle(
-					RuEn("Выбери стартовый пресет", "Choose a startup preset"),
-					RuEn(
-						"Это только основа. Потом всё можно поменять вручную.",
-						"This is only the baseline. Everything can be changed later."));
+				case Step::Presets: {
+					addTitle(
+						RuEn("Выбери стартовый пресет", "Choose a startup preset"),
+						RuEn(
+							"Потом всё можно поменять вручную.",
+							"You can change everything later."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddChoiceButton(
 					container,
@@ -1190,12 +629,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					RuEn("Назад", "Back"),
 					[=] { goToStep(Step::Welcome); });
 			} break;
-			case Step::PluginsInfo: {
-				addTitle(
-					RuEn("Плагины внутри Astrogram", "Plugins inside Astrogram"),
-					RuEn(
-						"Покажем доверенные .tgd-пакеты и предложим поставить их сразу.",
-						"We'll show trusted .tgd packages and let you install them right away."));
+				case Step::PluginsInfo: {
+					addTitle(
+						RuEn("Плагины внутри Astrogram", "Plugins inside Astrogram"),
+						RuEn(
+							"Покажем доверенные .tgd-пакеты, которые можно поставить сразу.",
+							"We'll show trusted .tgd packages you can install right away."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				setFooterButtons(
 					RuEn("Продолжить", "Continue"),
@@ -1203,16 +642,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					RuEn("Назад", "Back"),
 					[=] { goToStep(Step::Presets); });
 			} break;
-			case Step::PluginsInstall: {
+				case Step::PluginsInstall: {
 				if (!state->autoReloadTriggered && args.reloadPlugins) {
 					state->autoReloadTriggered = true;
 					(*requestPluginsReload)();
 				}
-				addTitle(
-					RuEn("3 рекомендации AstroPlugins", "3 AstroPlugins recommendations"),
-					RuEn(
-						"Выбери, что поставить сразу. Остальное можно открыть позже.",
-						"Choose what to install right away. Everything else stays available later."));
+					addTitle(
+						RuEn("Рекомендации AstroPlugins", "AstroPlugins recommendations"),
+						RuEn(
+							"Выбери, что поставить сразу. Остальное можно открыть позже в Plugins.",
+							"Choose what to install right away. Everything else stays available later in Plugins."));
 				const auto fallbackPluginsTitle = args.pluginsChannelTitle.isEmpty()
 					? RuEn("AstroPlugins", "AstroPlugins")
 					: args.pluginsChannelTitle;
@@ -1257,9 +696,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							0),
 						style::al_top);
 				}
-				if (plugins->empty()) {
-					container->add(
-						object_ptr<Ui::FlatLabel>(
+					if (plugins->empty()) {
+						container->add(
+							object_ptr<Ui::FlatLabel>(
 							container,
 							rpl::single(state->reloadingPlugins
 								? RuEn(
@@ -1274,16 +713,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							8,
 							OnboardingSidePadding(),
 							0),
-						style::al_top);
-				} else {
-					const auto visiblePlugins = std::min<int>(plugins->size(), 3);
-					Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
-					Ui::AddSubsectionTitle(
-						container,
-						rpl::single(RuEn("3 стартовые рекомендации", "3 starter recommendations")));
-					const auto channel = state->pluginsChannelPeer
-						? state->pluginsChannelPeer->asChannel()
-						: nullptr;
+							style::al_top);
+					} else {
+						const auto visiblePlugins = std::min<int>(plugins->size(), 3);
+						const auto channel = state->pluginsChannelPeer
+							? state->pluginsChannelPeer->asChannel()
+							: nullptr;
 					for (auto i = 0; i != visiblePlugins; ++i) {
 						const auto &plugin = (*plugins)[i];
 						if (channel
@@ -1307,19 +742,18 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							state->pluginsChannelPeer,
 							plugin,
 							fallbackPluginsTitle);
-						const auto action = plugin.invalidServerData
-							? std::function<void()>([requestPluginsReload] {
-								(*requestPluginsReload)();
-							})
-							: plugin.install;
-						auto description = texts.description.trimmed();
-						if (!texts.sourceLabel.trimmed().isEmpty()) {
-							description = AppendLine(description, texts.sourceLabel);
-						}
-						description = AppendLine(description, pluginStatusText(plugin));
-						AddChoiceButton(
-							container,
-							texts.title,
+							const auto action = plugin.invalidServerData
+								? std::function<void()>([requestPluginsReload] {
+									(*requestPluginsReload)();
+								})
+								: plugin.install;
+							auto description = texts.description.trimmed();
+							if (plugin.invalidServerData || plugin.pendingServerData) {
+								description = AppendLine(description, pluginStatusText(plugin));
+							}
+							AddChoiceButton(
+								container,
+								texts.title,
 							description,
 							&st::menuIconDownload,
 							[action] {
@@ -1337,12 +771,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					RuEn("Назад", "Back"),
 					[=] { goToStep(Step::PluginsInfo); });
 			} break;
-			case Step::MenuCustomization: {
-				addTitle(
-					RuEn("Кастомизируй меню Astrogram", "Customize Astrogram menus"),
-					RuEn(
-						"Боковую панель и контекстное меню потом можно спокойно докрутить вручную.",
-						"You can fine-tune the side panel and context menu later by hand."));
+				case Step::MenuCustomization: {
+					addTitle(
+						RuEn("Меню Astrogram", "Astrogram menus"),
+						RuEn(
+							"Боковую панель и контекстное меню можно докрутить позже вручную.",
+							"You can fine-tune the side panel and context menu later."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				setFooterButtons(
 					RuEn("Продолжить", "Continue"),
@@ -1350,12 +784,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					RuEn("Назад", "Back"),
 					[=] { goToStep(Step::PluginsInstall); });
 			} break;
-			case Step::ShellMode: {
-				addTitle(
-					RuEn("Выбери shell-режим", "Choose a shell mode"),
-					RuEn(
-						"Это только стартовый вид окна. Его можно поменять позже.",
-						"This is only the starting shell layout. You can change it later."));
+				case Step::ShellMode: {
+					addTitle(
+						RuEn("Shell-режим", "Shell mode"),
+						RuEn(
+							"Выбери стартовый вид окна.",
+							"Choose the starting shell layout."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				AddChoiceButton(
 					container,
@@ -1388,12 +822,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					RuEn("Назад", "Back"),
 					[=] { goToStep(Step::MenuCustomization); });
 			} break;
-			case Step::ExperimentalTips: {
-				addTitle(
-					RuEn("Дальше всё в Experimental", "Next everything stays in Experimental"),
-					RuEn(
-						"После гайда останутся только обычные настройки клиента.",
-						"After onboarding only the regular client settings remain."));
+				case Step::ExperimentalTips: {
+					addTitle(
+						RuEn("Дальше всё в настройках", "Next everything stays in settings"),
+						RuEn(
+							"После гайда останутся только обычные настройки клиента.",
+							"After onboarding only the regular client settings remain."));
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 				setFooterButtons(
 					RuEn("Продолжить", "Continue"),
@@ -1401,12 +835,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					RuEn("Назад", "Back"),
 					[=] { goToStep(Step::ShellMode); });
 			} break;
-			case Step::Finish: {
-				addTitle(
-					RuEn("Всё готово", "You're all set"),
-					RuEn(
-						"Плагины, пресет и меню уже подготовлены.",
-						"Plugins, preset and menus are ready."));
+				case Step::Finish: {
+					addTitle(
+						RuEn("Готово", "Ready"),
+						RuEn(
+							"Стартовая настройка завершена.",
+							"The initial setup is complete."));
 				if (state->officialChannelPeer) {
 					AddPeerChoiceButton(
 						container,
@@ -1432,18 +866,16 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							args.openOfficialChannel();
 						});
 				}
-				if (args.openDonate) {
-					AddChoiceButton(
-						container,
-						RuEn(
-							"Поддержать Astrogram",
-							"Support Astrogram"),
-						RuEn(
-							"Открывает поддержку.",
-							"Opens support."),
-						&st::menuIconGiftPremium,
-						[=] {
-							args.openDonate();
+					if (args.openDonate) {
+						AddChoiceButton(
+							container,
+							RuEn(
+								"Поддержать Astrogram",
+								"Support Astrogram"),
+							QString(),
+							&st::menuIconGiftPremium,
+							[=] {
+								args.openDonate();
 						});
 				}
 				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);

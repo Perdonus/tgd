@@ -224,6 +224,29 @@ void AddExperimentalSectionHeader(
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 }
 
+[[nodiscard]] not_null<Ui::VerticalLayout*> AddExperimentalSubmenu(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		bool expanded = false) {
+	const auto shown = container->lifetime().make_state<bool>(expanded);
+	const auto button = container->add(object_ptr<Button>(
+		container,
+		rpl::single(title),
+		st::settingsButtonNoIcon));
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)))
+		->setDuration(0);
+	button->clicks() | rpl::on_next([=](Qt::MouseButton) {
+		*shown = !*shown;
+		wrap->toggle(*shown, anim::type::normal);
+	}, container->lifetime());
+	wrap->toggle(expanded, anim::type::instant);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 4);
+	return wrap->entity();
+}
+
 [[nodiscard]] bool SameShellModePreferences(
 		const ShellModePreferences &a,
 		const ShellModePreferences &b) {
@@ -541,19 +564,36 @@ void SetupExperimental(
 
 	AddExperimentalSectionHeader(
 		container,
-		RuEn("Редакторы меню", "Menu editors"));
-	AddMenuCustomizationEditor(controller, container);
-	AddThreeDotsMenuCustomizationEditor(controller, container);
+		RuEn("Меню и панели", "Menus and panels"));
+	const auto menuEditors = AddExperimentalSubmenu(
+		container,
+		RuEn(
+			"Боковая панель и контекстное меню",
+			"Side panel and context menu"),
+		true);
+	AddMenuCustomizationEditor(controller, menuEditors);
+	const auto threeDots = AddExperimentalSubmenu(
+		container,
+		RuEn(
+			"Меню на 3 точки",
+			"Three-dots menu"));
+	AddThreeDotsMenuCustomizationEditor(controller, threeDots);
 
 	AddExperimentalSectionHeader(
 		container,
 		RuEn(
-			"Порядок экранов",
-			"Screen order"));
+			"Основные блоки интерфейса",
+			"Primary interface blocks"));
+	const auto blockOrder = AddExperimentalSubmenu(
+		container,
+		RuEn(
+			"Перестановка блоков",
+			"Reorder blocks"),
+		true);
 	AddShellLayoutOrderEditor(
 		controller,
 		window,
-		container,
+		blockOrder,
 		shellOrderState);
 }
 

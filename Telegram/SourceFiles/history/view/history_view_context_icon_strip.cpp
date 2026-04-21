@@ -32,6 +32,7 @@ constexpr auto kStripButtonSpacing = 8;
 constexpr auto kStripMaxButtons = 4;
 constexpr auto kStripRadius = 11;
 constexpr auto kStripGap = 0;
+constexpr auto kStripOverlap = 1;
 constexpr auto kContextMenuActionIdProperty[] = "_astro_context_action_id";
 
 struct ContextIconStripButton {
@@ -211,7 +212,8 @@ private:
 	for (const auto &action : resolved.actions) {
 		if (action.id.isEmpty()
 			|| !action.icon
-			|| !action.trigger) {
+			|| !action.trigger
+			|| !action.stripEligible) {
 			continue;
 		}
 		available.emplace(action.id, &action);
@@ -241,9 +243,6 @@ private:
 		if (appendEntry(entry)) {
 			return result;
 		}
-	}
-	if (!result.empty()) {
-		return result;
 	}
 	for (const auto &entry : layout.menu) {
 		if (appendEntry(entry)) {
@@ -344,7 +343,11 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 		|| (origin == Ui::PanelAnimation::Origin::TopRight);
 	const auto applyGeometry = [=] {
 		const auto inner = menu->menu()->geometry();
-		const auto desiredHeight = inner.y() + inner.height() + kStripGap + addedHeight;
+		const auto desiredHeight = inner.y()
+			+ inner.height()
+			+ kStripGap
+			+ addedHeight
+			- kStripOverlap;
 		if (menu->height() < desiredHeight) {
 			const auto add = desiredHeight - menu->height();
 			const auto updated = menu->geometry().marginsAdded({
@@ -358,7 +361,7 @@ AttachContextIconStripResult AttachContextIconStripToMenu(
 		}
 		strip->setGeometry(
 			inner.x(),
-			inner.y() + inner.height() + kStripGap,
+			inner.y() + inner.height() + kStripGap - kStripOverlap,
 			inner.width(),
 			strip->heightForButtons());
 	};
