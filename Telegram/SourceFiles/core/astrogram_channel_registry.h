@@ -524,8 +524,13 @@ private:
 			return;
 		}
 		state.subscribed = true;
+		const auto key = state.key;
 		const auto refresh = [=](const Data::MessageUpdate &update) {
-			const auto session = state.weak.get();
+			const auto i = _states.find(key);
+			if (i == _states.end() || !i->second) {
+				return;
+			}
+			const auto session = i->second->weak.get();
 			if (!session || !update.item) {
 				return;
 			}
@@ -533,7 +538,7 @@ private:
 			if (!history || !history->peer || (history->peer->id != details::RegistryPeerId())) {
 				return;
 			}
-			invalidateAndRefresh(state.key);
+			invalidateAndRefresh(key);
 		};
 		session->changes().realtimeMessageUpdates(
 			Data::MessageUpdate::Flag::NewAdded
@@ -548,8 +553,9 @@ private:
 
 	void scheduleRefresh(SessionState &state, crl::time delay) {
 		if (!state.refreshTimer) {
+			const auto key = state.key;
 			state.refreshTimer = std::make_unique<base::Timer>([=] {
-				auto i = _states.find(state.key);
+				auto i = _states.find(key);
 				if (i == _states.end() || !i->second) {
 					return;
 				}
@@ -656,6 +662,7 @@ private:
 			done(loaded);
 			return;
 		}
+		const auto key = state.key;
 		session->api().request(MTPchannels_GetChannels(
 			MTP_vector<MTPInputChannel>(
 				1,
@@ -663,8 +670,14 @@ private:
 					MTP_long(details::kRegistryChannelBareId.bare),
 					MTP_long(0)))
 		)).done([=](const MTPmessages_Chats &result) {
-			const auto session = state.weak.get();
+			const auto i = _states.find(key);
+			if (i == _states.end() || !i->second) {
+				done(nullptr);
+				return;
+			}
+			const auto session = i->second->weak.get();
 			if (!session) {
+				done(nullptr);
 				return;
 			}
 			auto resolved = static_cast<ChannelData*>(nullptr);
