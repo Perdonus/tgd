@@ -615,15 +615,18 @@ private:
 				}, [&](const MTPDmessages_messages &data) {
 					session->data().processUsers(data.vusers());
 					session->data().processChats(data.vchats());
-					messages = data.vmessages().v;
+					const auto &loaded = data.vmessages().v;
+					messages.assign(loaded.cbegin(), loaded.cend());
 				}, [&](const MTPDmessages_messagesSlice &data) {
 					session->data().processUsers(data.vusers());
 					session->data().processChats(data.vchats());
-					messages = data.vmessages().v;
+					const auto &loaded = data.vmessages().v;
+					messages.assign(loaded.cbegin(), loaded.cend());
 				}, [&](const MTPDmessages_channelMessages &data) {
 					session->data().processUsers(data.vusers());
 					session->data().processChats(data.vchats());
-					messages = data.vmessages().v;
+					const auto &loaded = data.vmessages().v;
+					messages.assign(loaded.cbegin(), loaded.cend());
 				});
 				auto snapshot = details::ParseRegistryMessages(messages);
 				snapshot.revision = state.snapshot.revision + 1;
