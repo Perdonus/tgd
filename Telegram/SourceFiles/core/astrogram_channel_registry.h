@@ -579,7 +579,13 @@ private:
 			state.refreshTimer->cancel();
 		}
 		state.inFlight = true;
+		const auto key = state.key;
 		resolveChannel(state, [=](ChannelData *channel) {
+			const auto i = _states.find(key);
+			if (i == _states.end() || !i->second) {
+				return;
+			}
+			auto &state = *i->second;
 			const auto session = state.weak.get();
 			if (!session || !channel) {
 				finishFailure(state, u"channel-feed-unavailable"_q);
@@ -595,13 +601,26 @@ private:
 				MTP_int(0),
 				MTP_long(0)
 			)).done([=](const MTPmessages_Messages &result) {
+				const auto i = _states.find(key);
+				if (i == _states.end() || !i->second) {
+					return;
+				}
+				auto &state = *i->second;
 				const auto session = state.weak.get();
 				if (!session) {
 					return;
 				}
 				auto messages = std::vector<MTPMessage>();
 				result.match([&](const MTPDmessages_messagesNotModified &) {
-				}, [&](const auto &data) {
+				}, [&](const MTPDmessages_messages &data) {
+					session->data().processUsers(data.vusers());
+					session->data().processChats(data.vchats());
+					messages = data.vmessages().v;
+				}, [&](const MTPDmessages_messagesSlice &data) {
+					session->data().processUsers(data.vusers());
+					session->data().processChats(data.vchats());
+					messages = data.vmessages().v;
+				}, [&](const MTPDmessages_channelMessages &data) {
 					session->data().processUsers(data.vusers());
 					session->data().processChats(data.vchats());
 					messages = data.vmessages().v;
@@ -610,6 +629,11 @@ private:
 				snapshot.revision = state.snapshot.revision + 1;
 				finishSuccess(state, std::move(snapshot));
 			}).fail([=](const MTP::Error &error) {
+				const auto i = _states.find(key);
+				if (i == _states.end() || !i->second) {
+					return false;
+				}
+				auto &state = *i->second;
 				finishFailure(state, error.type());
 				return false;
 			}).send();
