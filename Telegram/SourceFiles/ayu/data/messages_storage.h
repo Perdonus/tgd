@@ -25,6 +25,7 @@ std::vector<MessageSnapshot> getEditedMessages(
 	int totalLimit = 50);
 bool hasRevisions(not_null<HistoryItem*> item);
 void addDeletedMessage(not_null<HistoryItem*> item);
+void addDeletedMessage(MessageSnapshot snapshot);
 std::vector<MessageSnapshot> getDeletedMessages(
 	not_null<PeerData*> peer,
 	ID topicId = 0,

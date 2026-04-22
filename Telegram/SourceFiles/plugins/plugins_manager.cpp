@@ -3751,6 +3751,15 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 	}
 	const auto pluginId = it->pluginId;
 	const auto handler = it->handler;
+	const auto transientSnapshotStarted = !_uiTransientPluginsActive;
+	if (transientSnapshotStarted) {
+		beginUiTransientPluginSnapshot();
+	}
+	const auto finishTransientSnapshot = gsl::finally([&] {
+		if (transientSnapshotStarted) {
+			finishUiTransientPluginSnapshot();
+		}
+	});
 	setting = NormalizeSettingDescriptor(std::move(setting));
 	auto *target = (SettingDescriptor*)nullptr;
 	for (auto &section : it->descriptor.sections) {
@@ -3823,6 +3832,7 @@ bool Manager::updateSetting(SettingsPageId id, SettingDescriptor setting) {
 				{ u"pluginId"_q, pluginId },
 				{ u"settingId"_q, snapshot.id },
 			});
+		notifyStateChanged(u"settings"_q, pluginId, true, false);
 		finishRecoveryOperation();
 		return true;
 	} catch (...) {
@@ -4684,6 +4694,7 @@ SettingsPageId Manager::registerSettingsPage(
 			setting = NormalizeSettingDescriptor(std::move(setting));
 		}
 	}
+	descriptor.id = descriptor.id.trimmed();
 	const auto settingsPageKey = RegistrySettingsPageKey(descriptor);
 	const auto existingIds = _settingsPagesByPlugin.value(pluginId);
 	for (const auto existingId : existingIds) {
@@ -4691,7 +4702,10 @@ SettingsPageId Manager::registerSettingsPage(
 		if (existing == _settingsPages.end()) {
 			continue;
 		}
-		if (RegistrySettingsPageKey(existing->descriptor) == settingsPageKey) {
+		const auto sameLogicalPage = !descriptor.id.isEmpty()
+			&& (existing->descriptor.id.trimmed() == descriptor.id);
+		if (sameLogicalPage
+			|| (RegistrySettingsPageKey(existing->descriptor) == settingsPageKey)) {
 			unregisterSettingsPage(existingId);
 		}
 	}

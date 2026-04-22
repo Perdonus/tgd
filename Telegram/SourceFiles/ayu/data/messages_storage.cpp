@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QSet>
+#include <QTimer>
 #include <type_traits>
 
 #include <rpl/event_stream.h>
@@ -57,6 +58,18 @@ struct StorageCache {
 [[nodiscard]] rpl::event_stream<> &DeletedMessagesChangedStream() {
 	static auto stream = rpl::event_stream<>();
 	return stream;
+}
+
+void ScheduleDeletedMessagesChanged() {
+	static auto pending = false;
+	if (pending) {
+		return;
+	}
+	pending = true;
+	QTimer::singleShot(0, [] {
+		pending = false;
+		DeletedMessagesChangedStream().fire({});
+	});
 }
 
 void InvalidateSnapshotsCache() {
@@ -407,8 +420,12 @@ bool hasRevisions(not_null<HistoryItem*> item) {
 }
 
 void addDeletedMessage(not_null<HistoryItem*> item) {
-	AppendSnapshot(MapSnapshot(item, u"deleted"_q));
-	DeletedMessagesChangedStream().fire({});
+	addDeletedMessage(MapSnapshot(item, u"deleted"_q));
+}
+
+void addDeletedMessage(MessageSnapshot snapshot) {
+	AppendSnapshot(snapshot);
+	ScheduleDeletedMessagesChanged();
 }
 
 std::vector<MessageSnapshot> getDeletedMessages(

@@ -129,8 +129,8 @@ void ProcessMessageDelete(not_null<HistoryItem*> item) {
 		item->destroy();
 		return;
 	}
-	item->setDeleted();
 	AyuMessages::addDeletedMessage(item);
+	item->setDeleted();
 }
 
 void CheckForSwitchInlineButton(not_null<HistoryItem*> item) {

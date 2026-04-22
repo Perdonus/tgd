@@ -94,9 +94,9 @@ constexpr auto kPluginCardOuterMargin = 12;
 constexpr auto kPluginCardContentInsetLeft = 18;
 constexpr auto kPluginCardContentInsetRight = 12;
 constexpr auto kPluginCardDescriptionInsetLeft = 18;
-constexpr auto kPluginCardMetaBottomMargin = 12;
-constexpr auto kPluginCardDescriptionBottomMargin = 6;
-constexpr auto kPluginCardActionRowTopMargin = 16;
+constexpr auto kPluginCardMetaBottomMargin = 16;
+constexpr auto kPluginCardDescriptionBottomMargin = 10;
+constexpr auto kPluginCardActionRowTopMargin = 18;
 constexpr auto kPluginCardActionRowBottomPadding = 12;
 constexpr auto kPluginCardActionGap = 8;
 
@@ -2129,6 +2129,12 @@ private:
 
 	void rebuild() {
 		const auto preservedScrollTop = _scroll->scrollTop();
+		if (Core::App().plugins().uiTransientPluginsActive()
+			&& (_content->count() > 0)) {
+			requestRebuild(150);
+			restoreScrollTop(preservedScrollTop);
+			return;
+		}
 		const auto state = LookupPluginState(_pluginId);
 		if (!state) {
 			if (_lastKnownState
@@ -2383,6 +2389,15 @@ void Plugins::rebuildList() {
 			plugins.begin(),
 			plugins.end(),
 			&IsStablePluginCardState);
+	if (transientSnapshotActive
+		&& (_lastRenderedPluginCount > 0)
+		&& (!stableNow || plugins.empty())) {
+		Logs::writeClient(
+			u"[plugins-ui] retaining previous plugin cards during transient lifecycle"_q);
+		_listRefreshPending = true;
+		scheduleRebuildList(150);
+		return;
+	}
 	const auto samePluginList = [&] {
 		if (plugins.size() != _lastStablePlugins.size()) {
 			return false;
