@@ -50,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/inactive_press.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/toast/toast.h"
 #include "ui/ui_utility.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -88,6 +89,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "apiwrap.h"
 #include "api/api_common.h"
+#include "api/api_editing.h"
 #include "api/api_sending.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_suggest_post.h"
@@ -176,7 +178,7 @@ namespace {
 	return found ? visible : fallback;
 }
 
-constexpr auto kContextMenuActionIdProperty[] = "_astro_context_action_id";
+constexpr char kContextMenuActionIdProperty[] = "_astro_context_action_id";
 
 [[nodiscard]] bool IsContextMenuCustomSeparatorId(const QString &id) {
 	return id.startsWith(u"custom_separator_"_q);
