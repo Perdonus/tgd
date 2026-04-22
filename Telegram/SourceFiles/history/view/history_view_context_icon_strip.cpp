@@ -33,7 +33,7 @@ constexpr auto kStripMaxButtons = 4;
 constexpr auto kStripRadius = 11;
 constexpr auto kStripGap = 0;
 constexpr auto kStripOverlap = 1;
-constexpr auto kContextMenuActionIdProperty[] = "_astro_context_action_id";
+constexpr char kContextMenuActionIdProperty[] = "_astro_context_action_id";
 
 struct ContextIconStripButton {
 	QString id;
