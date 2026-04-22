@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_types.h"
+#include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
 #include "mtproto/core_types.h"
