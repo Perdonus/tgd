@@ -364,7 +364,7 @@ Data::CustomEmojiSizeTag Badge::sizeTag() const {
 
 rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	const auto statusOnlyForPremium = peer->isUser();
-	const auto registryBadgeProducer = [&] {
+	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
 		return rpl::single(registry.badgeLookup(peer).badge)
 			| rpl::then(
@@ -428,7 +428,7 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 
 rpl::producer<Badge::Content> VerifiedContentForPeer(
 		not_null<PeerData*> peer) {
-	const auto registryBadgeProducer = [&] {
+	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
 		return rpl::single(registry.badgeLookup(peer).badge)
 			| rpl::then(
