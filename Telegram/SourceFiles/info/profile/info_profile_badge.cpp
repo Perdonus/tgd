@@ -439,15 +439,17 @@ rpl::producer<Badge::Content> VerifiedContentForPeer(
 	}();
 	return rpl::combine(
 		BadgeValue(peer),
-		std::move(registryBadgeProducer)
-	) | rpl::map([=](
-			BadgeType badge,
-			std::optional<EmojiStatusId> registryBadgeStatus) {
-		if ((badge != BadgeType::Verified) || registryBadgeStatus.has_value()) {
-			badge = BadgeType::None;
+		std::move(registryBadgeProducer),
+		[=](
+				BadgeType badge,
+				std::optional<EmojiStatusId> registryBadgeStatus) {
+			if ((badge != BadgeType::Verified)
+				|| registryBadgeStatus.has_value()) {
+				badge = BadgeType::None;
+			}
+			return Badge::Content{ .badge = badge };
 		}
-		return Badge::Content{ .badge = badge };
-	}) | rpl::distinct_until_changed();
+	) | rpl::distinct_until_changed();
 }
 
 rpl::producer<Badge::Content> BotVerifyBadgeForPeer(
