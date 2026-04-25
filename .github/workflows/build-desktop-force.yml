@@ -112,14 +112,22 @@ jobs:
           ./.github/scripts/download-prebuilt-win-deps.ps1 -PrepareRoot '${{ steps.prepare_paths.outputs.prepare_root }}'
 
       - name: Setup sccache
+        continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Configure build acceleration
         shell: pwsh
         run: |
-          "SCCACHE_GHA_ENABLED=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "SCCACHE_CACHE_SIZE=10G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "SCCACHE_IGNORE_SERVER_IO_ERROR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $sccache = Get-Command sccache -ErrorAction SilentlyContinue
+          if ($sccache) {
+            "ASTROGRAM_USE_SCCACHE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "SCCACHE_GHA_ENABLED=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "SCCACHE_CACHE_SIZE=10G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "SCCACHE_IGNORE_SERVER_IO_ERROR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            "ASTROGRAM_USE_SCCACHE=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Warning "sccache is not available; continuing without compiler launcher."
+          }
           $buildJobs = 2
           "CMAKE_BUILD_PARALLEL_LEVEL=$buildJobs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -502,7 +510,8 @@ jobs:
           set "CFG_LOG_2=%CI_LOGS_DIR%\\configure-attempt2.log"
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
-          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          set "ACCEL_ARGS=-D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          if /I "%ASTROGRAM_USE_SCCACHE%"=="1" set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache %ACCEL_ARGS%"
 
           where python
           python --version
@@ -642,7 +651,8 @@ jobs:
           set "BUILD_LOG_VS_RELEASE=%CI_LOGS_DIR%\\build-vs-release.log"
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
-          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          set "ACCEL_ARGS=-D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          if /I "%ASTROGRAM_USE_SCCACHE%"=="1" set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache %ACCEL_ARGS%"
           set "BUILD_JOBS=2"
           set "BUILD_JOBS_SAFE=1"
           if defined CL (set "CL=/Zm300 !CL!") else set "CL=/Zm300"
@@ -686,8 +696,10 @@ jobs:
         run: |
           if ($env:SCCACHE_PATH) {
             & $env:SCCACHE_PATH --show-stats
-          } else {
+          } elseif (Get-Command sccache -ErrorAction SilentlyContinue) {
             sccache --show-stats
+          } else {
+            Write-Warning "sccache is not available; stats skipped."
           }
 
       - name: Upload diagnostics logs
@@ -885,7 +897,8 @@ jobs:
           set "PACK_BUILD_LOG=%CI_LOGS_DIR%\\build-packaging-tools.log"
           set "API_ID=17349"
           set "API_HASH=344583e45741c457fe1862106095a5eb"
-          set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          set "ACCEL_ARGS=-D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
+          if /I "%ASTROGRAM_USE_SCCACHE%"=="1" set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache %ACCEL_ARGS%"
 
           call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF -D DESKTOP_APP_SPECIAL_TARGET=win64 > "%PACK_CFG_LOG%" 2>&1
           if errorlevel 1 (
