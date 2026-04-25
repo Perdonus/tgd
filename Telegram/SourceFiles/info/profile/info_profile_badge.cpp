@@ -366,9 +366,12 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	const auto statusOnlyForPremium = peer->isUser();
 	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
-		return rpl::single(rpl::empty) | rpl::then(
-			registry.updates(&peer->session()) | rpl::to_empty
-		) | rpl::map([=] {
+		return rpl::merge(
+			rpl::single(rpl::empty_value()),
+			registry.updates(&peer->session()) | rpl::map([] {
+				return rpl::empty_value();
+			})
+		) | rpl::map([=](rpl::empty_value) {
 			return registry.badgeLookup(peer).badge;
 		});
 	}();
@@ -429,9 +432,12 @@ rpl::producer<Badge::Content> VerifiedContentForPeer(
 		not_null<PeerData*> peer) {
 	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
-		return rpl::single(rpl::empty) | rpl::then(
-			registry.updates(&peer->session()) | rpl::to_empty
-		) | rpl::map([=] {
+		return rpl::merge(
+			rpl::single(rpl::empty_value()),
+			registry.updates(&peer->session()) | rpl::map([] {
+				return rpl::empty_value();
+			})
+		) | rpl::map([=](rpl::empty_value) {
 			return registry.badgeLookup(peer).badge;
 		});
 	}();
