@@ -367,9 +367,9 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
 		return rpl::merge(
-			rpl::single(rpl::empty_value()),
-			registry.updates(&peer->session())
-		) | rpl::map([=] {
+			rpl::single(0),
+			registry.updates(&peer->session()) | rpl::map_to(0)
+		) | rpl::map([=](int) {
 			return registry.badgeLookup(peer).badge;
 		});
 	}();
@@ -431,9 +431,9 @@ rpl::producer<Badge::Content> VerifiedContentForPeer(
 	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
 		return rpl::merge(
-			rpl::single(rpl::empty_value()),
-			registry.updates(&peer->session())
-		) | rpl::map([=] {
+			rpl::single(0),
+			registry.updates(&peer->session()) | rpl::map_to(0)
+		) | rpl::map([=](int) {
 			return registry.badgeLookup(peer).badge;
 		});
 	}();
