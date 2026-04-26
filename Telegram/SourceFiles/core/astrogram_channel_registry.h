@@ -389,7 +389,7 @@ public:
 		requestRefresh(state);
 	}
 
-	[[nodiscard]] rpl::producer<> updates(Main::Session *session) {
+	[[nodiscard]] rpl::producer<rpl::empty_value> updates(Main::Session *session) {
 		auto &state = stateFor(session);
 		subscribeToChannelUpdates(state);
 		ensureLoaded(session);
@@ -485,7 +485,7 @@ private:
 		crl::time nextRefreshAt = 0;
 		QString lastError;
 		details::Snapshot snapshot;
-		rpl::event_stream<> updated;
+		rpl::event_stream<rpl::empty_value> updated;
 		rpl::lifetime updatesLifetime;
 		std::unique_ptr<base::Timer> refreshTimer;
 	};
@@ -704,7 +704,7 @@ private:
 		state.snapshot = std::move(snapshot);
 		scheduleRefresh(state, details::kSuccessTtl);
 		if (changed) {
-			state.updated.fire({});
+			state.updated.fire(rpl::empty_value());
 		}
 	}
 
@@ -717,7 +717,7 @@ private:
 		state.loaded = true;
 		scheduleRefresh(state, state.nextRefreshAt - crl::now());
 		if (firstResolve) {
-			state.updated.fire({});
+			state.updated.fire(rpl::empty_value());
 		}
 	}
 
