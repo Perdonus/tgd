@@ -366,12 +366,12 @@ Data::CustomEmojiSizeTag Badge::sizeTag() const {
 rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	const auto statusOnlyForPremium = peer->isUser();
 	auto registryBadgeProducer = [&] {
-		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
+		const auto registry = &Core::AstrogramChannelRegistry::Registry::Instance();
 		return rpl::merge(
 			rpl::single(0),
-			registry.updates(&peer->session())
+			registry->updates(&peer->session())
 		) | rpl::map([=](int) -> std::optional<EmojiStatusId> {
-			return registry.badgeLookup(peer).badge;
+			return registry->badgeLookup(peer).badge;
 		});
 	}();
 	return rpl::combine(
@@ -430,12 +430,12 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 rpl::producer<Badge::Content> VerifiedContentForPeer(
 		not_null<PeerData*> peer) {
 	auto registryBadgeProducer = [&] {
-		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
+		const auto registry = &Core::AstrogramChannelRegistry::Registry::Instance();
 		return rpl::merge(
 			rpl::single(0),
-			registry.updates(&peer->session())
+			registry->updates(&peer->session())
 		) | rpl::map([=](int) -> std::optional<EmojiStatusId> {
-			return registry.badgeLookup(peer).badge;
+			return registry->badgeLookup(peer).badge;
 		});
 	}();
 	return rpl::combine(
