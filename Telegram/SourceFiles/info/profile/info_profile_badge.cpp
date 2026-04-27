@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_info.h"
 
 #include <algorithm>
+#include <optional>
 
 #include <QtCore/QHash>
 #include <QtGui/QColor>
@@ -366,9 +367,10 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	const auto statusOnlyForPremium = peer->isUser();
 	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
-		return rpl::single(rpl::empty_value()) | rpl::then(
+		return rpl::merge(
+			rpl::single(0),
 			registry.updates(&peer->session())
-		) | rpl::map([=] {
+		) | rpl::map([=](int) -> std::optional<EmojiStatusId> {
 			return registry.badgeLookup(peer).badge;
 		});
 	}();
@@ -429,9 +431,10 @@ rpl::producer<Badge::Content> VerifiedContentForPeer(
 		not_null<PeerData*> peer) {
 	auto registryBadgeProducer = [&] {
 		auto &registry = Core::AstrogramChannelRegistry::Registry::Instance();
-		return rpl::single(rpl::empty_value()) | rpl::then(
+		return rpl::merge(
+			rpl::single(0),
 			registry.updates(&peer->session())
-		) | rpl::map([=] {
+		) | rpl::map([=](int) -> std::optional<EmojiStatusId> {
 			return registry.badgeLookup(peer).badge;
 		});
 	}();
