@@ -704,7 +704,7 @@ private:
 		state.snapshot = std::move(snapshot);
 		scheduleRefresh(state, details::kSuccessTtl);
 		if (changed) {
-			state.updated.fire(state.snapshot.revision);
+			state.updated.fire(int(state.snapshot.revision));
 		}
 	}
 
@@ -717,7 +717,7 @@ private:
 		state.loaded = true;
 		scheduleRefresh(state, state.nextRefreshAt - crl::now());
 		if (firstResolve) {
-			state.updated.fire(state.snapshot.revision);
+			state.updated.fire(int(state.snapshot.revision));
 		}
 	}
 
