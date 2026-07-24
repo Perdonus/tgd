@@ -70,95 +70,82 @@ jobs:
 
       - name: Download prebuilt Windows deps bundle
         id: prebuilt_deps
-        shell: pwsh
+        shell: bash
         env:
-          DEPS_TOKEN: ${{ secrets.DEPS_READ_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEPS_READ_TOKEN }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $repo = 'Perdonus/astrogram-win-deps'
+          set -euo pipefail
+          REPO="Perdonus/astrogram-win-deps"
+          TMP="$RUNNER_TEMP/astrogram-win-deps"
+          LIBS_ROOT="${{ steps.prepare_paths.outputs.libs_root }}"
+          THIRD_PARTY="${{ steps.prepare_paths.outputs.thirdparty_root }}"
+          PREPARE_ROOT="${{ steps.prepare_paths.outputs.prepare_root }}"
 
-          $token = $env:DEPS_TOKEN
-          if ([string]::IsNullOrWhiteSpace($token)) {
-            Write-Host "[deps] DEPS_READ_TOKEN secret is not set"
-            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          mkdir -p "$TMP"
+
+          if ! gh release view latest -R "$REPO" --json tagName >/dev/null 2>&1; then
+            echo "[deps] no published release in $REPO yet"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          download_and_extract() {
+            local name="$1"
+            local target="$2"
+            local base="${name%.tar.zst}"
+
+            # Try direct asset first
+            if gh release download latest -R "$REPO" -p "$name" -D "$TMP" --skip-existing 2>/dev/null; then
+              echo "[deps] downloaded $name -> $target"
+              mkdir -p "$target"
+              tar --zstd -xf "$TMP/$name" -C "$target"
+              echo "[deps] extracted $name"
+              return 0
+            fi
+
+            # Try merged parts
+            local merged="$TMP/$name"
+            rm -f "$merged"
+            local found=0
+            for i in 000 001 002 003 004 005; do
+              local part="${name}.part-${i}"
+              if gh release download latest -R "$REPO" -p "$part" -D "$TMP" --skip-existing 2>/dev/null; then
+                found=1
+                cat "$TMP/$part" >> "$merged"
+                echo "[deps]   -> merged $part"
+              fi
+            done
+
+            if [ $found -eq 1 ] && [ -f "$merged" ]; then
+              echo "[deps] downloaded $name (merged) -> $target"
+              mkdir -p "$target"
+              tar --zstd -xf "$merged" -C "$target"
+              echo "[deps] extracted $name"
+              return 0
+            fi
+
+            echo "[deps] asset not found: $name"
+            return 1
           }
-          $headers = @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json' }
-          try {
-            $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$repo/releases/latest"
-          } catch {
-            Write-Host "[deps] no published release in $repo yet"
-            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          OK=true
+          download_and_extract "astrogram-win-libs.tar.zst" "$LIBS_ROOT" || OK=false
+          if [ "$OK" = true ]; then
+            download_and_extract "astrogram-win-thirdparty.tar.zst" "$THIRD_PARTY" || OK=false
+          fi
+          if [ "$OK" = true ]; then
+            download_and_extract "astrogram-win-sources.tar.zst" "$PREPARE_ROOT" || OK=false
+          fi
+
+          if [ "$OK" != true ]; then
+            echo "[deps] required assets missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
-          }
+          fi
 
-          $assets = @{}
-          foreach ($asset in $release.assets) { $assets[$asset.name] = $asset.browser_download_url }
-
-          $tmp = Join-Path $env:RUNNER_TEMP 'astrogram-win-deps'
-          New-Item -ItemType Directory -Path $tmp -Force | Out-Null
-          $libsRoot = '${{ steps.prepare_paths.outputs.libs_root }}'
-          $thirdPartyRoot = '${{ steps.prepare_paths.outputs.thirdparty_root }}'
-
-          function Download-And-Extract([string] $baseName, [string] $targetDir) {
-            if ($assets.ContainsKey($baseName)) {
-              $dest = Join-Path $tmp $baseName
-              Write-Host "[deps] downloading $baseName -> $targetDir"
-              Invoke-WebRequest -Headers $headers -Uri $assets[$baseName] -OutFile $dest
-              New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-              tar --zstd -xf $dest -C $targetDir
-              Write-Host "[deps] extracted $baseName"
-              return $true
-            }
-            $parts = @($assets.Keys | Where-Object { $_ -match [regex]::Escape($baseName) + '\.part-\d+' } | Sort-Object)
-            if ($parts.Count -gt 0) {
-              $merged = Join-Path $tmp $baseName
-              Write-Host "[deps] downloading $baseName (merged $($parts.Count) parts) -> $targetDir"
-              $parts | ForEach-Object {
-                $partDest = Join-Path $tmp $_
-                Write-Host "[deps]   -> $_"
-                Invoke-WebRequest -Headers $headers -Uri $assets[$_] -OutFile $partDest
-                $bytes = [System.IO.File]::ReadAllBytes($partDest)
-                $fs = [System.IO.File]::Open($merged, [System.IO.FileMode]::Append)
-                try {
-                  $fs.Write($bytes, 0, $bytes.Length)
-                } finally {
-                  $fs.Close()
-                }
-              }
-              New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-              tar --zstd -xf $merged -C $targetDir
-              Write-Host "[deps] extracted $baseName"
-              return $true
-            }
-            return $false
-          }
-
-          $ok = $true
-          $extractMap = @{
-            'astrogram-win-libs.tar.zst' = $libsRoot
-            'astrogram-win-thirdparty.tar.zst' = $thirdPartyRoot
-            'astrogram-win-sources.tar.zst' = '${{ steps.prepare_paths.outputs.prepare_root }}'
-          }
-          foreach ($name in $extractMap.Keys) {
-            $targetDir = $extractMap[$name]
-            Write-Host "[deps] processing $name"
-            if (-not (Download-And-Extract $name $targetDir)) {
-              Write-Host "[deps] asset not found: $name"
-              $ok = $false
-              break
-            }
-          }
-
-          if (-not $ok) {
-            Write-Host "[deps] required assets missing"
-            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            exit 0
-          }
-
-          Write-Host "[deps] all archives extracted successfully"
-          Get-ChildItem -LiteralPath $libsRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 20 Name
-          "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          echo "[deps] all archives extracted"
+          ls -la "$LIBS_ROOT" 2>/dev/null || true
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Restore desktop source mirrors cache
         id: desktop_sources_cache
