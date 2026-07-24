@@ -87,16 +87,35 @@ jobs:
             exit 0
           fi
 
+          extract_archive() {
+            local archive="$1"
+            local target="$2"
+            local name
+            name=$(basename "$archive")
+            mkdir -p "$target"
+            echo "[deps] extracting $name -> $target"
+            local uncompressed="$archive.tar"
+            zstd -d --rm "$archive" -o "$uncompressed" 2>/dev/null || {
+              echo "[deps] zstd decompress failed for $name, trying pipe..."
+              zstd -d "$archive" 2>/dev/null | tar -xf - -C "$target"
+              local rc=$?
+              rm -f "${archive%.zst}"
+              return $rc
+            }
+            tar -xf "$uncompressed" -C "$target"
+            local rc=$?
+            rm -f "$uncompressed"
+            return $rc
+          }
+
           download_and_extract() {
             local name="$1"
             local target="$2"
 
             if gh release download latest -R "$REPO" -p "$name" -D "$TMP" --skip-existing 2>/dev/null; then
-              echo "[deps] downloaded $name -> $target"
-              mkdir -p "$target"
-              tar --zstd -xf "$TMP/$name" -C "$target"
-              echo "[deps] extracted $name"
-              return 0
+              echo "[deps] downloaded $name"
+              extract_archive "$TMP/$name" "$target"
+              return $?
             fi
 
             local merged="$TMP/$name"
@@ -112,11 +131,9 @@ jobs:
             done
 
             if [ $found -eq 1 ] && [ -f "$merged" ]; then
-              echo "[deps] downloaded $name (merged) -> $target"
-              mkdir -p "$target"
-              tar --zstd -xf "$merged" -C "$target"
-              echo "[deps] extracted $name"
-              return 0
+              echo "[deps] downloaded $name (merged)"
+              extract_archive "$merged" "$target"
+              return $?
             fi
 
             echo "[deps] asset not found: $name"
@@ -139,7 +156,14 @@ jobs:
           fi
 
           echo "[deps] all archives extracted"
+          echo "[deps] libs contents:"
           ls -la "$LIBS_ROOT" 2>/dev/null || true
+          echo "[deps] libs/win64 contents:"
+          ls -la "$LIBS_ROOT/win64" 2>/dev/null || true
+          echo "[deps] thirdparty contents:"
+          ls -la "$THIRD_PARTY" 2>/dev/null || true
+          echo "[deps] prepare contents:"
+          ls -la "$PREPARE_ROOT" 2>/dev/null || true
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Restore desktop source mirrors cache
