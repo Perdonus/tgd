@@ -68,103 +68,114 @@ jobs:
 
       - name: Download prebuilt Windows deps bundle
         id: prebuilt_deps
-        shell: bash
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.DEPS_READ_TOKEN }}
         run: |
-          set -euo pipefail
-          REPO="Perdonus/astrogram-win-deps"
-          TMP="$RUNNER_TEMP/astrogram-win-deps"
-          LIBS_ROOT="${{ steps.prepare_paths.outputs.libs_root }}"
-          THIRD_PARTY="${{ steps.prepare_paths.outputs.thirdparty_root }}"
-          PREPARE_ROOT="${{ steps.prepare_paths.outputs.prepare_root }}"
+          $ErrorActionPreference = "Continue"
+          $repo = "Perdonus/astrogram-win-deps"
+          $tmp = Join-Path $env:RUNNER_TEMP "astrogram-win-deps"
+          $libsRoot = "${{ steps.prepare_paths.outputs.libs_root }}"
+          $thirdParty = "${{ steps.prepare_paths.outputs.thirdparty_root }}"
+          $prepareRoot = "${{ steps.prepare_paths.outputs.prepare_root }}"
 
-          mkdir -p "$TMP"
+          if (-not (Test-Path $tmp)) { New-Item -ItemType Directory -Path $tmp -Force | Out-Null }
 
-          if ! gh release view latest -R "$REPO" --json tagName >/dev/null 2>&1; then
-            echo "[deps] no published release in $REPO yet"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          $releaseExists = gh release view latest -R $repo --json tagName 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "[deps] no published release in $repo yet"
+            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             exit 0
-          fi
+          }
 
-          extract_archive() {
-            local archive="$1"
-            local target="$2"
-            local name
-            name=$(basename "$archive")
-            mkdir -p "$target"
-            echo "[deps] extracting $name -> $target"
-            local uncompressed="$archive.tar"
-            zstd -d --rm "$archive" -o "$uncompressed" 2>/dev/null || {
-              echo "[deps] zstd decompress failed for $name, trying pipe..."
-              zstd -d "$archive" 2>/dev/null | tar -xf - -C "$target"
-              local rc=$?
-              rm -f "${archive%.zst}"
-              return $rc
+          function Extract-TarZst {
+            param([string]$Archive, [string]$Target)
+            if (-not (Test-Path $Target)) { New-Item -ItemType Directory -Path $Target -Force | Out-Null }
+            Write-Host "[deps] extracting $(Split-Path $Archive -Leaf) -> $Target"
+            $zstd = Get-Command zstd -ErrorAction SilentlyContinue
+            if (-not $zstd) {
+              $candidate = "C:\tools\zstd\zstd.exe"
+              if (Test-Path $candidate) { $zstd = @{ Source = $candidate } }
             }
-            tar -xf "$uncompressed" -C "$target"
-            local rc=$?
-            rm -f "$uncompressed"
-            return $rc
+            if ($zstd) {
+              Write-Host "[deps] using zstd at $($zstd.Source)"
+              $uncompressed = "$Archive.tar"
+              & $zstd.Source -d --rm $Archive -o $uncompressed 2>&1
+              if ($LASTEXITCODE -eq 0 -and (Test-Path $uncompressed)) {
+                tar -xf $uncompressed -C $Target 2>&1
+                $tarRc = $LASTEXITCODE
+                Remove-Item $uncompressed -Force -ErrorAction SilentlyContinue
+                if ($tarRc -eq 0) { Write-Host "[deps] extraction OK"; return $true }
+                Write-Host "[deps] tar extraction failed with code $tarRc"
+                return $false
+              }
+              Write-Host "[deps] zstd decompress failed, trying pipe..."
+              & $zstd.Source -d $Archive 2>$null | tar -xf - -C $Target 2>&1
+              Remove-Item "$($Archive -replace '\.zst$','')" -Force -ErrorAction SilentlyContinue
+              if ($LASTEXITCODE -eq 0) { Write-Host "[deps] pipe extraction OK"; return $true }
+              return $false
+            }
+            Write-Host "[deps] zstd not found, trying tar --zstd..."
+            tar --zstd -xf $Archive -C $Target 2>&1
+            return ($LASTEXITCODE -eq 0)
           }
 
-          download_and_extract() {
-            local name="$1"
-            local target="$2"
-
-            if gh release download latest -R "$REPO" -p "$name" -D "$TMP" --skip-existing 2>/dev/null; then
-              echo "[deps] downloaded $name"
-              extract_archive "$TMP/$name" "$target"
-              return $?
-            fi
-
-            local merged="$TMP/$name"
-            rm -f "$merged"
-            local found=0
-            for i in 000 001 002 003 004 005; do
-              local part="${name}.part-${i}"
-              if gh release download latest -R "$REPO" -p "$part" -D "$TMP" --skip-existing 2>/dev/null; then
-                found=1
-                cat "$TMP/$part" >> "$merged"
-                echo "[deps]   -> merged $part"
-              fi
-            done
-
-            if [ $found -eq 1 ] && [ -f "$merged" ]; then
-              echo "[deps] downloaded $name (merged)"
-              extract_archive "$merged" "$target"
-              return $?
-            fi
-
-            echo "[deps] asset not found: $name"
-            return 1
+          function Download-AndExtract {
+            param([string]$Name, [string]$Target)
+            $direct = gh release download latest -R $repo -p $Name -D $tmp --skip-existing 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "[deps] downloaded $Name"
+              return Extract-TarZst -Archive (Join-Path $tmp $Name) -Target $Target
+            }
+            $merged = Join-Path $tmp $Name
+            if (Test-Path $merged) { Remove-Item $merged -Force }
+            $found = $false
+            foreach ($i in @("000","001","002","003","004","005")) {
+              $part = "$Name.part-$i"
+              $dl = gh release download latest -R $repo -p $part -D $tmp --skip-existing 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                $found = $true
+                $partPath = Join-Path $tmp $part
+                $bytes = [System.IO.File]::ReadAllBytes($partPath)
+                $fs = [System.IO.File]::Open($merged, [System.IO.FileMode]::Append)
+                $fs.Write($bytes, 0, $bytes.Length)
+                $fs.Close()
+                Write-Host "[deps]   -> merged $part"
+              }
+            }
+            if ($found -and (Test-Path $merged)) {
+              Write-Host "[deps] downloaded $Name (merged)"
+              return Extract-TarZst -Archive $merged -Target $Target
+            }
+            Write-Host "[deps] asset not found: $Name"
+            return $false
           }
 
-          OK=true
-          download_and_extract "astrogram-win-libs.tar.zst" "$LIBS_ROOT" || OK=false
-          if [ "$OK" = true ]; then
-            download_and_extract "astrogram-win-thirdparty.tar.zst" "$THIRD_PARTY" || OK=false
-          fi
-          if [ "$OK" = true ]; then
-            download_and_extract "astrogram-win-sources.tar.zst" "$PREPARE_ROOT" || OK=false
-          fi
+          $ok = $true
+          if (-not (Download-AndExtract "astrogram-win-libs.tar.zst" $libsRoot)) { $ok = $false }
+          if ($ok) {
+            if (-not (Download-AndExtract "astrogram-win-thirdparty.tar.zst" $thirdParty)) { $ok = $false }
+          }
+          if ($ok) {
+            if (-not (Download-AndExtract "astrogram-win-sources.tar.zst" $prepareRoot)) { $ok = $false }
+          }
 
-          if [ "$OK" != true ]; then
-            echo "[deps] required assets missing"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          if (-not $ok) {
+            Write-Host "[deps] required assets missing"
+            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             exit 0
-          fi
+          }
 
-          echo "[deps] all archives extracted"
-          echo "[deps] libs contents:"
-          ls -la "$LIBS_ROOT" 2>/dev/null || true
-          echo "[deps] libs/win64 contents:"
-          ls -la "$LIBS_ROOT/win64" 2>/dev/null || true
-          echo "[deps] thirdparty contents:"
-          ls -la "$THIRD_PARTY" 2>/dev/null || true
-          echo "[deps] prepare contents:"
-          ls -la "$PREPARE_ROOT" 2>/dev/null || true
-          echo "ready=true" >> "$GITHUB_OUTPUT"
+          Write-Host "[deps] all archives extracted"
+          Write-Host "[deps] libs contents:"
+          Get-ChildItem $libsRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          Write-Host "[deps] libs/win64 contents:"
+          Get-ChildItem (Join-Path $libsRoot "win64") -Force -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          Write-Host "[deps] thirdparty contents:"
+          Get-ChildItem $thirdParty -Force -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          Write-Host "[deps] prepare contents:"
+          Get-ChildItem $prepareRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Restore desktop source mirrors cache
         id: desktop_sources_cache
