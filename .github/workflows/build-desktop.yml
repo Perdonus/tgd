@@ -97,20 +97,23 @@ jobs:
 
           $tmp = Join-Path $env:RUNNER_TEMP 'astrogram-win-deps'
           New-Item -ItemType Directory -Path $tmp -Force | Out-Null
-          $prepareRoot = '${{ steps.prepare_paths.outputs.prepare_root }}'
+          $libsRoot = '${{ steps.prepare_paths.outputs.libs_root }}'
+          $thirdPartyRoot = '${{ steps.prepare_paths.outputs.thirdparty_root }}'
 
-          function Download-And-Extract([string] $baseName) {
+          function Download-And-Extract([string] $baseName, [string] $targetDir) {
             if ($assets.ContainsKey($baseName)) {
               $dest = Join-Path $tmp $baseName
-              Write-Host "[deps] downloading $baseName"
+              Write-Host "[deps] downloading $baseName -> $targetDir"
               Invoke-WebRequest -Headers $headers -Uri $assets[$baseName] -OutFile $dest
-              tar --zstd -xf $dest -C $prepareRoot
+              New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+              tar --zstd -xf $dest -C $targetDir
+              Write-Host "[deps] extracted $baseName"
               return $true
             }
             $parts = @($assets.Keys | Where-Object { $_ -match [regex]::Escape($baseName) + '\.part-\d+' } | Sort-Object)
             if ($parts.Count -gt 0) {
               $merged = Join-Path $tmp $baseName
-              Write-Host "[deps] downloading $baseName (merged $($parts.Count) parts)"
+              Write-Host "[deps] downloading $baseName (merged $($parts.Count) parts) -> $targetDir"
               $parts | ForEach-Object {
                 $partDest = Join-Path $tmp $_
                 Write-Host "[deps]   -> $_"
@@ -123,15 +126,24 @@ jobs:
                   $fs.Close()
                 }
               }
-              tar --zstd -xf $merged -C $prepareRoot
+              New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+              tar --zstd -xf $merged -C $targetDir
+              Write-Host "[deps] extracted $baseName"
               return $true
             }
             return $false
           }
 
           $ok = $true
-          foreach ($name in @('astrogram-win-libs.tar.zst','astrogram-win-thirdparty.tar.zst','astrogram-win-sources.tar.zst')) {
-            if (-not (Download-And-Extract $name)) {
+          $extractMap = @{
+            'astrogram-win-libs.tar.zst' = $libsRoot
+            'astrogram-win-thirdparty.tar.zst' = $thirdPartyRoot
+            'astrogram-win-sources.tar.zst' = '${{ steps.prepare_paths.outputs.prepare_root }}'
+          }
+          foreach ($name in $extractMap.Keys) {
+            $targetDir = $extractMap[$name]
+            Write-Host "[deps] processing $name"
+            if (-not (Download-And-Extract $name $targetDir)) {
               Write-Host "[deps] asset not found: $name"
               $ok = $false
               break
@@ -144,6 +156,8 @@ jobs:
             exit 0
           }
 
+          Write-Host "[deps] all archives extracted successfully"
+          Get-ChildItem -LiteralPath $libsRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 20 Name
           "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Restore desktop source mirrors cache
