@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/top_background_gradient.h"
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
@@ -42,6 +43,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui {
 namespace {
+
+constexpr auto kStepCount = 5;
 
 enum class Step {
 	Welcome = 0,
@@ -378,12 +381,6 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 	return row;
 }
 
-void ClearLayout(not_null<Ui::VerticalLayout*> container) {
-	while (container->count()) {
-		delete container->widgetAt(0);
-	}
-}
-
 } // namespace
 
 void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
@@ -416,278 +413,299 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			box->closeBox();
 		};
 
-		const auto rebuild = std::make_shared<Fn<void()>>();
-		*rebuild = [=]() mutable {
-			ClearLayout(container);
+		// Build step containers wrapped in SlideWrap for smooth transitions.
+		auto stepWraps = std::array<
+			not_null<Ui::SlideWrap<Ui::VerticalLayout>*>,
+			kStepCount>();
 
-			const auto addTitle = [&](const QString &title, const QString &subtitle) {
-				container->add(
-					object_ptr<Ui::FlatLabel>(
-						container,
-						rpl::single(title),
-						st::sessionBigName),
-					style::margins(st::boxRowPadding.left(), 12, st::boxRowPadding.right(), 0),
-					style::al_top);
-				container->add(
-					object_ptr<Ui::FlatLabel>(
-						container,
-						rpl::single(subtitle),
-						st::boxLabel),
-					style::margins(st::boxRowPadding.left(), 6, st::boxRowPadding.right(), 0),
-					style::al_top);
-			};
+		for (auto i = 0; i < kStepCount; ++i) {
+			const auto wrap = container->add(
+				object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+					container,
+					object_ptr<Ui::VerticalLayout>(container)));
+			wrap->toggle(false, anim::type::instant);
+			stepWraps[i] = wrap;
+		}
 
-			switch (state->step) {
-			case Step::Welcome: {
-				AddHeroCover(
-					container,
-					RuEn("Добро пожаловать в", "Welcome to"),
-					RuEn(
-						"Astrogram Desktop\nКлиент уже готов к работе, дальше поможем быстро настроить самое важное.",
-						"Astrogram Desktop\nThe client is ready to use, next we will quickly tune the important parts."),
-					QColor(0x08, 0x15, 0x11),
-					QColor(0x10, 0x2b, 0x20),
-					QColor(0x2d, 0xd1, 0x85),
-					QColor(0xa1, 0xff, 0xcc));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip);
-				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
-					state->step = Step::Presets;
-					(*rebuild)();
+		const auto showStep = [=](Step step) {
+			state->step = step;
+			for (auto i = 0; i < kStepCount; ++i) {
+				const auto isCurrent = (Step(i) == step);
+				stepWraps[i]->toggle(isCurrent, anim::type::normal);
+			}
+		};
+
+		// Welcome step
+		{
+			const auto inner = stepWraps[0]->entity();
+			AddHeroCover(
+				inner,
+				RuEn("Добро пожаловать в", "Welcome to"),
+				RuEn(
+					"Astrogram Desktop\nКлиент уже готов к работе, дальше поможем быстро настроить самое важное.",
+					"Astrogram Desktop\nThe client is ready to use, next we will quickly tune the important parts."),
+				QColor(0x08, 0x15, 0x11),
+				QColor(0x10, 0x2b, 0x20),
+				QColor(0x2d, 0xd1, 0x85),
+				QColor(0xa1, 0xff, 0xcc));
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip);
+			AddPrimaryButton(inner, RuEn("Продолжить", "Continue"), [=] {
+				showStep(Step::Presets);
+			});
+		}
+
+		// Presets step
+		{
+			const auto inner = stepWraps[1]->entity();
+			AddHeroCover(
+				inner,
+				RuEn("Выбери пресет", "Choose a preset"),
+				RuEn(
+					"Astrogram Desktop\nЭто можно поменять позже в настройках Astrogram.",
+					"Astrogram Desktop\nYou can change this later in Astrogram settings."),
+				QColor(0x08, 0x15, 0x11),
+				QColor(0x10, 0x2b, 0x20),
+				QColor(0x2d, 0xd1, 0x85),
+				QColor(0xa1, 0xff, 0xcc));
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddChoiceButton(
+				inner,
+				RuEn("Рекомендованный", "Recommended"),
+				RuEn(
+					"Включает полезные Astrogram-функции без агрессивных изменений интерфейса.",
+					"Enables useful Astrogram features without aggressive interface changes."),
+				&st::menuIconPremium,
+				[=] {
+					if (args.applyPreset) {
+						args.applyPreset(AstrogramOnboardingPreset::Recommended);
+					}
+					showStep(Step::PluginsInfo);
 				});
-			} break;
-			case Step::Presets: {
-				addTitle(
-					RuEn("Выбери стартовый пресет", "Choose a startup preset"),
-					RuEn(
-						"Это можно поменять позже в настройках Astrogram. Если не хочешь выбирать сейчас, просто пропусти шаг.",
-						"You can change this later in Astrogram settings. If you don't want to decide now, just skip this step."));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddChoiceButton(
-					container,
-					RuEn("Рекомендованный", "Recommended"),
-					RuEn(
-						"Включает полезные Astrogram-функции без агрессивных изменений интерфейса.",
-						"Enables useful Astrogram features without aggressive interface changes."),
-					&st::menuIconPremium,
-					[=] {
-						if (args.applyPreset) {
-							args.applyPreset(AstrogramOnboardingPreset::Recommended);
-						}
-						state->step = Step::PluginsInfo;
-						(*rebuild)();
-					});
-				AddChoiceButton(
-					container,
-					RuEn("Приватный", "Private"),
-					RuEn(
-						"Делает упор на ghost mode, защиту от удаления и более осторожное поведение клиента.",
-						"Focuses on ghost mode, anti-recall and a more private client setup."),
-					&st::menuIconLock,
-					[=] {
-						if (args.applyPreset) {
-							args.applyPreset(AstrogramOnboardingPreset::Private);
-						}
-						state->step = Step::PluginsInfo;
-						(*rebuild)();
-					});
-				AddChoiceButton(
-					container,
-					RuEn("Минимальный", "Minimal"),
-					RuEn(
-						"Оставляет интерфейс ближе к Telegram Desktop и включает только базовые улучшения Astrogram.",
-						"Keeps the interface closer to Telegram Desktop and enables only core Astrogram improvements."),
-					&st::menuIconPalette,
-					[=] {
-						if (args.applyPreset) {
-							args.applyPreset(AstrogramOnboardingPreset::Minimal);
-						}
-						state->step = Step::PluginsInfo;
-						(*rebuild)();
-					});
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddLinkAction(container, RuEn("Выбрать позже", "Choose later"), [=] {
-					state->step = Step::PluginsInfo;
-					(*rebuild)();
+			AddChoiceButton(
+				inner,
+				RuEn("Приватный", "Private"),
+				RuEn(
+					"Делает упор на ghost mode, защиту от удаления и более осторожное поведение клиента.",
+					"Focuses on ghost mode, anti-recall and a more private client setup."),
+				&st::menuIconLock,
+				[=] {
+					if (args.applyPreset) {
+						args.applyPreset(AstrogramOnboardingPreset::Private);
+					}
+					showStep(Step::PluginsInfo);
 				});
-				Ui::AddSkip(container, st::settingsCheckboxesSkip);
-			} break;
-			case Step::PluginsInfo: {
-				addTitle(
-					RuEn("Что такое плагины?", "What are plugins?"),
-					RuEn(
-						"Плагины расширяют Astrogram: добавляют новые функции, настройки и полезные сценарии прямо внутри клиента.",
-						"Plugins extend Astrogram with extra features, settings and useful workflows directly inside the client."));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddChoiceButton(
-					container,
-					RuEn("Быстрая установка рекомендуемых плагинов", "Install recommended plugins"),
-					RuEn(
-						"Мы покажем несколько безопасных пакетов и дадим установить их в пару кликов.",
-						"We'll show a few safe packages and let you install them in a couple of clicks."),
-					&st::menuIconCustomize,
-					[=] {
-						state->step = Step::PluginsInstall;
-						(*rebuild)();
-					});
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
-					state->step = Step::PluginsInstall;
-					(*rebuild)();
+			AddChoiceButton(
+				inner,
+				RuEn("Минимальный", "Minimal"),
+				RuEn(
+					"Оставляет интерфейс ближе к Telegram Desktop и включает только базовые улучшения Astrogram.",
+					"Keeps the interface closer to Telegram Desktop and enables only core Astrogram improvements."),
+				&st::menuIconPalette,
+				[=] {
+					if (args.applyPreset) {
+						args.applyPreset(AstrogramOnboardingPreset::Minimal);
+					}
+					showStep(Step::PluginsInfo);
 				});
-				AddLinkAction(container, RuEn("Позже", "Later"), [=] {
-					state->step = Step::Finish;
-					(*rebuild)();
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddLinkAction(inner, RuEn("Выбрать позже", "Choose later"), [=] {
+				showStep(Step::PluginsInfo);
+			});
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip);
+		}
+
+		// Plugins Info step
+		{
+			const auto inner = stepWraps[2]->entity();
+			AddHeroCover(
+				inner,
+				RuEn("Плагины", "Plugins"),
+				RuEn(
+					"Astrogram Desktop\nПлагины расширяют Astrogram: добавляют новые функции, настройки и полезные сценарии прямо внутри клиента.",
+					"Astrogram Desktop\nPlugins extend Astrogram with extra features, settings and useful workflows directly inside the client."),
+				QColor(0x08, 0x13, 0x1f),
+				QColor(0x0f, 0x2b, 0x3f),
+				QColor(0x44, 0xc0, 0xff),
+				QColor(0x9c, 0xff, 0xd3));
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddChoiceButton(
+				inner,
+				RuEn("Быстрая установка рекомендуемых плагинов", "Install recommended plugins"),
+				RuEn(
+					"Мы покажем несколько безопасных пакетов и дадим установить их в пару кликов.",
+					"We'll show a few safe packages and let you install them in a couple of clicks."),
+				&st::menuIconCustomize,
+				[=] {
+					showStep(Step::PluginsInstall);
 				});
-			} break;
-			case Step::PluginsInstall: {
-				addTitle(
-					RuEn("Рекомендуемые плагины", "Recommended plugins"),
-					RuEn(
-						"Выбирай, что поставить сразу. Позже можно вернуться к этому списку из раздела плагинов и канала с пакетами.",
-						"Choose what to install right now. You can come back to this list later from the plugins section and the packages channel."));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
-				AddPeerChoiceButton(
-					container,
-					state->pluginsChannelPeer,
-					args.pluginsChannelTitle.isEmpty()
-						? RuEn("AstroPlugins", "AstroPlugins")
-						: args.pluginsChannelTitle,
-					args.pluginsChannelSubtitle,
-					[=] {
-						if (args.subscribePluginsChannel) {
-							args.subscribePluginsChannel();
-						}
-					});
-				AddPrimaryButton(container, RuEn("Подписаться", "Follow"), [=] {
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddPrimaryButton(inner, RuEn("Продолжить", "Continue"), [=] {
+				showStep(Step::PluginsInstall);
+			});
+			AddLinkAction(inner, RuEn("Позже", "Later"), [=] {
+				showStep(Step::Finish);
+			});
+		}
+
+		// Plugins Install step
+		{
+			const auto inner = stepWraps[3]->entity();
+			AddHeroCover(
+				inner,
+				RuEn("Рекомендуемые плагины", "Recommended plugins"),
+				RuEn(
+					"Astrogram Desktop\nВыбирай, что поставить сразу. Позже можно вернуться к этому списку из раздела плагинов.",
+					"Astrogram Desktop\nChoose what to install right now. You can come back to this list later from the plugins section."),
+				QColor(0x08, 0x13, 0x1f),
+				QColor(0x0f, 0x2b, 0x3f),
+				QColor(0x44, 0xc0, 0xff),
+				QColor(0x9c, 0xff, 0xd3));
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 3);
+
+			AddPeerChoiceButton(
+				inner,
+				state->pluginsChannelPeer,
+				args.pluginsChannelTitle.isEmpty()
+					? RuEn("AstroPlugins", "AstroPlugins")
+					: args.pluginsChannelTitle,
+				args.pluginsChannelSubtitle,
+				[=] {
 					if (args.subscribePluginsChannel) {
 						args.subscribePluginsChannel();
 					}
 				});
-				if (args.plugins.empty()) {
-					container->add(
-						object_ptr<Ui::FlatLabel>(
-							container,
-							rpl::single(RuEn(
-								"Сервер ещё не передал рекомендованные пакеты. Когда укажешь `astrogram_onboarding_plugin_post_ids`, они появятся здесь автоматически.",
-								"The server has not provided recommended packages yet. Once `astrogram_onboarding_plugin_post_ids` is set, they will appear here automatically.")),
-							st::boxLabel),
-						style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
-						style::al_top);
-				} else {
-					for (const auto &plugin : args.plugins) {
-						const auto install = plugin.install;
-						AddChoiceButton(
-							container,
-							plugin.title,
-							plugin.description,
-							&st::menuIconDownload,
-							[install] {
-								if (install) {
-									install();
-								}
-							});
-						if (!plugin.sourceLabel.trimmed().isEmpty()) {
-							container->add(
-								object_ptr<Ui::FlatLabel>(
-									container,
-									rpl::single(plugin.sourceLabel.trimmed()),
-									st::defaultFlatLabel),
-								style::margins(26, -2, 26, 4),
-								style::al_top);
-						}
-						AddPrimaryButton(
-							container,
-							RuEn("Установить", "Install"),
-							[install] {
-								if (install) {
-									install();
-								}
-							});
-						Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
-					}
+			AddPrimaryButton(inner, RuEn("Подписаться", "Follow"), [=] {
+				if (args.subscribePluginsChannel) {
+					args.subscribePluginsChannel();
 				}
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPrimaryButton(container, RuEn("Продолжить", "Continue"), [=] {
-					state->step = Step::Finish;
-					(*rebuild)();
-				});
-				AddLinkAction(container, RuEn("Посмотреть все", "View all"), [=] {
-					if (args.openAllPlugins) {
-						args.openAllPlugins();
+			});
+			if (args.plugins.empty()) {
+				inner->add(
+					object_ptr<Ui::FlatLabel>(
+						inner,
+						rpl::single(RuEn(
+							"Сервер ещё не передал рекомендованные пакеты. Они появятся здесь автоматически.",
+							"The server has not provided recommended packages yet. They will appear here automatically.")),
+						st::boxLabel),
+					style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
+					style::al_top);
+			} else {
+				for (const auto &plugin : args.plugins) {
+					const auto install = plugin.install;
+					AddChoiceButton(
+						inner,
+						plugin.title,
+						plugin.description,
+						&st::menuIconDownload,
+						[install] {
+							if (install) {
+								install();
+							}
+						});
+					if (!plugin.sourceLabel.trimmed().isEmpty()) {
+						inner->add(
+							object_ptr<Ui::FlatLabel>(
+								inner,
+								rpl::single(plugin.sourceLabel.trimmed()),
+								st::defaultFlatLabel),
+							style::margins(26, -2, 26, 4),
+							style::al_top);
 					}
-				});
-			} break;
-			case Step::Finish: {
-				AddHeroCover(
-					container,
-					RuEn("Всё готово", "You're all set"),
-					RuEn(
-						"Настройка завершена. Подпишись на официальный канал Astrogram и при желании поддержи разработку.",
-						"Setup is complete. Follow the official Astrogram channel and support development if you want."),
-					QColor(0x08, 0x13, 0x1f),
-					QColor(0x0f, 0x2b, 0x3f),
-					QColor(0x44, 0xc0, 0xff),
-					QColor(0x9c, 0xff, 0xd3));
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPeerChoiceButton(
-					container,
-					state->officialChannelPeer,
-					args.officialChannelTitle.trimmed().isEmpty()
-						? RuEn("Astrogram", "Astrogram")
-						: args.officialChannelTitle.trimmed(),
-					args.officialChannelSubtitle.trimmed().isEmpty()
-						? RuEn(
-							"Получай новости о сборках, клиентах и новых функциях Astrogram.",
-							"Get updates about builds, client changes and new Astrogram features.")
-						: args.officialChannelSubtitle,
-					[=] {
-						if (args.openOfficialChannel) {
-							args.openOfficialChannel();
-						}
-					});
-				AddChoiceButton(
-					container,
-					RuEn(
-						"Поддержать разработку Astrogram",
-						"Support Astrogram development"),
-					RuEn(
-						"Открывает донат-окно Astrogram с серверным значком подписчика.",
-						"Opens the Astrogram support box with the server-side subscriber badge."),
-					&st::menuIconGiftPremium,
-					[=] {
-						if (args.openDonate) {
-							args.openDonate();
-						}
-					});
-				Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-				AddPrimaryButton(container, RuEn("Завершить", "Finish"), finish);
-			} break;
+					AddPrimaryButton(
+						inner,
+						RuEn("Установить", "Install"),
+						[install] {
+							if (install) {
+								install();
+							}
+						});
+					Ui::AddSkip(inner, st::settingsCheckboxesSkip / 3);
+				}
 			}
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddPrimaryButton(inner, RuEn("Продолжить", "Continue"), [=] {
+				showStep(Step::Finish);
+			});
+			AddLinkAction(inner, RuEn("Посмотреть все", "View all"), [=] {
+				if (args.openAllPlugins) {
+					args.openAllPlugins();
+				}
+			});
+		}
 
-			if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
-				args.resolvePluginsChannel([=](PeerData *peer) {
-					if (!peer) {
-						return;
-					}
-					state->pluginsChannelPeer = peer;
-					if (weak.get() && (state->step == Step::PluginsInstall)) {
-						(*rebuild)();
+		// Finish step
+		{
+			const auto inner = stepWraps[4]->entity();
+			AddHeroCover(
+				inner,
+				RuEn("Всё готово", "You're all set"),
+				RuEn(
+					"Astrogram Desktop\nНастройка завершена. Подпишись на официальный канал Astrogram и при желании поддержи разработку.",
+					"Astrogram Desktop\nSetup is complete. Follow the official Astrogram channel and support development if you want."),
+				QColor(0x08, 0x13, 0x1f),
+				QColor(0x0f, 0x2b, 0x3f),
+				QColor(0x44, 0xc0, 0xff),
+				QColor(0x9c, 0xff, 0xd3));
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddPeerChoiceButton(
+				inner,
+				state->officialChannelPeer,
+				args.officialChannelTitle.trimmed().isEmpty()
+					? RuEn("Astrogram", "Astrogram")
+					: args.officialChannelTitle.trimmed(),
+				args.officialChannelSubtitle.trimmed().isEmpty()
+					? RuEn(
+						"Получай новости о сборках, клиентах и новых функциях Astrogram.",
+						"Get updates about builds, client changes and new Astrogram features.")
+					: args.officialChannelSubtitle,
+				[=] {
+					if (args.openOfficialChannel) {
+						args.openOfficialChannel();
 					}
 				});
-			}
-			if (!state->officialChannelPeer && args.resolveOfficialChannel) {
-				args.resolveOfficialChannel([=](PeerData *peer) {
-					if (!peer) {
-						return;
-					}
-					state->officialChannelPeer = peer;
-					if (weak.get() && (state->step == Step::Finish)) {
-						(*rebuild)();
+			AddChoiceButton(
+				inner,
+				RuEn(
+					"Поддержать разработку Astrogram",
+					"Support Astrogram development"),
+				RuEn(
+					"Открывает донат-окно Astrogram с серверным значком подписчика.",
+					"Opens the Astrogram support box with the server-side subscriber badge."),
+				&st::menuIconGiftPremium,
+				[=] {
+					if (args.openDonate) {
+						args.openDonate();
 					}
 				});
-			}
-		};
-		(*rebuild)();
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
+			AddPrimaryButton(inner, RuEn("Завершить", "Finish"), finish);
+		}
+
+		// Show the current step and resolve peer data.
+		showStep(Step::Welcome);
+
+		if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
+			args.resolvePluginsChannel([=](PeerData *peer) {
+				if (!peer) {
+					return;
+				}
+				state->pluginsChannelPeer = peer;
+				if (weak.get() && (state->step == Step::PluginsInstall)) {
+					showStep(Step::PluginsInstall);
+				}
+			});
+		}
+		if (!state->officialChannelPeer && args.resolveOfficialChannel) {
+			args.resolveOfficialChannel([=](PeerData *peer) {
+				if (!peer) {
+					return;
+				}
+				state->officialChannelPeer = peer;
+				if (weak.get() && (state->step == Step::Finish)) {
+					showStep(Step::Finish);
+				}
+			});
+		}
 	}));
 }
 

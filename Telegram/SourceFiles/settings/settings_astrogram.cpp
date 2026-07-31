@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
+#include "ui/boxes/astrogram_onboarding_box.h"
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
@@ -842,6 +843,19 @@ void SetupAstrogramHome(
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
 	AddLinksSection(controller, container);
+	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
+	AddActionButtonWithLabel(
+		container,
+		RuEn("Гайд по Astrogram", "Astrogram Guide"),
+		RuEn(
+			"Открыть окно первичной настройки",
+			"Open the initial setup guide"),
+		[=] {
+			Ui::ShowAstrogramOnboardingBox({
+				.controller = controller,
+			});
+		},
+		{ &st::menuIconChannel });
 }
 
 void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
