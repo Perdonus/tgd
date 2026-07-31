@@ -588,29 +588,16 @@ jobs:
             throw "[paths] Qt directories were not found after normalization"
           }
 
-          # ThirdParty linkage: the prebuilt deps extract ThirdParty alongside
-          # Libraries (e.g. D:/a/tgd/ThirdParty/), but cmake/validate_d3d_compiler
-          # looks for Python3 at ../ThirdParty from the workspace, which resolves
-          # to D:/a/tgd/ThirdParty/. Create a junction from the workspace level
-          # so both paths resolve.
-          $workspaceThirdParty = Join-Path $workspace "ThirdParty"
-          $parentThirdParty = Join-Path $parent "ThirdParty"
-          $tpTarget = Get-ExistingItem $parentThirdParty
-          if ($tpTarget) {
-            Ensure-DirAlias $workspaceThirdParty $tpTarget.FullName
-          } else {
-            Write-Host "[paths] ThirdParty not found at $parentThirdParty, checking alternatives"
-            $tpCandidates = @(
-              (Join-Path $workspace "Telegram\ThirdParty"),
-              $workspaceThirdParty
-            ) | Where-Object { Get-ExistingItem $_ }
-            if ($tpCandidates) {
-              Write-Host "[paths] ThirdParty found at: $($tpCandidates[0])"
-            } else {
-              Write-Host "[paths] parent directory structure:"
-              Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue | Select-Object -First 40 FullName
-            }
-          }
+      - name: Ensure Python3 found by CMake
+        if: ${{ success() }}
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          Write-Host "System Python3: $python"
+          $pythonDir = Split-Path -Parent $python
+          "Python3_ROOT_DIR=$pythonDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "Python3_EXECUTABLE=$python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          python --version
 
       - name: Configure (Windows Release)
         id: configure
