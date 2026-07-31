@@ -591,6 +591,32 @@ jobs:
             throw "[paths] Qt directories were not found after normalization"
           }
 
+          # ThirdParty linkage: the prepare root has ThirdParty extracted at
+          # ../ThirdParty (i.e. D:/a/ThirdParty/), but cmake/validate_d3d_compiler
+          # looks for Python3 at ../ThirdParty from the workspace, which resolves
+          # to D:/a/tgd/ThirdParty/. Create a junction so both paths resolve.
+          $thirdPartyRoot = Join-Path $prepareRoot "ThirdParty"
+          $workspaceThirdParty = Join-Path $workspace "ThirdParty"
+          $parentThirdParty = Join-Path $parent "ThirdParty"
+          $tpTarget = Get-ExistingItem $thirdPartyRoot
+          if ($tpTarget) {
+            Ensure-DirAlias $parentThirdParty $tpTarget.FullName
+            Ensure-DirAlias $workspaceThirdParty $tpTarget.FullName
+          } else {
+            Write-Host "[paths] ThirdParty root not found at $thirdPartyRoot, trying parent"
+            $tpCandidates = @(
+              $parentThirdParty,
+              $workspaceThirdParty,
+              (Join-Path $workspace "Telegram\ThirdParty")
+            ) | Where-Object { Get-ExistingItem $_ }
+            if ($tpCandidates) {
+              Write-Host "[paths] ThirdParty found at: $($tpCandidates[0])"
+            } else {
+              Write-Host "[paths] ThirdParty directory structure:"
+              Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue | Select-Object -First 40 FullName
+            }
+          }
+
       - name: Configure (Windows Release)
         id: configure
         shell: cmd
