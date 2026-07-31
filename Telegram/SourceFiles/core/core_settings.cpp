@@ -419,6 +419,7 @@ QByteArray Settings::serialize() const {
 			<< qint32(_ghostHideOnlineStatus.current() ? 1 : 0)
 			<< qint32(_ghostHideTypingProgress.current() ? 1 : 0)
 			<< qint32(_disableStories.current() ? 1 : 0)
+			<< qint32(_versionShown.current() ? 1 : 0)
 			<< qint32(_disableOpenLinkWarning.current() ? 1 : 0)
 			<< qint32(_showMessageSeconds.current() ? 1 : 0)
 			<< qint32(_showPollResultsBeforeVoting.current() ? 1 : 0)
@@ -573,6 +574,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint32 semiTransparentDeletedMessages = _semiTransparentDeletedMessages.current() ? 1 : 0;
 	qint32 disableAds = _disableAds.current() ? 1 : 0;
 	qint32 disableStories = _disableStories.current() ? 1 : 0;
+	qint32 versionShown = _versionShown.current() ? 1 : 0;
 	qint32 disableOpenLinkWarning = _disableOpenLinkWarning.current() ? 1 : 0;
 	qint32 showMessageSeconds = _showMessageSeconds.current() ? 1 : 0;
 	qint32 showPollResultsBeforeVoting
@@ -958,6 +960,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 		stream >> disableStories;
 	}
 	if (!stream.atEnd()) {
+		stream >> versionShown;
+	}
+	if (!stream.atEnd()) {
 		stream >> disableOpenLinkWarning;
 	}
 	if (!stream.atEnd()) {
@@ -1227,6 +1232,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_semiTransparentDeletedMessages = (semiTransparentDeletedMessages == 1);
 	_disableAds = (disableAds == 1);
 	_disableStories = (disableStories == 1);
+	_versionShown = (versionShown == 1);
 	_disableOpenLinkWarning = (disableOpenLinkWarning == 1);
 	_showMessageSeconds = (showMessageSeconds == 1);
 	_showPollResultsBeforeVoting = (showPollResultsBeforeVoting == 1);

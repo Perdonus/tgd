@@ -1693,9 +1693,6 @@ void Plugins::setupContent() {
 }
 
 void Plugins::scheduleRebuildList(int delayMs) {
-	if (_rebuildScheduled) {
-		return;
-	}
 	_rebuildScheduled = true;
 	QTimer::singleShot(delayMs, this, [=] {
 		_rebuildScheduled = false;

@@ -317,6 +317,19 @@ public:
 		_disableStories = value;
 		_saveDelayed.fire({});
 	}
+	[[nodiscard]] bool versionShown() const {
+		return _versionShown.current();
+	}
+	[[nodiscard]] rpl::producer<bool> versionShownValue() const {
+		return _versionShown.value();
+	}
+	void setVersionShown(bool value) {
+		if (_versionShown.current() == value) {
+			return;
+		}
+		_versionShown = value;
+		_saveDelayed.fire({});
+	}
 	[[nodiscard]] bool disableOpenLinkWarning() const {
 		return _disableOpenLinkWarning.current();
 	}
@@ -1298,6 +1311,7 @@ private:
 	rpl::variable<bool> _localPremium = false;
 	rpl::variable<bool> _disableAds = true;
 	rpl::variable<bool> _disableStories = false;
+	rpl::variable<bool> _versionShown = true;
 	rpl::variable<bool> _disableOpenLinkWarning = false;
 	rpl::variable<bool> _showMessageSeconds = false;
 	rpl::variable<bool> _showPollResultsBeforeVoting = false;

@@ -419,6 +419,11 @@ MainMenu::MainMenu(
 			controller->show(Box(AboutBox));
 		}));
 
+	Core::App().settings().versionShownValue(
+	) | rpl::on_next([=](bool shown) {
+		_version->setVisible(shown);
+	}, _version->lifetime());
+
 	rpl::combine(
 		_toggleAccounts->rightSkipValue(),
 		rpl::single(rpl::empty) | rpl::then(_badge->updated())

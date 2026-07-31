@@ -1029,6 +1029,13 @@ void SetupAstrogramInterface(
 		RuEn(
 			"Показывать ID пользователей, чатов и каналов",
 			"Show user, chat and channel IDs in profiles"));
+	AddToggle(
+		container,
+		settings.versionShownValue(),
+		RuEn(
+			"Показывать версию Astrogram в главном меню",
+			"Show Astrogram version in main menu"),
+		[&](bool toggled) { settings.setVersionShown(toggled); });
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Перевод и речь", "Translation & speech"));
 	AddToggle(
