@@ -591,28 +591,26 @@ jobs:
             throw "[paths] Qt directories were not found after normalization"
           }
 
-          # ThirdParty linkage: the prepare root has ThirdParty extracted at
-          # ../ThirdParty (i.e. D:/a/ThirdParty/), but cmake/validate_d3d_compiler
+          # ThirdParty linkage: the prebuilt deps extract ThirdParty alongside
+          # Libraries (e.g. D:/a/tgd/ThirdParty/), but cmake/validate_d3d_compiler
           # looks for Python3 at ../ThirdParty from the workspace, which resolves
-          # to D:/a/tgd/ThirdParty/. Create a junction so both paths resolve.
-          $thirdPartyRoot = Join-Path $prepareRoot "ThirdParty"
+          # to D:/a/tgd/ThirdParty/. Create a junction from the workspace level
+          # so both paths resolve.
           $workspaceThirdParty = Join-Path $workspace "ThirdParty"
           $parentThirdParty = Join-Path $parent "ThirdParty"
-          $tpTarget = Get-ExistingItem $thirdPartyRoot
+          $tpTarget = Get-ExistingItem $parentThirdParty
           if ($tpTarget) {
-            Ensure-DirAlias $parentThirdParty $tpTarget.FullName
             Ensure-DirAlias $workspaceThirdParty $tpTarget.FullName
           } else {
-            Write-Host "[paths] ThirdParty root not found at $thirdPartyRoot, trying parent"
+            Write-Host "[paths] ThirdParty not found at $parentThirdParty, checking alternatives"
             $tpCandidates = @(
-              $parentThirdParty,
-              $workspaceThirdParty,
-              (Join-Path $workspace "Telegram\ThirdParty")
+              (Join-Path $workspace "Telegram\ThirdParty"),
+              $workspaceThirdParty
             ) | Where-Object { Get-ExistingItem $_ }
             if ($tpCandidates) {
               Write-Host "[paths] ThirdParty found at: $($tpCandidates[0])"
             } else {
-              Write-Host "[paths] ThirdParty directory structure:"
+              Write-Host "[paths] parent directory structure:"
               Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue | Select-Object -First 40 FullName
             }
           }
