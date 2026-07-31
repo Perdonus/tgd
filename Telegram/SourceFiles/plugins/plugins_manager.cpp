@@ -5809,7 +5809,23 @@ void Manager::unloadPluginRecord(
 	record.messageObserverIds.clear();
 	record.state.loaded = false;
 	if (record.library) {
-		record.library->unload();
+		try {
+			InvokePluginCallbackOrThrow([&] {
+				record.library->unload();
+			});
+		} catch (...) {
+			if (!preserveLoadError || record.state.error.trimmed().isEmpty()) {
+				record.state.error = u"Library unload failed: "_q + CurrentExceptionText();
+			}
+			logEvent(
+				u"unload"_q,
+				u"single-library-unload-failed"_q,
+				QJsonObject{
+					{ u"pluginId"_q, pluginId },
+					{ u"path"_q, record.state.path },
+					{ u"reason"_q, CurrentExceptionText() },
+				});
+		}
 		record.library.reset();
 	}
 	FlushPluginUnload();

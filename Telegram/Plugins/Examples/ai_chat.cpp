@@ -1,6 +1,6 @@
 /*
 AI chat plugin for Astrogram.
-Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
+Intercepts /ai, keeps a per-window dialog, and talks to a configurable OpenAI-compatible API.
 */
 #include "plugins/plugins_api.h"
 
@@ -42,26 +42,25 @@ Intercepts /ai, keeps a per-window dialog, and talks to sosiskibot.ru/api.
 #endif // Q_OS_WIN
 
 TGD_PLUGIN_PREVIEW(
-	"sosiskibot.ai_chat",
+	"astrogram.ai_chat",
 	"AI Chat",
-	"2.0",
-	"@etopizdesblin",
-	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to sosiskibot.ru/api.",
-	"https://sosiskibot.ru",
+	"3.0",
+	"Astrogram",
+	"Intercepts /ai, opens the built-in Astrogram AI chat, and talks to a configurable OpenAI-compatible API.",
+	"",
 	"")
 
 namespace {
 
-constexpr auto kPluginId = "sosiskibot.ai_chat";
-constexpr auto kPluginVersion = "2.0";
-constexpr auto kPluginAuthor = "@etopizdesblin";
-constexpr auto kSiteUrl = "https://sosiskibot.ru";
-constexpr auto kApiUrl = "https://sosiskibot.ru/api/v1/chat/completions";
-constexpr auto kModelName = "gpt-4o-mini";
+constexpr auto kPluginId = "astrogram.ai_chat";
+constexpr auto kPluginVersion = "3.0";
+constexpr auto kPluginAuthor = "Astrogram";
+constexpr auto kDefaultModelName = "gpt-4o-mini";
 
+constexpr auto kApiUrlSettingId = "api_url";
 constexpr auto kApiKeySettingId = "api_key";
+constexpr auto kModelSettingId = "model";
 constexpr auto kOpenChatSettingId = "open_chat";
-constexpr auto kOpenSiteSettingId = "open_site";
 constexpr auto kInfoSettingId = "usage_info";
 
 constexpr int kDialogWidth = 560;
@@ -180,7 +179,7 @@ public:
 	: _host(host)
 	, _network(new QNetworkAccessManager(this)) {
 		refreshInfo();
-		_apiKey = readApiKey();
+		loadSettings();
 	}
 
 	Plugins::PluginInfo info() const override {
@@ -189,7 +188,7 @@ public:
 
 	void onLoad() override {
 		refreshInfo();
-		_apiKey = readApiKey();
+		loadSettings();
 
 		_outgoingInterceptorId = _host->registerOutgoingTextInterceptor(
 			_info.id,
@@ -234,8 +233,8 @@ public:
 				QStringLiteral("Open AI Chat"),
 				u8"Открыть ИИ-чат"),
 				tr(
-					QStringLiteral("Open the built-in sosiskibot.ru AI dialog."),
-					u8"Открыть встроенный ИИ-диалог sosiskibot.ru."),
+					QStringLiteral("Open the built-in AI chat dialog."),
+					u8"Открыть встроенный ИИ-диалог."),
 				[this](const Plugins::ActionContext &context) {
 					Q_UNUSED(context);
 					scheduleOpenChat(QString(), nullptr, false);
@@ -345,37 +344,64 @@ private:
 		_info.version = Latin1(kPluginVersion);
 		_info.author = Latin1(kPluginAuthor);
 		_info.description = tr(
-			QStringLiteral("Intercepts /ai, opens the built-in Astrogram AI chat, and uses sosiskibot.ru/api."),
-			u8"Перехватывает /ai, открывает встроенный ИИ-чат Astrogram и использует sosiskibot.ru/api.");
-		_info.website = Latin1(kSiteUrl);
+			QStringLiteral("Intercepts /ai, opens the built-in Astrogram AI chat, and talks to a configurable OpenAI-compatible API."),
+			u8"Перехватывает /ai, открывает встроенный ИИ-чат Astrogram и подключается к настраиваемому OpenAI-совместимому API.");
+		_info.website = QString();
+	}
+
+	void loadSettings() {
+		_apiUrl = NormalizeText(_host->settingStringValue(
+			_info.id, Latin1(kApiUrlSettingId), QString()));
+		_apiKey = NormalizeText(_host->settingStringValue(
+			_info.id, Latin1(kApiKeySettingId), QString()));
+		_model = NormalizeText(_host->settingStringValue(
+			_info.id, Latin1(kModelSettingId), QString()));
+		if (_model.isEmpty()) {
+			_model = Latin1(kDefaultModelName);
+		}
 	}
 
 	Plugins::SettingsPageDescriptor makeSettingsPage() const {
+		auto apiUrl = Plugins::SettingDescriptor();
+		apiUrl.id = Latin1(kApiUrlSettingId);
+		apiUrl.title = tr(
+			QStringLiteral("API endpoint URL"),
+			u8"URL эндпоинта API");
+		apiUrl.description = tr(
+			QStringLiteral("OpenAI-compatible API endpoint URL (e.g. https://api.openai.com/v1/chat/completions). Required."),
+			u8"OpenAI-совместимый URL эндпоинта API (например https://api.openai.com/v1/chat/completions). Обязательно.");
+		apiUrl.type = Plugins::SettingControl::TextInput;
+		apiUrl.textValue = _apiUrl;
+		apiUrl.placeholderText = tr(
+			QStringLiteral("https://api.openai.com/v1/chat/completions"),
+			u8"https://api.openai.com/v1/chat/completions");
+
 		auto apiKey = Plugins::SettingDescriptor();
 		apiKey.id = Latin1(kApiKeySettingId);
 		apiKey.title = tr(
 			QStringLiteral("API key"),
 			u8"API-ключ");
 		apiKey.description = tr(
-			QStringLiteral("Access token for requests to sosiskibot.ru/api."),
-			u8"Токен доступа для запросов к sosiskibot.ru/api.");
+			QStringLiteral("Access token for the API. Required."),
+			u8"Токен доступа для API. Обязательно.");
 		apiKey.type = Plugins::SettingControl::TextInput;
 		apiKey.textValue = _apiKey;
 		apiKey.placeholderText = tr(
-			QStringLiteral("Paste your sosiskibot.ru API key"),
-			u8"Вставьте API-ключ от sosiskibot.ru");
+			QStringLiteral("Paste your API key"),
+			u8"Вставьте ваш API-ключ");
 		apiKey.secret = true;
 
-		auto openSite = Plugins::SettingDescriptor();
-		openSite.id = Latin1(kOpenSiteSettingId);
-		openSite.title = tr(
-			QStringLiteral("Get API key"),
-			u8"Получить API-ключ");
-		openSite.description = tr(
-			QStringLiteral("Open sosiskibot.ru to get or manage your API key."),
-			u8"Открыть sosiskibot.ru, чтобы получить или настроить API-ключ.");
-		openSite.type = Plugins::SettingControl::ActionButton;
-		openSite.buttonText = QStringLiteral("sosiskibot.ru");
+		auto model = Plugins::SettingDescriptor();
+		model.id = Latin1(kModelSettingId);
+		model.title = tr(
+			QStringLiteral("Model name"),
+			u8"Название модели");
+		model.description = tr(
+			QStringLiteral("Model name (e.g. gpt-4o-mini, gpt-4o). Default: gpt-4o-mini."),
+			u8"Название модели (например gpt-4o-mini, gpt-4o). По умолчанию: gpt-4o-mini.");
+		model.type = Plugins::SettingControl::TextInput;
+		model.textValue = _model;
+		model.placeholderText = Latin1(kDefaultModelName);
 
 		auto openChat = Plugins::SettingDescriptor();
 		openChat.id = Latin1(kOpenChatSettingId);
@@ -397,11 +423,11 @@ private:
 			u8"Как это работает");
 		info.description = _outgoingInterceptorId
 			? tr(
-				QStringLiteral("Use /ai to open the AI chat. The plugin intercepts the command before sending, so it is not posted into the current chat. API keys are available at sosiskibot.ru."),
-				u8"Используйте /ai, чтобы открыть ИИ-чат. Плагин перехватывает команду до отправки, поэтому она не попадает в текущий чат. API-ключ можно получить на sosiskibot.ru.")
+				QStringLiteral("Use /ai to open the AI chat. The plugin intercepts the command before sending, so it is not posted into the current chat. Configure the API endpoint URL and key in the fields above."),
+				u8"Используйте /ai, чтобы открыть ИИ-чат. Плагин перехватывает команду до отправки, поэтому она не попадает в текущий чат. Укажите URL эндпоинта API и ключ в полях выше.")
 			: tr(
-				QStringLiteral("Use /ai to open the AI chat. In this build, outgoing slash-command interception is unavailable, so sending /ai may still reach the chat. You can still open the dialog from the plugin action. API keys are available at sosiskibot.ru."),
-				u8"Используйте /ai, чтобы открыть ИИ-чат. В этой сборке недоступен перехват исходящих slash-команд, поэтому /ai может уйти в чат. Окно по-прежнему можно открыть через действие плагина. API-ключ можно получить на sosiskibot.ru.");
+				QStringLiteral("Use /ai to open the AI chat. In this build, outgoing slash-command interception is unavailable, so sending /ai may still reach the chat. You can still open the dialog from the plugin action. Configure the API endpoint URL and key in the fields above."),
+				u8"Используйте /ai, чтобы открыть ИИ-чат. В этой сборке недоступен перехват исходящих slash-команд, поэтому /ai может уйти в чат. Окно по-прежнему можно открыть через действие плагина. Укажите URL эндпоинта API и ключ в полях выше.");
 		info.type = Plugins::SettingControl::InfoText;
 
 		auto section = Plugins::SettingsSectionDescriptor();
@@ -409,9 +435,10 @@ private:
 		section.title = tr(
 			QStringLiteral("Connection"),
 			u8"Подключение");
+		section.settings.push_back(apiUrl);
 		section.settings.push_back(apiKey);
+		section.settings.push_back(model);
 		section.settings.push_back(openChat);
-		section.settings.push_back(openSite);
 		section.settings.push_back(info);
 
 		auto page = Plugins::SettingsPageDescriptor();
@@ -420,36 +447,48 @@ private:
 			QStringLiteral("AI Chat"),
 			u8"ИИ-чат");
 		page.description = tr(
-			QStringLiteral("Configure the built-in Astrogram AI chat and access to sosiskibot.ru."),
-			u8"Настройте встроенный ИИ-чат Astrogram и доступ к sosiskibot.ru.");
+			QStringLiteral("Configure the built-in Astrogram AI chat and API connection."),
+			u8"Настройте встроенный ИИ-чат Astrogram и подключение к API.");
 		page.sections.push_back(section);
 		return page;
 	}
 
-	QString readApiKey() const {
-		return NormalizeText(_host->settingStringValue(
-			_info.id,
-			Latin1(kApiKeySettingId),
-			QString()));
-	}
-
 	QString defaultStatusText() const {
-		return _apiKey.isEmpty()
+		if (_apiUrl.isEmpty()) {
+			return tr(
+				QStringLiteral("Configure the API endpoint URL in Settings > Plugins > AI Chat."),
+				u8"Укажите URL эндпоинта API: Настройки > Плагины > ИИ-чат.");
+		}
+		if (_apiKey.isEmpty()) {
+			return tr(
+				QStringLiteral("Configure the API key in Settings > Plugins > AI Chat."),
+				u8"Укажите API-ключ: Настройки > Плагины > ИИ-чат.");
+		}
+		return (_outgoingInterceptorId
 			? tr(
-				QStringLiteral("Add your sosiskibot.ru API key in Settings > Plugins > AI Chat."),
-				u8"Добавьте API-ключ от sosiskibot.ru: Настройки > Плагины > ИИ-чат.")
-			: (_outgoingInterceptorId
-				? tr(
-					QStringLiteral("Ready. Model: %1. Use Ctrl+Enter to send.").arg(Latin1(kModelName)),
-					u8"Готово. Модель: %1. Для отправки используй Ctrl+Enter.").arg(Latin1(kModelName))
-				: tr(
-					QStringLiteral("Ready, but outgoing /ai interception is unavailable in this build. Model: %1. Use Ctrl+Enter to send.").arg(Latin1(kModelName)),
-					u8"Готово, но перехват исходящих /ai в этой сборке недоступен. Модель: %1. Для отправки используй Ctrl+Enter.").arg(Latin1(kModelName)));
+				QStringLiteral("Ready. Model: %1. Use Ctrl+Enter to send.").arg(_model),
+				u8"Готово. Модель: %1. Для отправки используй Ctrl+Enter.").arg(_model)
+			: tr(
+				QStringLiteral("Ready, but outgoing /ai interception is unavailable in this build. Model: %1. Use Ctrl+Enter to send.").arg(_model),
+				u8"Готово, но перехват исходящих /ai в этой сборке недоступен. Модель: %1. Для отправки используй Ctrl+Enter.").arg(_model));
 	}
 
 	void handleSettingChanged(const Plugins::SettingDescriptor &setting) {
+		if (setting.id == Latin1(kApiUrlSettingId)) {
+			_apiUrl = NormalizeText(setting.textValue);
+			refreshIdleWindows();
+			return;
+		}
 		if (setting.id == Latin1(kApiKeySettingId)) {
 			_apiKey = NormalizeText(setting.textValue);
+			refreshIdleWindows();
+			return;
+		}
+		if (setting.id == Latin1(kModelSettingId)) {
+			_model = NormalizeText(setting.textValue);
+			if (_model.isEmpty()) {
+				_model = Latin1(kDefaultModelName);
+			}
 			refreshIdleWindows();
 			return;
 		}
@@ -460,56 +499,6 @@ private:
 				}
 			});
 			return;
-		}
-		if (setting.id == Latin1(kOpenSiteSettingId)) {
-			QTimer::singleShot(120, this, [this] {
-				if (!_isUnloading) {
-					openSite();
-				}
-			});
-			return;
-		}
-	}
-
-	void openSite() const {
-		const auto url = QUrl(Latin1(kSiteUrl));
-		const auto urlText = url.toString();
-		auto launched = false;
-#ifdef Q_OS_WIN
-		const auto shellResult = reinterpret_cast<quintptr>(ShellExecuteW(
-			nullptr,
-			L"open",
-			reinterpret_cast<LPCWSTR>(urlText.utf16()),
-			nullptr,
-			nullptr,
-			SW_SHOWNORMAL));
-		launched = (shellResult > 32);
-		if (!launched) {
-			launched = QProcess::startDetached(
-				QStringLiteral("cmd"),
-				{
-					QStringLiteral("/c"),
-					QStringLiteral("start"),
-					QStringLiteral(""),
-					urlText,
-				});
-		}
-#elif defined(Q_OS_MACOS)
-		launched = QProcess::startDetached(
-			QStringLiteral("open"),
-			{ urlText });
-#else
-		launched = QProcess::startDetached(
-			QStringLiteral("xdg-open"),
-			{ urlText });
-#endif // Q_OS_WIN
-		if (!launched) {
-			launched = url.isValid() && QDesktopServices::openUrl(url);
-		}
-		if (!launched) {
-			_host->showToast(tr(
-				QStringLiteral("Could not open sosiskibot.ru."),
-				u8"Не удалось открыть sosiskibot.ru."));
 		}
 	}
 
@@ -717,8 +706,8 @@ private:
 
 		auto intro = new QLabel(
 			tr(
-				QStringLiteral("Chat with sosiskibot.ru directly inside Astrogram. Each Astrogram window keeps its own in-memory conversation."),
-				u8"Общайся с sosiskibot.ru прямо внутри Astrogram. У каждого окна Astrogram будет своя отдельная история диалога в памяти."),
+				QStringLiteral("Chat with the AI directly inside Astrogram. Each Astrogram window keeps its own in-memory conversation. Configure the API endpoint URL and key in Settings > Plugins > AI Chat."),
+				u8"Общайся с ИИ прямо внутри Astrogram. У каждого окна Astrogram будет своя отдельная история диалога в памяти. Укажите URL эндпоинта API и ключ: Настройки > Плагины > ИИ-чат."),
 			dialog);
 		intro->setWordWrap(true);
 		layout->addWidget(intro);
@@ -898,10 +887,18 @@ private:
 			return;
 		}
 
+		if (_apiUrl.isEmpty()) {
+			state->statusText = tr(
+				QStringLiteral("Configure the API endpoint URL in Settings > Plugins > AI Chat."),
+				u8"Укажите URL эндпоинта API: Настройки > Плагины > ИИ-чат.");
+			applyWindowState(*state);
+			return;
+		}
+
 		if (_apiKey.isEmpty()) {
 			state->statusText = tr(
-				QStringLiteral("Configure your sosiskibot.ru API key in Settings > Plugins > AI Chat."),
-				u8"Укажите API-ключ от sosiskibot.ru: Настройки > Плагины > ИИ-чат.");
+				QStringLiteral("Configure the API key in Settings > Plugins > AI Chat."),
+				u8"Укажите API-ключ: Настройки > Плагины > ИИ-чат.");
 			applyWindowState(*state);
 			return;
 		}
@@ -939,11 +936,11 @@ private:
 		});
 
 		const auto payload = QJsonObject{
-			{ QStringLiteral("model"), Latin1(kModelName) },
+			{ QStringLiteral("model"), _model },
 			{ QStringLiteral("messages"), messages },
 		};
 
-		QNetworkRequest request{ QUrl(Latin1(kApiUrl)) };
+		QNetworkRequest request{ QUrl(_apiUrl) };
 		request.setHeader(
 			QNetworkRequest::ContentTypeHeader,
 			QByteArrayLiteral("application/json"));
@@ -1080,7 +1077,9 @@ private:
 	Plugins::OutgoingInterceptorId _outgoingInterceptorId = 0;
 	Plugins::SettingsPageId _settingsPageId = 0;
 	Plugins::PluginInfo _info;
+	QString _apiUrl;
 	QString _apiKey;
+	QString _model;
 	bool _isUnloading = false;
 	std::unordered_map<QWidget*, WindowState> _windowStates;
 	std::unique_ptr<WindowState> _standaloneState;
