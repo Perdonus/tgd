@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "support/support_templates.h"
 #include "tde2e/tde2e_api.h"
 #include "tde2e/tde2e_integration.h"
+#include "ui/boxes/astrogram_onboarding_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/controls/swipe_handler.h"
@@ -82,6 +83,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
+#include <QtCore/QUrl>
 
 namespace Window {
 namespace {
@@ -877,6 +880,27 @@ void MainMenu::setupMenu() {
 			_nightThemeSwitches.fire_copy(*darkMode);
 		}
 	}, _nightThemeToggle->lifetime());
+
+	_menu->add(
+		object_ptr<Ui::PlainShadow>(_menu),
+		{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
+
+	addAction(
+		rpl::single(RuEn("Гайд", "Guide")),
+		{ &st::menuIconChannel }
+	)->setClickedCallback([=] {
+		controller->hideLayer();
+		Ui::ShowAstrogramOnboardingBox({
+			.controller = controller,
+		});
+	});
+
+	addAction(
+		rpl::single(RuEn("Поддержка", "Support")),
+		{ &st::menuIconInfo }
+	)->setClickedCallback([=] {
+		QDesktopServices::openUrl(QUrl(u"tg://support"_q));
+	});
 }
 
 void MainMenu::resizeEvent(QResizeEvent *e) {
