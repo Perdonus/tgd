@@ -491,7 +491,8 @@ void MainMenu::moveBadge() {
 		- _toggleAccounts->rightSkip()
 		- _badge->widget()->width();
 	const auto left = st::mainMenuCoverNameLeft
-		+ std::min(_name.maxWidth() + st::semiboldFont->spacew, available);
+		+ std::min(_name.maxWidth() + st::semiboldFont->spacew, available)
+		+ st::semiboldFont->spacew; // Extra spacing after name.
 	_badge->move(
 		left,
 		st::mainMenuCoverNameTop,
