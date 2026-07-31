@@ -168,9 +168,7 @@ void SetupExperimental(
 	addToggle(Data::kOptionExternalVideoPlayer);
 	addToggle(Window::kOptionNewWindowsSizeAsFirst);
 	addToggle(MTP::details::kOptionPreferIPv6);
-	if (base::options::lookup<bool>(kOptionFastButtonsMode).value()) {
-		addToggle(kOptionFastButtonsMode);
-	}
+	addToggle(kOptionFastButtonsMode);
 	addToggle(Window::kOptionDisableTouchbar);
 	addToggle(Info::kAlternativeScrollProcessing);
 	addToggle(kModerateCommonGroups);
