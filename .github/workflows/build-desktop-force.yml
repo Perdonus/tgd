@@ -588,6 +588,23 @@ jobs:
             throw "[paths] Qt directories were not found after normalization"
           }
 
+      - name: Setup Python3 symlink for CMake
+        if: ${{ success() }}
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path
+          $expectedDir = Join-Path (Join-Path $workspace "..") "ThirdParty\python\Scripts"
+          New-Item -ItemType Directory -Path $expectedDir -Force | Out-Null
+          $expectedExe = Join-Path $expectedDir "python.exe"
+          if (-not (Test-Path -LiteralPath $expectedExe)) {
+            New-Item -ItemType SymbolicLink -Path $expectedExe -Target $python -Force
+            Write-Host "Linked python $python -> $expectedExe"
+          } else {
+            Write-Host "Python already at $expectedExe"
+          }
+          Get-ChildItem $expectedExe -Force
+
       - name: Configure (Windows Release)
         id: configure
         shell: cmd
@@ -605,24 +622,18 @@ jobs:
           set "API_HASH=344583e45741c457fe1862106095a5eb"
           set "ACCEL_ARGS=-D CMAKE_C_COMPILER_LAUNCHER=sccache -D CMAKE_CXX_COMPILER_LAUNCHER=sccache -D CMAKE_POLICY_CMP0141=NEW -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D CMAKE_NINJA_FORCE_RESPONSE_FILE=ON"
 
-          for /f "delims=" %%i in ('where python') do set "PYTHON_PATH=%%i"
-          echo System Python3: !PYTHON_PATH!
-          for %%i in ("!PYTHON_PATH!") do set "PYTHON_DIR=%%~dpi"
-          if defined PYTHON_PATH (
-            set "PYTHON_ARGS=-DPython3_ROOT_DIR=!PYTHON_DIR! -DPython3_EXECUTABLE=!PYTHON_PATH!"
-          ) else (
-            set "PYTHON_ARGS="
-          )
+          where python
+          python --version
 
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt" del /f /q "%GITHUB_WORKSPACE%\\out\\CMakeCache.txt"
           if exist "%GITHUB_WORKSPACE%\\out\\CMakeFiles" rmdir /Q /S "%GITHUB_WORKSPACE%\\out\\CMakeFiles"
 
-          call configure.bat force -G "Ninja Multi-Config" %ACCEL_ARGS% !PYTHON_ARGS! -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
+          call configure.bat force -G "Ninja Multi-Config" %ACCEL_ARGS% -D TDESKTOP_API_TEST=ON -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_1%" 2>&1 && set "CFG_OK=1"
           if not defined CFG_OK (
             echo [configure] fast Ninja configure failed, retrying Visual Studio x64 configure
             powershell -NoProfile -Command "Get-Content -Path '%CFG_LOG_1%' -Tail 80"
             powershell -NoProfile -Command "$tail = (Get-Content -Path '%CFG_LOG_1%' -Tail 20) -join ' | '; Write-Output ('::warning title=Configure attempt1 failed::' + $tail)"
-            call configure.bat x64 force %ACCEL_ARGS% !PYTHON_ARGS! -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
+            call configure.bat x64 force %ACCEL_ARGS% -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% > "%CFG_LOG_2%" 2>&1 && set "CFG_OK=1"
           )
           if not defined CFG_OK (
             echo [configure] all x64 configure attempts failed
