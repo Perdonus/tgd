@@ -209,11 +209,6 @@ QString FormatPluginTitle(const ::Plugins::PluginState &state) {
 			: PluginUiText(u"Plugin"_q, u"Плагин"_q));
 }
 
-enum class PluginSourceBadgeMode {
-	Card,
-	Details,
-};
-
 QString PluginSourceBadgeText(const ::Plugins::PluginState &state) {
 	return state.sourceVerified
 		? PluginUiText(
@@ -274,19 +269,14 @@ QString PluginSourceRecordLabelText(const ::Plugins::PluginState &state) {
 		u"Метка доверенной записи: %1"_q).arg(label);
 }
 
-QString PluginSourceExactMatchText(PluginSourceBadgeMode mode) {
-	return (mode == PluginSourceBadgeMode::Card)
-		? PluginUiText(
-			u"Exact SHA-256 matches a trusted Astrogram source record."_q,
-			u"Точный SHA-256 совпал с доверенной записью источника Astrogram."_q)
-		: PluginUiText(
-			u"This exact plugin binary matches a trusted Astrogram source record by SHA-256."_q,
-			u"Точный бинарник этого плагина совпал с доверенной записью источника Astrogram по SHA-256."_q);
+QString PluginSourceExactMatchText() {
+	return PluginUiText(
+		u"This exact plugin binary matches a trusted Astrogram source record by SHA-256."_q,
+		u"Точный бинарник этого плагина совпал с доверенной записью источника Astrogram по SHA-256."_q);
 }
 
 QString PluginSourceBadgeDetailText(
-		const ::Plugins::PluginState &state,
-		PluginSourceBadgeMode mode) {
+		const ::Plugins::PluginState &state) {
 	const auto addLine = [](QString base, const QString &line) {
 		if (line.trimmed().isEmpty()) {
 			return base;
@@ -296,7 +286,7 @@ QString PluginSourceBadgeDetailText(
 			: (base + u"\n"_q + line.trimmed());
 	};
 	if (state.sourceVerified) {
-		auto result = PluginSourceExactMatchText(mode);
+		auto result = PluginSourceExactMatchText();
 		if (const auto label = PluginSourceRecordLabelText(state); !label.isEmpty()) {
 			result = addLine(result, label);
 		}
@@ -317,49 +307,28 @@ QString PluginSourceBadgeDetailText(
 			u"Доверенные записи источников станут доступны после полной загрузки активной сессии."_q);
 	}
 	if (reason == u"no-trusted-records"_q) {
-		return (mode == PluginSourceBadgeMode::Card)
-			? PluginUiText(
-				u"The trusted source record list is still empty."_q,
-				u"Список доверенных записей источников пока пуст."_q)
-			: PluginUiText(
-				u"No trusted Astrogram source records have been published yet, so this plugin cannot be verified."_q,
-				u"Доверенные записи источников Astrogram ещё не опубликованы, поэтому этот плагин пока нельзя подтвердить."_q);
+		return PluginUiText(
+			u"No trusted Astrogram source records have been published yet, so this plugin cannot be verified."_q,
+			u"Доверенные записи источников Astrogram ещё не опубликованы, поэтому этот плагин пока нельзя подтвердить."_q);
 	}
 	if (reason == u"no-valid-trusted-records"_q) {
-		return (mode == PluginSourceBadgeMode::Card)
-			? PluginUiText(
-				u"Trusted source records exist, but they are malformed."_q,
-				u"Доверенные записи источников существуют, но они повреждены."_q)
-			: PluginUiText(
-				u"Trusted source records were loaded, but none of them contain a valid exact SHA-256 entry."_q,
-				u"Доверенные записи источников загрузились, но ни одна из них не содержит корректный exact SHA-256."_q);
+		return PluginUiText(
+			u"Trusted source records were loaded, but none of them contain a valid exact SHA-256 entry."_q,
+			u"Доверенные записи источников загрузились, но ни одна из них не содержит корректный exact SHA-256."_q);
 	}
 	if (reason == u"hash-found-in-untrusted-channel"_q) {
-		auto result = (mode == PluginSourceBadgeMode::Card)
-			? PluginUiText(
-				u"Matching hash exists, but only outside the trusted source channel list."_q,
-				u"Совпадающий хеш найден, но только вне списка доверенных каналов-источников."_q)
-			: PluginUiText(
-				u"A matching SHA-256 record exists, but it points to a channel that is not in the trusted source allowlist."_q,
-				u"Совпадающая запись SHA-256 существует, но указывает на канал вне списка доверенных источников."_q);
+		auto result = PluginUiText(
+			u"A matching SHA-256 record exists, but it points to a channel that is not in the trusted source allowlist."_q,
+			u"Совпадающая запись SHA-256 существует, но указывает на канал вне списка доверенных источников."_q);
 		if (const auto origin = PluginSourceOriginText(state); !origin.isEmpty()) {
 			result = addLine(result, origin);
 		}
 		return result;
 	}
 	if (reason == u"matching-record-missing-origin"_q) {
-		return mode == PluginSourceBadgeMode::Card
-			? PluginUiText(
-				u"Matching hash record exists, but its source metadata is incomplete."_q,
-				u"Совпадающая запись хеша есть, но у неё неполные метаданные источника."_q)
-			: PluginUiText(
-					u"A matching SHA-256 record exists, but it does not contain a valid trusted channel and post id."_q,
-					u"Совпадающая запись SHA-256 существует, но в ней нет корректных идентификаторов доверенного канала и поста."_q);
-	}
-	if (mode == PluginSourceBadgeMode::Card) {
 		return PluginUiText(
-			u"This exact SHA-256 was not found in trusted Astrogram source records."_q,
-			u"Точный SHA-256 не найден в доверенных записях источников Astrogram."_q);
+			u"A matching SHA-256 record exists, but it does not contain a valid trusted channel and post id."_q,
+			u"Совпадающая запись SHA-256 существует, но в ней нет корректных идентификаторов доверенного канала и поста."_q);
 	}
 	auto result = PluginUiText(
 		u"This exact plugin binary SHA-256 was not found in trusted Astrogram source records."_q,
@@ -372,13 +341,12 @@ QString PluginSourceBadgeDetailText(
 
 void AddPluginSourceBadge(
 		not_null<Ui::VerticalLayout*> container,
-		const ::Plugins::PluginState &state,
-		PluginSourceBadgeMode mode = PluginSourceBadgeMode::Card) {
+		const ::Plugins::PluginState &state) {
 	const auto badge = container->add(
 		object_ptr<Ui::RpWidget>(container),
 		style::margins(
 			kPluginCardContentInsetLeft,
-			(mode == PluginSourceBadgeMode::Card) ? 4 : 0,
+			0,
 			kPluginCardContentInsetRight,
 			0),
 		style::al_top);
@@ -418,10 +386,8 @@ void AddPluginSourceBadge(
 
 	AddPluginDescriptionText(
 		container,
-		PluginSourceBadgeDetailText(state, mode));
-	if (mode == PluginSourceBadgeMode::Details) {
-		AddPluginMetaText(container, PluginSourceHashText(state));
-	}
+		PluginSourceBadgeDetailText(state));
+	AddPluginMetaText(container, PluginSourceHashText(state));
 }
 
 QString PluginDocsText() {
@@ -1550,7 +1516,7 @@ private:
 		_title = FormatPluginTitle(*state);
 		const auto stateChanged = crl::guard(this, [=] { rebuild(); });
 
-		AddPluginSourceBadge(_content, *state, PluginSourceBadgeMode::Details);
+		AddPluginSourceBadge(_content, *state);
 		Ui::AddSkip(_content);
 
 		const auto actions = Core::App().plugins().actionsFor(state->info.id);
