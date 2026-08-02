@@ -226,14 +226,15 @@ void ShowAstrogramUpdateChannelBox(
 	};
 
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto labels = std::vector<QString>{
+			RuEn("Stable", "Stable"),
+			RuEn("Dev (beta)", "Dev (beta)"),
+		};
 		SingleChoiceBox(box, {
 			.title = rpl::single(RuEn(
 				"Скрытый канал обновлений Astrogram",
 				"Hidden Astrogram update channel")),
-			.options = {
-				rpl::single(RuEn("Stable", "Stable")),
-				rpl::single(RuEn("Dev (beta)", "Dev (beta)")),
-			},
+			.options = labels,
 			.initialSelection = cInstallBetaVersion() ? 1 : 0,
 			.callback = [=](int index) {
 				applyChannel(index == 1);
@@ -297,7 +298,7 @@ void AddAstrogramHeader(
 				Qt::AlignHCenter | Qt::TextSingleLine,
 				AstrogramVersionText());
 		}, raw->lifetime());
-	raw->events() | rpl::start_with_next([=](not_null<QEvent*> event) {
+	base::install_event_filter(raw, [=](not_null<QEvent*> event) {
 		if (event->type() != QEvent::MouseButtonRelease) {
 			return;
 		}
@@ -590,7 +591,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				}
 			}, row->lifetime());
 			updateRowState(state);
-			row->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
+			base::install_event_filter(row, [=](not_null<QEvent*> e) {
 				if (e->type() != QEvent::MouseButtonRelease) {
 					return;
 				}

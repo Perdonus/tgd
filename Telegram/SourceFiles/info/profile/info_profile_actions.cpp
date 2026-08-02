@@ -1465,7 +1465,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 					const auto raw = url.split(
 						u"copy:"_q,
 						Qt::SkipEmptyParts).last();
-					request.menu->addAction(tr::lng_context_copy(tr::now), [=] {
+					request.menu->addAction(u"Copy"_q, [=] {
 						copyPeerId(raw);
 					});
 					return;
@@ -1633,7 +1633,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		line.text->setContextMenuHook(
 			[=](Ui::FlatLabel::ContextMenuRequest request) {
 				if (request.selection.empty()) {
-					request.menu->addAction(tr::lng_context_copy(tr::now), [=] {
+					request.menu->addAction(u"Copy"_q, [=] {
 						copyPeerId();
 					});
 				} else {

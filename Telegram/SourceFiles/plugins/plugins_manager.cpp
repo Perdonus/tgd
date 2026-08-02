@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
+#include "main/main_app_config.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "apiwrap.h"
@@ -508,7 +509,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$id = [uri]::EscapeDataString($env:ASTRO_PLUGIN_ID);" ^
   "$uri = $env:BASE + '/v1/plugins/' + $id;" ^
   "try { $result = Invoke-RestMethod -Method Delete -Uri $uri -TimeoutSec 20; $result | ConvertTo-Json -Depth 50 } catch { if ($_.Exception.Response) { $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $payload = $reader.ReadToEnd(); if ($payload) { Write-Output $payload }; exit 1 } else { Write-Error $_; exit 1 } }"
-exit /b %errorlevel%
+exit /b %errorlevel%)BATCH"
+		R"BATCH(
 
 :plugin_actions
 if "%~1"=="" (
