@@ -414,9 +414,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 		};
 
 		// Build step containers wrapped in SlideWrap for smooth transitions.
-		auto stepWraps = std::array<
-			not_null<Ui::SlideWrap<Ui::VerticalLayout>*>,
-			kStepCount>();
+		auto stepWraps = std::vector<
+			not_null<Ui::SlideWrap<Ui::VerticalLayout>*>>();
+		stepWraps.reserve(kStepCount);
 
 		for (auto i = 0; i < kStepCount; ++i) {
 			const auto wrap = container->add(
@@ -424,7 +424,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					container,
 					object_ptr<Ui::VerticalLayout>(container)));
 			wrap->toggle(false, anim::type::instant);
-			stepWraps[i] = wrap;
+			stepWraps.push_back(wrap);
 		}
 
 		const auto showStep = [=](Step step) {
