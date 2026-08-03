@@ -1631,13 +1631,13 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 			copyPeerId();
 		});
 		line.text->setContextMenuHook(
-			[=](Ui::FlatLabel::ContextMenuRequest request) {
+			[text = line.text, this](Ui::FlatLabel::ContextMenuRequest request) {
 				if (request.selection.empty()) {
 					request.menu->addAction(u"Copy"_q, [=] {
 						copyPeerId();
 					});
 				} else {
-					line.text->fillContextMenu(request);
+					text->fillContextMenu(request);
 				}
 			});
 	};
