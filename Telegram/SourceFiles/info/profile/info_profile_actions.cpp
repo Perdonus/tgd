@@ -1633,7 +1633,7 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 		line.text->setContextMenuHook(
 			[text = line.text, this](Ui::FlatLabel::ContextMenuRequest request) {
 				if (request.selection.empty()) {
-					request.menu->addAction(u"Copy"_q, [=] {
+					request.menu->addAction(u"Copy"_q, [this] {
 						copyPeerId();
 					});
 				} else {

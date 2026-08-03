@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_astrogram.h"
 
 #include "core/application.h"
+#include "base/event_filter.h"
 #include "base/options.h"
 #include "core/file_utilities.h"
 #include "core/core_settings.h"
@@ -300,11 +301,11 @@ void AddAstrogramHeader(
 		}, raw->lifetime());
 	base::install_event_filter(raw, [=](not_null<QEvent*> event) {
 		if (event->type() != QEvent::MouseButtonRelease) {
-			return;
+			return base::EventFilterResult::Continue;
 		}
 		const auto mouse = static_cast<QMouseEvent*>(event.get());
 		if (mouse->button() != Qt::LeftButton) {
-			return;
+			return base::EventFilterResult::Continue;
 		}
 		const auto avatarRect = QRect(
 			(raw->width() - kAvatarSize) / 2,
@@ -312,7 +313,7 @@ void AddAstrogramHeader(
 			kAvatarSize,
 			kAvatarSize);
 		if (!avatarRect.contains(mouse->pos())) {
-			return;
+			return base::EventFilterResult::Continue;
 		}
 		const auto now = QDateTime::currentMSecsSinceEpoch();
 		if ((now - *lastSecretClickMs) > kSecretChannelClickWindowMs) {
@@ -323,7 +324,9 @@ void AddAstrogramHeader(
 		if (*secretClicks >= kSecretChannelClickThreshold) {
 			*secretClicks = 0;
 			ShowAstrogramUpdateChannelBox(controller);
+			return base::EventFilterResult::Cancel;
 		}
+		return base::EventFilterResult::Continue;
 	}, raw->lifetime());
 }
 
@@ -593,21 +596,21 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 			updateRowState(state);
 			base::install_event_filter(row, [=](not_null<QEvent*> e) {
 				if (e->type() != QEvent::MouseButtonRelease) {
-					return;
+					return base::EventFilterResult::Continue;
 				}
 				const auto mouse = static_cast<QMouseEvent*>(e.get());
 				if (mouse->button() != Qt::LeftButton) {
-					return;
+					return base::EventFilterResult::Continue;
 				}
 				if (state->installed || state->downloading || state->extracting) {
-					return;
+					return base::EventFilterResult::Continue;
 				}
 				for (const auto &other : models) {
 					if (other->downloading || other->extracting) {
 						controller->showToast(RuEn(
 							"Дождитесь завершения текущей установки модели.",
 							"Wait for the current model installation to finish."));
-						return;
+						return base::EventFilterResult::Continue;
 					}
 				}
 				const auto failState = [=](const QString &status, const QString &log) {
