@@ -205,7 +205,7 @@ void SetupUpdate(
 		st::settingsButtonNoIcon));
 	openRelease->hide();
 	const auto releaseUrl = std::make_shared<QString>();
-	const auto refreshReleaseInfo = [=](
+	auto refreshReleaseInfo = [=](
 			const Core::UpdateReleaseInfo &info) mutable {
 		const auto visible = info.available
 			|| info.changelogLoading
@@ -286,7 +286,7 @@ void SetupUpdate(
 	toggle->toggledValue(
 	) | rpl::filter([](bool toggled) {
 		return (toggled != cAutoUpdate());
-	}) | rpl::on_next([=](bool toggled) {
+	}) | rpl::on_next([=](bool toggled) mutable {
 		cSetAutoUpdate(toggled);
 
 		Local::writeSettings();
@@ -340,14 +340,14 @@ void SetupUpdate(
 		update->show();
 		downloading->fire(false);
 	}, options->lifetime());
-	checker.releaseInfoChanged() | rpl::on_next([=] {
+	checker.releaseInfoChanged() | rpl::on_next([=]() mutable {
 		refreshReleaseInfo(checker.releaseInfo());
 	}, container->lifetime());
 
 	setDefaultStatus(checker);
 	refreshReleaseInfo(initialReleaseInfo);
 
-	check->addClickHandler([=] {
+	check->addClickHandler([=]() mutable {
 		cSetLastUpdateCheck(0);
 		checker.start();
 	});
