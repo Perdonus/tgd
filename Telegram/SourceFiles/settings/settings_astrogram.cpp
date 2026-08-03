@@ -664,7 +664,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 				};
 				if (hasArchive(state)) {
 					extractModel();
-					return;
+					return base::EventFilterResult::Continue;
 				}
 				QDir().mkpath(modelsDir);
 				QFile::remove(state->partialPath);
@@ -673,7 +673,7 @@ void ShowSpeechModelDownloadBox(not_null<Window::SessionController*> controller)
 					failState(
 						RuEn("Не удалось создать файл", "Could not create file"),
 						u"create file failed"_q);
-					return;
+					return base::EventFilterResult::Continue;
 				}
 				state->lastError = QString();
 				state->progress = 0.;
