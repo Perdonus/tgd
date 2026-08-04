@@ -408,7 +408,7 @@ void ShowSingleLineTextEditBox(
 			box,
 			st::defaultInputField,
 			Ui::InputField::Mode::NoNewlines,
-			placeholder,
+			rpl::single(placeholder),
 			TextWithTags{ current, {} }));
 
 		box->addButton(tr::lng_settings_save(), [=] {
