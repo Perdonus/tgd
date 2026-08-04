@@ -112,7 +112,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			? RuEn("Расширенные • Обновление доступно", "Advanced • Update available")
 			: tr::lng_settings_advanced(tr::now);
 	};
-	return rpl::single(makeLabel()) | rpl::then(
+	return rpl::single(rpl::empty_value()) | rpl::then(
 		rpl::merge(
 			checker.ready(),
 			checker.checking(),
@@ -121,7 +121,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			checker.progress() | rpl::to_empty,
 			checker.releaseInfoChanged()
 		)
-	) | rpl::map(makeLabel);
+	) | rpl::map([=] { return makeLabel(); });
 }
 
 [[nodiscard]] rpl::producer<QString> UpdateSectionLabel() {
@@ -143,7 +143,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			"Обновление Astrogram",
 			"Astrogram update");
 	};
-	return rpl::single(makeLabel()) | rpl::then(
+	return rpl::single(rpl::empty_value()) | rpl::then(
 		rpl::merge(
 			checker.ready(),
 			checker.checking(),
@@ -152,7 +152,7 @@ constexpr auto kSugValidatePhone = "VALIDATE_PHONE_NUMBER"_cs;
 			checker.progress() | rpl::to_empty,
 			checker.releaseInfoChanged()
 		)
-	) | rpl::map(makeLabel);
+	) | rpl::map([=] { return makeLabel(); });
 }
 
 [[nodiscard]] rpl::producer<bool> UpdateSectionVisible() {
