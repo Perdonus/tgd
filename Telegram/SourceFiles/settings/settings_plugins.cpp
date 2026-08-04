@@ -1235,12 +1235,12 @@ void RequestPluginRemoval(
 			}
 			box->closeBox();
 			if (onRemoved) {
-				QTimer::singleShot(0, controller, [=] {
+				QTimer::singleShot(0, qobject_cast<QObject*>(controller.get()), [=] {
 					onRemoved();
 				});
 			}
 		});
-		box->addButton(rpl::single(tr::lng_cancel()), [=] {
+		box->addButton(tr::lng_cancel(), [=] {
 			box->closeBox();
 		});
 	}));
