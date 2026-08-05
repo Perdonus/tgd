@@ -169,9 +169,10 @@ void AddHeroCover(
 		gradientRight,
 	});
 
+	const auto labelText = tr::rich(subtitle);
 	const auto subtitleLabel = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		tr::rich(subtitle),
+		labelText,
 		state->subtitleSt);
 	subtitleLabel->setTryMakeSimilarLines(true);
 
@@ -237,9 +238,10 @@ not_null<Ui::RoundButton*> AddPrimaryButton(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
 		std::function<void()> callback) {
+	auto buttonText = rpl::single(text);
 	auto button = object_ptr<Ui::RoundButton>(
 		container,
-		rpl::single(text),
+		std::move(buttonText),
 		st::defaultActiveButton);
 	button->setTextTransform(Ui::RoundButton::TextTransform::NoTransform);
 	const auto raw = container->add(
@@ -256,9 +258,10 @@ not_null<Ui::LinkButton*> AddLinkAction(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
 		std::function<void()> callback) {
+	auto textProducer = rpl::single(text);
 	auto button = object_ptr<Ui::LinkButton>(
 		container,
-		rpl::single(text),
+		std::move(textProducer),
 		st::defaultLinkButton);
 	const auto raw = container->add(std::move(button),
 		style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
@@ -283,9 +286,10 @@ not_null<Ui::SettingsButton*> AddChoiceButton(
 		style::margins(12, 0, 12, 0));
 	button->setClickedCallback(std::move(callback));
 	if (!description.isEmpty()) {
+		auto descProducer = rpl::single(description);
 		auto label = object_ptr<Ui::FlatLabel>(
 			container,
-			rpl::single(description),
+			std::move(descProducer),
 			st::defaultFlatLabel);
 		container->add(std::move(label),
 			style::margins(26, -2, 26, 6),
@@ -580,11 +584,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				}
 			});
 			if (args.plugins.empty()) {
+				auto pluginText = rpl::single(RuEn(
+					"Сервер ещё не передал рекомендованные пакеты. Они появятся здесь автоматически.",
+					"The server has not provided recommended packages yet. They will appear here automatically."));
 				auto label = object_ptr<Ui::FlatLabel>(
 					inner,
-					rpl::single(RuEn(
-						"Сервер ещё не передал рекомендованные пакеты. Они появятся здесь автоматически.",
-						"The server has not provided recommended packages yet. They will appear here automatically.")),
+					std::move(pluginText),
 					st::boxLabel);
 				inner->add(std::move(label),
 					style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
@@ -603,9 +608,10 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							}
 						});
 					if (!plugin.sourceLabel.trimmed().isEmpty()) {
+						auto srcProducer = rpl::single(plugin.sourceLabel.trimmed());
 						auto srcLabel = object_ptr<Ui::FlatLabel>(
 							inner,
-							rpl::single(plugin.sourceLabel.trimmed()),
+							std::move(srcProducer),
 							st::defaultFlatLabel);
 						inner->add(std::move(srcLabel),
 							style::margins(26, -2, 26, 4),
