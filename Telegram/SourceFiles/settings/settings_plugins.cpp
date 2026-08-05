@@ -1235,7 +1235,7 @@ void RequestPluginRemoval(
 			}
 			box->closeBox();
 			if (onRemoved) {
-				QTimer::singleShot(0, qobject_cast<QObject*>(controller.get()), [=] {
+				QTimer::singleShot(0, static_cast<QObject*>(controller.get()), [=] {
 					onRemoved();
 				});
 			}
