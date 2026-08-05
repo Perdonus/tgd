@@ -256,14 +256,14 @@ not_null<Ui::LinkButton*> AddLinkAction(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
 		std::function<void()> callback) {
-	const auto button = container->add(
-		object_ptr<Ui::LinkButton>(
-			container,
-			rpl::single(text),
-			st::defaultLinkButton),
+	auto button = object_ptr<Ui::LinkButton>(
+		container,
+		rpl::single(text),
+		st::defaultLinkButton);
+	const auto raw = container->add(std::move(button),
 		style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
-	button->setClickedCallback(std::move(callback));
-	return button;
+	raw->setClickedCallback(std::move(callback));
+	return raw;
 }
 
 not_null<Ui::SettingsButton*> AddChoiceButton(
@@ -283,11 +283,11 @@ not_null<Ui::SettingsButton*> AddChoiceButton(
 		style::margins(12, 0, 12, 0));
 	button->setClickedCallback(std::move(callback));
 	if (!description.isEmpty()) {
-		container->add(
-			object_ptr<Ui::FlatLabel>(
-				container,
-				rpl::single(description),
-				st::defaultFlatLabel),
+		auto label = object_ptr<Ui::FlatLabel>(
+			container,
+			rpl::single(description),
+			st::defaultFlatLabel);
+		container->add(std::move(label),
 			style::margins(26, -2, 26, 6),
 			style::al_top);
 	}
@@ -580,13 +580,13 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				}
 			});
 			if (args.plugins.empty()) {
-				inner->add(
-					object_ptr<Ui::FlatLabel>(
-						inner,
-						rpl::single(RuEn(
-							"Сервер ещё не передал рекомендованные пакеты. Они появятся здесь автоматически.",
-							"The server has not provided recommended packages yet. They will appear here automatically.")),
-						st::boxLabel),
+				auto label = object_ptr<Ui::FlatLabel>(
+					inner,
+					rpl::single(RuEn(
+						"Сервер ещё не передал рекомендованные пакеты. Они появятся здесь автоматически.",
+						"The server has not provided recommended packages yet. They will appear here automatically.")),
+					st::boxLabel);
+				inner->add(std::move(label),
 					style::margins(st::boxRowPadding.left(), 8, st::boxRowPadding.right(), 0),
 					style::al_top);
 			} else {
@@ -603,11 +603,11 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 							}
 						});
 					if (!plugin.sourceLabel.trimmed().isEmpty()) {
-						inner->add(
-							object_ptr<Ui::FlatLabel>(
-								inner,
-								rpl::single(plugin.sourceLabel.trimmed()),
-								st::defaultFlatLabel),
+						auto srcLabel = object_ptr<Ui::FlatLabel>(
+							inner,
+							rpl::single(plugin.sourceLabel.trimmed()),
+							st::defaultFlatLabel);
+						inner->add(std::move(srcLabel),
 							style::margins(26, -2, 26, 4),
 							style::al_top);
 					}
