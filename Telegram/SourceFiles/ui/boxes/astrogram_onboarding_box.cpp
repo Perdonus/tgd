@@ -169,10 +169,9 @@ void AddHeroCover(
 		gradientRight,
 	});
 
-	const auto labelText = tr::rich(subtitle);
 	const auto subtitleLabel = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		labelText,
+		rpl::single(tr::rich(subtitle)),
 		state->subtitleSt);
 	subtitleLabel->setTryMakeSimilarLines(true);
 
@@ -258,10 +257,9 @@ not_null<Ui::LinkButton*> AddLinkAction(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
 		std::function<void()> callback) {
-	auto textProducer = rpl::single(text);
 	auto button = object_ptr<Ui::LinkButton>(
 		container,
-		std::move(textProducer),
+		text,
 		st::defaultLinkButton);
 	const auto raw = container->add(std::move(button),
 		style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
