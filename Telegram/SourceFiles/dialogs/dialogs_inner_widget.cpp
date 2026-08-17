@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_subsection_tabs.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "info/profile/info_profile_badge.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/shortcuts.h"
@@ -304,6 +305,12 @@ InnerWidget::InnerWidget(
 	}, lifetime());
 
 	session().downloaderTaskFinished(
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+
+	Info::Profile::EnsureAstrogramSubscriberSession(&session());
+	Info::Profile::AstrogramSubscriberUpdated(
 	) | rpl::on_next([=] {
 		update();
 	}, lifetime());

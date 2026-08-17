@@ -110,7 +110,8 @@ ComposedBadge::ComposedBadge(
 		nullptr,
 		std::move(animationPaused),
 		kPlayStatusLimit,
-		Info::Profile::BadgeType::Premium) {
+		Info::Profile::BadgeType::Premium
+			| Info::Profile::BadgeType::AstrogramBadge) {
 	if (hasUnread) {
 		_unread = CreateUnread(this, rpl::single(
 			rpl::empty

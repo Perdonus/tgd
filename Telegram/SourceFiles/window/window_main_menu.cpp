@@ -335,7 +335,8 @@ MainMenu::MainMenu(
 	_emojiStatusPanel.get(),
 	[=] { return controller->isGifPausedAtLeastFor(GifPauseReason::Layer); },
 	kPlayStatusLimit,
-	Info::Profile::BadgeType::Premium))
+	Info::Profile::BadgeType::Premium
+		| Info::Profile::BadgeType::AstrogramBadge))
 , _scroll(this, st::defaultSolidScroll)
 , _inner(_scroll->setOwnedWidget(
 	object_ptr<Ui::VerticalLayout>(_scroll.data())))

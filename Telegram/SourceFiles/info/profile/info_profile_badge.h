@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flags.h"
 #include "base/object_ptr.h"
 
+class QPainter;
+
 namespace style {
 struct InfoPeerBadge;
 } // namespace style
@@ -43,6 +45,7 @@ enum class BadgeType : uchar {
 	Scam = 0x08,
 	Fake = 0x10,
 	Direct = 0x20,
+	AstrogramBadge = 0x40,
 };
 inline constexpr bool is_flag_type(BadgeType) { return true; }
 
@@ -96,6 +99,11 @@ private:
 	rpl::lifetime _lifetime;
 
 };
+
+[[nodiscard]] bool IsAstrogramSubscriber(not_null<PeerData*> peer);
+[[nodiscard]] rpl::producer<> AstrogramSubscriberUpdated();
+void EnsureAstrogramSubscriberSession(not_null<Main::Session*> session);
+void PaintAstrogramBadge(QPainter &p, int x, int y, int size);
 
 [[nodiscard]] rpl::producer<Badge::Content> BadgeContentForPeer(
 	not_null<PeerData*> peer);

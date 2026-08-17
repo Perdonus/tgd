@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_unread_things.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/history_view_send_action.h"
+#include "info/profile/info_profile_badge.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
@@ -488,6 +489,14 @@ void PaintRow(
 				+ chatTypeIcon->width()
 				+ st::dialogsChatTypeSkip);
 		}
+	}
+	if (from && Info::Profile::IsAstrogramSubscriber(from)) {
+		const auto size = st::dialogsVerifiedIcon.width();
+		const auto x = rectForName.left();
+		const auto y = rectForName.top()
+			+ (st::semiboldFont->height - size) / 2;
+		Info::Profile::PaintAstrogramBadge(p, x, y, size);
+		rectForName.setLeft(x + size + st::dialogsChatTypeSkip);
 	}
 	auto texttop = context.st->textTop;
 	if (const auto folder = entry->asFolder()) {

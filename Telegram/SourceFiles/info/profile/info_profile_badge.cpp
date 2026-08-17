@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "base/weak_ptr.h"
+#include "core/application.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_emoji_statuses.h"
@@ -27,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "styles/style_info.h"
 
+#include <QPainterPath>
 #include <QSet>
 #include <type_traits>
 
@@ -90,6 +92,19 @@ public:
 		};
 		return rpl::single(current()) | rpl::then(
 			_updated.events() | rpl::map(current));
+	}
+
+	[[nodiscard]] bool contains(not_null<PeerData*> peer) const {
+		const auto key = peer->id.value & PeerId::kChatTypeMask;
+		return _badgedBareIds.contains(key);
+	}
+
+	[[nodiscard]] rpl::producer<> updated() const {
+		return _updated.events();
+	}
+
+	void ensureLoaded(not_null<Main::Session*> session) {
+		ensureSession(session);
 	}
 
 private:
@@ -221,6 +236,45 @@ private:
 };
 
 } // namespace
+
+bool IsAstrogramSubscriber(not_null<PeerData*> peer) {
+	return ChannelSubscriberBadge::Instance().contains(peer);
+}
+
+rpl::producer<> AstrogramSubscriberUpdated() {
+	return ChannelSubscriberBadge::Instance().updated();
+}
+
+void EnsureAstrogramSubscriberSession(not_null<Main::Session*> session) {
+	ChannelSubscriberBadge::Instance().ensureLoaded(session);
+}
+
+void PaintAstrogramBadge(QPainter &p, int x, int y, int size) {
+	const auto ratio = style::DevicePixelRatio();
+	static auto cache = QImage();
+	static auto cacheSize = 0;
+	static auto cacheRatio = 0.;
+	if (cacheSize != size || cacheRatio != ratio || cache.isNull()) {
+		auto source = QImage(u":/gui/art/astrogram/settings_avatar.png"_q);
+		if (source.isNull()) {
+			source = QImage(u":/gui/art/logo_256_no_margin.png"_q);
+		}
+		cache = source.scaled(
+			QSize(size, size) * ratio,
+			Qt::IgnoreAspectRatio,
+			Qt::SmoothTransformation);
+		cache.setDevicePixelRatio(ratio);
+		cacheSize = size;
+		cacheRatio = ratio;
+	}
+	const auto hq = PainterHighQualityEnabler(p);
+	QPainterPath path;
+	path.addEllipse(QRectF(x, y, size, size));
+	p.save();
+	p.setClipPath(path);
+	p.drawImage(x, y, cache);
+	p.restore();
+}
 
 Badge::Badge(
 	not_null<QWidget*> parent,
@@ -375,11 +429,27 @@ void Badge::setContent(Content content) {
 					: st::attentionButtonFg));
 			}, _view->lifetime());
 	} break;
+	case BadgeType::AstrogramBadge: {
+		const auto &style = st();
+		const auto size = style.premium.width();
+		_view->resize(size, size);
+		_view->paintRequest(
+		) | rpl::on_next([=, badge = _view.data()]{
+			auto p = Painter(badge);
+			PaintAstrogramBadge(p, 0, 0, size);
+		}, _view->lifetime());
+	} break;
 	}
 
-	if (!HasPremiumClick(_content) || !_premiumClickCallback) {
+	if (_content.badge == BadgeType::AstrogramBadge) {
+		_view->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+		_view->setClickedCallback([] {
+			Core::App().openLocalUrl(u"tg://support"_q, {});
+		});
+	} else if (!HasPremiumClick(_content) || !_premiumClickCallback) {
 		_view->setAttribute(Qt::WA_TransparentForMouseEvents);
 	} else {
+		_view->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 		_view->setClickedCallback(_premiumClickCallback);
 	}
 
@@ -416,7 +486,8 @@ void Badge::move(int left, int top, int bottom) {
 	const auto &style = st();
 	const auto star = !_emojiStatus
 		&& (_content.badge == BadgeType::Premium
-			|| _content.badge == BadgeType::Verified);
+			|| _content.badge == BadgeType::Verified
+			|| _content.badge == BadgeType::AstrogramBadge);
 	const auto fake = !_emojiStatus && !star;
 	const auto skip = fake ? 0 : style.position.x();
 	const auto badgeLeft = left + skip;
@@ -461,11 +532,9 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 			badge = BadgeType::Premium;
 		}
 		if (serverBadgeStatus.has_value()) {
-			// Server-side badge source of truth.
-			badge = BadgeType::Premium;
-			if (serverBadgeStatus->documentId) {
-				emojiStatusId = *serverBadgeStatus;
-			}
+			// Server-side subscriber badge source of truth.
+			badge = BadgeType::AstrogramBadge;
+			emojiStatusId = EmojiStatusId();
 		}
 		if (statusOnlyForPremium && badge != BadgeType::Premium) {
 			emojiStatusId = EmojiStatusId();

@@ -230,7 +230,8 @@ Cover::Cover(
 			Window::GifPauseReason::Layer);
 	},
 	0, // customStatusLoopsLimit
-	Info::Profile::BadgeType::Premium)
+	Info::Profile::BadgeType::Premium
+		| Info::Profile::BadgeType::AstrogramBadge)
 , _userpic(
 	this,
 	controller,

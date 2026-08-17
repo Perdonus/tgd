@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "info/info_memento.h"
 #include "info/info_controller.h"
+#include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_values.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/storage_shared_media.h"
@@ -145,6 +146,12 @@ TopBarWidget::TopBarWidget(
 	Lang::Updated(
 	) | rpl::on_next([=] {
 		refreshLang();
+	}, lifetime());
+
+	Info::Profile::EnsureAstrogramSubscriberSession(&controller->session());
+	Info::Profile::AstrogramSubscriberUpdated(
+	) | rpl::on_next([=] {
+		update();
 	}, lifetime());
 
 	_forward->setClickedCallback([=] { _forwardSelection.fire({}); });
@@ -611,6 +618,14 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			const auto skip = _titleBadge.drawVerified(p, position, st::dialogsVerifiedColors);
 			nameleft += skip + st::dialogsChatTypeSkip;
 			namewidth -= skip + st::dialogsChatTypeSkip;
+		}
+		if (Info::Profile::IsAstrogramSubscriber(namePeer)) {
+			const auto size = st::dialogsVerifiedIcon.width();
+			const auto y = nametop
+				+ (st::msgNameStyle.font->height - size) / 2;
+			Info::Profile::PaintAstrogramBadge(p, nameleft, y, size);
+			nameleft += size + st::dialogsChatTypeSkip;
+			namewidth -= size + st::dialogsChatTypeSkip;
 		}
 		const auto badgeWidth = _titleBadge.drawGetWidth(p, {
 			.peer = namePeer,

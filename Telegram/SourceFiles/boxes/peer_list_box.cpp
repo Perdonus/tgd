@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
+#include "info/profile/info_profile_badge.h"
 #include "base/unixtime.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -803,12 +804,19 @@ int PeerListRow::paintNameIconGetWidth(
 		|| _isVerifyCodesChat) {
 		return 0;
 	}
-	return _badge.drawGetWidth(p, {
+	auto subscriberWidth = 0;
+	if (Info::Profile::IsAstrogramSubscriber(peer())) {
+		const auto size = st::dialogsVerifiedIcon.width();
+		const auto y = nameTop + (st::semiboldFont->height - size) / 2;
+		Info::Profile::PaintAstrogramBadge(p, nameLeft, y, size);
+		subscriberWidth = size + st::dialogsChatTypeSkip;
+	}
+	return subscriberWidth + _badge.drawGetWidth(p, {
 		.peer = peer(),
 		.rectForName = QRect(
-			nameLeft,
+			nameLeft + subscriberWidth,
 			nameTop,
-			availableWidth,
+			availableWidth - subscriberWidth,
 			st::semiboldFont->height),
 		.nameWidth = nameWidth,
 		.outerWidth = outerWidth,
@@ -1011,6 +1019,12 @@ PeerListContent::PeerListContent(
 , _controller(controller)
 , _rowHeight(_st.item.height) {
 	_controller->session().downloaderTaskFinished(
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+
+	Info::Profile::EnsureAstrogramSubscriberSession(&_controller->session());
+	Info::Profile::AstrogramSubscriberUpdated(
 	) | rpl::on_next([=] {
 		update();
 	}, lifetime());
