@@ -47,6 +47,12 @@ struct MessageSnapshot {
 	int editDate = 0;
 	MediaKind mediaKind = MediaKind::None;
 	QString text;
+	QString mediaFileName;
+	QString mediaMimeType;
+	long long mediaSize = 0;
+	int mediaDuration = 0;
+	int mediaWidth = 0;
+	int mediaHeight = 0;
 };
 
 } // namespace AyuMessages

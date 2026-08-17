@@ -78,6 +78,23 @@ namespace {
 	return MediaKind::Other;
 }
 
+void FillMediaMetadata(
+		not_null<HistoryItem*> item,
+		MessageSnapshot *snapshot) {
+	const auto media = item->media();
+	if (!media) {
+		return;
+	}
+	if (const auto document = media->document()) {
+		snapshot->mediaFileName = document->filename();
+		snapshot->mediaMimeType = document->mimeString();
+		snapshot->mediaSize = document->size;
+		snapshot->mediaDuration = int(document->duration());
+		snapshot->mediaWidth = document->dimensions.width();
+		snapshot->mediaHeight = document->dimensions.height();
+	}
+}
+
 [[nodiscard]] MessageSnapshot MapSnapshot(
 		not_null<HistoryItem*> item,
 		const QString &kind) {
@@ -94,6 +111,7 @@ namespace {
 	snapshot.editDate = base::unixtime::now();
 	snapshot.text = item->originalText().text;
 	snapshot.mediaKind = MediaKindFor(item);
+	FillMediaMetadata(item, &snapshot);
 	if (const auto edited = item->Get<HistoryMessageEdited>()) {
 		snapshot.editDate = edited->date;
 	}
@@ -123,6 +141,12 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		{ u"editDate"_q, snapshot.editDate },
 		{ u"media"_q, int(snapshot.mediaKind) },
 		{ u"text"_q, snapshot.text },
+		{ u"mediaFileName"_q, snapshot.mediaFileName },
+		{ u"mediaMimeType"_q, snapshot.mediaMimeType },
+		{ u"mediaSize"_q, QString::number(snapshot.mediaSize) },
+		{ u"mediaDuration"_q, snapshot.mediaDuration },
+		{ u"mediaWidth"_q, snapshot.mediaWidth },
+		{ u"mediaHeight"_q, snapshot.mediaHeight },
 	};
 	file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
 	file.write("\n");
@@ -170,6 +194,12 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		? MediaKind(mediaValue)
 		: MediaKind::None;
 	snapshot.text = object.value(u"text"_q).toString();
+	snapshot.mediaFileName = object.value(u"mediaFileName"_q).toString();
+	snapshot.mediaMimeType = object.value(u"mediaMimeType"_q).toString();
+	snapshot.mediaSize = object.value(u"mediaSize"_q).toString().toLongLong();
+	snapshot.mediaDuration = object.value(u"mediaDuration"_q).toInt();
+	snapshot.mediaWidth = object.value(u"mediaWidth"_q).toInt();
+	snapshot.mediaHeight = object.value(u"mediaHeight"_q).toInt();
 	return snapshot;
 }
 

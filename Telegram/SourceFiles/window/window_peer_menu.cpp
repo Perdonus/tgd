@@ -207,7 +207,13 @@ constexpr auto kTopicsSearchMinCount = 1;
 
 [[nodiscard]] QString RecallMessageBody(
 		const AyuMessages::MessageSnapshot &message) {
-	const auto media = DescribeMediaKind(message.mediaKind);
+	auto media = DescribeMediaKind(message.mediaKind);
+	if (!message.mediaFileName.isEmpty()
+		&& (message.mediaKind == AyuMessages::MediaKind::File
+			|| message.mediaKind == AyuMessages::MediaKind::Audio
+			|| message.mediaKind == AyuMessages::MediaKind::Video)) {
+		media += u" ("_q + message.mediaFileName + u")"_q;
+	}
 	auto body = message.text;
 	if (!media.isEmpty()) {
 		body = body.isEmpty() ? media : (media + u": "_q + body);
