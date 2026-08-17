@@ -77,7 +77,12 @@ bool IsSupportedWindowWidget(QWidget *widget) {
 	if (!widget || !widget->isWindow() || widget->parentWidget()) {
 		return false;
 	}
-	return widget->windowType() == Qt::Window;
+	// Telegram's main window is a plain top-level widget without an explicit
+	// Qt::Window flag, so its windowType() is Qt::Widget. Accept the common
+	// top-level window types (Window, Widget, Dialog) but skip transient
+	// popups, tooltips and menus.
+	const auto type = widget->windowType();
+	return type == Qt::Window || type == Qt::Widget || type == Qt::Dialog;
 }
 
 bool IsReadyWindowWidget(QWidget *widget) {
