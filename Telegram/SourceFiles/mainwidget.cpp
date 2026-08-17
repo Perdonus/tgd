@@ -250,8 +250,12 @@ void PrimeAstrogramChannel(
 void ResolveAstrogramChannelByBareId(
 		not_null<Window::SessionController*> controller,
 		ChannelId bareId,
-		Fn<void(not_null<ChannelData*>)> done) {
+		Fn<void(not_null<ChannelData*>)> done,
+		Fn<void()> fail = nullptr) {
 	if (!bareId) {
+		if (fail) {
+			fail();
+		}
 		return;
 	}
 	if (const auto loaded = controller->session().data().channelLoaded(bareId)) {
@@ -261,6 +265,7 @@ void ResolveAstrogramChannelByBareId(
 	const auto weak = base::make_weak(controller);
 	const auto sharedDone = std::make_shared<Fn<void(not_null<ChannelData*>)>>(
 		std::move(done));
+	const auto sharedFail = std::make_shared<Fn<void()>>(std::move(fail));
 	controller->session().api().request(MTPchannels_GetChannels(
 		MTP_vector<MTPInputChannel>(
 			1,
@@ -270,23 +275,36 @@ void ResolveAstrogramChannelByBareId(
 		if (!controller) {
 			return;
 		}
+		auto resolved = false;
 		result.match([&](const auto &data) {
 			const auto peer = controller->session().data().processChats(
 				data.vchats());
 			if (peer && (peer->id == peerFromChannel(bareId))) {
 				if (const auto channel = peer->asChannel()) {
+					resolved = true;
 					(*sharedDone)(channel);
 				}
 			}
 		});
+		if (!resolved && *sharedFail) {
+			(*sharedFail)();
+		}
+	}).fail([=](const MTP::Error &) {
+		if (*sharedFail) {
+			(*sharedFail)();
+		}
 	}).send();
 }
 
 void ResolveAstrogramChannel(
 		not_null<Window::SessionController*> controller,
 		int64 channelId,
-		Fn<void(not_null<ChannelData*>)> done) {
+		Fn<void(not_null<ChannelData*>)> done,
+		Fn<void()> fail = nullptr) {
 	if (!channelId) {
+		if (fail) {
+			fail();
+		}
 		return;
 	}
 	const auto bareId = AstrogramChannelBareId(channelId);
@@ -303,7 +321,10 @@ void ResolveAstrogramChannel(
 			ResolveAstrogramChannelByBareId(
 				controller,
 				bareId,
-				std::move(done));
+				std::move(done),
+				std::move(fail));
+		} else if (fail) {
+			fail();
 		}
 		return;
 	}
@@ -316,6 +337,7 @@ void ResolveAstrogramChannel(
 	const auto weak = base::make_weak(controller);
 	const auto sharedDone = std::make_shared<Fn<void(not_null<ChannelData*>)>>(
 		std::move(done));
+	const auto sharedFail = std::make_shared<Fn<void()>>(std::move(fail));
 	using Flag = MTPcontacts_ResolveUsername::Flag;
 	controller->session().api().request(MTPcontacts_ResolveUsername(
 		MTP_flags(Flag()),
@@ -343,7 +365,10 @@ void ResolveAstrogramChannel(
 				ResolveAstrogramChannelByBareId(
 					controller,
 					bareId,
-					*sharedDone);
+					*sharedDone,
+					*sharedFail);
+			} else if (*sharedFail) {
+				(*sharedFail)();
 			}
 		}
 	}).fail([=](const MTP::Error &) {
@@ -351,7 +376,10 @@ void ResolveAstrogramChannel(
 			ResolveAstrogramChannelByBareId(
 				controller,
 				bareId,
-				*sharedDone);
+				*sharedDone,
+				*sharedFail);
+		} else if (*sharedFail) {
+			(*sharedFail)();
 		}
 	}).send();
 }
@@ -360,15 +388,28 @@ void OpenAstrogramChannel(
 		not_null<Window::SessionController*> controller,
 		int64 channelId) {
 	if (!channelId) {
+		controller->showToast(RuEn(
+			"Канал ещё не настроен на сервере.",
+			"The channel is not configured on the server yet."));
 		return;
 	}
 	const auto weak = base::make_weak(controller);
-	ResolveAstrogramChannel(controller, channelId, [=](not_null<ChannelData*> channel) {
-		if (const auto controller = weak.get()) {
-			PrimeAstrogramChannel(controller, channel);
-			controller->showPeer(channel);
-		}
-	});
+	ResolveAstrogramChannel(
+		controller,
+		channelId,
+		[=](not_null<ChannelData*> channel) {
+			if (const auto controller = weak.get()) {
+				PrimeAstrogramChannel(controller, channel);
+				controller->showPeer(channel);
+			}
+		},
+		[=] {
+			if (const auto controller = weak.get()) {
+				controller->showToast(RuEn(
+					"Не удалось открыть канал.",
+					"Could not open the channel."));
+			}
+		});
 }
 
 void InstallAstrogramOnboardingPlugin(

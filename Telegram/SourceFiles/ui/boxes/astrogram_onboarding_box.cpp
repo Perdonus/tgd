@@ -26,8 +26,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/top_background_gradient.h"
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
+#include "ui/wrap/center_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/buttons.h"
+
+#include <rpl/event_stream.h>
 #include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "window/window_session_controller.h"
@@ -261,8 +264,11 @@ not_null<Ui::LinkButton*> AddLinkAction(
 		container,
 		text,
 		st::defaultLinkButton);
-	const auto raw = container->add(std::move(button),
-		style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
+	const auto raw = container->add(
+		object_ptr<Ui::CenterWrap<Ui::LinkButton>>(
+			container,
+			std::move(button)),
+		style::margins(0, 0, 0, 0))->entity();
 	raw->setClickedCallback(std::move(callback));
 	return raw;
 }
@@ -298,7 +304,8 @@ not_null<Ui::SettingsButton*> AddChoiceButton(
 
 not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 		not_null<Ui::VerticalLayout*> container,
-		PeerData *peer,
+		std::function<PeerData*()> peerGetter,
+		rpl::producer<PeerData*> peerChanged,
 		const QString &fallbackTitle,
 		const QString &fallbackDescription,
 		std::function<void()> callback) {
@@ -320,11 +327,48 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 	struct State {
 		std::shared_ptr<Ui::Text::String> title;
 		std::shared_ptr<Ui::Text::String> status;
+		PeerData *peer = nullptr;
+		Ui::UserpicButton *userpic = nullptr;
+		bool subscribed = false;
+		std::function<void()> refresh;
 	};
 	const auto state = row->lifetime().make_state<State>();
 	state->title = std::make_shared<Ui::Text::String>();
 	state->status = std::make_shared<Ui::Text::String>();
-	const auto refresh = [=] {
+	state->refresh = [=] {
+		const auto peer = peerGetter();
+		if (peer && state->peer != peer) {
+			state->peer = peer;
+			if (state->userpic) {
+				state->userpic->destroy();
+				state->userpic = nullptr;
+			}
+			state->userpic = Ui::CreateChild<Ui::UserpicButton>(
+				row,
+				peer,
+				*userpicSt);
+			state->userpic->move(st::defaultPeerListItem.photoPosition);
+			state->userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
+			peer->loadUserpic();
+			state->userpic->show();
+			if (!state->subscribed) {
+				state->subscribed = true;
+				peer->session().changes().peerUpdates(
+					peer,
+					Data::PeerUpdate::Flag::Name
+						| Data::PeerUpdate::Flag::Username
+						| Data::PeerUpdate::Flag::Photo
+						| Data::PeerUpdate::Flag::Members
+						| Data::PeerUpdate::Flag::FullInfo
+				) | rpl::on_next([=](const Data::PeerUpdate &) {
+					state->refresh();
+				}, row->lifetime());
+				if (const auto channel = peer->asChannel();
+					channel && !channel->membersCountKnown()) {
+					peer->session().api().requestFullPeer(channel);
+				}
+			}
+		}
 		const auto texts = ComputePeerCardTexts(
 			peer,
 			fallbackTitle,
@@ -338,28 +382,11 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 		row->update();
 	};
 
-	if (peer) {
-		using Button = Ui::UserpicButton;
-		const auto userpic = Ui::CreateChild<Button>(row, peer, *userpicSt);
-		userpic->move(st::defaultPeerListItem.photoPosition);
-		userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
-		peer->loadUserpic();
-		peer->session().changes().peerUpdates(
-			peer,
-			Data::PeerUpdate::Flag::Name
-				| Data::PeerUpdate::Flag::Username
-				| Data::PeerUpdate::Flag::Photo
-				| Data::PeerUpdate::Flag::Members
-				| Data::PeerUpdate::Flag::FullInfo
-		) | rpl::on_next([=](const Data::PeerUpdate &) {
-			refresh();
-		}, row->lifetime());
-		if (const auto channel = peer->asChannel();
-			channel && !channel->membersCountKnown()) {
-			peer->session().api().requestFullPeer(channel);
-		}
-	}
-	refresh();
+	std::move(peerChanged) | rpl::on_next([=](PeerData *peer) {
+		state->refresh();
+	}, row->lifetime());
+
+	state->refresh();
 
 	row->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(row);
@@ -390,7 +417,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 
 	args.controller->show(Box([args = std::move(args)](
 			not_null<Ui::GenericBox*> box) mutable {
-		box->setWidth(st::boxWideWidth * 5 / 4);
+		box->setWidth(st::boxWideWidth);
 		box->setStyle(st::stakeBox);
 		box->setNoContentMargin(true);
 
@@ -401,11 +428,12 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			Step step = Step::Welcome;
 			PeerData *pluginsChannelPeer = nullptr;
 			PeerData *officialChannelPeer = nullptr;
+			rpl::event_stream<PeerData*> pluginsPeerChanged;
+			rpl::event_stream<PeerData*> officialPeerChanged;
 		};
-		const auto state = box->lifetime().make_state<State>(State{
-			.pluginsChannelPeer = args.pluginsChannelPeer,
-			.officialChannelPeer = args.officialChannelPeer,
-		});
+		const auto state = box->lifetime().make_state<State>();
+		state->pluginsChannelPeer = args.pluginsChannelPeer;
+		state->officialChannelPeer = args.officialChannelPeer;
 		const auto weak = base::make_weak(box);
 
 		const auto finish = [=] {
@@ -544,6 +572,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddPrimaryButton(inner, RuEn("Продолжить", "Continue"), [=] {
 				showStep(Step::PluginsInstall);
 			});
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
 			AddLinkAction(inner, RuEn("Позже", "Later"), [=] {
 				showStep(Step::Finish);
 			});
@@ -566,7 +595,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 
 			AddPeerChoiceButton(
 				inner,
-				state->pluginsChannelPeer,
+				[state] { return state->pluginsChannelPeer; },
+				state->pluginsPeerChanged.events(),
 				args.pluginsChannelTitle.isEmpty()
 					? RuEn("AstroPlugins", "AstroPlugins")
 					: args.pluginsChannelTitle,
@@ -575,11 +605,13 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					if (args.subscribePluginsChannel) {
 						args.subscribePluginsChannel();
 					}
+					box->closeBox();
 				});
 			AddPrimaryButton(inner, RuEn("Подписаться", "Follow"), [=] {
 				if (args.subscribePluginsChannel) {
 					args.subscribePluginsChannel();
 				}
+				box->closeBox();
 			});
 			if (args.plugins.empty()) {
 				auto pluginText = rpl::single(RuEn(
@@ -630,6 +662,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddPrimaryButton(inner, RuEn("Продолжить", "Continue"), [=] {
 				showStep(Step::Finish);
 			});
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
 			AddLinkAction(inner, RuEn("Посмотреть все", "View all"), [=] {
 				if (args.openAllPlugins) {
 					args.openAllPlugins();
@@ -653,7 +686,8 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
 			AddPeerChoiceButton(
 				inner,
-				state->officialChannelPeer,
+				[state] { return state->officialChannelPeer; },
+				state->officialPeerChanged.events(),
 				args.officialChannelTitle.trimmed().isEmpty()
 					? RuEn("Astrogram", "Astrogram")
 					: args.officialChannelTitle.trimmed(),
@@ -666,6 +700,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					if (args.openOfficialChannel) {
 						args.openOfficialChannel();
 					}
+					box->closeBox();
 				});
 			AddChoiceButton(
 				inner,
@@ -694,6 +729,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					return;
 				}
 				state->pluginsChannelPeer = peer;
+				state->pluginsPeerChanged.fire_copy(peer);
 				if (weak.get() && (state->step == Step::PluginsInstall)) {
 					showStep(Step::PluginsInstall);
 				}
@@ -705,6 +741,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 					return;
 				}
 				state->officialChannelPeer = peer;
+				state->officialPeerChanged.fire_copy(peer);
 				if (weak.get() && (state->step == Step::Finish)) {
 					showStep(Step::Finish);
 				}

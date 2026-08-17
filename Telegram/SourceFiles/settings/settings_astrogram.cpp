@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_instance.h"
 #include "plugins/plugins_manager.h"
 #include "settings/settings_common.h"
+#include "settings/settings_experimental.h"
 #include "settings/settings_plugins.h"
 #include "settings.h"
 #include "styles/style_boxes.h"
@@ -841,6 +842,7 @@ void SetupAstrogramHome(
 		{
 			{ RuEn("Плагины", "Plugins"), Plugins::Id(), { &st::menuIconCustomize } },
 			{ RuEn("Защита от удаления", "Anti-recall"), AstrogramAntiRecall::Id(), { &st::menuIconRestore } },
+			{ RuEn("Экспериментальные", "Experimental"), Experimental::Id(), { &st::menuIconManage } },
 		});
 	Ui::AddSkip(container);
 	AddSectionGroupTitle(container, RuEn("Ссылки", "Links"));
