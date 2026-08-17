@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_badge.h"
 
+#include "apiwrap.h"
 #include "base/weak_ptr.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"

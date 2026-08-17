@@ -29,7 +29,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/top_background_gradient.h"
 #include "ui/ui_utility.h"
 #include "ui/vertical_list.h"
-#include "ui/wrap/center_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/buttons.h"
 
@@ -272,10 +271,9 @@ not_null<Ui::LinkButton*> AddLinkAction(
 		text,
 		st::defaultLinkButton);
 	const auto raw = container->add(
-		object_ptr<Ui::CenterWrap<Ui::LinkButton>>(
-			container,
-			std::move(button)),
-		style::margins(0, 0, 0, 0))->entity();
+		std::move(button),
+		style::margins(0, 0, 0, 0),
+		style::al_center);
 	raw->setClickedCallback(std::move(callback));
 	return raw;
 }

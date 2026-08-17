@@ -51,7 +51,7 @@ namespace {
 			return MediaKind::Audio;
 		} else if (document->isAnimation()) {
 			return MediaKind::Gif;
-		} else if (document->isSticker()) {
+		} else if (document->sticker()) {
 			return MediaKind::Sticker;
 		}
 		return MediaKind::File;

@@ -79,13 +79,29 @@ def extract_host_method_names(api_text: str) -> list[str]:
     return sorted(set(result))
 
 
+def read_plugin_source(path: pathlib.Path) -> str:
+    """Read a plugin source, following a single #include wrapper if present.
+
+    PluginCatalog entries are thin wrappers like:
+        #include "../../../Telegram/Plugins/Examples/ai_chat.cpp"
+    so we resolve the include to validate the real plugin source.
+    """
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r'#include\s+"([^"]+\.cpp)"', text)
+    if match and len(text.strip().splitlines()) <= 3:
+        target = (path.parent / match.group(1)).resolve()
+        if target.exists():
+            return target.read_text(encoding="utf-8")
+    return text
+
+
 def check_plugin_source(
     path: pathlib.Path,
     host_methods: set[str],
     errors: list[str],
     prefix: str,
 ) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_plugin_source(path)
     require(
         r'#include\s+"plugins/plugins_api.h"',
         text,
