@@ -344,7 +344,7 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 		if (peer && state->peer != peer) {
 			state->peer = peer;
 			if (state->userpic) {
-				state->userpic->destroy();
+				delete state->userpic;
 				state->userpic = nullptr;
 			}
 			state->userpic = Ui::CreateChild<Ui::UserpicButton>(
@@ -762,7 +762,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				AddChoiceButton(
 					inner,
 					plugin.title,
-					TextUtilities::ParseEntities(plugin.description),
+					TextUtilities::ParseEntities(plugin.description, TextParseLinks),
 					&st::menuIconDownload,
 						[install] {
 							if (install) {
