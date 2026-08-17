@@ -146,9 +146,8 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 		+ st::cocoonTitleFont->height
 		+ st::cocoonSubtitleTop;
 
-	const auto colorizeBold = [](QString text) {
-		auto result = tr::rich(text);
-		auto &entities = result.entities;
+	const auto colorizeBold = [](TextWithEntities text) {
+		auto &entities = text.entities;
 		for (auto i = entities.begin(); i != entities.end(); ++i) {
 			if (i->type() == EntityType::Bold) {
 				i = entities.insert(
@@ -160,7 +159,7 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 				++i;
 			}
 		}
-		return result;
+		return text;
 	};
 
 	struct State {
@@ -202,13 +201,21 @@ void AddAstrogramSupportCover(not_null<Ui::VerticalLayout*> container) {
 		QColor(0xad, 0xff, 0xcf),
 	});
 
+	auto subtitleText = [&] {
+		auto result = Ui::Text::Bold(RuEn(
+			"50 ₽",
+			"50 RUB"));
+		result.append(TextWithEntities{ RuEn(
+			" • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nПоддержите клиент и получите серверный значок подписчика Astrogram.",
+			" • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nSupport the client and receive an Astrogram server-side subscriber badge.") });
+		return colorizeBold(std::move(result));
+	}();
 	const auto subtitle = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		rpl::single(colorizeBold(RuEn(
-			"<b>50 ₽</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nПоддержите клиент и получите серверный значок подписчика Astrogram.",
-			"<b>50 RUB</b> • ≈ $0.55 • ≈ 22 UAH • ≈ 265 KZT • ≈ 1.80 BYN\nSupport the client and receive an Astrogram server-side subscriber badge."))),
+		rpl::single(std::move(subtitleText)),
 		state->subtitleSt);
 	subtitle->setTryMakeSimilarLines(true);
+	subtitle->setBreakEverywhere(true);
 
 	cover->widthValue() | rpl::on_next([=](int width) {
 		const auto available = width

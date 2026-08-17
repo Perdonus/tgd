@@ -21,7 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "settings/settings_common.h"
-#include "ui/controls/userpic_button.h"
+#include "ui/userpic_view.h"
 #include "ui/effects/ministar_particles.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
@@ -177,9 +177,10 @@ void AddHeroCover(
 
 	const auto subtitleLabel = Ui::CreateChild<Ui::FlatLabel>(
 		cover,
-		rpl::single(tr::rich(subtitle)),
+		rpl::single(TextWithEntities{ subtitle }),
 		state->subtitleSt);
 	subtitleLabel->setTryMakeSimilarLines(true);
+	subtitleLabel->setBreakEverywhere(true);
 
 	cover->widthValue() | rpl::on_next([=](int width) {
 		const auto available = width
@@ -323,16 +324,11 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 	row->resize(row->width(), st::defaultPeerListItem.height);
 	row->setClickedCallback(std::move(callback));
 
-	const auto userpicSt = row->lifetime().make_state<style::UserpicButton>(
-		st::defaultUserpicButton);
-	userpicSt->photoSize = st::defaultPeerListItem.photoSize;
-	userpicSt->size = QSize(userpicSt->photoSize, userpicSt->photoSize);
-
 	struct State {
 		std::shared_ptr<Ui::Text::String> title;
 		std::shared_ptr<Ui::Text::String> status;
 		PeerData *peer = nullptr;
-		Ui::UserpicButton *userpic = nullptr;
+		Ui::PeerUserpicView userpicView;
 		bool subscribed = false;
 		std::function<void()> refresh;
 	};
@@ -343,18 +339,7 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 		const auto peer = peerGetter();
 		if (peer && state->peer != peer) {
 			state->peer = peer;
-			if (state->userpic) {
-				delete state->userpic;
-				state->userpic = nullptr;
-			}
-			state->userpic = Ui::CreateChild<Ui::UserpicButton>(
-				row,
-				peer,
-				*userpicSt);
-			state->userpic->move(st::defaultPeerListItem.photoPosition);
-			state->userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
 			peer->loadUserpic();
-			state->userpic->show();
 			if (!state->subscribed) {
 				state->subscribed = true;
 				peer->session().changes().peerUpdates(
@@ -405,6 +390,15 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 	row->paintRequest() | rpl::on_next([=] {
 		auto p = QPainter(row);
 		const auto &st = st::defaultPeerListItem;
+		if (state->peer) {
+			state->peer->paintUserpicLeft(
+				p,
+				state->userpicView,
+				st.photoPosition.x(),
+				st.photoPosition.y(),
+				row->width(),
+				st.photoSize);
+		}
 		const auto availableWidth = row->width()
 			- st::boxRowPadding.right()
 			- st.namePosition.x();
@@ -478,39 +472,97 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				? ChannelId(uint64(channelId))
 				: ChannelId();
 		};
+		// Keep in sync with AstrogramChannelUsername() in mainwidget.cpp.
+		const auto channelUsername = [](int64 channelId) {
+			switch (channelId) {
+			case -1003814280064LL: return u"astroplugin"_q;
+			case -1003641835839LL: return u"astrogramchannel"_q;
+			}
+			return QString();
+		};
 		const auto resolveChannelById = [=](
 				int64 channelId,
 				Fn<void(PeerData*)> done) {
-			const auto bareId = channelBareId(channelId);
-			if (!bareId) {
-				done(nullptr);
-				return;
-			}
 			const auto session = &args.controller->session();
-			if (const auto loaded = session->data().channelLoaded(bareId)) {
-				done(loaded);
+			const auto weakController = base::make_weak(args.controller);
+			const auto finish = [=](PeerData *peer) {
+				if (peer) {
+					if (const auto channel = peer->asChannel()) {
+						channel->loadUserpic();
+						session->api().requestFullPeer(channel);
+					}
+					done(peer);
+				} else {
+					done(nullptr);
+				}
+			};
+			const auto resolveByBareId = [=] {
+				const auto bareId = channelBareId(channelId);
+				if (!bareId) {
+					done(nullptr);
+					return;
+				}
+				if (const auto loaded = session->data().channelLoaded(bareId)) {
+					finish(loaded);
+					return;
+				}
+				session->api().request(MTPchannels_GetChannels(
+					MTP_vector<MTPInputChannel>(
+						1,
+						MTP_inputChannel(MTP_long(bareId.bare), MTP_long(0)))
+				)).done([=](const MTPmessages_Chats &result) {
+					const auto controller = weakController.get();
+					if (!controller) {
+						done(nullptr);
+						return;
+					}
+					PeerData *peer = nullptr;
+					result.match([&](const auto &data) {
+						peer = controller->session().data().processChats(
+							data.vchats());
+					});
+					finish((peer && (peer->id == peerFromChannel(bareId)))
+						? peer
+						: nullptr);
+				}).fail([=](const MTP::Error &) {
+					done(nullptr);
+				}).send();
+			};
+			const auto username = channelUsername(channelId);
+			if (username.isEmpty()) {
+				resolveByBareId();
 				return;
 			}
-			const auto weakController = base::make_weak(args.controller);
-			session->api().request(MTPchannels_GetChannels(
-				MTP_vector<MTPInputChannel>(
-					1,
-					MTP_inputChannel(MTP_long(bareId.bare), MTP_long(0)))
-			)).done([=](const MTPmessages_Chats &result) {
+			if (const auto peer = session->data().peerByUsername(username)) {
+				finish(peer);
+				return;
+			}
+			using Flag = MTPcontacts_ResolveUsername::Flag;
+			session->api().request(MTPcontacts_ResolveUsername(
+				MTP_flags(Flag()),
+				MTP_string(username),
+				MTP_string(QString())
+			)).done([=](const MTPcontacts_ResolvedPeer &result) {
 				const auto controller = weakController.get();
 				if (!controller) {
 					done(nullptr);
 					return;
 				}
-				result.match([&](const auto &data) {
-					const auto peer = controller->session().data().processChats(
-						data.vchats());
-					if (peer && (peer->id == peerFromChannel(bareId))) {
-						done(peer);
+				PeerData *peer = nullptr;
+				result.match([&](const MTPDcontacts_resolvedPeer &data) {
+					controller->session().data().processUsers(data.vusers());
+					controller->session().data().processChats(data.vchats());
+					if (const auto peerId = peerFromMTP(data.vpeer())) {
+						peer = controller->session().data().peer(peerId);
 					}
 				});
+				if (peer && peer->asChannel()) {
+					finish(peer);
+				} else {
+					resolveByBareId();
+				}
 			}).fail([=](const MTP::Error &) {
-				done(nullptr);
+				resolveByBareId();
 			}).send();
 		};
 		if (!args.resolvePluginsChannel) {
@@ -673,7 +725,7 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddLinkAction(inner, RuEn("Выбрать позже", "Choose later"), [=] {
 				showStep(Step::PluginsInfo);
 			});
-			Ui::AddSkip(inner, st::settingsCheckboxesSkip);
+			Ui::AddSkip(inner, st::settingsCheckboxesSkip / 2);
 		}
 
 		// Plugins Info step
