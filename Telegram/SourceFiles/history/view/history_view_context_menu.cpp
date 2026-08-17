@@ -203,7 +203,7 @@ void ShowEditHistoryBox(
 				style::al_top);
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(revision.text),
+				rpl::single(AyuMessages::SnapshotText(revision)),
 				st::boxLabel),
 				style::margins(
 					st::boxPadding.left(),

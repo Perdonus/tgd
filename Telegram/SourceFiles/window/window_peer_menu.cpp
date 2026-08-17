@@ -205,7 +205,7 @@ constexpr auto kTopicsSearchMinCount = 1;
 	return peer ? peer->name() : QString();
 }
 
-[[nodiscard]] QString RecallMessageBody(
+[[nodiscard]] QString RecallMediaDescription(
 		const AyuMessages::MessageSnapshot &message) {
 	auto media = DescribeMediaKind(message.mediaKind);
 	if (!message.mediaFileName.isEmpty()
@@ -214,6 +214,12 @@ constexpr auto kTopicsSearchMinCount = 1;
 			|| message.mediaKind == AyuMessages::MediaKind::Video)) {
 		media += u" ("_q + message.mediaFileName + u")"_q;
 	}
+	return media;
+}
+
+[[nodiscard]] QString RecallMessageBody(
+		const AyuMessages::MessageSnapshot &message) {
+	const auto media = RecallMediaDescription(message);
 	auto body = message.text;
 	if (!media.isEmpty()) {
 		body = body.isEmpty() ? media : (media + u": "_q + body);
@@ -271,6 +277,15 @@ void ShowDeletedMessagesBox(
 				style::al_top);
 			return;
 		}
+		box->addButton(
+			rpl::single(AstrogramUiText("Clear", "Очистить")),
+			[=] {
+				AyuMessages::clearDeletedMessages(peer, topicId);
+				controller->window().showToast(AstrogramUiText(
+					"Deleted messages cleared.",
+					"Удалённые сообщения очищены."));
+				box->closeBox();
+			});
 		for (auto i = 0, count = int(messages.size()); i != count; ++i) {
 			const auto &message = messages[i];
 			auto header = AstrogramUiText(
@@ -292,16 +307,31 @@ void ShowDeletedMessagesBox(
 					st::boxPadding.right(),
 					0),
 				style::al_top);
-			box->addRow(object_ptr<Ui::FlatLabel>(
-				box,
-				rpl::single(RecallMessageBody(message)),
-				st::boxLabel),
-				style::margins(
-					st::boxPadding.left(),
-					0,
-					st::boxPadding.right(),
-					0),
-				style::al_top);
+			const auto media = RecallMediaDescription(message);
+			if (!media.isEmpty()) {
+				box->addRow(object_ptr<Ui::FlatLabel>(
+					box,
+					rpl::single(media),
+					st::sessionDateLabel),
+					style::margins(
+						st::boxPadding.left(),
+						0,
+						st::boxPadding.right(),
+						0),
+					style::al_top);
+			}
+			if (!message.text.isEmpty()) {
+				box->addRow(object_ptr<Ui::FlatLabel>(
+					box,
+					rpl::single(AyuMessages::SnapshotText(message)),
+					st::boxLabel),
+					style::margins(
+						st::boxPadding.left(),
+						0,
+						st::boxPadding.right(),
+						0),
+					style::al_top);
+			}
 		}
 	}));
 }

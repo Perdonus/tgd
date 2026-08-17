@@ -47,6 +47,13 @@ struct MessageSnapshot {
 	int editDate = 0;
 	MediaKind mediaKind = MediaKind::None;
 	QString text;
+	QString textEntities;
+	int views = 0;
+	ID fwdFromId = 0;
+	QString fwdName;
+	int fwdDate = 0;
+	int replyMessageId = 0;
+	int replyTopId = 0;
 	QString mediaFileName;
 	QString mediaMimeType;
 	long long mediaSize = 0;

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "main/main_session.h"
+#include "ui/text/text_utilities.h"
 
 #include <algorithm>
 #include <optional>
@@ -109,7 +110,25 @@ void FillMediaMetadata(
 	snapshot.messageId = item->id.bare;
 	snapshot.date = item->date();
 	snapshot.editDate = base::unixtime::now();
-	snapshot.text = item->originalText().text;
+	const auto &originalText = item->originalText();
+	snapshot.text = originalText.text;
+	snapshot.textEntities = TextUtilities::ConvertEntitiesToTextTags(
+		originalText.entities);
+	snapshot.views = item->viewsCount();
+	if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+		if (forwarded->originalSender) {
+			snapshot.fwdFromId = forwarded->originalSender->id.value;
+			snapshot.fwdName = forwarded->originalSender->name();
+		}
+		if (!forwarded->originalPostAuthor.isEmpty()) {
+			snapshot.fwdName = forwarded->originalPostAuthor;
+		}
+		snapshot.fwdDate = forwarded->originalDate;
+	}
+	if (const auto reply = item->Get<HistoryMessageReply>()) {
+		snapshot.replyMessageId = reply->messageId().bare;
+		snapshot.replyTopId = reply->topMessageId().bare;
+	}
 	snapshot.mediaKind = MediaKindFor(item);
 	FillMediaMetadata(item, &snapshot);
 	if (const auto edited = item->Get<HistoryMessageEdited>()) {
@@ -141,6 +160,13 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		{ u"editDate"_q, snapshot.editDate },
 		{ u"media"_q, int(snapshot.mediaKind) },
 		{ u"text"_q, snapshot.text },
+		{ u"textEntities"_q, snapshot.textEntities },
+		{ u"views"_q, snapshot.views },
+		{ u"fwdFromId"_q, QString::number(snapshot.fwdFromId) },
+		{ u"fwdName"_q, snapshot.fwdName },
+		{ u"fwdDate"_q, snapshot.fwdDate },
+		{ u"replyMessageId"_q, snapshot.replyMessageId },
+		{ u"replyTopId"_q, snapshot.replyTopId },
 		{ u"mediaFileName"_q, snapshot.mediaFileName },
 		{ u"mediaMimeType"_q, snapshot.mediaMimeType },
 		{ u"mediaSize"_q, QString::number(snapshot.mediaSize) },
@@ -194,6 +220,13 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		? MediaKind(mediaValue)
 		: MediaKind::None;
 	snapshot.text = object.value(u"text"_q).toString();
+	snapshot.textEntities = object.value(u"textEntities"_q).toString();
+	snapshot.views = object.value(u"views"_q).toInt();
+	snapshot.fwdFromId = object.value(u"fwdFromId"_q).toString().toLongLong();
+	snapshot.fwdName = object.value(u"fwdName"_q).toString();
+	snapshot.fwdDate = object.value(u"fwdDate"_q).toInt();
+	snapshot.replyMessageId = object.value(u"replyMessageId"_q).toInt();
+	snapshot.replyTopId = object.value(u"replyTopId"_q).toInt();
 	snapshot.mediaFileName = object.value(u"mediaFileName"_q).toString();
 	snapshot.mediaMimeType = object.value(u"mediaMimeType"_q).toString();
 	snapshot.mediaSize = object.value(u"mediaSize"_q).toString().toLongLong();
@@ -225,6 +258,33 @@ void SortSnapshots(std::vector<MessageSnapshot> *snapshots) {
 			}
 			return a.date > b.date;
 		});
+}
+
+template <typename Predicate>
+void RewriteSnapshotsKeeping(Predicate &&keep) {
+	const auto path = StoragePath();
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		return;
+	}
+	auto lines = std::vector<QByteArray>();
+	while (!file.atEnd()) {
+		const auto line = file.readLine();
+		const auto parsed = ParseSnapshotLine(line);
+		if (!parsed || keep(*parsed)) {
+			lines.push_back(line);
+		}
+	}
+	file.close();
+
+	auto out = QFile(path);
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+		return;
+	}
+	for (const auto &line : lines) {
+		out.write(line);
+	}
+	out.close();
 }
 
 } // namespace
@@ -287,7 +347,10 @@ std::vector<MessageSnapshot> getDeletedMessages(
 	}
 	while (!file.atEnd()) {
 		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (!parsed || !MatchesPeer(peer, topicId, *parsed) || parsed->text.isEmpty()) {
+		if (!parsed
+			|| !MatchesPeer(peer, topicId, *parsed)
+			|| (parsed->text.isEmpty()
+				&& parsed->mediaKind == MediaKind::None)) {
 			continue;
 		}
 		result.push_back(*parsed);
@@ -309,13 +372,29 @@ bool hasDeletedMessages(
 	}
 	while (!file.atEnd()) {
 		const auto parsed = ParseSnapshotLine(file.readLine());
-		if (parsed && MatchesPeer(peer, topicId, *parsed) && !parsed->text.isEmpty()) {
+		if (parsed
+			&& MatchesPeer(peer, topicId, *parsed)
+			&& (!parsed->text.isEmpty()
+				|| parsed->mediaKind != MediaKind::None)) {
 			file.close();
 			return true;
 		}
 	}
 	file.close();
 	return false;
+}
+
+TextWithEntities SnapshotText(const MessageSnapshot &snapshot) {
+	return TextWithEntities{
+		snapshot.text,
+		TextUtilities::ConvertTextTagsToEntities(snapshot.textEntities),
+	};
+}
+
+void clearDeletedMessages(not_null<PeerData*> peer, ID topicId) {
+	RewriteSnapshotsKeeping([&](const MessageSnapshot &snapshot) {
+		return !MatchesPeer(peer, topicId, snapshot);
+	});
 }
 
 } // namespace AyuMessages

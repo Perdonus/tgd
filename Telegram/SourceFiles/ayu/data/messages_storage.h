@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ayu/data/entities.h"
 
+#include "ui/text/text_entity.h"
+
 #include <vector>
 
 class HistoryItem;
@@ -29,5 +31,7 @@ std::vector<MessageSnapshot> getDeletedMessages(
 bool hasDeletedMessages(
 	not_null<PeerData*> peer,
 	ID topicId = 0);
+[[nodiscard]] TextWithEntities SnapshotText(const MessageSnapshot &snapshot);
+void clearDeletedMessages(not_null<PeerData*> peer, ID topicId = 0);
 
 } // namespace AyuMessages
