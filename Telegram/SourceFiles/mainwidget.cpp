@@ -151,7 +151,8 @@ void ClearBotStartToken(PeerData *peer) {
 [[nodiscard]] bool IsAstrogramPluginPackage(not_null<DocumentData*> document) {
 	const auto filename = document->filename().trimmed();
 	return !filename.isEmpty()
-		&& filename.endsWith(u".tgd"_q, Qt::CaseInsensitive);
+		&& (filename.endsWith(u".tgd"_q, Qt::CaseInsensitive)
+			|| filename.endsWith(u".plugin"_q, Qt::CaseInsensitive));
 }
 
 [[nodiscard]] QString AstrogramPluginTitle(
@@ -167,6 +168,8 @@ void ClearBotStartToken(PeerData *peer) {
 	}
 	if (filename.endsWith(u".tgd"_q, Qt::CaseInsensitive)) {
 		filename.chop(4);
+	} else if (filename.endsWith(u".plugin"_q, Qt::CaseInsensitive)) {
+		filename.chop(7);
 	}
 	filename = QFileInfo(filename).completeBaseName().trimmed();
 	return filename.isEmpty()

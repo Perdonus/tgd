@@ -7,9 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_badge.h"
 
+#include "base/weak_ptr.h"
 #include "data/data_changes.h"
+#include "data/data_channel.h"
 #include "data/data_emoji_statuses.h"
 #include "data/data_peer.h"
+#include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -23,13 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "styles/style_info.h"
 
-#include <QtNetwork/QNetworkAccessManager>
-#include <QtNetwork/QNetworkReply>
-#include <QtNetwork/QNetworkRequest>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QUrlQuery>
-#include <map>
+#include <QSet>
+#include <type_traits>
 
 namespace Info::Profile {
 namespace {
@@ -39,219 +37,186 @@ namespace {
 		|| (content.badge == BadgeType::Verified && content.emojiStatusId);
 }
 
-[[nodiscard]] bool JsonTruthy(const QJsonValue &value) {
-	if (value.isBool()) {
-		return value.toBool();
-	} else if (value.isDouble()) {
-		return (value.toInt() != 0);
-	} else if (value.isString()) {
-		const auto lowered = value.toString().trimmed().toLower();
-		return (lowered == u"1"_q
-			|| lowered == u"true"_q
-			|| lowered == u"yes"_q
-			|| lowered == u"on"_q);
-	}
-	return false;
-}
+constexpr auto kBadgeChannelBareId = ChannelId(3960998300ULL);
+constexpr auto kBadgeHistoryLimit = 100;
+constexpr auto kBadgeSuccessTtl = crl::time(5 * 60 * 1000);
+constexpr auto kBadgeRetryTtl = crl::time(30 * 1000);
 
-[[nodiscard]] uint64 JsonToUint64(const QJsonValue &value) {
-	if (value.isDouble()) {
-		const auto asInt = value.toVariant().toULongLong();
-		return asInt;
-	} else if (value.isString()) {
-		auto ok = false;
-		const auto parsed = value.toString().trimmed().toULongLong(&ok);
-		return ok ? parsed : 0;
-	}
-	return 0;
-}
-
-constexpr auto kServerBadgeSuccessTtl = crl::time(5 * 60 * 1000);
-constexpr auto kServerBadgeRetryTtl = crl::time(30 * 1000);
-
-[[nodiscard]] uint64 ServerBadgeEmojiStatusId(const QJsonObject &object) {
-	for (const auto &key : {
-		u"emoji_status_id"_q,
-		u"emojiStatusId"_q,
-		u"document_id"_q,
-		u"documentId"_q,
-	}) {
-		if (const auto value = object.value(key); !value.isUndefined()) {
-			return JsonToUint64(value);
-		}
-	}
-	return 0;
-}
-
-[[nodiscard]] std::optional<std::optional<EmojiStatusId>> ParseServerBadgeObject(
-		const QJsonObject &object) {
-	const auto hasEnabledField = object.contains(u"badge"_q)
-		|| object.contains(u"subscriber"_q)
-		|| object.contains(u"enabled"_q);
-	const auto hasStatusIdField = object.contains(u"emoji_status_id"_q)
-		|| object.contains(u"emojiStatusId"_q)
-		|| object.contains(u"document_id"_q)
-		|| object.contains(u"documentId"_q);
-	if (!hasEnabledField && !hasStatusIdField) {
+// Parses a peer id posted into the badge channel. Supports all forms:
+//  123456789       -> bare id 123456789 (user)
+//  -1234567890     -> bare id 1234567890 (chat)
+//  -1003960998300  -> bare id 3960998300 (channel)
+//  3960998300      -> bare id 3960998300 (channel without -100 prefix)
+[[nodiscard]] std::optional<uint64> ParseBadgeBareId(const QString &raw) {
+	const auto text = raw.trimmed();
+	if (text.isEmpty()) {
 		return std::nullopt;
 	}
-	const auto statusId = ServerBadgeEmojiStatusId(object);
-	const auto enabled = hasEnabledField
-		? (JsonTruthy(object.value(u"badge"_q))
-			|| JsonTruthy(object.value(u"subscriber"_q))
-			|| JsonTruthy(object.value(u"enabled"_q))
-			|| (statusId != 0))
-		: (statusId != 0);
-	if (!enabled) {
-		return std::optional<std::optional<EmojiStatusId>>(
-			std::optional<EmojiStatusId>());
+	auto ok = false;
+	const auto value = text.toLongLong(&ok);
+	if (!ok || !value) {
+		return std::nullopt;
 	}
-	auto result = EmojiStatusId();
-	result.documentId = statusId;
-	return std::optional<std::optional<EmojiStatusId>>(result);
+	auto positive = (value < 0) ? -value : value;
+	constexpr auto kBotApiChannelOffset = 1000000000000LL;
+	if (positive >= kBotApiChannelOffset) {
+		positive -= kBotApiChannelOffset;
+	}
+	if (positive <= 0) {
+		return std::nullopt;
+	}
+	return uint64(positive);
 }
 
-[[nodiscard]] std::optional<std::optional<EmojiStatusId>> ParseServerBadgeResponse(
-		const QJsonObject &root) {
-	if (const auto parsed = ParseServerBadgeObject(root)) {
-		return parsed;
-	}
-	for (const auto &key : {
-		u"data"_q,
-		u"result"_q,
-		u"payload"_q,
-		u"response"_q,
-	}) {
-		const auto value = root.value(key);
-		if (value.isObject()) {
-			if (const auto parsed = ParseServerBadgeObject(value.toObject())) {
-				return parsed;
-			}
-		}
-	}
-	return std::nullopt;
-}
-
-class ServerSubscriberBadge final {
+class ChannelSubscriberBadge final {
 public:
-	[[nodiscard]] static ServerSubscriberBadge &Instance() {
-		static ServerSubscriberBadge instance;
+	[[nodiscard]] static ChannelSubscriberBadge &Instance() {
+		static ChannelSubscriberBadge instance;
 		return instance;
 	}
 
+	// Returns an optional emoji status: std::nullopt means "no badge",
+	// a value (possibly with documentId == 0) means "subscriber badge".
 	[[nodiscard]] rpl::producer<std::optional<EmojiStatusId>> badgeValue(
 			not_null<PeerData*> peer) {
-		const auto key = uint64(peer->id.value);
-		auto i = _entries.find(key);
-		if (i == end(_entries)) {
-			_entries.emplace(key, std::make_unique<Entry>());
-			i = _entries.find(key);
-		}
-		Expects(i != end(_entries));
-		const auto entry = i->second.get();
-		requestIfNeeded(peer->id, entry);
-		return rpl::single(entry->emojiStatusId) | rpl::then(
-			entry->updated.events() | rpl::map([=] {
-				return entry->emojiStatusId;
-			}));
+		const auto session = &peer->session();
+		ensureSession(session);
+		const auto key = peer->id.value & PeerId::kChatTypeMask;
+		const auto current = [=]() -> std::optional<EmojiStatusId> {
+			return _badgedBareIds.contains(key)
+				? std::optional<EmojiStatusId>(EmojiStatusId())
+				: std::nullopt;
+		};
+		return rpl::single(current()) | rpl::then(
+			_updated.events() | rpl::map(current));
 	}
 
 private:
-	struct Entry {
-		bool inFlight = false;
-		crl::time nextRequestAt = 0;
-		std::optional<EmojiStatusId> emojiStatusId;
-		rpl::event_stream<> updated;
-	};
-
-	[[nodiscard]] static QUrl BuildRequestUrl(PeerId peerId) {
-		// Server-side subscriber badge endpoint.
-		// Expected JSON:
-		// { "badge": true, "emoji_status_id": 1234567890 }
-		// or { "subscriber": true, "emoji_status_id": 1234567890 }
-		auto url = QUrl(u"https://sosiskibot.ru/api/astrogram/subscriber-badge"_q);
-		auto query = QUrlQuery();
-		query.addQueryItem(
-			u"peer_id"_q,
-			QString::number(qulonglong(peerId.value)));
-		if (peerId.is<UserId>()) {
-			query.addQueryItem(
-				u"user_id"_q,
-				QString::number(qulonglong(peerId.to<UserId>().bare)));
-		}
-		url.setQuery(query);
-		return url;
-	}
-
-	void requestIfNeeded(PeerId peerId, Entry *entry) {
-		Expects(entry != nullptr);
-		if (entry->inFlight || entry->nextRequestAt > crl::now()) {
+	void ensureSession(not_null<Main::Session*> session) {
+		if (_session.get() == session) {
+			if (!_fetching && _nextRequestAt <= crl::now()) {
+				refresh(session);
+			}
 			return;
 		}
-		entry->inFlight = true;
-		const auto peerKey = uint64(peerId.value);
-		Logs::writeClient(QString::fromLatin1(
-			"[badge] request started: peer=%1")
-			.arg(QString::number(qulonglong(peerId.value))));
-
-		QNetworkRequest request(BuildRequestUrl(peerId));
-		request.setAttribute(
-			QNetworkRequest::RedirectPolicyAttribute,
-			QNetworkRequest::NoLessSafeRedirectPolicy);
-		auto *reply = _manager.get(request);
-		QObject::connect(
-			reply,
-			&QNetworkReply::finished,
-			reply,
-			[=] {
-				auto i = _entries.find(peerKey);
-				if (i == end(_entries)) {
-					reply->deleteLater();
-					return;
-				}
-				auto &stored = i->second;
-				stored->inFlight = false;
-
-				auto next = stored->emojiStatusId;
-				auto resolved = false;
-				auto nextRequestAt = crl::now() + kServerBadgeRetryTtl;
-				const auto statusCode = reply->attribute(
-					QNetworkRequest::HttpStatusCodeAttribute).toInt();
-				if (reply->error() == QNetworkReply::NoError) {
-					const auto parsed = QJsonDocument::fromJson(reply->readAll());
-					if (parsed.isObject()) {
-						if (const auto parsedBadge = ParseServerBadgeResponse(
-								parsed.object())) {
-							next = *parsedBadge;
-							resolved = true;
-							nextRequestAt = crl::now() + kServerBadgeSuccessTtl;
-						}
-					}
-					Logs::writeClient(QString::fromLatin1(
-						"[badge] request finished: peer=%1 http=%2 resolved=%3 enabled=%4 emojiStatusId=%5")
-						.arg(QString::number(qulonglong(peerId.value)))
-						.arg(statusCode)
-						.arg(resolved ? u"true"_q : u"false"_q)
-						.arg(next.has_value() ? u"true"_q : u"false"_q)
-						.arg(next ? QString::number(next->documentId) : QStringLiteral("0")));
-				} else {
-					Logs::writeClient(QString::fromLatin1(
-						"[badge] request failed: peer=%1 http=%2 reason=%3")
-						.arg(QString::number(qulonglong(peerId.value)))
-						.arg(statusCode)
-						.arg(reply->errorString()));
-				}
-				stored->nextRequestAt = nextRequestAt;
-				if (resolved && stored->emojiStatusId != next) {
-					stored->emojiStatusId = next;
-					stored->updated.fire({});
-				}
-				reply->deleteLater();
-			});
+		_session = base::make_weak(session);
+		_badgedBareIds.clear();
+		_fetching = false;
+		_nextRequestAt = 0;
+		refresh(session);
 	}
 
-	std::map<uint64, std::unique_ptr<Entry>> _entries;
-	QNetworkAccessManager _manager;
+	void refresh(not_null<Main::Session*> session) {
+		if (_fetching) {
+			return;
+		}
+		_fetching = true;
+		if (const auto loaded = session->data().channelLoaded(
+				kBadgeChannelBareId)) {
+			fetchHistory(session, loaded);
+			return;
+		}
+		session->api().request(MTPchannels_GetChannels(
+			MTP_vector<MTPInputChannel>(
+				1,
+				MTP_inputChannel(
+					MTP_long(kBadgeChannelBareId.bare),
+					MTP_long(0)))
+		)).done([=](const MTPmessages_Chats &result) {
+			const auto session = _session.get();
+			if (!session) {
+				_fetching = false;
+				return;
+			}
+			auto channel = (ChannelData*)nullptr;
+			result.match([&](const auto &data) {
+				const auto peer = session->data().processChats(data.vchats());
+				if (peer
+					&& peer->id == peerFromChannel(kBadgeChannelBareId)) {
+					channel = peer->asChannel();
+				}
+			});
+			if (channel) {
+				fetchHistory(session, channel);
+			} else {
+				_fetching = false;
+				_nextRequestAt = crl::now() + kBadgeRetryTtl;
+			}
+		}).fail([=] {
+			_fetching = false;
+			_nextRequestAt = crl::now() + kBadgeRetryTtl;
+		}).send();
+	}
+
+	void fetchHistory(
+			not_null<Main::Session*> session,
+			not_null<ChannelData*> channel) {
+		session->api().request(MTPmessages_GetHistory(
+			channel->input(),
+			MTP_int(0), // offset_id
+			MTP_int(0), // offset_date
+			MTP_int(0), // add_offset
+			MTP_int(kBadgeHistoryLimit), // limit
+			MTP_int(0), // max_id
+			MTP_int(0), // min_id
+			MTP_long(0) // hash
+		)).done([=](const MTPmessages_Messages &result) {
+			_fetching = false;
+			_nextRequestAt = crl::now() + kBadgeSuccessTtl;
+			applyMessages(session, result);
+		}).fail([=] {
+			_fetching = false;
+			_nextRequestAt = crl::now() + kBadgeRetryTtl;
+		}).send();
+	}
+
+	void applyMessages(
+			not_null<Main::Session*> session,
+			const MTPmessages_Messages &result) {
+		auto badged = QSet<uint64>();
+		result.match(
+			[&](const MTPDmessages_messages &data) {
+				collectBadgedIds(data.vmessages().v, badged);
+			},
+			[&](const MTPDmessages_messagesSlice &data) {
+				collectBadgedIds(data.vmessages().v, badged);
+			},
+			[&](const MTPDmessages_channelMessages &data) {
+				collectBadgedIds(data.vmessages().v, badged);
+			},
+			[](const MTPDmessages_messagesNotModified &) {});
+		if (badged != _badgedBareIds) {
+			_badgedBareIds = std::move(badged);
+			_updated.fire({});
+		}
+		Logs::writeClient(QString::fromLatin1(
+			"[badge] refreshed: %1 ids from channel %2")
+			.arg(_badgedBareIds.size())
+			.arg(kBadgeChannelBareId.bare));
+	}
+
+	void collectBadgedIds(
+			const auto &messages,
+			QSet<uint64> &badged) {
+		for (const auto &message : messages) {
+			const auto bareId = message.match(
+				[](const MTPDmessage &data) -> std::optional<uint64> {
+					return ParseBadgeBareId(data.vmessage().v);
+				},
+				[](const auto &) -> std::optional<uint64> {
+					return std::nullopt;
+				});
+			if (bareId) {
+				badged.insert(*bareId);
+			}
+		}
+	}
+
+	base::weak_ptr<Main::Session> _session;
+	bool _fetching = false;
+	crl::time _nextRequestAt = 0;
+	QSet<uint64> _badgedBareIds;
+	rpl::event_stream<> _updated;
 };
 
 } // namespace
@@ -480,7 +445,7 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 	return rpl::combine(
 		BadgeValue(peer),
 		EmojiStatusIdValue(peer),
-		ServerSubscriberBadge::Instance().badgeValue(peer)
+		ChannelSubscriberBadge::Instance().badgeValue(peer)
 	) | rpl::map([=](
 			BadgeType badge,
 			EmojiStatusId emojiStatusId,

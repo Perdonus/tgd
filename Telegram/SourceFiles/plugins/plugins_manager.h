@@ -373,6 +373,12 @@ private:
 	void unregisterPluginMessageObservers(const QString &pluginId);
 	void unregisterPluginWindowHandlers(const QString &pluginId);
 	void unregisterPluginWindowWidgetHandlers(const QString &pluginId);
+	void invokeWindowHandler(
+		const WindowHandlerEntry &entry,
+		Window::Controller *window);
+	void invokeWindowWidgetHandler(
+		const WindowWidgetHandlerEntry &entry,
+		QWidget *widget);
 	void unregisterPluginSessionHandlers(const QString &pluginId);
 	QString commandKey(const QString &command) const;
 	bool hasPlugin(const QString &pluginId) const;

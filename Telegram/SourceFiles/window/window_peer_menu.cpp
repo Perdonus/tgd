@@ -150,6 +150,71 @@ constexpr auto kTopicsSearchMinCount = 1;
 		: QLocale().toString(dt, QLocale::LongFormat);
 }
 
+[[nodiscard]] QString DescribeMediaKind(AyuMessages::MediaKind kind) {
+	switch (kind) {
+	case AyuMessages::MediaKind::Photo:
+		return AstrogramUiText("Photo", "Фото");
+	case AyuMessages::MediaKind::Video:
+		return AstrogramUiText("Video", "Видео");
+	case AyuMessages::MediaKind::Voice:
+		return AstrogramUiText("Voice message", "Голосовое сообщение");
+	case AyuMessages::MediaKind::VideoNote:
+		return AstrogramUiText("Video message", "Видеосообщение");
+	case AyuMessages::MediaKind::Audio:
+		return AstrogramUiText("Audio", "Аудио");
+	case AyuMessages::MediaKind::Gif:
+		return AstrogramUiText("GIF", "GIF");
+	case AyuMessages::MediaKind::Sticker:
+		return AstrogramUiText("Sticker", "Стикер");
+	case AyuMessages::MediaKind::File:
+		return AstrogramUiText("File", "Файл");
+	case AyuMessages::MediaKind::Link:
+		return AstrogramUiText("Link", "Ссылка");
+	case AyuMessages::MediaKind::Poll:
+		return AstrogramUiText("Poll", "Опрос");
+	case AyuMessages::MediaKind::Contact:
+		return AstrogramUiText("Contact", "Контакт");
+	case AyuMessages::MediaKind::Location:
+		return AstrogramUiText("Location", "Геопозиция");
+	case AyuMessages::MediaKind::Call:
+		return AstrogramUiText("Call", "Звонок");
+	case AyuMessages::MediaKind::Game:
+		return AstrogramUiText("Game", "Игра");
+	case AyuMessages::MediaKind::Invoice:
+		return AstrogramUiText("Invoice", "Счёт");
+	case AyuMessages::MediaKind::TodoList:
+		return AstrogramUiText("List", "Список");
+	case AyuMessages::MediaKind::Story:
+		return AstrogramUiText("Story", "История");
+	case AyuMessages::MediaKind::Other:
+		return AstrogramUiText("Media", "Медиа");
+	case AyuMessages::MediaKind::None:
+		return QString();
+	}
+	return QString();
+}
+
+[[nodiscard]] QString ResolveRecallSender(
+		not_null<SessionController*> controller,
+		AyuMessages::ID fromId) {
+	if (!fromId) {
+		return QString();
+	}
+	const auto peer = controller->session().data().peerLoaded(
+		PeerId(uint64(fromId)));
+	return peer ? peer->name() : QString();
+}
+
+[[nodiscard]] QString RecallMessageBody(
+		const AyuMessages::MessageSnapshot &message) {
+	const auto media = DescribeMediaKind(message.mediaKind);
+	auto body = message.text;
+	if (!media.isEmpty()) {
+		body = body.isEmpty() ? media : (media + u": "_q + body);
+	}
+	return body;
+}
+
 void ShowDeletedMessagesBox(
 		not_null<SessionController*> controller,
 		not_null<PeerData*> peer,
@@ -169,7 +234,13 @@ void ShowDeletedMessagesBox(
 				for (const auto &message : messages) {
 					lines.push_back(FormatRecallTimestamp(
 						message.editDate ? message.editDate : message.date));
-					lines.push_back(message.text);
+					const auto sender = ResolveRecallSender(
+						controller,
+						message.fromId);
+					const auto body = RecallMessageBody(message);
+					lines.push_back(sender.isEmpty()
+						? body
+						: (sender + u": "_q + body));
 					lines.push_back(QString());
 				}
 				if (const auto clipboard = QGuiApplication::clipboard()) {
@@ -196,13 +267,18 @@ void ShowDeletedMessagesBox(
 		}
 		for (auto i = 0, count = int(messages.size()); i != count; ++i) {
 			const auto &message = messages[i];
+			auto header = AstrogramUiText(
+				"Message %1 • %2",
+				"Сообщение %1 • %2"
+			).arg(i + 1).arg(FormatRecallTimestamp(
+				message.editDate ? message.editDate : message.date));
+			const auto sender = ResolveRecallSender(controller, message.fromId);
+			if (!sender.isEmpty()) {
+				header += u" • "_q + sender;
+			}
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(AstrogramUiText(
-					"Message %1 • %2",
-					"Сообщение %1 • %2"
-				).arg(i + 1).arg(FormatRecallTimestamp(
-					message.editDate ? message.editDate : message.date))),
+				rpl::single(header),
 				st::sessionDateLabel),
 				style::margins(
 					st::boxPadding.left(),
@@ -212,7 +288,7 @@ void ShowDeletedMessagesBox(
 				style::al_top);
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(message.text),
+				rpl::single(RecallMessageBody(message)),
 				st::boxLabel),
 				style::margins(
 					st::boxPadding.left(),

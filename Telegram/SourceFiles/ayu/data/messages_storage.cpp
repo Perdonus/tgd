@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/data/messages_storage.h"
 
 #include "base/unixtime.h"
+#include "data/data_document.h"
+#include "data/data_media_types.h"
 #include "data/data_session.h"
 #include "data/data_peer.h"
 #include "history/history.h"
@@ -30,6 +32,52 @@ namespace {
 	return u"./tdata/astro_recall_log.jsonl"_q;
 }
 
+[[nodiscard]] MediaKind MediaKindFor(not_null<HistoryItem*> item) {
+	const auto media = item->media();
+	if (!media) {
+		return MediaKind::None;
+	}
+	if (media->photo()) {
+		return MediaKind::Photo;
+	}
+	if (const auto document = media->document()) {
+		if (document->isVoiceMessage()) {
+			return MediaKind::Voice;
+		} else if (document->isVideoMessage()) {
+			return MediaKind::VideoNote;
+		} else if (document->isVideoFile()) {
+			return MediaKind::Video;
+		} else if (document->isAudioFile() || document->isSong()) {
+			return MediaKind::Audio;
+		} else if (document->isAnimation()) {
+			return MediaKind::Gif;
+		} else if (document->isSticker()) {
+			return MediaKind::Sticker;
+		}
+		return MediaKind::File;
+	}
+	if (media->webpage()) {
+		return MediaKind::Link;
+	} else if (media->poll()) {
+		return MediaKind::Poll;
+	} else if (media->sharedContact()) {
+		return MediaKind::Contact;
+	} else if (media->location()) {
+		return MediaKind::Location;
+	} else if (media->call()) {
+		return MediaKind::Call;
+	} else if (media->game()) {
+		return MediaKind::Game;
+	} else if (media->invoice()) {
+		return MediaKind::Invoice;
+	} else if (media->todolist()) {
+		return MediaKind::TodoList;
+	} else if (media->storyId()) {
+		return MediaKind::Story;
+	}
+	return MediaKind::Other;
+}
+
 [[nodiscard]] MessageSnapshot MapSnapshot(
 		not_null<HistoryItem*> item,
 		const QString &kind) {
@@ -39,12 +87,13 @@ namespace {
 		& PeerId::kChatTypeMask;
 	snapshot.dialogId = item->history()->peer->id.value & PeerId::kChatTypeMask;
 	snapshot.peerId = item->history()->peer->id.value & PeerId::kChatTypeMask;
-	snapshot.fromId = item->from()->id.value & PeerId::kChatTypeMask;
+	snapshot.fromId = item->from()->id.value;
 	snapshot.topicId = item->topic() ? item->topicRootId().bare : 0;
 	snapshot.messageId = item->id.bare;
 	snapshot.date = item->date();
 	snapshot.editDate = base::unixtime::now();
 	snapshot.text = item->originalText().text;
+	snapshot.mediaKind = MediaKindFor(item);
 	if (const auto edited = item->Get<HistoryMessageEdited>()) {
 		snapshot.editDate = edited->date;
 	}
@@ -52,7 +101,7 @@ namespace {
 }
 
 void AppendSnapshot(const MessageSnapshot &snapshot) {
-	if (snapshot.text.isEmpty()) {
+	if (snapshot.text.isEmpty() && snapshot.mediaKind == MediaKind::None) {
 		return;
 	}
 
@@ -72,6 +121,7 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 		{ u"messageId"_q, snapshot.messageId },
 		{ u"date"_q, snapshot.date },
 		{ u"editDate"_q, snapshot.editDate },
+		{ u"media"_q, int(snapshot.mediaKind) },
 		{ u"text"_q, snapshot.text },
 	};
 	file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
@@ -114,6 +164,11 @@ void AppendSnapshot(const MessageSnapshot &snapshot) {
 	snapshot.messageId = object.value(u"messageId"_q).toInt();
 	snapshot.date = object.value(u"date"_q).toInt();
 	snapshot.editDate = object.value(u"editDate"_q).toInt();
+	const auto mediaValue = object.value(u"media"_q).toInt(int(MediaKind::None));
+	snapshot.mediaKind = (mediaValue >= int(MediaKind::None)
+		&& mediaValue <= int(MediaKind::Other))
+		? MediaKind(mediaValue)
+		: MediaKind::None;
 	snapshot.text = object.value(u"text"_q).toString();
 	return snapshot;
 }

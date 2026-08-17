@@ -4235,50 +4235,7 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 	}
 	const auto handlers = _windowHandlers;
 	for (const auto &entry : handlers) {
-		if (!entry.handler) {
-			continue;
-		}
-		try {
-			startRecoveryOperation(u"window"_q, { entry.pluginId });
-			const auto previousPluginId = _registeringPluginId;
-			_registeringPluginId = entry.pluginId;
-			logEvent(
-				u"window"_q,
-				u"invoke-callback"_q,
-				QJsonObject{
-					{ u"pluginId"_q, entry.pluginId },
-					{ u"hasWindow"_q, window != nullptr },
-				});
-			InvokePluginCallbackOrThrow([&] {
-				entry.handler(window);
-			});
-			_registeringPluginId = previousPluginId;
-			logEvent(
-				u"window"_q,
-				u"callback-success"_q,
-				QJsonObject{
-					{ u"pluginId"_q, entry.pluginId },
-				});
-			finishRecoveryOperation();
-		} catch (...) {
-			_registeringPluginId.clear();
-			logEvent(
-				u"window"_q,
-				u"callback-failed"_q,
-				QJsonObject{
-					{ u"pluginId"_q, entry.pluginId },
-					{ u"reason"_q, CurrentExceptionText() },
-				});
-			if (!entry.pluginId.isEmpty()) {
-				disablePlugin(
-					entry.pluginId,
-					u"Window callback failed: "_q + CurrentExceptionText());
-			}
-			showToast(PluginUiText(
-				u"Plugin window callback failed."_q,
-				u"Оконный callback плагина завершился с ошибкой."_q));
-			finishRecoveryOperation();
-		}
+		invokeWindowHandler(entry, window);
 	}
 	if (!window) {
 		return;
@@ -4286,50 +4243,105 @@ void Manager::notifyWindowCreated(Window::Controller *window) {
 	const auto widget = window->widget();
 	const auto widgetHandlers = _windowWidgetHandlers;
 	for (const auto &entry : widgetHandlers) {
-		if (!entry.handler) {
-			continue;
-		}
-		try {
-			startRecoveryOperation(u"window"_q, { entry.pluginId });
-			const auto previousPluginId = _registeringPluginId;
-			_registeringPluginId = entry.pluginId;
-			logEvent(
-				u"window"_q,
-				u"invoke-widget-callback"_q,
-				QJsonObject{
-					{ u"pluginId"_q, entry.pluginId },
-					{ u"hasWidget"_q, true },
-				});
-			InvokePluginCallbackOrThrow([&] {
-				entry.handler(widget);
+		invokeWindowWidgetHandler(entry, widget);
+	}
+}
+
+void Manager::invokeWindowHandler(
+		const WindowHandlerEntry &entry,
+		Window::Controller *window) {
+	if (!entry.handler) {
+		return;
+	}
+	try {
+		startRecoveryOperation(u"window"_q, { entry.pluginId });
+		const auto previousPluginId = _registeringPluginId;
+		_registeringPluginId = entry.pluginId;
+		logEvent(
+			u"window"_q,
+			u"invoke-callback"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"hasWindow"_q, window != nullptr },
 			});
-			_registeringPluginId = previousPluginId;
-			logEvent(
-				u"window"_q,
-				u"widget-callback-success"_q,
-				QJsonObject{
-					{ u"pluginId"_q, entry.pluginId },
-				});
-			finishRecoveryOperation();
-		} catch (...) {
-			_registeringPluginId.clear();
-			logEvent(
-				u"window"_q,
-				u"widget-callback-failed"_q,
-				QJsonObject{
-					{ u"pluginId"_q, entry.pluginId },
-					{ u"reason"_q, CurrentExceptionText() },
-				});
-			if (!entry.pluginId.isEmpty()) {
-				disablePlugin(
-					entry.pluginId,
-					u"Window widget callback failed: "_q + CurrentExceptionText());
-			}
-			showToast(PluginUiText(
-				u"Plugin window widget callback failed."_q,
-				u"Window widget callback плагина завершился с ошибкой."_q));
-			finishRecoveryOperation();
+		InvokePluginCallbackOrThrow([&] {
+			entry.handler(window);
+		});
+		_registeringPluginId = previousPluginId;
+		logEvent(
+			u"window"_q,
+			u"callback-success"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry.pluginId },
+			});
+		finishRecoveryOperation();
+	} catch (...) {
+		_registeringPluginId.clear();
+		logEvent(
+			u"window"_q,
+			u"callback-failed"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"reason"_q, CurrentExceptionText() },
+			});
+		if (!entry.pluginId.isEmpty()) {
+			disablePlugin(
+				entry.pluginId,
+				u"Window callback failed: "_q + CurrentExceptionText());
 		}
+		showToast(PluginUiText(
+			u"Plugin window callback failed."_q,
+			u"Оконный callback плагина завершился с ошибкой."_q));
+		finishRecoveryOperation();
+	}
+}
+
+void Manager::invokeWindowWidgetHandler(
+		const WindowWidgetHandlerEntry &entry,
+		QWidget *widget) {
+	if (!entry.handler) {
+		return;
+	}
+	try {
+		startRecoveryOperation(u"window"_q, { entry.pluginId });
+		const auto previousPluginId = _registeringPluginId;
+		_registeringPluginId = entry.pluginId;
+		logEvent(
+			u"window"_q,
+			u"invoke-widget-callback"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"hasWidget"_q, widget != nullptr },
+			});
+		InvokePluginCallbackOrThrow([&] {
+			entry.handler(widget);
+		});
+		_registeringPluginId = previousPluginId;
+		logEvent(
+			u"window"_q,
+			u"widget-callback-success"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry.pluginId },
+			});
+		finishRecoveryOperation();
+	} catch (...) {
+		_registeringPluginId.clear();
+		logEvent(
+			u"window"_q,
+			u"widget-callback-failed"_q,
+			QJsonObject{
+				{ u"pluginId"_q, entry.pluginId },
+				{ u"reason"_q, CurrentExceptionText() },
+			});
+		if (!entry.pluginId.isEmpty()) {
+			disablePlugin(
+				entry.pluginId,
+				u"Window widget callback failed: "_q + CurrentExceptionText());
+		}
+		showToast(PluginUiText(
+			u"Plugin window widget callback failed."_q,
+			u"Window widget callback плагина завершился с ошибкой."_q));
+		finishRecoveryOperation();
 	}
 }
 
@@ -4825,18 +4837,32 @@ void Manager::forEachWindow(
 
 void Manager::onWindowCreated(
 		std::function<void(Window::Controller*)> handler) {
-	if (handler) {
-		_windowHandlers.push_back({
-			.pluginId = _registeringPluginId,
-			.handler = std::move(handler),
-		});
-		logEvent(
-			u"registry"_q,
-			u"register-window-handler"_q,
-			QJsonObject{
-				{ u"pluginId"_q, _registeringPluginId },
-			});
+	if (!handler) {
+		return;
 	}
+	const auto pluginId = _registeringPluginId;
+	const auto handlerCopy = handler;
+	_windowHandlers.push_back({
+		.pluginId = pluginId,
+		.handler = std::move(handler),
+	});
+	logEvent(
+		u"registry"_q,
+		u"register-window-handler"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+		});
+	// Invoke for already-existing windows too, so a plugin that is loaded
+	// after the main window was created still receives the current windows.
+	QTimer::singleShot(0, this, [=] {
+		if (!hasPlugin(pluginId)) {
+			return;
+		}
+		const auto entry = WindowHandlerEntry{ pluginId, handlerCopy };
+		Core::App().forEachWindow([&](not_null<Window::Controller*> window) {
+			invokeWindowHandler(entry, window.get());
+		});
+	});
 }
 
 void Manager::forEachWindowWidget(
@@ -4853,18 +4879,34 @@ void Manager::forEachWindowWidget(
 
 void Manager::onWindowWidgetCreated(
 		std::function<void(QWidget*)> handler) {
-	if (handler) {
-		_windowWidgetHandlers.push_back({
-			.pluginId = _registeringPluginId,
-			.handler = std::move(handler),
-		});
-		logEvent(
-			u"registry"_q,
-			u"register-window-widget-handler"_q,
-			QJsonObject{
-				{ u"pluginId"_q, _registeringPluginId },
-			});
+	if (!handler) {
+		return;
 	}
+	const auto pluginId = _registeringPluginId;
+	const auto handlerCopy = handler;
+	_windowWidgetHandlers.push_back({
+		.pluginId = pluginId,
+		.handler = std::move(handler),
+	});
+	logEvent(
+		u"registry"_q,
+		u"register-window-widget-handler"_q,
+		QJsonObject{
+			{ u"pluginId"_q, pluginId },
+		});
+	// Invoke for already-existing windows too, so a plugin that is loaded
+	// after the main window was created still receives the current widget.
+	QTimer::singleShot(0, this, [=] {
+		if (!hasPlugin(pluginId)) {
+			return;
+		}
+		const auto entry = WindowWidgetHandlerEntry{ pluginId, handlerCopy };
+		Core::App().forEachWindow([&](not_null<Window::Controller*> window) {
+			if (const auto widget = window->widget()) {
+				invokeWindowWidgetHandler(entry, widget);
+			}
+		});
+	});
 }
 
 Window::Controller *Manager::activeWindow() const {
@@ -5931,7 +5973,7 @@ void Manager::scanPlugins(bool metadataOnly) {
 	QDir().mkpath(_pluginsPath);
 	auto dir = QDir(_pluginsPath);
 	const auto files = dir.entryInfoList(
-		{ u"*.tgd"_q },
+		{ u"*.tgd"_q, u"*.plugin"_q },
 		QDir::Files,
 		QDir::Name | QDir::IgnoreCase);
 	logEvent(

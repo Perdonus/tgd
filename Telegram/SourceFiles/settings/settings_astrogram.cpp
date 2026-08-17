@@ -868,8 +868,6 @@ void SetupAstrogramCore(not_null<Ui::VerticalLayout*> container) {
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Основные возможности", "Core features"));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 	AddSectionGroupTitle(container, RuEn("Аккаунт и Premium", "Account & Premium"));
 	AddToggle(
 		container,
@@ -1008,8 +1006,6 @@ void SetupAstrogramInterface(
 	auto &settings = Core::App().settings();
 	Ui::AddDivider(container);
 	Ui::AddSkip(container, st::settingsCheckboxesSkip / 2);
-	AddSectionGroupTitle(container, RuEn("Интерфейс и поведение", "Interface & behavior"));
-	Ui::AddSkip(container, st::settingsCheckboxesSkip / 3);
 	AddSectionGroupTitle(container, RuEn("Окно и навигация", "Window & navigation"));
 	AddToggle(
 		container,

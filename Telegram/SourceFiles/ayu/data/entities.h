@@ -13,6 +13,28 @@ namespace AyuMessages {
 
 using ID = long long;
 
+enum class MediaKind : int {
+	None = 0,
+	Photo,
+	Video,
+	Voice,
+	VideoNote,
+	Audio,
+	Gif,
+	Sticker,
+	File,
+	Link,
+	Poll,
+	Contact,
+	Location,
+	Call,
+	Game,
+	Invoice,
+	TodoList,
+	Story,
+	Other,
+};
+
 struct MessageSnapshot {
 	QString kind;
 	ID userId = 0;
@@ -23,6 +45,7 @@ struct MessageSnapshot {
 	int messageId = 0;
 	int date = 0;
 	int editDate = 0;
+	MediaKind mediaKind = MediaKind::None;
 	QString text;
 };
 

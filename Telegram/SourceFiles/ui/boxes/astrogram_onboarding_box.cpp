@@ -14,8 +14,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "base/weak_ptr.h"
+
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "settings/settings_common.h"
 #include "ui/controls/userpic_button.h"
@@ -31,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 
 #include <rpl/event_stream.h>
+#include <QTimer>
 #include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "window/window_session_controller.h"
@@ -249,9 +253,12 @@ not_null<Ui::RoundButton*> AddPrimaryButton(
 	const auto raw = container->add(
 		std::move(button),
 		style::margins(st::boxRowPadding.left(), 0, st::boxRowPadding.right(), 0));
-	raw->resizeToWidth(container->width()
+	const auto availableWidth = container->width()
 		- st::boxRowPadding.left()
-		- st::boxRowPadding.right());
+		- st::boxRowPadding.right();
+	if (availableWidth > 0) {
+		raw->resizeToWidth(availableWidth);
+	}
 	raw->setClickedCallback(std::move(callback));
 	return raw;
 }
@@ -276,7 +283,7 @@ not_null<Ui::LinkButton*> AddLinkAction(
 not_null<Ui::SettingsButton*> AddChoiceButton(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &title,
-		const QString &description,
+		const TextWithEntities &description,
 		const style::icon *icon,
 		std::function<void()> callback) {
 	auto descriptor = Settings::IconDescriptor();
@@ -289,11 +296,10 @@ not_null<Ui::SettingsButton*> AddChoiceButton(
 			std::move(descriptor)),
 		style::margins(12, 0, 12, 0));
 	button->setClickedCallback(std::move(callback));
-	if (!description.isEmpty()) {
-		auto descProducer = rpl::single(description);
+	if (!description.text.isEmpty()) {
 		auto label = object_ptr<Ui::FlatLabel>(
 			container,
-			std::move(descProducer),
+			rpl::single(description),
 			st::defaultFlatLabel);
 		container->add(std::move(label),
 			style::margins(26, -2, 26, 6),
@@ -363,10 +369,20 @@ not_null<Ui::AbstractButton*> AddPeerChoiceButton(
 				) | rpl::on_next([=](const Data::PeerUpdate &) {
 					state->refresh();
 				}, row->lifetime());
-				if (const auto channel = peer->asChannel();
-					channel && !channel->membersCountKnown()) {
-					peer->session().api().requestFullPeer(channel);
-				}
+				const auto requestCount = [=] {
+					const auto current = state->peer;
+					const auto channel = current
+						? current->asChannel()
+						: nullptr;
+					if (channel && !channel->membersCountKnown()) {
+						current->session().api().requestFullPeer(channel);
+					}
+				};
+				requestCount();
+				// Retry a couple of times so the subscriber count always
+				// appears even when the first full-info request is slow.
+				QTimer::singleShot(1500, row, requestCount);
+				QTimer::singleShot(4500, row, requestCount);
 			}
 		}
 		const auto texts = ComputePeerCardTexts(
@@ -424,6 +440,14 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 		const auto container = box->verticalLayout();
 		AddUniqueCloseButton(box);
 
+		// The guide should open only once, on the first launch. Mark it as
+		// shown as soon as the box is closed in any way (Finish, X or Esc).
+		box->lifetime().add([=] {
+			if (args.finished) {
+				args.finished();
+			}
+		});
+
 		struct State {
 			Step step = Step::Welcome;
 			PeerData *pluginsChannelPeer = nullptr;
@@ -435,6 +459,116 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 		state->pluginsChannelPeer = args.pluginsChannelPeer;
 		state->officialChannelPeer = args.officialChannelPeer;
 		const auto weak = base::make_weak(box);
+
+		// Make the guide self-sufficient: when it is opened from the settings
+		// or the main menu (no callbacks provided), resolve the channels by
+		// their ids from the app config and open them directly.
+		const auto &appConfig = args.controller->session().appConfig();
+		if (!args.pluginsChannelId) {
+			args.pluginsChannelId = appConfig.astrogramPluginsChannelId();
+		}
+		if (!args.officialChannelId) {
+			args.officialChannelId = appConfig.astrogramOfficialChannelId();
+		}
+		const auto channelBareId = [](int64 channelId) {
+			constexpr auto kBotApiChannelOffset = 1000000000000LL;
+			if (channelId <= -kBotApiChannelOffset) {
+				const auto bare = (-channelId) - kBotApiChannelOffset;
+				return (bare > 0) ? ChannelId(uint64(bare)) : ChannelId();
+			}
+			return (channelId > 0)
+				? ChannelId(uint64(channelId))
+				: ChannelId();
+		};
+		const auto resolveChannelById = [=](
+				int64 channelId,
+				Fn<void(PeerData*)> done) {
+			const auto bareId = channelBareId(channelId);
+			if (!bareId) {
+				done(nullptr);
+				return;
+			}
+			const auto session = &args.controller->session();
+			if (const auto loaded = session->data().channelLoaded(bareId)) {
+				done(loaded);
+				return;
+			}
+			const auto weakController = base::make_weak(args.controller);
+			session->api().request(MTPchannels_GetChannels(
+				MTP_vector<MTPInputChannel>(
+					1,
+					MTP_inputChannel(MTP_long(bareId.bare), MTP_long(0)))
+			)).done([=](const MTPmessages_Chats &result) {
+				const auto controller = weakController.get();
+				if (!controller) {
+					done(nullptr);
+					return;
+				}
+				result.match([&](const auto &data) {
+					const auto peer = controller->session().data().processChats(
+						data.vchats());
+					if (peer && (peer->id == peerFromChannel(bareId))) {
+						done(peer);
+					}
+				});
+			}).fail([=](const MTP::Error &) {
+				done(nullptr);
+			}).send();
+		};
+		if (!args.resolvePluginsChannel) {
+			args.resolvePluginsChannel = [=](Fn<void(PeerData*)> done) {
+				resolveChannelById(args.pluginsChannelId, std::move(done));
+			};
+		}
+		if (!args.resolveOfficialChannel) {
+			args.resolveOfficialChannel = [=](Fn<void(PeerData*)> done) {
+				resolveChannelById(args.officialChannelId, std::move(done));
+			};
+		}
+		const auto openPeer = [=](PeerData *peer) {
+			const auto controller = base::make_weak(args.controller).get();
+			if (peer && controller) {
+				if (const auto channel = peer->asChannel()) {
+					controller->showPeer(channel);
+				}
+			}
+		};
+		if (!args.subscribePluginsChannel) {
+			args.subscribePluginsChannel = [=] {
+				if (const auto peer = state->pluginsChannelPeer) {
+					openPeer(peer);
+				} else {
+					resolveChannelById(
+						args.pluginsChannelId,
+						[=](PeerData *peer) {
+							if (!peer || !weak.get()) {
+								return;
+							}
+							state->pluginsChannelPeer = peer;
+							state->pluginsPeerChanged.fire_copy(peer);
+							openPeer(peer);
+						});
+				}
+			};
+		}
+		if (!args.openOfficialChannel) {
+			args.openOfficialChannel = [=] {
+				if (const auto peer = state->officialChannelPeer) {
+					openPeer(peer);
+				} else {
+					resolveChannelById(
+						args.officialChannelId,
+						[=](PeerData *peer) {
+							if (!peer || !weak.get()) {
+								return;
+							}
+							state->officialChannelPeer = peer;
+							state->officialPeerChanged.fire_copy(peer);
+							openPeer(peer);
+						});
+				}
+			};
+		}
 
 		const auto finish = [=] {
 			if (args.finished) {
@@ -501,9 +635,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddChoiceButton(
 				inner,
 				RuEn("Рекомендованный", "Recommended"),
-				RuEn(
+				TextWithEntities{ RuEn(
 					"Включает полезные Astrogram-функции без агрессивных изменений интерфейса.",
-					"Enables useful Astrogram features without aggressive interface changes."),
+					"Enables useful Astrogram features without aggressive interface changes.") },
 				&st::menuIconPremium,
 				[=] {
 					if (args.applyPreset) {
@@ -514,9 +648,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddChoiceButton(
 				inner,
 				RuEn("Приватный", "Private"),
-				RuEn(
+				TextWithEntities{ RuEn(
 					"Делает упор на ghost mode, защиту от удаления и более осторожное поведение клиента.",
-					"Focuses on ghost mode, anti-recall and a more private client setup."),
+					"Focuses on ghost mode, anti-recall and a more private client setup.") },
 				&st::menuIconLock,
 				[=] {
 					if (args.applyPreset) {
@@ -527,9 +661,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddChoiceButton(
 				inner,
 				RuEn("Минимальный", "Minimal"),
-				RuEn(
+				TextWithEntities{ RuEn(
 					"Оставляет интерфейс ближе к Telegram Desktop и включает только базовые улучшения Astrogram.",
-					"Keeps the interface closer to Telegram Desktop and enables only core Astrogram improvements."),
+					"Keeps the interface closer to Telegram Desktop and enables only core Astrogram improvements.") },
 				&st::menuIconPalette,
 				[=] {
 					if (args.applyPreset) {
@@ -561,9 +695,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			AddChoiceButton(
 				inner,
 				RuEn("Быстрая установка рекомендуемых плагинов", "Install recommended plugins"),
-				RuEn(
+				TextWithEntities{ RuEn(
 					"Мы покажем несколько безопасных пакетов и дадим установить их в пару кликов.",
-					"We'll show a few safe packages and let you install them in a couple of clicks."),
+					"We'll show a few safe packages and let you install them in a couple of clicks.") },
 				&st::menuIconCustomize,
 				[=] {
 					showStep(Step::PluginsInstall);
@@ -627,11 +761,11 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 			} else {
 				for (const auto &plugin : args.plugins) {
 					const auto install = plugin.install;
-					AddChoiceButton(
-						inner,
-						plugin.title,
-						plugin.description,
-						&st::menuIconDownload,
+				AddChoiceButton(
+					inner,
+					plugin.title,
+					TextUtilities::ParseEntities(plugin.description),
+					&st::menuIconDownload,
 						[install] {
 							if (install) {
 								install();
@@ -707,9 +841,9 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 				RuEn(
 					"Поддержать разработку Astrogram",
 					"Support Astrogram development"),
-				RuEn(
+				TextWithEntities{ RuEn(
 					"Открывает донат-окно Astrogram с серверным значком подписчика.",
-					"Opens the Astrogram support box with the server-side subscriber badge."),
+					"Opens the Astrogram support box with the server-side subscriber badge.") },
 				&st::menuIconGiftPremium,
 				[=] {
 					if (args.openDonate) {
@@ -725,24 +859,24 @@ void ShowAstrogramOnboardingBox(AstrogramOnboardingArgs args) {
 
 		if (!state->pluginsChannelPeer && args.resolvePluginsChannel) {
 			args.resolvePluginsChannel([=](PeerData *peer) {
-				if (!peer) {
+				if (!peer || !weak.get()) {
 					return;
 				}
 				state->pluginsChannelPeer = peer;
 				state->pluginsPeerChanged.fire_copy(peer);
-				if (weak.get() && (state->step == Step::PluginsInstall)) {
+				if (state->step == Step::PluginsInstall) {
 					showStep(Step::PluginsInstall);
 				}
 			});
 		}
 		if (!state->officialChannelPeer && args.resolveOfficialChannel) {
 			args.resolveOfficialChannel([=](PeerData *peer) {
-				if (!peer) {
+				if (!peer || !weak.get()) {
 					return;
 				}
 				state->officialChannelPeer = peer;
 				state->officialPeerChanged.fire_copy(peer);
-				if (weak.get() && (state->step == Step::Finish)) {
+				if (state->step == Step::Finish) {
 					showStep(Step::Finish);
 				}
 			});
